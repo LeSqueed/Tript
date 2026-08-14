@@ -92,3 +92,15 @@ internal struct DStrNative
     public nuint Length;
     public nuint Capacity;
 }
+
+// struct obs_encoder_roi [obs-encoder.h:162-176]. Four uint32_t edges then a float; passed by
+// pointer to obs_encoder_add_roi.
+[StructLayout(LayoutKind.Sequential)]
+internal struct ObsEncoderRoiNative
+{
+    public uint Top;
+    public uint Bottom;
+    public uint Left;
+    public uint Right;
+    public float Priority;
+}

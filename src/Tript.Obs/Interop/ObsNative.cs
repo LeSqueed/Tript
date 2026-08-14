@@ -466,6 +466,200 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_force_update_transform(nint item);
 
+    // ---- obs.h: encoders ----
+    //
+    // Both create functions hand back a non-null placeholder for an unregistered id — measured, and
+    // the reason the binding probes obs_get_encoder_codec first. The id and name are copied, like
+    // obs_source_create. The settings object is retained, not copied.
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_video_encoder_create(string id, string name, nint settings, nint hotkeyData);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_audio_encoder_create(string id, string name, nint settings, nuint mixerIndex, nint hotkeyData);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_release(nint encoder);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_name(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_encoder_set_name(nint encoder, string name);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_id(nint encoder);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_codec(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_encoder_get_type(nint encoder);
+
+    // The type-level probes. obs_get_encoder_codec returns NULL for an id no module registered, and
+    // that is the reliable unavailability test: obs_get_encoder_type returns Audio (0) for an
+    // unknown id, measured, so it cannot stand in.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_encoder_codec(string id);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int obs_get_encoder_type(string id);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial uint obs_get_encoder_caps(string id);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_caps(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_enum_encoder_types(nuint index, out nint id);
+
+    // Incremented; the caller releases. Null for an id no module registered.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_encoder_defaults(string id);
+
+    // Incremented; the caller releases. Note the settings object is *shared*, not copied — an edit
+    // through the caller's reference reaches the encoder without an Update call.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_settings(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_update(nint encoder, nint settings);
+
+    // Returns an obs_properties_t; free with obs_properties_destroy. Null for an id that is not
+    // registered or declares no properties.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_encoder_properties(string id);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_properties_destroy(nint props);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_properties_first(nint props);
+
+    // Takes obs_property_t **: the current item is released and the caller's variable overwritten.
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_property_next(ref nint property);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_property_name(nint property);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_property_get_type(nint property);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_property_list_format(nint property);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_property_list_item_count(nint property);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_property_list_item_string(nint property, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial long obs_property_list_item_int(nint property, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial double obs_property_list_item_float(nint property, nuint index);
+
+    // ---- obs.h: encoder binding and behaviour ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_video(nint encoder, nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_audio(nint encoder, nint audio);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_active(nint encoder);
+
+    // Borrowed; null until the plugin sets one.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_last_error(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_scaled_size(nint encoder, uint width, uint height);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_gpu_scale_type(nint encoder, int scaleType);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_set_frame_rate_divisor(nint encoder, uint divisor);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_preferred_video_format(nint encoder, int format);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_preferred_color_space(nint encoder, int colorspace);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_set_preferred_range(nint encoder, int range);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_scaling_enabled(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_width(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_height(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_gpu_scaling_enabled(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_encoder_get_scale_type(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_frame_rate_divisor(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_encoded_frames(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_sample_rate(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_encoder_get_frame_size(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_encoder_get_mixer_index(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_encoder_get_preferred_video_format(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_encoder_get_preferred_color_space(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_encoder_get_preferred_range(nint encoder);
+
+    // Region of interest. Absent encoders answer false; the capability flag is OBS_ENCODER_CAP_ROI.
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_add_roi(nint encoder, in ObsEncoderRoiNative roi);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_encoder_has_roi(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_encoder_clear_roi(nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_encoder_get_roi_increment(nint encoder);
+
     // ---- obs-data.h: settings objects ----
     //
     // Every numeric setting is long long. Narrowing it to int works right up until a bitrate,

@@ -374,6 +374,15 @@ public sealed class ObsRuntime : IDisposable
         return video != nint.Zero;
     }
 
+    // The audio_t* encoders bind to. obs_get_audio checks and returns null before any reset — the
+    // asymmetry with video is libobs's, measured — so this has the same shape as its video
+    // counterpart purely for symmetry, not out of necessity.
+    internal bool TryGetAudioHandle(out nint audio)
+    {
+        audio = ObsNative.obs_get_audio();
+        return audio != nint.Zero;
+    }
+
     // The frame interval the compositor is actually running at, in nanoseconds. Derived from the
     // frame rate rather than stored, so it is the one place the fraction that was requested can be
     // checked against what the compositor made of it.

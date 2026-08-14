@@ -6,5 +6,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tript.Detection.Tests/Tript.Detection.Tests.csproj" />
+    <Project Path="tests/Tript.Obs.IntegrationTests/Tript.Obs.IntegrationTests.csproj" />
   </Folder>
 </Solution>

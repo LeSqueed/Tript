@@ -3,4 +3,11 @@
     <RootNamespace>Tript.Obs</RootNamespace>
     <AssemblyName>Tript.Obs</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The tier-2 tests reflect over the interop surface to prove every declared symbol resolves,
+         which means they have to see it. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.Obs.IntegrationTests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

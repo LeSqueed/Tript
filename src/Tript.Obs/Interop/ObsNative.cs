@@ -162,4 +162,226 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_get_audio();
+
+    // ---- obs-data.h: settings objects ----
+    //
+    // Every numeric setting is long long. Narrowing it to int works right up until a bitrate,
+    // a timestamp or a file size does not fit, and the loss is silent.
+    //
+    // The autoselect family is deprecated in 32.2.1 and deliberately absent here.
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_create();
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_create_from_json(string json);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_create_from_json_file(string file);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_create_from_json_file_safe(string file, string backupExtension);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_addref(nint data);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_release(nint data);
+
+    // ---- obs-data.h: setters ----
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_string(nint data, string name, string? value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_int(nint data, string name, long value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_double(nint data, string name, double value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_bool(nint data, string name, [MarshalAs(UnmanagedType.U1)] bool value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_obj(nint data, string name, nint value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_array(nint data, string name, nint value);
+
+    // ---- obs-data.h: getters ----
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_string(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial long obs_data_get_int(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial double obs_data_get_double(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_get_bool(nint data, string name);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_obj(nint data, string name);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_array(nint data, string name);
+
+    // ---- obs-data.h: defaults ----
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_string(nint data, string name, string? value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_int(nint data, string name, long value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_double(nint data, string name, double value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_bool(nint data, string name, [MarshalAs(UnmanagedType.U1)] bool value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_obj(nint data, string name, nint value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_set_default_array(nint data, string name, nint value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_default_string(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial long obs_data_get_default_int(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial double obs_data_get_default_double(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_get_default_bool(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_default_obj(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_data_get_default_array(nint data, string name);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_get_defaults(nint data);
+
+    // ---- obs-data.h: presence, clearing, merging ----
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_has_user_value(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_has_default_value(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_erase(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_clear(nint data);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_unset_user_value(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_data_unset_default_value(nint data, string name);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_apply(nint target, nint applyData);
+
+    // ---- obs-data.h: serialisation ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_get_json(nint data);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_get_json_with_defaults(nint data);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_get_json_pretty(nint data);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_get_json_pretty_with_defaults(nint data);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_save_json(nint data, string file);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_save_json_safe(nint data, string file, string tempExtension, string backupExtension);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_save_json_pretty_safe(nint data, string file, string tempExtension, string backupExtension);
+
+    // ---- obs-data.h: iteration ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_first(nint data);
+
+    // Takes obs_data_item_t **: it releases the current item and overwrites the caller's variable.
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_item_next(ref nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_item_release(ref nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_item_get_name(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_data_item_gettype(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_data_item_numtype(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_item_has_user_value(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_data_item_has_default_value(nint item);
+
+    // ---- obs-data.h: arrays ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_array_create();
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_array_addref(nint array);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_array_release(nint array);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_data_array_count(nint array);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_data_array_item(nint array, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_data_array_push_back(nint array, nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_array_insert(nint array, nuint index, nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_array_push_back_array(nint array, nint other);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_data_array_erase(nint array, nuint index);
 }

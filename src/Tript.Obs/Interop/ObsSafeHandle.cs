@@ -14,7 +14,8 @@ namespace Tript.Obs.Interop;
 //   * Borrowed for the duration of a call — id strings, names. Read immediately into managed
 //     memory; never stored, never wrapped.
 //   * Owned by the OBS context — sources, outputs, encoders. ObsContextHandle.
-//   * Owned by the caller, outliving the context — bmem allocations. BMemHandle.
+//   * Owned by the caller, outliving the context — bmem allocations, and the refcounted settings
+//     objects. BMemHandle, ObsSettingsHandle, ObsSettingsArrayHandle.
 //
 // SafeHandle rather than a raw pointer plus try/finally because the failure it prevents is
 // invisible: a leaked libobs object keeps a device, a thread or a file open, and nothing reports
@@ -66,6 +67,43 @@ internal sealed class BMemHandle : ObsSafeHandle
     protected override bool ReleaseHandle()
     {
         ObsNative.bfree(handle);
+        return true;
+    }
+}
+
+// A refcounted settings object. Deliberately **not** an ObsContextHandle, which is the assumption
+// the shape of obs_data invites and which measurement refutes: on 32.2.1 obs_data_create succeeds
+// before obs_startup, an object created inside a context still reads its values after
+// obs_shutdown, and obs_data_release afterwards neither crashes nor leaks. obs_data lives on bmem
+// and the OBS core holds no registry of these objects, so its lifetime is the caller's alone.
+//
+// The consequence for the generation stamp is the one that matters: an ObsContextHandle would
+// *decline* to release a settings object that outlived a shutdown, which here would be a genuine
+// leak rather than the use-after-free it prevents for sources and encoders.
+internal sealed class ObsSettingsHandle : ObsSafeHandle
+{
+    internal ObsSettingsHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        ObsNative.obs_data_release(handle);
+        return true;
+    }
+}
+
+// Same ownership rules as ObsSettingsHandle; a separate type because obs_data_array_t has its own
+// release and passing one where the other is expected would corrupt a refcount silently.
+internal sealed class ObsSettingsArrayHandle : ObsSafeHandle
+{
+    internal ObsSettingsArrayHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        ObsNative.obs_data_array_release(handle);
         return true;
     }
 }

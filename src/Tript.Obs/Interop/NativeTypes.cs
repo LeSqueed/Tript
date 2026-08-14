@@ -47,6 +47,42 @@ internal struct ObsModuleFailureInfoNative
     public nuint Count;
 }
 
+// struct vec2. Declared as a union of two floats and a two-element array in the header; both arms
+// have the same layout, so the binding mirrors the named one.
+[StructLayout(LayoutKind.Sequential)]
+internal struct Vec2Native
+{
+    public float X;
+    public float Y;
+}
+
+// struct obs_sceneitem_crop. Four C ints, not unsigned: libobs accepts the negative value and
+// stores zero.
+[StructLayout(LayoutKind.Sequential)]
+internal struct ObsSceneItemCropNative
+{
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+// struct obs_transform_info. 44 bytes; the one-byte C bool at CropToBounds is the last field and is
+// followed by three bytes of tail padding, so a managed bool here would report 48 and write four
+// bytes into a struct libobs reads as one.
+[StructLayout(LayoutKind.Sequential)]
+internal struct ObsTransformInfoNative
+{
+    public Vec2Native Position;
+    public float Rotation;
+    public Vec2Native Scale;
+    public uint Alignment;
+    public int BoundsType;
+    public uint BoundsAlignment;
+    public Vec2Native Bounds;
+    public byte CropToBounds;
+}
+
 // struct dstr, libobs's growable string. Its buffer comes from bmem, so the caller frees it with
 // bfree — dstr_free is a static inline and therefore not exported.
 [StructLayout(LayoutKind.Sequential)]

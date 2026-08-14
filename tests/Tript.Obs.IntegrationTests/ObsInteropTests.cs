@@ -110,6 +110,28 @@ public sealed class ObsInteropTests
         Assert.Equal(4, (int)Marshal.OffsetOf<ObsAudioInfoNative>(nameof(ObsAudioInfoNative.Speakers)));
     }
 
+    // The scene-item transform, which is passed by pointer into libobs in both directions: a field
+    // at the wrong offset here is read as the next one, silently.
+    [Fact]
+    public void ObsTransformInfo_MatchesTheNativeStructLayout()
+    {
+        Assert.Equal(8, Marshal.SizeOf<Vec2Native>());
+        Assert.Equal(16, Marshal.SizeOf<ObsSceneItemCropNative>());
+        Assert.Equal(44, Marshal.SizeOf<ObsTransformInfoNative>());
+
+        Assert.Equal(0, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Position)));
+        Assert.Equal(8, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Rotation)));
+        Assert.Equal(12, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Scale)));
+        Assert.Equal(20, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Alignment)));
+        Assert.Equal(24, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.BoundsType)));
+        Assert.Equal(28, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.BoundsAlignment)));
+        Assert.Equal(32, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Bounds)));
+
+        // The trailing one-byte C bool, and the three bytes of tail padding behind it that keep the
+        // struct a multiple of its four-byte alignment.
+        Assert.Equal(40, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.CropToBounds)));
+    }
+
     [Fact]
     public void VaList_MatchesTheSystemVStructLayout()
     {

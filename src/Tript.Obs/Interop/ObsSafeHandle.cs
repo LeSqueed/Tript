@@ -93,6 +93,71 @@ internal sealed class ObsSettingsHandle : ObsSafeHandle
     }
 }
 
+// A source, a scene or a scene item. All three are ObsContextHandles, and unlike obs_data that was
+// measured rather than assumed: obs_shutdown frees every one of these whether or not the caller
+// still holds a reference — a source deliberately leaked across a shutdown left the allocation count
+// back at zero — so a release afterwards is a use-after-free, which is what the generation stamp
+// declines to perform.
+internal sealed class ObsSourceHandle : ObsContextHandle
+{
+    internal ObsSourceHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override void Release(nint handle) => ObsNative.obs_source_release(handle);
+}
+
+// A scene, which is a source with one measured difference: obs_scene_create registers the scene with
+// the OBS core, and that registration is a reference of its own. Releasing the caller's reference
+// leaves the scene alive and still findable by name, so a handle for such a scene marks the source
+// removed first — the call that makes the core let go. A private scene has no such registration and
+// is destroyed by the release alone.
+internal sealed class ObsSceneHandle : ObsContextHandle
+{
+    private readonly bool _registeredWithCore;
+
+    internal ObsSceneHandle(nint handle, bool registeredWithCore) : base(handle, ownsHandle: true) =>
+        _registeredWithCore = registeredWithCore;
+
+    protected override void Release(nint handle)
+    {
+        if (_registeredWithCore)
+            ObsNative.obs_source_remove(ObsNative.obs_scene_get_source(handle));
+
+        ObsNative.obs_scene_release(handle);
+    }
+}
+
+// A scene item. obs_scene_add returns a *borrowed* pointer — the single reference it creates belongs
+// to the scene — so every handle takes its own reference first and this release balances that one,
+// never the scene's. Releasing a borrowed item instead frees it while the scene still lists it,
+// which measurement shows leaves the scene holding a dangling pointer rather than failing.
+internal sealed class ObsSceneItemHandle : ObsContextHandle
+{
+    internal ObsSceneItemHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override void Release(nint handle) => ObsNative.obs_sceneitem_release(handle);
+}
+
+// A weak source reference. Deliberately not an ObsContextHandle, for the same reason as obs_data and
+// on the same evidence: the control block is a bmem allocation that survives obs_shutdown, and the
+// count only returns to zero once it is released. Declining to release it after a shutdown would
+// leak it.
+internal sealed class ObsWeakSourceHandle : ObsSafeHandle
+{
+    internal ObsWeakSourceHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        ObsNative.obs_weak_source_release(handle);
+        return true;
+    }
+}
+
 // Same ownership rules as ObsSettingsHandle; a separate type because obs_data_array_t has its own
 // release and passing one where the other is expected would corrupt a refcount silently.
 internal sealed class ObsSettingsArrayHandle : ObsSafeHandle

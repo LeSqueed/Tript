@@ -118,6 +118,10 @@ public sealed class ObsRuntime : IDisposable
 
         lock (Gate)
         {
+            // Before the shutdown, and not merely as tidiness: a populated scene still referenced
+            // when libobs shuts down is a segmentation fault, not a leak.
+            DisposeLiveScenes();
+
             ObsNative.obs_shutdown();
 
             // After the shutdown, so no handle can be created against a context that is already
@@ -429,6 +433,89 @@ public sealed class ObsRuntime : IDisposable
             ThrowIfDisposed();
             return ObsNative.obs_get_audio() != nint.Zero;
         }
+    }
+
+    // ---- output channels ----
+
+    // libobs composes what it outputs from 64 global channels, each holding at most one source —
+    // usually a scene. This is how a scene becomes the thing being recorded. The header assigns no
+    // meaning to any index; channel 0 for the programme scene is convention, not a rule.
+    public const uint MaxOutputChannels = 64;
+
+    // The channel takes a reference of its own, so the caller may dispose its source afterwards.
+    // Passing null clears the channel and releases that reference.
+    public void SetOutputSource(uint channel, ObsSource? source)
+    {
+        ThrowIfDisposed();
+        ThrowIfChannelOutOfRange(channel);
+        ObsNative.obs_set_output_source(channel, source?.Pointer ?? nint.Zero);
+    }
+
+    // The overload that matters in practice: a scene is a source, and reaching for its source
+    // pointer at every call site is where a stray release eventually comes from.
+    public void SetOutputSource(uint channel, ObsScene scene)
+    {
+        ThrowIfDisposed();
+        ThrowIfChannelOutOfRange(channel);
+        ArgumentNullException.ThrowIfNull(scene);
+        ObsNative.obs_set_output_source(channel, scene.SourcePointer);
+    }
+
+    // Null when the channel is empty. The reference is incremented, so the result is the caller's to
+    // dispose — reading a channel and forgetting that is a leak that keeps a whole scene alive.
+    public ObsSource? GetOutputSource(uint channel)
+    {
+        ThrowIfDisposed();
+        ThrowIfChannelOutOfRange(channel);
+        return ObsSource.FromOwnedPointerOrNull(ObsNative.obs_get_output_source(channel));
+    }
+
+    private static void ThrowIfChannelOutOfRange(uint channel)
+    {
+        if (channel >= MaxOutputChannels)
+            throw new ArgumentOutOfRangeException(nameof(channel), channel,
+                $"libobs has {MaxOutputChannels} output channels; the index must be below that.");
+    }
+
+    // ---- scene registry ----
+    //
+    // Measured on 32.2.1 and stated nowhere: obs_shutdown segfaults if a scene the caller still
+    // holds a reference to still has items attached. Leaked sources are freed cleanly and an empty
+    // leaked scene is fine — it is specifically a populated, still-referenced scene that takes the
+    // process down. Since that is a caller forgetting to dispose, and the punishment is a crash
+    // rather than a leak, live scenes are tracked and disposed here before libobs is shut down.
+
+    private static readonly Lock SceneGate = new();
+    private static readonly List<ObsScene> LiveScenes = [];
+
+    internal static void RegisterScene(ObsScene scene)
+    {
+        lock (SceneGate)
+        {
+            LiveScenes.Add(scene);
+        }
+    }
+
+    internal static void UnregisterScene(ObsScene scene)
+    {
+        lock (SceneGate)
+        {
+            LiveScenes.Remove(scene);
+        }
+    }
+
+    private static void DisposeLiveScenes()
+    {
+        ObsScene[] scenes;
+        lock (SceneGate)
+        {
+            scenes = LiveScenes.ToArray();
+            LiveScenes.Clear();
+        }
+
+        // Reverse order, so a scene added to another scene is taken apart before its container.
+        for (var i = scenes.Length - 1; i >= 0; i--)
+            scenes[i].Dispose();
     }
 
     // ---- teardown helpers ----

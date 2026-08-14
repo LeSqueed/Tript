@@ -163,6 +163,309 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_get_audio();
 
+    // ---- obs.h: output channels ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_set_output_source(uint channel, nint source);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_get_output_source(uint channel);
+
+    // ---- obs.h: sources ----
+    //
+    // obs_source_create copies both the id and the name — measured, and the opposite of
+    // obs_reset_video, which keeps the caller's pointer. Nothing here has to be kept alive.
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_source_create(string id, string name, nint settings, nint hotkeyData);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_source_create_private(string id, string name, nint settings);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_release(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_ref(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_remove(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_source_removed(nint source);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_source_by_name(string name);
+
+    // Null for an id no loaded module registered, which is the only reliable way to tell: creating
+    // an unregistered id succeeds and hands back a placeholder rather than null.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_source_get_display_name(string id);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial uint obs_get_source_output_flags(string id);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_output_flags(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_name(nint source);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void obs_source_set_name(nint source, string name);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_uuid(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_id(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_unversioned_id(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_source_get_type(nint source);
+
+    // Incremented; the caller releases. Note this is the very object handed to obs_source_create,
+    // not a copy of it.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_settings(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_update(nint source, nint settings);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_reset_settings(nint source, nint settings);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_width(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_height(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_base_width(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_base_height(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_source_enabled(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_set_enabled(nint source, [MarshalAs(UnmanagedType.U1)] bool enabled);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_source_active(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_source_showing(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_source_is_scene(nint source);
+
+    // ---- obs.h: weak source references ----
+    //
+    // The weak control block is bmem's and outlives obs_shutdown, so it is released like an
+    // obs_data rather than like the source it points at.
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_get_weak_source(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_weak_source_release(nint weak);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_weak_source_get_source(nint weak);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_weak_source_expired(nint weak);
+
+    // ---- obs.h: scenes ----
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_scene_create(string name);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_scene_create_private(string name);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_scene_release(nint scene);
+
+    // Neither conversion changes a reference count.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_scene_get_source(nint scene);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_scene_from_source(nint source);
+
+    // Borrowed: the item belongs to the scene, which is why every handle in this binding takes its
+    // own reference before storing one.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_scene_add(nint scene, nint source);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_scene_find_source(nint scene, string name);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_scene_find_sceneitem_by_id(nint scene, long id);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_scene_enum_items(
+        nint scene, delegate* unmanaged[Cdecl]<nint, nint, nint, byte> callback, nint parameter);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_scene_reorder_items(nint scene, nint* itemOrder, nuint count);
+
+    // ---- obs.h: scene items ----
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_addref(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_release(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_remove(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial long obs_sceneitem_get_id(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_sceneitem_get_scene(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_sceneitem_get_source(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_pos(nint item, ref Vec2Native position);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_get_pos(nint item, out Vec2Native position);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_rot(nint item, float degrees);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float obs_sceneitem_get_rot(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_scale(nint item, ref Vec2Native scale);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_get_scale(nint item, out Vec2Native scale);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_alignment(nint item, uint alignment);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_sceneitem_get_alignment(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_bounds_type(nint item, int type);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_sceneitem_get_bounds_type(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_bounds_alignment(nint item, uint alignment);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_sceneitem_get_bounds_alignment(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_bounds(nint item, ref Vec2Native bounds);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_get_bounds(nint item, out Vec2Native bounds);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_bounds_crop(nint item, [MarshalAs(UnmanagedType.U1)] bool crop);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_get_bounds_crop(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_crop(nint item, ref ObsSceneItemCropNative crop);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_get_crop(nint item, out ObsSceneItemCropNative crop);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_get_info2(nint item, out ObsTransformInfoNative info);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_info2(nint item, ref ObsTransformInfoNative info);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_order(nint item, int movement);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_order_position(nint item, int position);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_sceneitem_get_order_position(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_visible(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_set_visible(nint item, [MarshalAs(UnmanagedType.U1)] bool visible);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_locked(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_set_locked(nint item, [MarshalAs(UnmanagedType.U1)] bool locked);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_select(nint item, [MarshalAs(UnmanagedType.U1)] bool select);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_sceneitem_selected(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_scale_filter(nint item, int filter);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_sceneitem_get_scale_filter(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_blending_method(nint item, int method);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_sceneitem_get_blending_method(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_set_blending_mode(nint item, int mode);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_sceneitem_get_blending_mode(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_defer_update_begin(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_defer_update_end(nint item);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_sceneitem_force_update_transform(nint item);
+
     // ---- obs-data.h: settings objects ----
     //
     // Every numeric setting is long long. Narrowing it to int works right up until a bitrate,

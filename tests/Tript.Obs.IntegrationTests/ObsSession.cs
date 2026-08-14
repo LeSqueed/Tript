@@ -57,6 +57,36 @@ internal sealed class ObsSession : IDisposable
         return session;
     }
 
+    // A context in which source types exist: video and audio mixes reset, then the plugins that
+    // register the sources these tests use. Sources and scenes can be created without a video mix at
+    // all — measured — but nothing a capture source does is meaningful without one.
+    internal static ObsSession StartWithSourceTypes()
+    {
+        var session = Start();
+
+        try
+        {
+            session.ResetVideoOrThrow(new ObsVideoSettings
+            {
+                BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720
+            });
+
+            if (!session.Runtime.ResetAudio(new ObsAudioSettings()))
+                throw new InvalidOperationException("obs_reset_audio refused the default settings.");
+
+            var report = session.StartModules();
+            if (!report.AllLoaded)
+                throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
+
+        return session;
+    }
+
     // The full ordering the headers imply: startup, paths, video and audio, modules, post-load.
     internal ObsModuleLoadReport StartModules()
     {

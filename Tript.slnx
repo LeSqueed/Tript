@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tript.Core/Tript.Core.csproj" />
+    <Project Path="src/Tript.Detection/Tript.Detection.csproj" />
+    <Project Path="src/Tript.Obs/Tript.Obs.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tript.Detection.Tests/Tript.Detection.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -7,3 +7,6 @@ node_modules/
 # Local tooling configuration and working notes — not part of the product.
 .claude/
 CLAUDE.md
+
+# Model assets are large binaries; kept out of git pending a distribution decision.
+data/models/**/*.onnx

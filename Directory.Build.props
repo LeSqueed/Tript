@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows10.0.19041.0;net10.0</TargetFrameworks>
+    <Platforms>x64</Platforms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <!-- Both target frameworks are carried from the first commit even while only one is exercised:
+         retrofitting a second TFM later costs more than carrying an idle one. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>

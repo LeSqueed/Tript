@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Tript.Obs</RootNamespace>
+    <AssemblyName>Tript.Obs</AssemblyName>
+  </PropertyGroup>
+</Project>

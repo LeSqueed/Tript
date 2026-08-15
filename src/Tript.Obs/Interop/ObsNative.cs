@@ -150,6 +150,55 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial ulong obs_get_frame_interval_ns();
 
+    // ---- media-io/video-io.h: raw frame subscription ----
+    //
+    // The media-io pair, not the core obs_add_raw_video_callback2: connect2 reports failure (an
+    // unsatisfiable conversion, a duplicate (callback, param) pair, or a zero frame-rate divisor)
+    // where the core function silently discards it. disconnect is void because disconnect2, which
+    // reports whether the input was found, only exists from 31.1.2 — and that boolean would not be
+    // a quiescence guarantee anyway. The callback signature is the header's
+    // void (*)(void *param, struct video_data *frame).
+
+    // Returns false when the conversion cannot be satisfied, when (callback, param) is already
+    // connected, or when frameRateDivisor is zero. The frame_rate_divisor is counted per
+    // subscription and delivers every Nth composited frame; the skipped frames are dropped before
+    // any conversion.
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool video_output_connect2(
+        nint video, in VideoScaleInfoNative conversion, uint frameRateDivisor,
+        delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint param);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void video_output_disconnect(
+        nint video, delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint param);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool video_output_active(nint video);
+
+    // Borrowed; lives for the lifetime of the video output.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint video_output_get_info(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int video_output_get_format(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint video_output_get_width(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint video_output_get_height(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial double video_output_get_frame_rate(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint video_output_get_skipped_frames(nint video);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint video_output_get_total_frames(nint video);
+
     // ---- obs.h: audio ----
 
     [LibraryImport(ObsLibrary.Name)]

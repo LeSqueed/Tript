@@ -104,3 +104,46 @@ internal struct ObsEncoderRoiNative
     public uint Right;
     public float Priority;
 }
+
+// struct video_data [media-io/video-io.h:121-125]. Three fields and nothing else: no width, no
+// height, no format, no frame rate — all four are properties of the subscription, not of the
+// frame. MAX_AV_PLANES is 8; no format uses more than 4 and unused entries are null. The plane
+// pointers are declared as long because a fixed buffer cannot hold a pointer type; on the
+// platforms this binding targets a pointer and a long are the same size, and every use casts
+// back to nint.
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct VideoDataNative
+{
+    public fixed long Data[8];
+    public fixed uint Linesize[8];
+    public ulong Timestamp;
+}
+
+// struct video_scale_info [media-io/video-io.h:278-284]. The conversion a raw-frame subscription
+// asks for. range and colorspace are enums, hence the ints.
+[StructLayout(LayoutKind.Sequential)]
+internal struct VideoScaleInfoNative
+{
+    public int Format;
+    public uint Width;
+    public uint Height;
+    public int Range;
+    public int Colorspace;
+}
+
+// struct video_output_info [media-io/video-io.h:127-139]. The video output's own configuration,
+// which is where a consumer learns the native format and size before deciding whether to convert.
+// size_t cache_size is 8 bytes on the platforms this binding targets, hence nuint.
+[StructLayout(LayoutKind.Sequential)]
+internal struct VideoOutputInfoNative
+{
+    public nint Name;
+    public int Format;
+    public uint FpsNumerator;
+    public uint FpsDenominator;
+    public uint Width;
+    public uint Height;
+    public nuint CacheSize;
+    public int ColorSpace;
+    public int Range;
+}

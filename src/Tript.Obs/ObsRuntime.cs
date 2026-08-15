@@ -107,6 +107,13 @@ public sealed class ObsRuntime : IDisposable
 
             var runtime = new ObsRuntime();
             _current = runtime;
+
+            // The resolver is installed at Start rather than later so that a consumer reaching for
+            // FrameSourceRegistry.Current always finds one. It resolves to the live runtime's own
+            // frame source, and it is indirect because the pipeline is torn down and rebuilt
+            // across a settings change — a captured instance would go stale silently.
+            FrameSourceRegistry.SetResolver(() => new ObsFrameSource(runtime));
+
             return runtime;
         }
     }
@@ -131,6 +138,11 @@ public sealed class ObsRuntime : IDisposable
 
             // Only now is libobs certain not to read the strings it kept pointers to.
             FreeInternedStrings();
+
+            // The frame source the resolver handed out is backed by this runtime, which is now
+            // gone; a later resolution would build an ObsFrameSource over a disposed runtime.
+            // Clearing the registry here means a subsequent Start installs a fresh one.
+            FrameSourceRegistry.Reset();
         }
     }
 
@@ -373,6 +385,13 @@ public sealed class ObsRuntime : IDisposable
         video = HasVideo ? ObsNative.obs_get_video() : nint.Zero;
         return video != nint.Zero;
     }
+
+    // Whether the mix with the given handle is the one that is current. A raw-frame subscription
+    // that connected to a handle which a later obs_reset_video tore down must not disconnect from
+    // it — that pointer is freed. This is the cheap and safe test, and the callers hold the
+    // control plane, so no reset can land between the check and the disconnect they make.
+    internal bool IsCurrentVideoHandle(nint video) =>
+        TryGetVideoHandle(out var current) && current == video;
 
     // The audio_t* encoders bind to. obs_get_audio checks and returns null before any reset — the
     // asymmetry with video is libobs's, measured — so this has the same shape as its video

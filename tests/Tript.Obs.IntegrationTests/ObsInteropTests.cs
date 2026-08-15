@@ -132,6 +132,48 @@ public sealed class ObsInteropTests
         Assert.Equal(40, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.CropToBounds)));
     }
 
+    // The raw-frame callback structures. struct video_data is passed to the callback by pointer,
+    // and struct video_scale_info is the subscription's conversion request; a wrong offset here
+    // corrupts every plane after the first. The encoder ROI struct is included with the group
+    // because it shares the compact four-uint-plus-float shape.
+    [Fact]
+    public unsafe void VideoIoStructs_MatchTheNativeLayout()
+    {
+        // data[8] as nint + linesize[8] as uint + timestamp. 8 bytes padding after the linesizes
+        // aligns the 8-byte uint64_t. (The binding models the pointer array as long, which is the
+        // same width as nint on the platforms this runs on.)
+        Assert.Equal(104, Marshal.SizeOf<VideoDataNative>());
+        Assert.Equal(0, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Data)));
+        Assert.Equal(64, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Linesize)));
+        Assert.Equal(96, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Timestamp)));
+
+        // format (int) + width + height + range + colorspace, all four bytes.
+        Assert.Equal(20, Marshal.SizeOf<VideoScaleInfoNative>());
+        Assert.Equal(0, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Format)));
+        Assert.Equal(4, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Width)));
+        Assert.Equal(8, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Height)));
+        Assert.Equal(12, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Range)));
+        Assert.Equal(16, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Colorspace)));
+
+        // name (nint) + format + fps_num + fps_den + width + height (six uint32s) then the size_t
+        // cache_size. The six uint32s end at byte 28, and the size_t must sit at an 8-byte
+        // boundary, so four bytes of padding separate height from cache_size. colorspace and range
+        // follow at 40 and 44, and the tail padding rounds the struct out to 48.
+        Assert.Equal(48, Marshal.SizeOf<VideoOutputInfoNative>());
+        Assert.Equal(0, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Name)));
+        Assert.Equal(8, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Format)));
+        Assert.Equal(12, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.FpsNumerator)));
+        Assert.Equal(16, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.FpsDenominator)));
+        Assert.Equal(20, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Width)));
+        Assert.Equal(24, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Height)));
+        Assert.Equal(32, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.CacheSize)));
+        Assert.Equal(40, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.ColorSpace)));
+        Assert.Equal(44, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Range)));
+
+        Assert.Equal(20, Marshal.SizeOf<ObsEncoderRoiNative>());
+        Assert.Equal(16, (int)Marshal.OffsetOf<ObsEncoderRoiNative>(nameof(ObsEncoderRoiNative.Priority)));
+    }
+
     [Fact]
     public void VaList_MatchesTheSystemVStructLayout()
     {

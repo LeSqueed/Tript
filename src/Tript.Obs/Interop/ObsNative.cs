@@ -660,6 +660,177 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_encoder_get_roi_increment(nint encoder);
 
+    // ---- obs.h: outputs ----
+    //
+    // obs_output_create hands back a non-null placeholder for an unregistered id — measured, and the
+    // reason the binding probes obs_output_get_display_name first. The id and name are copied, like
+    // obs_source_create. The settings object is retained, not copied.
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_output_create(string id, string name, nint settings, nint hotkeyData);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_release(nint output);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_name(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_start(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_stop(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_force_stop(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_delay(nint output, uint delaySec, uint flags);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_active(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_output_get_flags(nint output);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_output_defaults(string id);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_update(nint output, nint settings);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_can_pause(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_pause(nint output, [MarshalAs(UnmanagedType.U1)] bool pause);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_paused(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_settings(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_signal_handler(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_media(nint output, nint video, nint audio);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_mixer(nint output, nuint mixerIndex);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_output_get_mixer(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_mixers(nint output, nuint mixers);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nuint obs_output_get_mixers(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_video_encoder(nint output, nint encoder);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_video_encoder2(nint output, nint encoder, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_audio_encoder(nint output, nint encoder, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_video_encoder(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_video_encoder2(nint output, nuint index);
+
+    // Incremented; the caller releases.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_audio_encoder(nint output, nuint index);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_service(nint output, nint service);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_reconnect_settings(nint output, int retryCount, int retrySec);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial ulong obs_output_get_total_bytes(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_output_get_frames_dropped(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_output_get_total_frames(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_output_set_preferred_size(nint output, uint width, uint height);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_id(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float obs_output_get_congestion(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_output_get_connect_time_ms(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_output_reconnecting(nint output);
+
+    // Borrowed; null until the plugin sets one.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_last_error(nint output);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_output_properties(string id);
+
+    // The type-level probes. obs_output_get_display_name returns NULL for an id no module registered,
+    // and that is the reliable unavailability test: obs_output_create still answers a non-null
+    // placeholder for an unknown id, measured, so a create result cannot stand in for this probe.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_output_get_display_name(string id);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial uint obs_get_output_flags(string id);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_enum_output_types(nuint index, out nint id);
+
+    // ---- callback/signal.h and callback/calldata.h ----
+    //
+    // The signal callback is signal_callback_t: void (param, calldata). The global variant adds the
+    // signal name; only the plain form is used here.
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void signal_handler_connect(
+        nint handler, string signal, delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint parameter);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial void signal_handler_disconnect(
+        nint handler, string signal, delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint parameter);
+
+    // Reads a calldata field by name into a buffer of the right size. calldata ints are long long, so
+    // a caller reading the stop signal's "code" must pass sizeof(long) — the inline wrappers are
+    // static inline and therefore not exported.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool calldata_get_data(nint calldata, string name, void* value, nuint size);
+
+    // Returns a borrowed pointer to the string in the calldata.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool calldata_get_string(nint calldata, string name, nint* value);
+
     // ---- obs-data.h: settings objects ----
     //
     // Every numeric setting is long long. Narrowing it to int works right up until a bitrate,

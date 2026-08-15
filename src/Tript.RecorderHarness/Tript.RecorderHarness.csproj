@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Tript.RecorderHarness</RootNamespace>
+    <AssemblyName>Tript.RecorderHarness</AssemblyName>
+    <!-- The harness is a Linux-only native launcher: it exists to run as a real executable
+         (apphost) whose directory also carries a copy of the obs-ffmpeg-mux helper, so that the
+         plugin's executable-path lookup finds the helper. A framework-dependent console app has no
+         use here, and the windows TFM would drag in targets it can never run on. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <Platforms>x64</Platforms>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>true</UseAppHost>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tript.Obs/Tript.Obs.csproj" />
+  </ItemGroup>
+</Project>

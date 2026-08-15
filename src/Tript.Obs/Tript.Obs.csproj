@@ -5,9 +5,14 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- The tier-2 tests reflect over the interop surface to prove every declared symbol resolves,
-         which means they have to see it. -->
+         which means they have to see it. The recorder harness is a test-owned executable that runs
+         the recording in its own process (the muxer helper has to sit next to the real executable),
+         and it binds encoders to the session's mixes, so it reads the same internal handles. -->
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>Tript.Obs.IntegrationTests</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.RecorderHarness</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 </Project>

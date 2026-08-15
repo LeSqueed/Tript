@@ -10,5 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.Obs\Tript.Obs.csproj" />
+    <ProjectReference Include="..\..\src\Tript.RecorderHarness\Tript.RecorderHarness.csproj" />
   </ItemGroup>
 </Project>

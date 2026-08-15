@@ -153,6 +153,18 @@ internal sealed class ObsEncoderHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_encoder_release(handle);
 }
 
+// An output. An ObsContextHandle for the same measured reason as a source and an encoder:
+// obs_shutdown destroys every output regardless of outstanding references, so releasing one
+// afterwards is a use-after-free that the generation stamp declines to perform.
+internal sealed class ObsOutputHandle : ObsContextHandle
+{
+    internal ObsOutputHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override void Release(nint handle) => ObsNative.obs_output_release(handle);
+}
+
 // A weak source reference. Deliberately not an ObsContextHandle, for the same reason as obs_data and
 // on the same evidence: the control block is a bmem allocation that survives obs_shutdown, and the
 // count only returns to zero once it is released. Declining to release it after a shutdown would

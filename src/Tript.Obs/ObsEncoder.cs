@@ -41,6 +41,9 @@ public sealed class ObsEncoder : IDisposable
         return new ObsEncoder(pointer);
     }
 
+    internal static ObsEncoder? FromOwnedPointerOrNull(nint pointer) =>
+        pointer == nint.Zero ? null : new ObsEncoder(pointer);
+
     internal nint Pointer
     {
         get

@@ -10,3 +10,7 @@ CLAUDE.md
 
 # Model assets are large binaries; kept out of git pending a distribution decision.
 data/models/**/*.onnx
+
+# Frontend build artifacts (src/Tript.Web).
+dist/
+*.tsbuildinfo

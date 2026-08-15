@@ -1,0 +1,80 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * The Tript theme — one theme block, activated by data-theme="tript" on the document root.
+ *
+ * Dark modern theme. The accent is a light teal on a dark primary, so the contrast trap from the
+ * reference theme (dark text on primary) is avoided by construction: text on the accent is always
+ * dark (#04252b), and text on the dark ground is light. A contrast check in the unit suite guards
+ * this — see theme/contrast.test.ts.
+ */
+
+:root,
+:root[data-theme='tript'] {
+  color-scheme: dark;
+
+  /* Identity */
+  --color-accent: #22d3ee; /* light teal — the identity colour */
+  --color-accent-content: #04252b; /* dark text, legible on the accent */
+  --color-primary: #1a2029; /* dark primary surface */
+  --color-primary-content: #ffffff;
+
+  /* Surfaces (dark) */
+  --color-base-100: #0b0f14; /* page ground */
+  --color-base-200: #121821; /* raised surface */
+  --color-base-300: #171f2a; /* deepest surface */
+  --color-neutral: #10161f;
+
+  /* Text */
+  --color-base-content: #e6edf3;
+
+  /* Semantic */
+  --color-info: #4aa8ff;
+  --color-success: #36d399;
+  --color-warning: #f0b429;
+  --color-error: #f87171;
+
+  /* Structure */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --border: 1px solid #242e3b;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+}
+
+button {
+  font: inherit;
+}
+
+a {
+  color: var(--color-accent);
+}

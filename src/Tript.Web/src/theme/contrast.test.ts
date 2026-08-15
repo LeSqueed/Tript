@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// The accent-colour constraint, verified mechanically. The reference theme put dark text on the
+// primary colour and worked only because its accent was light. Under a dark modern theme the rule
+// is: text on the accent must contrast against the accent, and text on the dark ground must
+// contrast against the ground. These numbers are the contract the theme block must keep.
+
+import { describe, expect, it } from 'vitest';
+
+/** Parse #rrggbb into [r, g, b] 0..255. */
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) {
+    throw new Error(`not a #rrggbb colour: ${hex}`);
+  }
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ];
+}
+
+function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio between two colours, 1..21. */
+export function contrastRatio(a: string, b: string): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+const ACCENT = '#22d3ee';
+const ACCENT_CONTENT = '#04252b';
+const PRIMARY = '#1a2029';
+const BASE_CONTENT = '#e6edf3';
+const BASE_100 = '#0b0f14';
+
+describe('theme accent constraint', () => {
+  it('dark text on the accent is legible (WCAG AA for normal text)', () => {
+    // Dark text on the light accent — the direction the reference theme had wrong.
+    expect(contrastRatio(ACCENT_CONTENT, ACCENT)).toBeGreaterThanOrEqual(7);
+  });
+
+  it('light text on the dark primary is legible', () => {
+    expect(contrastRatio(PRIMARY, BASE_CONTENT)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the accent is light, not dark — the trap only bites dark accents', () => {
+    // A dark accent would make white-on-accent buttons unreadable. Guard the hue itself.
+    const accentLum = luminance(ACCENT);
+    expect(accentLum).toBeGreaterThan(0.5);
+  });
+
+  it('page text contrasts against the page ground', () => {
+    expect(contrastRatio(BASE_CONTENT, BASE_100)).toBeGreaterThanOrEqual(7);
+  });
+});

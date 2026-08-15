@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Tript.Settings</RootNamespace>
+    <AssemblyName>Tript.Settings</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Tript.Core\Tript.Core.csproj" />
+  </ItemGroup>
+</Project>

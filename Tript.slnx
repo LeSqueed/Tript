@@ -3,9 +3,13 @@
     <Project Path="src/Tript.Core/Tript.Core.csproj" />
     <Project Path="src/Tript.Detection/Tript.Detection.csproj" />
     <Project Path="src/Tript.Obs/Tript.Obs.csproj" />
+    <Project Path="src/Tript.Settings/Tript.Settings.csproj" />
     <Project Path="src/Tript.RecorderHarness/Tript.RecorderHarness.csproj" />
+    <Project Path="src/Tript.Media/Tript.Media.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Tript.Media.Tests/Tript.Media.Tests.csproj" />
+    <Project Path="tests/Tript.Settings.Tests/Tript.Settings.Tests.csproj" />
     <Project Path="tests/Tript.Detection.Tests/Tript.Detection.Tests.csproj" />
     <Project Path="tests/Tript.Obs.IntegrationTests/Tript.Obs.IntegrationTests.csproj" />
   </Folder>

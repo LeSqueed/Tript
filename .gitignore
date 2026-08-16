@@ -14,3 +14,6 @@ data/models/**/*.onnx
 # Frontend build artifacts (src/Tript.Web).
 dist/
 *.tsbuildinfo
+
+# OBS bundle downloads / extraction (third_party/ is a build cache).
+third_party/

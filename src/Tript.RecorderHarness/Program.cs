@@ -82,6 +82,27 @@ internal static class Program
         }
     }
 
+    // Applies the discovered module paths to a runtime. The harness is Linux-only, so the discovery
+    // resolves the system OBS install through ObsRuntimeLocator rather than a hardcoded layout.
+    private static void ApplyDiscoveredModulePaths(ObsRuntime runtime)
+    {
+        var locations = ObsRuntimeLocator.Discover();
+        if (!locations.Found)
+            throw new InvalidOperationException(
+                "No OBS runtime was found; the harness needs a system obs-studio install.");
+
+        // No SetRuntimeDirectory here: the harness uses the system OBS install and starts the
+        // runtime before this runs, and libobs refuses a directory change after the context is
+        // loaded. The runtime directory is only for a bundled runtime, which the harness has none of.
+
+        var binaryPattern = Path.Combine(locations.ModuleBinaryDir!, "%module%.so");
+        var dataPattern = Path.Combine(locations.ModuleDataDir ?? locations.ModuleBinaryDir!, "%module%");
+        runtime.AddModulePath(binaryPattern, dataPattern);
+
+        if (locations.CoreDataDir is not null)
+            runtime.AddDataPath(locations.CoreDataDir);
+    }
+
     // The recorder-driven path: a real runtime, a colour source the app owns, and the T3 recorder
     // state machine owning the output. Start (Session mode), run, Stop, and let the stop signal
     // complete the transition. The parent asserts the state machine's snapshot and the file — the
@@ -131,7 +152,7 @@ internal static class Program
         foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source" })
             runtime.AddSafeModule(module);
 
-        runtime.AddModulePath("/usr/lib/obs-plugins/%module%.so", "/usr/share/obs/obs-studio/plugins/%module%/data");
+        ApplyDiscoveredModulePaths(runtime);
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 
@@ -265,7 +286,7 @@ internal static class Program
         foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source" })
             runtime.AddSafeModule(module);
 
-        runtime.AddModulePath("/usr/lib/obs-plugins/%module%.so", "/usr/share/obs/obs-studio/plugins/%module%/data");
+        ApplyDiscoveredModulePaths(runtime);
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 
@@ -414,7 +435,7 @@ internal static class Program
         foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" })
             runtime.AddSafeModule(module);
 
-        runtime.AddModulePath("/usr/lib/obs-plugins/%module%.so", "/usr/share/obs/obs-studio/plugins/%module%/data");
+        ApplyDiscoveredModulePaths(runtime);
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 

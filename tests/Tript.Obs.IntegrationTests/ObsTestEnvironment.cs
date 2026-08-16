@@ -2,16 +2,36 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Runtime.InteropServices;
+using Tript.Obs;
 
 namespace Tript.Obs.IntegrationTests;
 
 // Everything the tests need to know about this machine's OBS install, in one place so a different
-// runtime layout is a one-file change.
+// runtime layout is a one-file change. The layout itself is discovered at runtime through
+// ObsRuntimeLocator rather than hardcoded, so the tests track the distro instead of a hardcoded
+// path.
 internal static class ObsTestEnvironment
 {
-    internal const string PluginBinaryPath = "/usr/lib/obs-plugins";
-    internal const string PluginDataPath = "/usr/share/obs/obs-studio/plugins/%module%/data";
-    internal const string CoreDataPath = "/usr/share/obs/obs-studio/";
+    private static readonly Lazy<ObsRuntimeLocations> Loc = new(ObsRuntimeLocator.Discover);
+
+    // The module binary dir and data dir from discovery. Throws if no OBS runtime is found — the
+    // integration tests require a real install to run.
+    internal static string PluginBinaryPath =>
+        Loc.Value.ModuleBinaryDir
+        ?? throw new InvalidOperationException("No OBS runtime found; the integration tests need a system obs-studio install.");
+
+    // The module data root with the %module% fragment, matching how AddModulePath substitutes it.
+    // The portable layout nests data under a "data" subdir; distro installs put it directly under
+    // the module dir. libobs probes each in order, so the pattern carries both forms.
+    internal static string PluginDataPath =>
+        Path.Combine(Loc.Value.ModuleDataDir ?? PluginBinaryPath, "%module%");
+
+    // A concrete module data dir for OpenModule, which takes a real path rather than a pattern.
+    internal static string ModuleDataDir =>
+        Loc.Value.ModuleDataDir ?? PluginBinaryPath;
+
+    // The core data dir (libobs effects, locale, licenses). May be null on a stripped install.
+    internal static string? CoreDataPath => Loc.Value.CoreDataDir;
 
     // An allowlist, not a preference. With no safe list libobs loads every plugin it finds, and
     // frontend-tools aborts the process on a machine with no Qt frontend to call back into —

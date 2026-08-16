@@ -3,6 +3,7 @@
 
 using System.Text;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Tript.Obs.IntegrationTests;
 
@@ -90,7 +91,13 @@ public sealed class ObsLifecycleTests
     public void AnAddedDataPath_ResolvesFilesAndUnknownNamesReturnNull()
     {
         using var session = ObsSession.Start();
-        session.Runtime.AddDataPath(ObsTestEnvironment.CoreDataPath);
+
+        // The core data dir is discovered with the runtime; a stripped install may not have it.
+        var coreData = ObsTestEnvironment.CoreDataPath;
+        if (coreData is null)
+            throw SkipException.ForSkip("No OBS core data dir found; nothing to resolve data files from.");
+
+        session.Runtime.AddDataPath(coreData);
 
         try
         {
@@ -104,7 +111,7 @@ public sealed class ObsLifecycleTests
         {
             // Data paths outlive obs_shutdown; leaving one behind would make the next test's leak
             // accounting start from a different floor.
-            Assert.True(session.Runtime.RemoveDataPath(ObsTestEnvironment.CoreDataPath));
+            Assert.True(session.Runtime.RemoveDataPath(coreData));
         }
     }
 

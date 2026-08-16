@@ -64,7 +64,7 @@ public sealed class ObsModuleTests
 
         var result = session.Runtime.OpenModule(
             $"{ObsTestEnvironment.PluginBinaryPath}/image-source.so",
-            ObsTestEnvironment.PluginDataPath,
+            ObsTestEnvironment.ModuleDataDir,
             out var module);
 
         Assert.Equal(ObsModuleOpenResult.Success, result);
@@ -86,8 +86,8 @@ public sealed class ObsModuleTests
         using var session = ObsSession.Start();
 
         var result = session.Runtime.OpenModule(
-            "/usr/lib/obs-plugins/tript-no-such-module.so",
-            ObsTestEnvironment.PluginDataPath,
+            $"{ObsTestEnvironment.PluginBinaryPath}/tript-no-such-module.so",
+            ObsTestEnvironment.ModuleDataDir,
             out var module);
 
         Assert.Equal(ObsModuleOpenResult.FailedToOpen, result);
@@ -102,7 +102,7 @@ public sealed class ObsModuleTests
         // libobs itself loads as a shared object but exports none of the module entry points.
         var result = session.Runtime.OpenModule(
             "/usr/lib/libobs.so.0",
-            ObsTestEnvironment.PluginDataPath,
+            ObsTestEnvironment.ModuleDataDir,
             out _);
 
         Assert.True(result is ObsModuleOpenResult.MissingExports or ObsModuleOpenResult.FailedToOpen,

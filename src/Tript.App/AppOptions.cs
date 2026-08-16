@@ -29,7 +29,7 @@ internal sealed class AppOptions
     {
         string contentRoot = Path.Combine(Path.GetTempPath(), "tript-app", "content");
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
-        string webRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "Tript.Web", "dist");
+        string webRoot = DefaultWebRoot();
         var fakeRecorder = false;
         string? gameListJson = null;
 
@@ -75,6 +75,19 @@ internal sealed class AppOptions
 
         options.Validate();
         return options;
+    }
+
+    // The default web root. In a published layout the built frontend ships as ./dist next to the
+    // executable (the Makefile assembles it there); in a dev checkout the source tree carries it at
+    // <repo>/src/Tript.Web/dist. Prefer the published layout when it exists, else the dev path.
+    internal static string DefaultWebRoot()
+    {
+        var published = Path.Combine(AppContext.BaseDirectory, "dist");
+        if (Directory.Exists(published))
+            return published;
+
+        var dev = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "Tript.Web", "dist");
+        return dev;
     }
 
     private void Validate()

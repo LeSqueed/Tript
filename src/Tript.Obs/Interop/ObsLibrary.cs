@@ -82,7 +82,8 @@ internal static class ObsLibrary
     }
 
     // SONAME first on Linux: libobs.so is the development symlink and is absent from a runtime
-    // bundle, which is exactly the layout Tript ships.
+    // bundle, which is exactly the layout Tript ships. On Windows the official OBS bundle ships
+    // obs64.dll under bin/64bit, so that is tried before obs.dll (the layout some packaging uses).
     private static string[] CandidateFileNames() =>
-        OperatingSystem.IsWindows() ? ["obs.dll"] : ["libobs.so.0", "libobs.so"];
+        OperatingSystem.IsWindows() ? ["obs64.dll", "obs.dll"] : ["libobs.so.0", "libobs.so"];
 }

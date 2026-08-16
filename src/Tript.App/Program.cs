@@ -72,21 +72,49 @@ internal static class Program
         return new AppHost(options, store, runtime, tracker);
     }
 
+    // The startup is platform-split. On Linux, OBS is a system dependency and the runtime needs
+    // the display handed over explicitly (libobs cannot discover the display server for itself).
+    // On Windows, OBS is bundled next to the app and needs no X11. The runtime itself — video and
+    // audio reset, module load — is shared.
     private static ObsRuntime StartObsRuntime()
     {
-        if (XInitThreads() == 0)
-            throw new InvalidOperationException("XInitThreads failed.");
+        var locations = ObsRuntimeLocator.Discover();
+        if (!locations.Found)
+            throw new InvalidOperationException(
+                "No OBS runtime was found. On Linux, install obs-studio (libobs + the plugin modules); " +
+                "on Windows the bundled OBS runtime is missing from the app directory.");
 
-        var display = XOpenDisplay(null);
-        if (display == nint.Zero)
-            throw new InvalidOperationException("XOpenDisplay returned null; no X server reachable.");
+        if (locations.RuntimeDirectory is not null)
+            ObsRuntime.SetRuntimeDirectory(locations.RuntimeDirectory);
 
-        var runtime = ObsRuntime.Start(new ObsStartupOptions
+        // The muxer helper must sit next to this executable (os_get_executable_path_ptr). On
+        // Linux the system helper is symlinked beside us; on Windows the bundle already has it.
+        // Best-effort — a machine without the helper will surface the failure at recording time.
+        _ = MuxerHelper.EnsureNextToApp();
+
+        ObsStartupOptions startup;
+        if (OperatingSystem.IsWindows())
         {
-            Locale = "en-US",
-            NixPlatform = ObsNixPlatform.X11Egl,
-            NixPlatformDisplay = display
-        });
+            startup = new ObsStartupOptions { Locale = "en-US" };
+        }
+        else
+        {
+            if (XInitThreads() == 0)
+                throw new InvalidOperationException("XInitThreads failed.");
+
+            var display = XOpenDisplay(null);
+            if (display == nint.Zero)
+                throw new InvalidOperationException("XOpenDisplay returned null; no X server reachable.");
+
+            startup = new ObsStartupOptions
+            {
+                Locale = "en-US",
+                NixPlatform = ObsNixPlatform.X11Egl,
+                NixPlatformDisplay = display
+            };
+        }
+
+        var runtime = ObsRuntime.Start(startup);
 
         var video = new ObsVideoSettings
         {
@@ -102,13 +130,26 @@ internal static class Program
         if (!runtime.ResetAudio(new ObsAudioSettings()))
             throw new InvalidOperationException("obs_reset_audio refused the default settings.");
 
-        // The same safe module list the integration tests use, plus linux-pulseaudio: the audio
-        // routing creates pulse capture sources, so the module must be loadable even though the
-        // alpha records Session (single programme track) and the routing is not driven for it.
-        foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" })
+        // The core data dir (effects, locale, licenses) is optional — some installs strip it — but
+        // when present it makes libobs's own effects findable, same as the integration tests.
+        if (locations.CoreDataDir is not null)
+            runtime.AddDataPath(locations.CoreDataDir);
+
+        // The allowlist keeps the module load to what the recorder actually uses, and it is
+        // platform-specific: the capture source differs (linux-capture vs windows-capture), and
+        // the audio module differs (linux-pulseaudio vs windows' wasapi). Adding the frontend's
+        // module would abort the process because there is no frontend here.
+        foreach (var module in SafeModules())
             runtime.AddSafeModule(module);
 
-        runtime.AddModulePath("/usr/lib/obs-plugins/%module%.so", "/usr/share/obs/obs-studio/plugins/%module%/data");
+        // The data path is a search root: libobs substitutes %module% and looks for the module's
+        // data under it. The portable OBS layout nests it under a "data" subdir; distro installs
+        // put it directly under the module dir. Both are probed because libobs searches each in
+        // order, so the pattern carries both forms.
+        var binaryPattern = Path.Combine(locations.ModuleBinaryDir!, "%module%" + (OperatingSystem.IsWindows() ? ".dll" : ".so"));
+        var moduleDataRoot = locations.ModuleDataDir ?? locations.ModuleBinaryDir!;
+        var dataPattern = Path.Combine(moduleDataRoot, "%module%");
+        runtime.AddModulePath(binaryPattern, dataPattern);
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 
@@ -120,6 +161,13 @@ internal static class Program
 
         return runtime;
     }
+
+    // The module allowlist. Kept small: the recorder needs the x264/ffmpeg encoders, the capture
+    // source, the image source (for the colour/blank), and the platform audio source.
+    private static IReadOnlyList<string> SafeModules() =>
+        OperatingSystem.IsWindows()
+            ? new[] { "obs-x264", "obs-ffmpeg", "win-capture", "image-source" }
+            : new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" };
 
     [DllImport("libX11.so.6", CharSet = CharSet.Ansi)]
     private static extern nint XOpenDisplay(string? name);

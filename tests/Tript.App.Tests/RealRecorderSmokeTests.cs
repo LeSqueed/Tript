@@ -42,14 +42,8 @@ public sealed class RealRecorderSmokeTests : IDisposable
         if (!CanRunRealRecording(out var reason))
             throw SkipException.ForSkip(reason);
 
-        // The ffmpeg_muxer plugin spawns obs-ffmpeg-mux next to the *actual binary* of the process
-        // that starts the output — the app host, in this case. Copy the helper there before
-        // starting the host, the same way ObsMuxerHelper does for the recorder harness.
-        var helper = Path.Combine(Path.GetDirectoryName(AppHostDriver.AppHostPathForReal)!, "obs-ffmpeg-mux");
-        if (!File.Exists(helper))
-        {
-            File.Copy("/usr/bin/obs-ffmpeg-mux", helper, overwrite: true);
-        }
+        // The app host symlinks the system obs-ffmpeg-mux beside its own binary at startup
+        // (MuxerHelper.EnsureNextToApp), so no copy is needed here.
 
         var host = AppHostDriver.StartReal(_contentRoot, _settingsPath);
         await using var _ = host;
@@ -96,10 +90,11 @@ public sealed class RealRecorderSmokeTests : IDisposable
             return false;
         }
 
-        // The muxer helper must exist somewhere the test can copy it from.
-        if (!File.Exists("/usr/bin/obs-ffmpeg-mux"))
+        // The muxer helper must exist somewhere the app can symlink it from. The app resolves it
+        // via PATH and the standard dirs, so this mirrors that.
+        if (!File.Exists("/usr/bin/obs-ffmpeg-mux") && !File.Exists("/usr/local/bin/obs-ffmpeg-mux"))
         {
-            reason = "/usr/bin/obs-ffmpeg-mux is missing; the ffmpeg_muxer plugin cannot record.";
+            reason = "No obs-ffmpeg-mux helper found in the standard dirs; the ffmpeg_muxer plugin cannot record.";
             return false;
         }
 

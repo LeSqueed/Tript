@@ -162,6 +162,15 @@ public sealed class ObsSource : IDisposable
     // its settings again.
     public ObsSettings GetSettings() => ObsSettings.FromOwnedPointer(ObsNative.obs_source_get_settings(Pointer));
 
+    // The properties this *instance* declares, read through obs_source_properties rather than the
+    // type-level obs_get_source_properties. For most source types the two agree; for capture
+    // sources the instance route is the reliable one, because the instance already holds the
+    // connection the property builder needs — measured on linux-capture 32.2.1, where the
+    // type-level probe for xshm_input crashes on an Xwayland server while this succeeds. See
+    // ObsSourceProperties for the discovery surface.
+    public IReadOnlyList<ObsSourceProperty> EnumerateProperties() =>
+        ObsSourceProperties.EnumerateProperties(ObsNative.obs_source_properties(Pointer));
+
     // Applies the given keys over the source's existing settings and asks it to reconfigure.
     public void Update(ObsSettings settings)
     {

@@ -131,6 +131,26 @@ internal static unsafe partial class ObsNative
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_enum_input_types(nuint index, out nint id);
 
+    // Incremented; the caller releases. Null for an id no module registered.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_source_defaults(string id);
+
+    // Returns an obs_properties_t; free with obs_properties_destroy. Null for an id that is not
+    // registered or declares no properties. Answers for any registered source type — inputs,
+    // filters, transitions and scenes alike — which is what makes it the capture-source settings
+    // discovery route (spec/obs-binding.md, Part 11): the capture keys are plugin-side and not in
+    // the libobs headers.
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint obs_get_source_properties(string id);
+
+    // Returns an obs_properties_t for a *created* source; free with obs_properties_destroy. Some
+    // source types build a different property list for an instance than for the type-level probe —
+    // measured on linux-capture 32.2.1, where the type-level obs_get_source_properties crashes on
+    // an Xwayland server while the instance-level call succeeds because the instance already holds
+    // its display connection. This is the reliable route for capture sources.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_source_properties(nint source);
+
     // ---- obs.h: video ----
 
     [LibraryImport(ObsLibrary.Name)]

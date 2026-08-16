@@ -14,12 +14,19 @@
 // Navigation (previous/next) moves between sessions in the current context, wrapping at both ends.
 //
 // Data comes from the player session source seam (player/sessionSource.ts) — the alpha stub. The
-// real IPC-backed source plugs in behind the same interface. Region selection is exposed to T9
-// (the clip dialog) through player/clipSeam.ts; this view deliberately builds no dialog.
+// real IPC-backed source plugs in behind the same interface.
+//
+// This view is the seam owner for the clip dialog (T9): it renders the dialog in the player,
+// feeds it the session's regions, and wires the `importProgress` message (the clip result arrives
+// asynchronously — the backend never returns from CreateClip synchronously) and the `state` message
+// (per-track audio layout). The segment-looping affordance lives here too: while the playhead is
+// inside the selected marked segment and crosses its end, playback seeks back to the segment's
+// start — stay inside a marked segment and it loops; leave it and normal playback resumes
+// (spec/frontend.md — "segment looping").
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { BookmarkItem, ContentItem } from '../ipc/protocol';
+import type { BookmarkItem, ContentItem, RecordingState } from '../ipc/protocol';
 import { contentUrl } from '../ipc/endpoints';
 import { DEFAULT_SESSION_SECONDS, stubSessionSource, type SessionSource } from './player/sessionSource';
 import type { TimelineRegion } from './player/clipSeam';
@@ -28,12 +35,20 @@ import { usePlayback } from './player/usePlayback';
 import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
 import { TransportBar } from './player/TransportBar';
+import { useClipDialog } from './player/useClipDialog';
+import { ClipDialog } from './player/clipDialog';
+import { computeLoopDecision } from './player/clipLoop';
+import { clampTime } from './player/clipModel';
 
 export interface PlayerViewProps {
   client: IpcClient;
   /** The session source seam. Defaults to the alpha stub; the real source plugs in here. */
   source?: SessionSource;
-  /** The clip-dialog seam. The alpha ships with no regions. */
+  /**
+   * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns
+   * the region list; a caller can alternatively supply regions for a read-only region view.
+   * Defaults to the dialog's own regions (none before the dialog is opened).
+   */
   regions?: TimelineRegion[];
   selectedRegionId?: string | null;
   onRegionSelect?(region: TimelineRegion): void;
@@ -44,9 +59,9 @@ const sessionSource: SessionSource = stubSessionSource;
 export function PlayerView({
   client,
   source = sessionSource,
-  regions = [],
-  selectedRegionId = null,
-  onRegionSelect = () => {},
+  regions: externalRegions,
+  selectedRegionId: externalSelectedRegionId,
+  onRegionSelect: externalOnRegionSelect,
 }: PlayerViewProps) {
   const sessions = useMemo(() => source.getSessions(), [source]);
   const [itemIndex, setItemIndex] = useState(0);
@@ -56,7 +71,7 @@ export function PlayerView({
   const fallbackDuration =
     item?.endTime !== undefined && item.endTime > 0 ? item.endTime : DEFAULT_SESSION_SECONDS;
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
-  const { duration, currentTime, seek, videoRef } = playback;
+  const { duration, currentTime, seek, playing, videoRef } = playback;
 
   // NOTE: the state variable is `viewWindow`, never `window` — `window` is the DOM global and
   // shadowing it would break the keyboard listener below (addEventListener on a WindowState).
@@ -69,6 +84,50 @@ export function PlayerView({
   useEffect(() => {
     setViewWindow((prev) => zoomWindow(currentTime, prev.seconds, duration));
   }, [currentTime, duration]);
+
+  // The clip dialog owns the region list while it is open. When the seam caller supplies its own
+  // regions/selection/handler (the read-only region view), those win; otherwise the dialog's
+  // regions are used and its selection handler is the loop target.
+  const dialog = useClipDialog();
+  const regions = externalRegions ?? dialog.regions;
+  const selectedRegionId = externalSelectedRegionId ?? dialog.selectedRegionId;
+  const onRegionSelect = useCallback(
+    (region: TimelineRegion) => {
+      if (externalOnRegionSelect) {
+        externalOnRegionSelect(region);
+        return;
+      }
+      dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id);
+    },
+    [externalOnRegionSelect, dialog],
+  );
+
+  // The dialog wires itself into the IPC surface. The owner of the connection does the sending:
+  // `addImportHandler` fires for every CreateClip payload the dialog builds, and `create()` is
+  // asynchronous — the backend result arrives later as an `importProgress` message, which is fed
+  // back through `applyImportProgress`. The `state` message carries the session's audio-track
+  // layout, so the dialog can offer per-track volume/mute when the recording had tracks.
+  useEffect(() => {
+    return dialog.addImportHandler((content) => {
+      client.send('CreateClip', content as Parameters<IpcClient['send']>[1] & { id: string });
+    });
+  }, [dialog, client]);
+
+  useEffect(() => {
+    return client.on('importProgress', (content) => {
+      dialog.applyImportProgress(content as Parameters<typeof dialog.applyImportProgress>[0]);
+    });
+  }, [dialog, client]);
+
+  useEffect(() => {
+    return client.on('state', (content) => {
+      const message = content as { state?: RecordingState };
+      const tracks = message?.state?.audioTracks;
+      if (Array.isArray(tracks) && tracks.length > 0) {
+        dialog.setAudioTracks(tracks);
+      }
+    });
+  }, [client, dialog]);
 
   const navigate = useCallback(
     (delta: number) => {
@@ -84,7 +143,14 @@ export function PlayerView({
     client.send('ToggleFullscreen', { enabled: true });
   }, [client]);
 
-  // Keyboard: space toggles play/pause, arrows seek (per the navigation spec).
+  const openClipDialog = useCallback(() => {
+    if (item) {
+      dialog.openDialog(item, currentTime);
+    }
+  }, [item, currentTime, dialog]);
+
+  // Keyboard: space toggles play/pause, arrows seek (per the navigation spec). The dialog's own
+  // inputs are excluded by the input/textarea/button check.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, button, [role="slider"]')) {
@@ -104,6 +170,25 @@ export function PlayerView({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [playback, currentTime, seek]);
+
+  // Segment looping: while the playhead is inside the selected marked segment and playing, when it
+  // crosses the segment's end, seek back to the segment's start. The decision is pure
+  // (player/clipLoop.ts) and needs the previous sample — the `<video>` element drives currentTime
+  // through its own timeupdate events, which are not guaranteed to land exactly on the boundary, and
+  // the step-size guard tells a natural play-through from a deliberate seek past the end ("leaving"
+  // the segment).
+  const lastSampleRef = useRef<number | null>(null);
+  useEffect(() => {
+    const previousTime = lastSampleRef.current;
+    lastSampleRef.current = currentTime;
+    if (previousTime === null) {
+      return;
+    }
+    const decision = computeLoopDecision(currentTime, previousTime, playing, regions, selectedRegionId);
+    if (decision.shouldLoopBack && decision.region) {
+      seek(clampTime(decision.region.start, duration));
+    }
+  }, [currentTime, playing, regions, selectedRegionId, seek, duration]);
 
   if (!item) {
     return (
@@ -162,7 +247,7 @@ export function PlayerView({
       </div>
 
       <TransportBar
-        playing={playback.playing}
+        playing={playing}
         currentTime={currentTime}
         duration={duration}
         onTogglePlayPause={playback.togglePlayPause}
@@ -191,6 +276,9 @@ export function PlayerView({
       </div>
 
       <div className="player-footer">
+        <button type="button" className="btn" onClick={openClipDialog} aria-label="Open clip dialog">
+          Create clip
+        </button>
         <span className="muted small">
           Bookmarks: {bookmarks.length}
         </span>
@@ -198,6 +286,8 @@ export function PlayerView({
           Zoom window: {viewWindow.seconds.toFixed(1)}s
         </span>
       </div>
+
+      <ClipDialog client={client} dialog={dialog} />
     </section>
   );
 }

@@ -221,4 +221,9 @@
   display: flex;
   justify-content: space-between;
   gap: var(--space-2);
+  align-items: center;
+}
+
+.player-footer .btn {
+  align-self: flex-start;
 }

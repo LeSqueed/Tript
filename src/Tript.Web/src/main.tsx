@@ -8,6 +8,7 @@ import './app/app.css';
 import './components/RecorderBar.css';
 import './components/LibraryView.css';
 import './components/PlayerView.css';
+import './components/player/clipDialog.css';
 import './components/SettingsView.css';
 
 createRoot(document.getElementById('root')!).render(

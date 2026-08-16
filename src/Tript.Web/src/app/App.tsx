@@ -47,7 +47,7 @@ export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       </nav>
       <main className="app-content">
         {route === 'library' && <LibraryView client={client} />}
-        {route === 'player' && <PlayerView />}
+        {route === 'player' && <PlayerView client={client} />}
         {route === 'settings' && <SettingsView client={client} />}
       </main>
     </div>

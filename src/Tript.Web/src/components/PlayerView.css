@@ -2,7 +2,7 @@
 
 .player-view {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-3);
   max-width: 960px;
 }
 
@@ -10,6 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .player-title {
@@ -20,6 +21,11 @@
   background: var(--color-base-300);
   color: var(--color-base-content);
   border: var(--border);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .video-frame {
@@ -36,21 +42,183 @@
   background: #000;
 }
 
-.timeline-stub {
+/* ---------------------------------------------------------------------------
+ * Transport row
+ * ------------------------------------------------------------------------- */
+
+.transport-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   background: var(--color-base-200);
   border: var(--border);
   border-radius: var(--radius);
-  padding: var(--space-3);
 }
 
-.timeline-progress {
-  height: 6px;
+.transport-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.transport-sep {
+  opacity: 0.5;
+}
+
+.transport-spacer {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dual timeline stack
+ * ------------------------------------------------------------------------- */
+
+.timeline-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* The thin full-session bar. */
+
+.timeline-bar {
+  position: relative;
+  height: 18px;
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.timeline-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: var(--radius);
+}
+
+.timeline-tick {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  border: none;
+  border-radius: 1px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.timeline-window-bracket {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* The zoomed precision timeline. */
+
+.timeline-zoomed {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-1);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  user-select: none;
+  touch-action: none;
+}
+
+.timeline-ruler {
+  position: relative;
+  height: 16px;
+}
+
+.timeline-ruler-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-base-content);
+  opacity: 0.55;
+}
+
+.timeline-track {
+  position: relative;
+  height: 44px;
   background: var(--color-base-300);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
-.timeline-progress-fill {
-  height: 100%;
-  background: var(--color-accent);
+.timeline-bookmark {
+  position: absolute;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.timeline-region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  z-index: 1;
+}
+
+.timeline-region.selected {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.timeline-bubble {
+  position: absolute;
+  bottom: 46px;
+  transform: translateX(-50%);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.timeline-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
 }

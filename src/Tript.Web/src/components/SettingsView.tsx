@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Settings — logical pages: recording, buffer/replay, audio, capture, game. The alpha ships the
-// page tabs and one probe that sends UpdateSettings to the backend.
+// Settings — logical pages: recording, buffer/replay, audio, capture, game. The buffer has its
+// own page; the audio page drives the multi-track model (track count, source→track routing,
+// per-source volume) — spec/frontend.md. Each page reads the full `settings` push from the
+// backend and writes page-scoped partials via `UpdateSettings` (the backend is the source of
+// truth; see useSettings.ts for the cause-echo discipline).
 
 import { useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
+import { useSettings, type SettingsPageName } from '../settings/useSettings';
+import { RecordingPage } from '../settings/pages/RecordingPage';
+import { BufferPage } from '../settings/pages/BufferPage';
+import { AudioPage } from '../settings/pages/AudioPage';
+import { CapturePage } from '../settings/pages/CapturePage';
+import { GamePage } from '../settings/pages/GamePage';
 
-export type SettingsPage = 'recording' | 'buffer' | 'audio' | 'capture' | 'game';
-
-const PAGES: { id: SettingsPage; label: string }[] = [
+const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'recording', label: 'Recording' },
   { id: 'buffer', label: 'Buffer' },
   { id: 'audio', label: 'Audio' },
@@ -17,7 +24,8 @@ const PAGES: { id: SettingsPage; label: string }[] = [
 ];
 
 export function SettingsView({ client }: { client: IpcClient }) {
-  const [page, setPage] = useState<SettingsPage>('recording');
+  const [page, setPage] = useState<SettingsPageName>('recording');
+  const controller = useSettings(client);
 
   return (
     <section className="settings-view">
@@ -37,15 +45,41 @@ export function SettingsView({ client }: { client: IpcClient }) {
       </div>
       <div className="settings-body">
         <h2>{PAGES.find((p) => p.id === page)?.label}</h2>
-        <p className="muted">Settings page content lands in the settings task.</p>
+        {!controller.hasSettings && (
+          <p className="muted small">
+            Waiting for the backend to push settings. The forms stay editable; changes are sent
+            when the connection is live.
+          </p>
+        )}
         {page === 'recording' && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => client.send('UpdateSettings', { settings: { recordingMode: 'manual' } })}
-          >
-            Apply sample setting
-          </button>
+          <RecordingPage
+            settings={controller.settings.recording}
+            update={controller.update}
+            page={page}
+            externalPushCount={controller.externalPushCount}
+          />
+        )}
+        {page === 'buffer' && (
+          <BufferPage
+            settings={controller.settings.buffer}
+            update={controller.update}
+            page={page}
+            externalPushCount={controller.externalPushCount}
+          />
+        )}
+        {page === 'audio' && (
+          <AudioPage settings={controller.settings.audio} update={controller.update} page={page} />
+        )}
+        {page === 'capture' && (
+          <CapturePage settings={controller.settings.capture} update={controller.update} page={page} />
+        )}
+        {page === 'game' && (
+          <GamePage
+            settings={controller.settings.game}
+            update={controller.update}
+            page={page}
+            externalPushCount={controller.externalPushCount}
+          />
         )}
       </div>
     </section>

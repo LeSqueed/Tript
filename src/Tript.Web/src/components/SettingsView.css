@@ -26,3 +26,265 @@
   border-bottom-color: var(--color-accent);
   color: var(--color-accent);
 }
+
+.settings-body h2 {
+  margin-top: 0;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.settings-page-note {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Field layout                                                        */
+/* ------------------------------------------------------------------ */
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-field-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.settings-field-hint {
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.settings-input {
+  background: var(--color-base-300);
+  color: var(--color-base-content);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+}
+
+.settings-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.settings-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-base-content) 50%),
+    linear-gradient(135deg, var(--color-base-content) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: var(--space-6);
+}
+
+/* ------------------------------------------------------------------ */
+/* Toggle                                                              */
+/* ------------------------------------------------------------------ */
+
+.settings-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Actions                                                             */
+/* ------------------------------------------------------------------ */
+
+.settings-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.btn.danger {
+  background: transparent;
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+  font-weight: 500;
+}
+
+.btn.danger:hover {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pill {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-neutral);
+  white-space: nowrap;
+}
+
+.pill-muted {
+  color: var(--color-base-content);
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------ */
+/* Audio page — tracks and sources                                     */
+/* ------------------------------------------------------------------ */
+
+.settings-subheading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.audio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+}
+
+.audio-track {
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.audio-track-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.audio-track-header .settings-input {
+  flex: 1;
+}
+
+.audio-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.audio-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-base-300);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.audio-source-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.audio-source-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audio-source-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-range {
+  width: 120px;
+  accent-color: var(--color-accent);
+}
+
+.audio-source-volume-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+  font-size: 12px;
+}
+
+.audio-source-add {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Game page                                                           */
+/* ------------------------------------------------------------------ */
+
+.game-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.game-row {
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.game-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.game-row-main .settings-input {
+  flex: 1;
+}
+
+.game-row-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.settings-inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 96px;
+}
+
+.game-add {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-2);
+}

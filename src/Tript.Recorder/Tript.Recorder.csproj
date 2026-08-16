@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Tript.Core\Tript.Core.csproj" />
+    <ProjectReference Include="..\Tript.Detection\Tript.Detection.csproj" />
     <ProjectReference Include="..\Tript.Obs\Tript.Obs.csproj" />
     <ProjectReference Include="..\Tript.Settings\Tript.Settings.csproj" />
   </ItemGroup>

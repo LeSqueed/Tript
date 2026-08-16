@@ -17,7 +17,7 @@ namespace Tript.App;
 // Assembles every component into the running alpha. Owns the process lifetime:
 //
 //   * the settings store and the recording-session tracker (already registered at startup),
-//   * the recorder + auto-start coordinator + detection host (the recording path),
+//   * the recorder + process-game detector + detection host (the recording path),
 //   * the three local IPC channels: control socket, content server, UI host,
 //   * the content catalogue (what the library and the content server serve),
 //   * the clip pipeline (IClipEngine) driven by CreateClip.
@@ -42,10 +42,10 @@ internal sealed class AppHost : IDisposable
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
     private ObsSource? _colourSource;
-    private AutoStartCoordinator? _autoStart;
     private ProcessNameGameDetector? _detector;
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
+    private string? _activeOutputPath;
 
     private readonly List<GameInfo> _catalogueGames = [];
     private IClipEngine? _clipEngine;
@@ -126,7 +126,6 @@ internal sealed class AppHost : IDisposable
             return;
         _disposed = true;
 
-        _autoStart?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _recorder?.Dispose();
@@ -164,6 +163,7 @@ internal sealed class AppHost : IDisposable
         if (!_recorder!.Start(resolved))
             return false;
 
+        _activeOutputPath = resolved.OutputPath;
         _currentGameId = effectiveGameId;
         _pendingMetadata = new RecordingMetadata
         {
@@ -205,13 +205,37 @@ internal sealed class AppHost : IDisposable
         if (session is not null && _pendingMetadata is not null)
         {
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
+            WriteMetadataSidecar(_pendingMetadata);
         }
 
         _pendingMetadata = null;
+        _activeOutputPath = null;
         _currentGameId = null;
 
         PushState(recording: false, null);
         return true;
+    }
+
+    // Persists the recording's metadata — game, start time, content type, audio tracks and the
+    // automatic bookmarks the detection host produced (spec/config-and-storage.md) — next to the
+    // file, so a finished recording carries its metadata on disk and bookmarks survive the process.
+    // The .bookmarks.json sidecar is the user-driven bookmark path (AddBookmark/DeleteBookmark) and
+    // is left alone here. A failed start leaves no file, so the sidecar is written only when the
+    // recording actually exists.
+    private void WriteMetadataSidecar(RecordingMetadata metadata)
+    {
+        if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
+            return;
+
+        var sidecar = _activeOutputPath + ".metadata.json";
+        try
+        {
+            File.WriteAllText(sidecar, JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Tript.App: could not write metadata sidecar: {exception.Message}");
+        }
     }
 
     // ---- lifecycle no-ops (the commands the alpha accepts but does not implement) ----
@@ -255,20 +279,16 @@ internal sealed class AppHost : IDisposable
         if (gameNames.Count == 0)
             return;
 
+        // The auto-start seam subscribes the detector straight to the same host methods the IPC
+        // path uses, so an auto-recorded session gets the whole lifecycle — metadata sidecar,
+        // session tracking, detection and state pushes — rather than a bare recorder Start/Stop.
+        // Resolving the detected game's settings is StartRecording's own job. The booleans the
+        // methods return are the start/stop refusal channel, which the detector's lifecycle does
+        // not need to see.
         _detector = new ProcessNameGameDetector(gameNames);
-        _autoStart = new AutoStartCoordinator(_recorder, _detector,
-            gameName =>
-            {
-                var gameId = GameList.FirstOrDefault(game => game.Name.Equals(gameName, StringComparison.OrdinalIgnoreCase))?.Id
-                             ?? gameName;
-                var settings = _settingsStore.Load();
-                var resolved = SettingsResolver.Resolve(settings, gameId);
-                if (resolved.Mode == RecordingMode.Hybrid)
-                    resolved.Mode = RecordingMode.Session;
-                resolved.OutputPath = BuildOutputPath(settings);
-                return resolved;
-            });
-        _autoStart.Start();
+        _detector.GameStarted += name => StartRecording(name);
+        _detector.GameStopped += () => StopRecording();
+        _detector.Start();
     }
 
     private void StartDetection(string gameId)

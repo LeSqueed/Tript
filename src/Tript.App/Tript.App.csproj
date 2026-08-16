@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Tript.App</RootNamespace>
+    <AssemblyName>Tript.App</AssemblyName>
+    <!-- The app host is a real native launcher: it owns the OBS context, and the ffmpeg_muxer
+         plugin spawns its obs-ffmpeg-mux helper next to the *actual binary* of the process
+         (os_get_executable_path_ptr resolves /proc/self/exe), so the app host must be an apphost
+         executable whose directory carries a copy of the helper — the same constraint that made
+         Tript.RecorderHarness a framework-dependent console app. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <Platforms>x64</Platforms>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>true</UseAppHost>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tript.Core/Tript.Core.csproj" />
+    <ProjectReference Include="../Tript.Detection/Tript.Detection.csproj" />
+    <ProjectReference Include="../Tript.Obs/Tript.Obs.csproj" />
+    <ProjectReference Include="../Tript.Recorder/Tript.Recorder.csproj" />
+    <ProjectReference Include="../Tript.Settings/Tript.Settings.csproj" />
+    <ProjectReference Include="../Tript.Media/Tript.Media.csproj" />
+  </ItemGroup>
+</Project>

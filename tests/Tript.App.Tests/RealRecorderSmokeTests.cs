@@ -36,10 +36,11 @@ public sealed class RealRecorderSmokeTests : IDisposable
     {
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Real_recording_writes_an_mp4_and_the_content_server_serves_it()
     {
-        Skip.IfNot(CanRunRealRecording(out var reason), reason);
+        if (!CanRunRealRecording(out var reason))
+            throw SkipException.ForSkip(reason);
 
         // The ffmpeg_muxer plugin spawns obs-ffmpeg-mux next to the *actual binary* of the process
         // that starts the output — the app host, in this case. Copy the helper there before

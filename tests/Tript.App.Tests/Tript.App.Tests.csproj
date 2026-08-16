@@ -3,18 +3,17 @@
     <RootNamespace>Tript.App.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <!-- The app host is a net10.0 (non-windows) apphost; the smoke tests spawn it as a child and
-         bind the same three ports. Restricting this project to net10.0 keeps `dotnet test` from
-         running the suite twice (the Directory.Build.props default is both TFMs). -->
-    <TargetFramework>net10.0</TargetFramework>
-    <UseAppHost>false</UseAppHost>
+         bind the same three ports. Run with `-f net10.0` so `dotnet test` runs the suite once.
+         The TFMs are inherited (not restricted to net10.0): forcing a single TFM here breaks
+         xunit.runner.visualstudio's adapter copy into the output, and discovery then fails with
+         "No test is available". -->
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <!-- Runtime test skipping (xunit 2.x has no Assert.Skip): the real-recorder test skips when the
-         machine cannot host a real recording. -->
-    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+    <!-- The real-recorder test uses xunit 2.9's Assert.Skip (a first-class skip) to opt out when
+         the machine cannot host a real recording. No extra skip package is needed. -->
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.App\Tript.App.csproj" />

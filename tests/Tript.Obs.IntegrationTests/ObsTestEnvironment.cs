@@ -24,6 +24,16 @@ internal static class ObsTestEnvironment
         "image-source"
     ];
 
+    // The modules the audio-routing tests load on top of the base set. linux-pulseaudio registers
+    // the audio device capture sources (pulse_input_capture / pulse_output_capture) that the
+    // multi-track routing drives; the base list deliberately omits it because the recording
+    // milestone never needs an audio device, and a machine with no PulseAudio server should not be
+    // prevented from loading the modules it does need.
+    internal static readonly string[] AudioModules =
+    [
+        "linux-pulseaudio"
+    ];
+
     private static readonly Lock DisplayGate = new();
     private static nint _display;
 

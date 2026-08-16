@@ -320,6 +320,32 @@ internal static unsafe partial class ObsNative
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_source_is_scene(nint source);
 
+    // ---- obs.h: source audio routing ----
+    //
+    // The per-source audio controls behind the multi-track routing (spec/recorder.md). A source
+    // declares which mixers it feeds with a bitmask — bit n means mixer n, and MAX_AUDIO_MIXES is
+    // 6 — and its per-source volume with a linear multiplier. The active pair is what makes a
+    // capture source actually produce audio: libobs only runs a source's audio while its active
+    // reference count is non-zero.
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_set_audio_mixers(nint source, uint mixers);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial uint obs_source_get_audio_mixers(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_set_volume(nint source, float volume);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float obs_source_get_volume(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_inc_active(nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_source_dec_active(nint source);
+
     // ---- obs.h: weak source references ----
     //
     // The weak control block is bmem's and outlives obs_shutdown, so it is released like an

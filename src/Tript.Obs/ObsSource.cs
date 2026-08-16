@@ -202,6 +202,36 @@ public sealed class ObsSource : IDisposable
 
     public bool IsShowing => ObsNative.obs_source_showing(Pointer);
 
+    // ---- audio ----
+
+    // Which of libobs's audio mixers this source feeds, as a bitmask — bit n means mixer n, and
+    // MAX_AUDIO_MIXES is 6 (spec/obs-binding.md, "Audio routing and tracks"). The multi-track
+    // routing gives every source on a track the same single bit, so a track carries every source
+    // sharing its mixer. The bitmask is what a recorder sets before starting the output; the getter
+    // reads it back.
+    public uint AudioMixers
+    {
+        get => ObsNative.obs_source_get_audio_mixers(Pointer);
+        set => ObsNative.obs_source_set_audio_mixers(Pointer, value);
+    }
+
+    // The per-source gain, a linear multiplier. Volume is per-source, not per-track: two sources
+    // merged into one track keep their own volumes (spec/recorder.md, "Multi-track audio"). The
+    // getter reads back what the setter stored.
+    public float Volume
+    {
+        get => ObsNative.obs_source_get_volume(Pointer);
+        set => ObsNative.obs_source_set_volume(Pointer, value);
+    }
+
+    // The active pair is what makes a capture source actually produce audio: libobs runs a source's
+    // audio only while its active reference count is non-zero, and a freshly created source has a
+    // count of zero. A recorder marks each source it routes active at start and inactive at stop;
+    // the counter is balanced, so every MarkActive needs a matching MarkInactive.
+    public void MarkActive() => ObsNative.obs_source_inc_active(Pointer);
+
+    public void MarkInactive() => ObsNative.obs_source_dec_active(Pointer);
+
     // ---- removal ----
 
     // Marks the source removed and signals every holder to let go. It does not destroy anything by

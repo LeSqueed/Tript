@@ -87,6 +87,41 @@ internal sealed class ObsSession : IDisposable
         return session;
     }
 
+    // A context in which audio device capture sources exist: the base source types plus the
+    // linux-pulseaudio module, which registers pulse_input_capture / pulse_output_capture — the
+    // sources the multi-track routing actually routes into mixers. Creating one needs no PulseAudio
+    // server to be reachable (the source exists regardless; it just captures silence), so this is
+    // safe on a machine without audio.
+    internal static ObsSession StartWithAudioSources()
+    {
+        var session = Start();
+
+        try
+        {
+            session.ResetVideoOrThrow(new ObsVideoSettings
+            {
+                BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720
+            });
+
+            if (!session.Runtime.ResetAudio(new ObsAudioSettings()))
+                throw new InvalidOperationException("obs_reset_audio refused the default settings.");
+
+            foreach (var module in ObsTestEnvironment.AudioModules)
+                session.Runtime.AddSafeModule(module);
+
+            var report = session.StartModules();
+            if (!report.AllLoaded)
+                throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
+
+        return session;
+    }
+
     // The full ordering the headers imply: startup, paths, video and audio, modules, post-load.
     internal ObsModuleLoadReport StartModules()
     {

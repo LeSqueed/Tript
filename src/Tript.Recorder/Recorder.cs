@@ -8,9 +8,9 @@ using Tript.Settings;
 namespace Tript.Recorder;
 
 // The recorder state machine. Owns the IRecorderOutput a session builds (an ffmpeg_muxer output and
-// its encoders for alpha), borrows the session's source, and is driven by two inputs: the IPC
-// surface (Start and Stop calls) and the auto-start seam (an IGameDetector that says a game
-// appeared or went away).
+// its encoders for alpha), borrows the session's source, and is driven by the control plane — Start
+// and Stop calls (which may come from the IPC surface or from the app host wiring the game
+// detector).
 //
 // The contract the spec cares about is what this type gets right:
 //
@@ -170,8 +170,9 @@ public sealed class Recorder : IDisposable
         }
     }
 
-    // Stops the recording but leaves the reason to the caller — the auto-start path: the game went
-    // away, so this is a GameStopped end, not a user request.
+    // Stops the recording as a GameStopped end rather than a user request: the caller sets the stop
+    // reason before the output's stop signal resolves it. No longer wired to the auto-start path,
+    // but retained as the explicit GameStopped stop.
     internal bool StopForGameEnd()
     {
         lock (_gate)
@@ -256,7 +257,7 @@ public sealed class Recorder : IDisposable
             // for; a code on a recording that expected to keep going is a failure to surface. The
             // caller who asked for the end picks the reason for a clean stop: the user-requested
             // path (Stop) leaves it unset and the stop signal resolves it to UserRequested; the
-            // auto-start path (StopForGameEnd) set GameStopped already, and that reason survives.
+            // GameStopped stop (StopForGameEnd) set GameStopped already, and that reason survives.
             _lastStopCode = stop.Code;
             _lastError = stop.LastError;
             _lastStopReason = stop.Code == ObsOutputStopCode.Success

@@ -90,26 +90,6 @@ internal sealed class FakeOutput : IRecorderOutput
     public void Dispose() => Disposed = true;
 }
 
-// A fake IGameDetector the auto-start tests drive by hand.
-internal sealed class FakeGameDetector : IGameDetector
-{
-    public bool Started { get; private set; }
-
-    public event Action<string>? GameStarted;
-
-    public event Action? GameStopped;
-
-    public void Start() => Started = true;
-
-    public void RaiseGameStarted(string game) => GameStarted?.Invoke(game);
-
-    public void RaiseGameStopped() => GameStopped?.Invoke();
-
-    public void Dispose()
-    {
-    }
-}
-
 internal static class TestSettings
 {
     internal static ResolvedRecorderSettings Session(string outputPath = "out.mp4") => new()

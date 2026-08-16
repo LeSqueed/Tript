@@ -16,5 +16,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Tript.Obs/Tript.Obs.csproj" />
+    <ProjectReference Include="../Tript.Recorder/Tript.Recorder.csproj" />
   </ItemGroup>
 </Project>

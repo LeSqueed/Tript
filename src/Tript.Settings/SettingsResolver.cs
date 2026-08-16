@@ -51,6 +51,10 @@ public sealed class ResolvedRecorderSettings
 {
     public RecordingMode Mode { get; set; }
 
+    // Where the recording is written. The settings resolver owns storage decisions; the recorder
+    // consumes the resolved path.
+    public string OutputPath { get; set; } = string.Empty;
+
     public int ResolutionWidth { get; set; }
 
     public int ResolutionHeight { get; set; }
@@ -76,6 +80,7 @@ public sealed class ResolvedRecorderSettings
     public ResolvedRecorderSettings Clone() => new()
     {
         Mode = Mode,
+        OutputPath = OutputPath,
         ResolutionWidth = ResolutionWidth,
         ResolutionHeight = ResolutionHeight,
         Fps = Fps,

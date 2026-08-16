@@ -46,7 +46,17 @@ internal sealed class ObsRecorderHarnessDriver
         return ObsMuxerHelper.TryDeploy();
     }
 
-    internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds)
+    internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds) =>
+        RunCore(outputPath, durationSeconds, useRecorder: false);
+
+    // The recorder round-trip: the harness drives the T3 recorder state machine (Recorder over
+    // ObsRecorderSession) rather than the raw binding. The parent asserts the file and the
+    // recorder's verdict — the state machine's Idle -> Recording -> Stopping -> Idle against a real
+    // muxer.
+    internal static (Verdict Verdict, int ExitCode) RunRecorder(string outputPath, double durationSeconds) =>
+        RunCore(outputPath, durationSeconds, useRecorder: true);
+
+    private static (Verdict Verdict, int ExitCode) RunCore(string outputPath, double durationSeconds, bool useRecorder)
     {
         if (!File.Exists(HarnessPath))
             throw new InvalidOperationException(
@@ -60,6 +70,8 @@ internal sealed class ObsRecorderHarnessDriver
         };
         startInfo.ArgumentList.Add(outputPath);
         startInfo.ArgumentList.Add(durationSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (useRecorder)
+            startInfo.ArgumentList.Add("--recorder");
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("The recorder harness could not be started.");

@@ -3,6 +3,8 @@
 
 using System.Runtime.InteropServices;
 using Tript.Obs;
+using Tript.Recorder;
+using Tript.Settings;
 
 namespace Tript.RecorderHarness;
 
@@ -26,12 +28,17 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        // Usage: Tript.RecorderHarness <output-path> [duration-seconds]
+        // Usage: Tript.RecorderHarness <output-path> [duration-seconds] [--recorder]
         // Both real arguments the parent passes. The harness records a colour source on channel 0
         // through x264 and aac, waits duration-seconds (default 1.0), stops, and exits.
+        //
+        // With --recorder, the recording is driven through the T3 recorder state machine
+        // (Recorder over ObsRecorderSession) instead of the raw binding: Start, run, Stop, and the
+        // stop signal completes the transition back to Idle. The parent asserts the recorder's
+        // snapshot and the file, which is how the state machine is verified against a real muxer.
         if (args.Length < 1)
         {
-            Console.Error.WriteLine("usage: Tript.RecorderHarness <output-path> [duration-seconds]");
+            Console.Error.WriteLine("usage: Tript.RecorderHarness <output-path> [duration-seconds] [--recorder]");
             return 2;
         }
 
@@ -40,9 +47,13 @@ internal static class Program
             ? parsed
             : 1.0;
 
+        var useRecorder = args.Skip(2).Contains("--recorder");
+
         try
         {
-            return Run(outputPath, durationSeconds);
+            return useRecorder
+                ? RunRecorder(outputPath, durationSeconds)
+                : Run(outputPath, durationSeconds);
         }
         catch (Exception exception)
         {
@@ -50,6 +61,139 @@ internal static class Program
             return 3;
         }
     }
+
+    // The recorder-driven path: a real runtime, a colour source the app owns, and the T3 recorder
+    // state machine owning the output. Start (Session mode), run, Stop, and let the stop signal
+    // complete the transition. The parent asserts the state machine's snapshot and the file — the
+    // recorder's Idle -> Recording -> Stopping -> Idle round-trip against a real muxer.
+    private static int RunRecorder(string outputPath, double durationSeconds)
+    {
+        if (XInitThreads() == 0)
+        {
+            Console.Error.WriteLine("XInitThreads failed.");
+            return 4;
+        }
+
+        var display = XOpenDisplay(null);
+        if (display == nint.Zero)
+        {
+            Console.Error.WriteLine("XOpenDisplay returned null; no X server reachable.");
+            return 5;
+        }
+
+        using var runtime = ObsRuntime.Start(new ObsStartupOptions
+        {
+            Locale = "en-US",
+            NixPlatform = ObsNixPlatform.X11Egl,
+            NixPlatformDisplay = display
+        });
+
+        var video = new ObsVideoSettings
+        {
+            BaseWidth = 1280,
+            BaseHeight = 720,
+            OutputWidth = 1280,
+            OutputHeight = 720
+        };
+
+        if (runtime.ResetVideo(video) != ObsVideoResetResult.Success)
+        {
+            Console.Error.WriteLine("obs_reset_video refused the settings.");
+            return 6;
+        }
+
+        if (!runtime.ResetAudio(new ObsAudioSettings()))
+        {
+            Console.Error.WriteLine("obs_reset_audio refused the default settings.");
+            return 7;
+        }
+
+        foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source" })
+            runtime.AddSafeModule(module);
+
+        runtime.AddModulePath("/usr/lib/obs-plugins/%module%.so", "/usr/share/obs/obs-studio/plugins/%module%/data");
+        var report = runtime.LoadAllModules();
+        runtime.PostLoadModules();
+
+        if (!report.AllLoaded)
+        {
+            Console.Error.WriteLine($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
+            return 8;
+        }
+
+        // The colour source is the app's own source; the recorder borrows it via the session.
+        using var colour = ObsSource.CreatePrivate("color_source", "recorder colour");
+        using var session = new ObsRecorderSession(runtime, colour);
+        using var recorder = new Tript.Recorder.Recorder(session, RecorderSettings(outputPath));
+
+        if (!recorder.Start(RecorderSettings(outputPath)))
+        {
+            Console.Error.WriteLine($"The recorder refused the start: {recorder.Snapshot.LastError ?? recorder.Snapshot.LastStopReason?.ToString() ?? "(no reason)"}");
+            return 10;
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(durationSeconds))
+        {
+            if (recorder.Snapshot.State != RecorderState.Recording)
+            {
+                Console.Error.WriteLine($"The recorder left Recording early: {recorder.Snapshot.LastStopReason}");
+                Console.WriteLine($"RESULT:{Describe(recorder.Snapshot.LastStopCode ?? ObsOutputStopCode.Error)}");
+                return 1;
+            }
+
+            Thread.Sleep(5);
+        }
+
+        if (!recorder.Stop())
+        {
+            Console.Error.WriteLine("The recorder refused the stop.");
+            return 11;
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (recorder.Snapshot.State != RecorderState.Idle)
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("The recorder did not return to Idle in time.");
+
+            Thread.Sleep(20);
+        }
+
+        if (recorder.Snapshot.LastStopReason != RecorderStopReason.UserRequested)
+        {
+            Console.Error.WriteLine($"The recording ended with reason {recorder.Snapshot.LastStopReason}.");
+            Console.WriteLine($"RESULT:{Describe(recorder.Snapshot.LastStopCode ?? ObsOutputStopCode.Error)}");
+            return 1;
+        }
+
+        if (!System.IO.File.Exists(outputPath) || new System.IO.FileInfo(outputPath).Length == 0)
+        {
+            Console.Error.WriteLine("The recording reported success but no non-empty file is on disk.");
+            Console.WriteLine("RESULT:FAIL:NO_FILE");
+            return 1;
+        }
+
+        Console.WriteLine("RESULT:SUCCESS");
+        return 0;
+    }
+
+    // The resolved settings the recorder consumes: Session mode, the harness's 1280x720 display,
+    // and the recorded file's path. The alpha recorder records Session only.
+    private static ResolvedRecorderSettings RecorderSettings(string outputPath) => new()
+    {
+        Mode = RecordingMode.Session,
+        OutputPath = outputPath,
+        ResolutionWidth = 1280,
+        ResolutionHeight = 720,
+        Fps = 30,
+        Encoder = "x264",
+        Quality = 12,
+        AudioTracks =
+        {
+            new AudioTrack { Name = "Program", Sources = { new AudioSource { Name = "Program", Kind = AudioSourceKind.Output } } }
+        }
+    };
 
     private static int Run(string outputPath, double durationSeconds)
     {

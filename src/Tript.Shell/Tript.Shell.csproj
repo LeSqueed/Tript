@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Tript.Shell</RootNamespace>
+    <AssemblyName>Tript.Shell</AssemblyName>
+    <!-- The desktop shell is a thin native launcher: it hosts the Photino webview pointed at the
+         app's UI host, and reuses Tript.App's construction seam (AppHost.BuildApp). Like the app
+         host, it must be an apphost executable so the ffmpeg_muxer plugin can resolve its helper
+         next to the actual binary. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <Platforms>x64</Platforms>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>true</UseAppHost>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tript.App/Tript.App.csproj" />
+  </ItemGroup>
+</Project>

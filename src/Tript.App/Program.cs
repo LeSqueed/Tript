@@ -46,7 +46,9 @@ internal static class Program
         }
     }
 
-    private static AppHost BuildApp(AppOptions options)
+    // The desktop shell (src/Tript.Shell) constructs its host through this same seam, so a
+    // windowed build and the headless launcher are the same host rather than two divergent copies.
+    internal static AppHost BuildApp(AppOptions options)
     {
         // The libobs context, when the recording path is real. The seam mode (--fake-recorder)
         // records through a fake recorder session, so no libobs is started at all — the smoke

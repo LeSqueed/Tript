@@ -840,7 +840,10 @@ internal sealed class AppHost : IDisposable
     {
         var directory = Path.Combine(EffectiveRoot, "sessions");
         Directory.CreateDirectory(directory);
-        var name = $"session-{DateTime.Now:yyyyMMdd-HHmmss}.mp4";
+        // Millisecond resolution keeps two sessions started in the same second from colliding on
+        // one file name (a stop/start in quick succession would otherwise overwrite the recording
+        // and its metadata record).
+        var name = $"session-{DateTime.Now:yyyyMMdd-HHmmssfff}.mp4";
         return Path.Combine(directory, name);
     }
 }

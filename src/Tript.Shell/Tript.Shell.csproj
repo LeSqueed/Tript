@@ -8,7 +8,12 @@
          next to the actual binary. -->
     <TargetFrameworks>net10.0</TargetFrameworks>
     <Platforms>x64</Platforms>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe, not Exe: the subsystem bit is what decides whether Windows opens a console window
+         for the process. A desktop app that shows a Photino window must not also raise an empty
+         console behind it, which is exactly what the console subsystem does. The flag is a no-op
+         on Linux (there is no subsystem field in ELF), so the same project serves both platforms
+         and `dotnet run` still prints to the terminal that launched it. -->
+    <OutputType>WinExe</OutputType>
     <UseAppHost>true</UseAppHost>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

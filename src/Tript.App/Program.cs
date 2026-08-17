@@ -50,13 +50,17 @@ internal static class Program
     // windowed build and the headless launcher are the same host rather than two divergent copies.
     internal static AppHost BuildApp(AppOptions options)
     {
+        // The settings store is constructed before the runtime so the runtime can be initialised
+        // with the recording frame rate from the settings (the FPS selector must affect the mix).
+        var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
+
         // The libobs context, when the recording path is real. The seam mode (--fake-recorder)
         // records through a fake recorder session, so no libobs is started at all — the smoke
         // tests that do not touch hardware run against that.
         ObsRuntime? runtime = null;
         if (!options.FakeRecorder)
         {
-            runtime = StartObsRuntime();
+            runtime = StartObsRuntime(store.Load().Recording.Fps);
 
             // The detection host resolves the live frame source through the registry.
             // ObsRuntime.Start installs the resolver; this is where the alpha verifies the
@@ -64,8 +68,6 @@ internal static class Program
             // "no frame source".
             _ = FrameSourceRegistry.Current;
         }
-
-        var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
 
         // The recorder and the detector agree on what is being recorded through the core registry;
         // the tracker is what makes that true for this process.
@@ -78,7 +80,7 @@ internal static class Program
     // the display handed over explicitly (libobs cannot discover the display server for itself).
     // On Windows, OBS is bundled next to the app and needs no X11. The runtime itself — video and
     // audio reset, module load — is shared.
-    private static ObsRuntime StartObsRuntime()
+    private static ObsRuntime StartObsRuntime(int fps)
     {
         var locations = ObsRuntimeLocator.Discover();
         if (!locations.Found)
@@ -123,7 +125,11 @@ internal static class Program
             BaseWidth = 1920,
             BaseHeight = 1080,
             OutputWidth = 1920,
-            OutputHeight = 1080
+            OutputHeight = 1080,
+            // The recording frame rate comes from the settings, so the FPS selector actually
+            // affects the recorded mix (libobs runs the compositor at fps_num/fps_den).
+            FpsNumerator = (uint)Math.Max(1, fps),
+            FpsDenominator = 1
         };
 
         if (runtime.ResetVideo(video) != ObsVideoResetResult.Success)
@@ -138,10 +144,10 @@ internal static class Program
             runtime.AddDataPath(locations.CoreDataDir);
 
         // The allowlist keeps the module load to what the recorder actually uses, and it is
-        // platform-specific: the capture source differs (linux-capture vs windows-capture), and
-        // the audio module differs (linux-pulseaudio vs windows' wasapi). Adding the frontend's
+        // platform-specific: the capture source differs (linux-capture vs win-capture), and
+        // the audio module differs (linux-pulseaudio vs win-wasapi). Adding the frontend's
         // module would abort the process because there is no frontend here.
-        foreach (var module in SafeModules())
+        foreach (var module in SafeModules(OperatingSystem.IsWindows()))
             runtime.AddSafeModule(module);
 
         // The data path is a search root: libobs substitutes %module% and looks for the module's
@@ -166,9 +172,23 @@ internal static class Program
 
     // The module allowlist. Kept small: the recorder needs the x264/ffmpeg encoders, the capture
     // source, the image source (for the colour/blank), and the platform audio source.
-    private static IReadOnlyList<string> SafeModules() =>
-        OperatingSystem.IsWindows()
-            ? new[] { "obs-x264", "obs-ffmpeg", "win-capture", "image-source" }
+    //
+    // The names are module binary names — the %module% libobs substitutes into the module path
+    // pattern (win-wasapi.dll on Windows, linux-pulseaudio.so on Linux). Every Windows entry was
+    // checked against the bundled runtime (third_party/obs-studio-32.2.2-x64/obs-plugins/64bit):
+    // obs-x264, obs-ffmpeg, win-capture, image-source and win-wasapi all ship there. That check
+    // matters because a name with no matching module file is invisible at startup: AddSafeModule is
+    // a filter, and LoadAllModules only reports modules it opened and could not initialise, so a
+    // misspelt or absent module is silently never loaded and the failure only surfaces later, when
+    // creating a source of a type that module would have registered.
+    //
+    // The platform is a parameter rather than an OperatingSystem.IsWindows() call inside the switch
+    // so both branches stay assertable from a test process running on either OS.
+    internal static IReadOnlyList<string> SafeModules(bool isWindows) =>
+        isWindows
+            // win-wasapi registers wasapi_input_capture / wasapi_output_capture, the ids
+            // ObsAudioRoutingSink asks for on Windows. Without it there is no audio at all.
+            ? new[] { "obs-x264", "obs-ffmpeg", "win-capture", "image-source", "win-wasapi" }
             : new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" };
 
     [DllImport("libX11.so.6", CharSet = CharSet.Ansi)]

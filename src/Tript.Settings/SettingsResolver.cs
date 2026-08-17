@@ -27,6 +27,13 @@ public sealed class SettingsResolver
             Encoder = game?.QualityOverride?.Encoder ?? settings.Recording.Encoder,
             Quality = game?.QualityOverride?.Quality ?? settings.Recording.Quality,
 
+            // Rate control has no per-game override: the per-game quality override type is the one
+            // the settings schema defines (resolution, fps, encoder, quality) and growing it is a
+            // separate decision. The global choice is therefore the effective one for every game.
+            RateControl = settings.Recording.RateControl,
+            BitrateKbps = settings.Recording.BitrateKbps,
+            MaxBitrateKbps = settings.Recording.MaxBitrateKbps,
+
             BufferEnabled = settings.Buffer.Enabled,
             BufferDuration = settings.Buffer.Duration,
             BufferMaxSizeBytes = settings.Buffer.MaxSizeBytes,
@@ -65,6 +72,15 @@ public sealed class ResolvedRecorderSettings
 
     public int Quality { get; set; }
 
+    // How the encoder spends its bits, and the kbps figures the rate-targeted modes use. The
+    // recorder validates the mode against the encoder family it actually resolved and coerces an
+    // unsupported one; a resolved value is a request, not a promise (ObsRecorderSession).
+    public RateControlMode RateControl { get; set; }
+
+    public int BitrateKbps { get; set; }
+
+    public int MaxBitrateKbps { get; set; }
+
     public bool BufferEnabled { get; set; }
 
     public TimeSpan BufferDuration { get; set; }
@@ -86,6 +102,9 @@ public sealed class ResolvedRecorderSettings
         Fps = Fps,
         Encoder = Encoder,
         Quality = Quality,
+        RateControl = RateControl,
+        BitrateKbps = BitrateKbps,
+        MaxBitrateKbps = MaxBitrateKbps,
         BufferEnabled = BufferEnabled,
         BufferDuration = BufferDuration,
         BufferMaxSizeBytes = BufferMaxSizeBytes,

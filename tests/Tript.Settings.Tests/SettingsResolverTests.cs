@@ -101,4 +101,45 @@ public class SettingsResolverTests
         var source = Assert.Single(track.Sources);
         Assert.Equal("Game audio", source.Name);
     }
+
+    // The codec-and-quality choices reach the recorder through the same resolved shape as the encoder
+    // id and the quality profile. They have no per-game override — the schema's per-game quality
+    // override is resolution, fps, encoder and quality, and growing it is a separate decision — so the
+    // global choice is the effective one for every game, including one that overrides other fields.
+    [Fact]
+    public void Resolve_CarriesTheRateControlChoiceForEveryGame()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.QualityOverride = new GameQualityOverride { Quality = 18, Encoder = "obs_x264" };
+        });
+        settings.Recording.RateControl = RateControlMode.Cbr;
+        settings.Recording.BitrateKbps = 22_000;
+        settings.Recording.MaxBitrateKbps = 33_000;
+
+        var resolved = SettingsResolver.Resolve(settings, gameId: "ow");
+
+        Assert.Equal(RateControlMode.Cbr, resolved.RateControl);
+        Assert.Equal(22_000, resolved.BitrateKbps);
+        Assert.Equal(33_000, resolved.MaxBitrateKbps);
+
+        // And they survive the clone the recorder takes of the config it is handed, so a caller
+        // mutating its copy after the start cannot change how the running recording is encoded.
+        var clone = resolved.Clone();
+        Assert.Equal(RateControlMode.Cbr, clone.RateControl);
+        Assert.Equal(22_000, clone.BitrateKbps);
+        Assert.Equal(33_000, clone.MaxBitrateKbps);
+    }
+
+    // The default is constant quality on every machine: Cqp is the stored value, and the recorder
+    // coerces it into x264's CRF when a software encoder is what the runtime resolved. The default
+    // therefore records the user's intent rather than one family's spelling of it.
+    [Fact]
+    public void Resolve_DefaultsToConstantQuality()
+    {
+        var resolved = SettingsResolver.Resolve(new Settings());
+
+        Assert.Equal(RateControlMode.Cqp, resolved.RateControl);
+        Assert.Equal(15_000, resolved.BitrateKbps);
+    }
 }

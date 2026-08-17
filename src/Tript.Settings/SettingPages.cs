@@ -29,8 +29,29 @@ public sealed class RecordingSettings
 
     public string Encoder { get; set; } = "x264";
 
-    // The quality profile applied when a game has no override of its own.
+    // The quality profile applied when a game has no override of its own. The app's own 1..20 scale,
+    // higher being better; the recorder maps it onto the H.264 quantiser scale the resolved encoder
+    // family reads (ObsRecorderSession.MapQualityToQuantiser). Only the constant-quality rate-control
+    // modes consume it.
     public int Quality { get; set; } = 10;
+
+    // How the encoder is told to spend its bits. Cqp is the default because it means "constant
+    // quality" on every machine: an encoder family that does not accept CQP — x264 — has the choice
+    // coerced into its own constant-quality mode (CRF) by the recorder, so the default records the
+    // user's intent rather than one family's spelling of it. The coercion is what keeps a settings
+    // file written on one machine from crashing on another, and it lives with the recorder because
+    // only the recorder knows which encoder id the runtime resolved.
+    public RateControlMode RateControl { get; set; } = RateControlMode.Cqp;
+
+    // The target bitrate for the rate-targeted modes (CBR and VBR), in kbps. Ignored by the
+    // constant-quality modes. 15 Mbps is the rule-of-thumb "looks right" figure for 1080p60 H.264
+    // local recording — well above a streaming bitrate, because nothing here is being uploaded.
+    public int BitrateKbps { get; set; } = 15_000;
+
+    // The VBR ceiling, in kbps, or 0 for "derive it from the target". Only the families that
+    // document a ceiling key receive it (NVENC and QSV have max_bitrate; AMF has none at all, and
+    // x264's ceiling is its VBV pair) — see ObsRecorderSession for which key each family reads.
+    public int MaxBitrateKbps { get; set; }
 
     // The directory recordings are written to, or empty for the platform default (Videos/Tript).
     // The host resolves the effective path; the recorder never sees this field.

@@ -19,6 +19,39 @@ public enum RecordingMode
     Hybrid
 }
 
+// How the video encoder is told to spend its bits. The four members are the modes the encoder
+// families actually accept (spec/obs-binding.md Part 10): CRF is x264's constant-quality mode and
+// exists nowhere else, CQP is the hardware families' constant-quantiser mode, and CBR/VBR are the
+// rate-targeted modes every documented family accepts.
+//
+// The member set is deliberately per-family rather than an abstract "quality/bitrate" pair, because
+// the mode name is written into the encoder's own `rate_control` key and a name a family does not
+// know is not a soft failure: obs-ffmpeg's VAAPI encoder walks a NULL-terminated table and
+// dereferences the terminator, so an unrecognised mode segfaults the process at output start. Which
+// modes a given encoder accepts, and what a mode the resolved encoder does not accept is coerced
+// into, is the recorder's decision (ObsRecorderSession.SupportedRateControlModes) — nothing here
+// may be written through to an encoder unvalidated.
+//
+// Names, not ordinals, are the persisted form (JsonStringEnumConverter), so a member may be added
+// but never renamed. Cqp is first so that the zero value — what a default-constructed resolved config
+// carries before anything sets it — is constant quality on the families most machines resolve to,
+// which is also what the recorder wrote before this setting existed.
+public enum RateControlMode
+{
+    // Constant quantiser, the hardware families' spelling of constant quality.
+    Cqp,
+
+    // Constant quality, x264's spelling of the same idea. The quality profile picks the quantiser.
+    Crf,
+
+    // Constant bitrate: the encoder holds the configured kbps whatever the picture costs.
+    Cbr,
+
+    // Variable bitrate: the configured kbps is the target, with a ceiling where the family has a
+    // key for one.
+    Vbr
+}
+
 // What a recording, clip, highlight or buffer entry is — the content-type discriminator carried
 // by each content record. Highlight is load-only for Tript: nothing produces it, and whether it
 // is still recognised on load is a separate decision.

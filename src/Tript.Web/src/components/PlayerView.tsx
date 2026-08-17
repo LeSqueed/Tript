@@ -17,13 +17,25 @@
 // IPC-backed (player/ipcSessionSource.ts) and re-renders on the control socket's `content` push;
 // tests inject their own static source through the `source` prop.
 //
+// Segments (clip regions) are marked here, from the transport: I sets the in point at the playhead,
+// O closes the segment at the playhead, M marks a whole default-length segment around it — the
+// conventional NLE idiom, offered both as labelled buttons (with the shortcut in the label) and as
+// keys. Marking lives in the player rather than in the clip dialog because the dialog is a modal
+// panel over the video: with it open the playhead cannot be moved, so an in/out point could never be
+// placed. Marks are held by the clip-dialog controller (`attachSession` + `markRegion`) and survive
+// opening and closing the dialog, so the loop is: mark on the timeline → review/adjust in the dialog
+// → create. The dialog seeds its default 10s proposal only when nothing has been marked.
+//
 // This view is the seam owner for the clip dialog (T9): it renders the dialog in the player,
 // feeds it the session's regions, and wires the `importProgress` message (the clip result arrives
 // asynchronously — the backend never returns from CreateClip synchronously) and the `state` message
-// (per-track audio layout). The segment-looping affordance lives here too: while the playhead is
-// inside the selected marked segment and crosses its end, playback seeks back to the segment's
-// start — stay inside a marked segment and it loops; leave it and normal playback resumes
-// (spec/frontend.md — "segment looping").
+// (per-track audio layout). The segment-looping affordance lives here too: clicking a segment moves
+// the playhead to its start and loops it — while the playhead is inside the selected segment and
+// crosses its end, playback seeks back to the segment's start; leave it and normal playback resumes
+// (spec/frontend.md — "segment looping"). The loop tracks the segment as the user keeps shaping it:
+// the end takes effect immediately, and pushing the start past the playhead brings the playhead with
+// it. Two effects below drive that from the two different triggers (a playhead sample, a bounds
+// change); player/clipLoop.ts holds both rule sets as pure functions.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -39,8 +51,16 @@ import { ZoomedTimeline } from './player/ZoomedTimeline';
 import { TransportBar } from './player/TransportBar';
 import { useClipDialog } from './player/useClipDialog';
 import { ClipDialog } from './player/clipDialog';
-import { computeLoopDecision } from './player/clipLoop';
-import { clampTime } from './player/clipModel';
+import { computeEditSeek, computeLoopDecision } from './player/clipLoop';
+import {
+  buildDefaultRegion,
+  clampTime,
+  DEFAULT_REGION_SECONDS,
+  MIN_REGION_SECONDS,
+  newRegionId,
+  resolveClipBounds,
+} from './player/clipModel';
+import { formatTime } from './player/timelineModel';
 
 export interface PlayerViewProps {
   client: IpcClient;
@@ -112,10 +132,30 @@ export function PlayerView({
   // circuit keeps bookmarks at [] until the source exists (and `item` is undefined then anyway).
   const bookmarks = useMemo(() => (item && source ? source.getBookmarks(item) : []), [source, item]);
 
-  const fallbackDuration =
-    item?.endTime !== undefined && item.endTime > 0 ? item.endTime : DEFAULT_SESSION_SECONDS;
+  // The session's declared length, when the content record carries one. `DEFAULT_SESSION_SECONDS` is
+  // NOT a length: it is a placeholder that keeps the timeline drawable for a recording with no
+  // metadata record (the normal case for one that was never post-processed) until the <video> element
+  // reports its own duration. Good enough to lay out a timeline, useless as a bound — see below.
+  const declaredDuration = item?.endTime !== undefined && item.endTime > 0 ? item.endTime : undefined;
+  const fallbackDuration = declaredDuration ?? DEFAULT_SESSION_SECONDS;
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
-  const { duration, currentTime, seek, playing, videoRef } = playback;
+  const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
+
+  // The bound every marked segment lives inside — the media's own duration once it has reported one,
+  // the declared length until then, and 0 when neither exists.
+  //
+  // MEASURED BUG (this is the hole this resolution closes): `duration` above starts at
+  // `fallbackDuration`, so on a session with no `endTime` the player believed the video was 120s long
+  // until metadata arrived. Every clamp in the clip model was correct and every one of them was
+  // clamping against 120 — a segment could be marked, dragged or typed out to 0:45 on a file that was
+  // really 8s long, and because marks deliberately survive closing the dialog, that segment was still
+  // there at Create time. Segments are therefore bounded by `clipDuration`, never by the placeholder,
+  // and the controller re-checks its regions against it whenever it changes.
+  const clipBounds = resolveClipBounds(durationKnown ? duration : undefined, declaredDuration);
+  const clipDuration = clipBounds.seconds;
+  // Nothing can be marked inside a media that has no measured length, or one too short to hold the
+  // shortest allowed segment. The mark controls say so rather than silently doing nothing.
+  const canMark = clipDuration >= MIN_REGION_SECONDS;
 
   // NOTE: the state variable is `viewWindow`, never `window` — `window` is the DOM global and
   // shadowing it would break the keyboard listener below (addEventListener on a WindowState).
@@ -132,18 +172,37 @@ export function PlayerView({
   // The clip dialog owns the region list while it is open. When the seam caller supplies its own
   // regions/selection/handler (the read-only region view), those win; otherwise the dialog's
   // regions are used and its selection handler is the loop target.
-  const dialog = useClipDialog();
+  const dialog = useClipDialog(clipDuration);
+  // Attach the session under review so segments can be marked before the dialog is ever opened
+  // (and so switching sessions drops the previous session's marks).
+  useEffect(() => {
+    dialog.attachSession(item ?? null);
+  }, [item, dialog.attachSession]);
   const regions = externalRegions ?? dialog.regions;
   const selectedRegionId = externalSelectedRegionId ?? dialog.selectedRegionId;
   const onRegionSelect = useCallback(
     (region: TimelineRegion) => {
       if (externalOnRegionSelect) {
+        // The caller owns the selection (the read-only region view): it decides what a click means,
+        // so the player must not move the playhead behind its back.
         externalOnRegionSelect(region);
         return;
       }
-      dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id);
+      // The click toggles: clicking the looping segment again turns the loop off. Deselecting is not
+      // "review this segment", so it leaves the playhead exactly where the user left it.
+      const deselecting = dialog.selectedRegionId === region.id;
+      dialog.selectRegion(deselecting ? null : region.id);
+      if (deselecting) {
+        return;
+      }
+      // Selecting a segment starts its loop at the top — the playhead moves to the segment's first
+      // frame rather than the loop engaging only if playback happened to already be inside it. The
+      // seek happens whether or not the video is playing (paused, it shows the segment's first
+      // frame, which is what "move to the start" means on a still), but selection deliberately does
+      // NOT start playback the user did not ask for.
+      seek(clampTime(region.start, duration));
     },
-    [externalOnRegionSelect, dialog],
+    [externalOnRegionSelect, dialog, seek, duration],
   );
 
   // The dialog wires itself into the IPC surface. The owner of the connection does the sending:
@@ -193,11 +252,86 @@ export function PlayerView({
     }
   }, [item, currentTime, dialog]);
 
-  // Keyboard: space toggles play/pause, arrows seek (per the navigation spec). The dialog's own
-  // inputs are excluded by the input/textarea/button check.
+  // The pending in point: set at the playhead by I, closed into a segment by O. It lives here rather
+  // than in the controller because it is a transport gesture, not part of the clip — nothing is
+  // marked until the out point lands.
+  const [markInTime, setMarkInTime] = useState<number | null>(null);
+  const canAdjustRegions = externalRegions === undefined;
+
+  // The three marking gestures clamp against `clipDuration`, not the timeline's display duration:
+  // an in point, an out point and a default-length segment must all land inside the media, and only
+  // `clipDuration` knows how long that is.
+  const markIn = useCallback(() => {
+    if (!canMark) {
+      return;
+    }
+    setMarkInTime(clampTime(currentTime, clipDuration));
+  }, [canMark, currentTime, clipDuration]);
+
+  const markOut = useCallback(() => {
+    if (markInTime === null) {
+      return;
+    }
+    const out = clampTime(currentTime, clipDuration);
+    dialog.markRegion(markInTime, out);
+    // markRegion refuses a span shorter than MIN_REGION_SECONDS (both points on the same frame).
+    // The in point then stays standing, so the user moves the playhead and presses O again rather
+    // than discovering that nothing happened and starting over.
+    if (Math.abs(out - markInTime) >= MIN_REGION_SECONDS) {
+      setMarkInTime(null);
+    }
+  }, [markInTime, currentTime, clipDuration, dialog]);
+
+  const markSegmentAtPlayhead = useCallback(() => {
+    // The same proposal the dialog would have seeded — a full-length segment centred on the playhead,
+    // shrunk to the whole media when the media is shorter than the default length.
+    const region = buildDefaultRegion(currentTime, clipDuration, newRegionId());
+    dialog.markRegion(region.start, region.end);
+    setMarkInTime(null);
+  }, [currentTime, clipDuration, dialog]);
+
+  const updateRegionBounds = useCallback(
+    (id: string, bounds: { start: number; end: number }) => {
+      dialog.updateRegion(id, bounds.start, bounds.end);
+    },
+    [dialog],
+  );
+
+  // Keyboard: space toggles play/pause, arrows seek (per the navigation spec), I/O mark a segment's
+  // in/out points at the playhead and M marks a default-length one around it.
+  //
+  // Two levels of suppression. Typing always wins: while focus is in a text field, a select or a
+  // slider (the clip title field is one click away) no shortcut fires. Beyond that, Space and the
+  // arrows keep their existing behaviour of standing down for a focused button — the browser already
+  // maps them onto buttons — while the mark keys deliberately still fire there, because clicking
+  // "Mark in" leaves that button focused and pressing O next has to work.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, button, [role="slider"]')) {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="slider"]')) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      const onButton = target?.closest('button') != null;
+      const key = event.key.toLowerCase();
+      if (key === 'i') {
+        event.preventDefault();
+        markIn();
+        return;
+      }
+      if (key === 'o') {
+        event.preventDefault();
+        markOut();
+        return;
+      }
+      if (key === 'm') {
+        event.preventDefault();
+        markSegmentAtPlayhead();
+        return;
+      }
+      if (onButton) {
         return;
       }
       if (event.code === 'Space') {
@@ -213,7 +347,7 @@ export function PlayerView({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [playback, currentTime, seek]);
+  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead]);
 
   // Segment looping: while the playhead is inside the selected marked segment and playing, when it
   // crosses the segment's end, seek back to the segment's start. The decision is pure
@@ -233,6 +367,67 @@ export function PlayerView({
       seek(clampTime(decision.region.start, duration));
     }
   }, [currentTime, playing, regions, selectedRegionId, seek, duration]);
+
+  // The looping segment while it is being EDITED. The effect above reacts to the playhead moving; this
+  // one reacts to the loop's *bounds* moving under a stationary (possibly paused) playhead, which is
+  // the other half of the affordance: the loop follows the end as the user drags it, and the playhead
+  // comes along when the start is pushed past it (player/clipLoop.ts documents the rule set).
+  //
+  // The two effects cannot be one. A bound moving looks exactly like a seek from the playhead's point
+  // of view — nothing about `currentTime` changed — so feeding edits into `computeLoopDecision` would
+  // have it read an edit as "the user left the segment" (or, when the end lands behind the playhead,
+  // as a crossing that never happened).
+  //
+  // Nor do they fight each other, and that is worth spelling out because both of them call `seek`:
+  //
+  //   - Within one commit React runs effects in declaration order, so the sample effect above runs
+  //     first with the *unchanged* playhead (previous === current → no crossing, no decision) and this
+  //     one then decides on the edit alone.
+  //   - Every seek either effect makes lands exactly on the segment's start, and that position is a
+  //     fixed point of the sample path: `crossedEnd` needs currentTime >= end (a start is always at
+  //     least MIN_REGION_SECONDS before the end) and `inside` is exclusive of the start, so the
+  //     resulting sample decides nothing. A loop-back can never cascade into another one.
+  //   - This effect re-baselines its previous bounds on every run, so its own seek (which changes the
+  //     playhead, not the bounds) comes back as "no bound moved" — no feedback.
+  const selectedRegion = useMemo(
+    () => regions.find((region) => region.id === selectedRegionId) ?? null,
+    [regions, selectedRegionId],
+  );
+  const loopBoundsRef = useRef<TimelineRegion | null>(null);
+  const loopDurationRef = useRef(clipDuration);
+  const reconcilingRef = useRef(false);
+  useEffect(() => {
+    const previousBounds = loopBoundsRef.current;
+    loopBoundsRef.current = selectedRegion;
+    // Bounds also change without anyone editing them. When the media reports its real length, the
+    // clip controller reconciles every region against it (clipModel's `reconcileRegions` — truncate
+    // what straddles the real end, drop what lies beyond it). That is the machine correcting itself,
+    // not the user shaping a segment, and it must not drag the playhead around.
+    //
+    // Two things follow. The trigger to watch is `clipDuration` (the bound the reconciliation clamps
+    // against), not the seekable `duration` — they move together when metadata lands, but only the
+    // former is what the controller keys on. And the corrected bounds do not arrive in the commit that
+    // changed it: the reconciliation is a `setRegions` from an effect, so they land in the next one.
+    // The guard therefore spans both commits — a change to the bound arms a one-commit grace, and the
+    // following run spends it whatever it sees. A bound change always produces a following render, so
+    // the grace can never linger and swallow a real edit later on.
+    const spendingGrace = reconcilingRef.current;
+    if (loopDurationRef.current !== clipDuration) {
+      loopDurationRef.current = clipDuration;
+      reconcilingRef.current = true;
+      return;
+    }
+    reconcilingRef.current = false;
+    if (spendingGrace) {
+      return;
+    }
+    const target = computeEditSeek(previousBounds, selectedRegion, currentTime);
+    if (target !== null) {
+      // Clamped to the *seekable* duration: the segment lives inside `clipDuration`, but the playhead
+      // is a playback position and the video element owns that bound.
+      seek(clampTime(target, duration));
+    }
+  }, [selectedRegion, currentTime, clipDuration, duration, seek]);
 
   if (!item) {
     return (
@@ -306,6 +501,12 @@ export function PlayerView({
           window={clampWindow(viewWindow, duration)}
           onSeek={seek}
         />
+        {/*
+          The timelines are laid out against the display duration, which is the placeholder length
+          while nothing has been measured. That is a layout number, not a bound: a drag on the zoomed
+          timeline commits through `updateRegionBounds` → `dialog.updateRegion`, which clamps against
+          the clippable duration, so no gesture here can produce a segment outside the media.
+        */}
         <ZoomedTimeline
           currentTime={currentTime}
           duration={duration}
@@ -313,11 +514,70 @@ export function PlayerView({
           bookmarks={bookmarks}
           regions={regions}
           selectedRegionId={selectedRegionId}
+          markInTime={canAdjustRegions ? markInTime : null}
           onWindowChange={setViewWindow}
           onSeek={seek}
           onRegionSelect={onRegionSelect}
+          onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
         />
       </div>
+
+      {canAdjustRegions && (
+        <div className="player-clip-bar">
+          <span className="player-clip-bar-label">Segments</span>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={markIn}
+            disabled={!canMark}
+            aria-label="Mark segment in point"
+            title="Set the segment's in point at the playhead (I)"
+          >
+            Mark in (I)
+          </button>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={markOut}
+            disabled={!canMark || markInTime === null}
+            aria-label="Mark segment out point"
+            title="Close the segment at the playhead (O)"
+          >
+            Mark out (O)
+          </button>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={markSegmentAtPlayhead}
+            disabled={!canMark}
+            aria-label="Mark segment around the playhead"
+            title={`Mark a ${DEFAULT_REGION_SECONDS}s segment around the playhead (M)`}
+          >
+            Mark {DEFAULT_REGION_SECONDS}s (M)
+          </button>
+          {markInTime !== null && (
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setMarkInTime(null)}
+              aria-label="Clear the in point"
+            >
+              Clear in
+            </button>
+          )}
+          <span className="player-clip-hint muted small" data-testid="player-clip-hint">
+            {!canMark
+              ? // Honest about why the controls are dead: the alternative was to let segments be
+                // marked against a length nobody has measured, which is the bug this replaces.
+                'Waiting for the video length — segments can only be marked once the media reports how long it is.'
+              : markInTime !== null
+              ? `In point at ${formatTime(markInTime)} — press O (or Mark out) at the playhead to close the segment.`
+              : regions.length === 0
+                ? 'No segments marked yet — press I at the in point, then O at the out point.'
+                : `${regions.length} segment${regions.length === 1 ? '' : 's'} marked — drag a segment or its edges on the timeline to adjust, then Create clip.`}
+          </span>
+        </div>
+      )}
 
       <div className="player-footer">
         <button type="button" className="btn" onClick={openClipDialog} aria-label="Open clip dialog">
@@ -331,7 +591,7 @@ export function PlayerView({
         </span>
       </div>
 
-      <ClipDialog client={client} dialog={dialog} />
+      <ClipDialog client={client} dialog={dialog} currentTime={currentTime} />
     </section>
   );
 }

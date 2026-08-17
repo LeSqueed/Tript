@@ -5,11 +5,13 @@
 // is exercised through the real `useClipDialog` hook mounted in a probe component, with a `send`
 // callback captured to assert the CreateClip payloads.
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
 import type { IpcClient } from '../../ipc/websocketClient';
 import { ClipDialog } from './clipDialog';
+import { MIN_REGION_SECONDS } from './clipModel';
 import { useClipDialog, type ClipDialogController } from './useClipDialog';
 
 const session: ContentItem = {
@@ -39,7 +41,10 @@ interface SentCommand {
  * Mount the real hook + dialog. Returns `dialog()` (the live controller, re-read after every
  * state change) and the commands the seam owner would send over the socket.
  */
-function probe(send?: (method: string, params?: unknown) => void): {
+function probe(
+  send?: (method: string, params?: unknown) => void,
+  currentTime = 0,
+): {
   dialog: () => ClipDialogController;
   sent: SentCommand[];
 } {
@@ -49,7 +54,7 @@ function probe(send?: (method: string, params?: unknown) => void): {
     const dialog = useClipDialog();
     // Keep the ref fresh across re-renders so the test reads the live controller.
     ref.dialog = dialog;
-    return <ClipDialog client={clientStub} dialog={dialog} />;
+    return <ClipDialog client={clientStub} dialog={dialog} currentTime={currentTime} />;
   }
   render(<Probe />);
   const dialog = () => {
@@ -124,6 +129,175 @@ describe('clip dialog — region list', () => {
   });
 });
 
+describe('clip dialog — marking segments (the in/out path from the player)', () => {
+  it('keeps segments marked before the dialog was ever opened, instead of reseeding a proposal', () => {
+    const { dialog } = probe();
+    // The player attaches the session as it plays, then the user marks with I/O.
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(10, 20));
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().regions).toHaveLength(1);
+    expect(dialog().regions[0]).toMatchObject({ start: 10, end: 20 });
+  });
+
+  it('the first mark replaces the untouched default proposal and becomes the loop target', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().regions[0]).toMatchObject({ start: 37, end: 47 });
+    act(() => dialog().markRegion(60, 70));
+    expect(dialog().regions).toHaveLength(1);
+    expect(dialog().regions[0]).toMatchObject({ start: 60, end: 70 });
+    expect(dialog().selectedRegionId).toBe(dialog().regions[0].id);
+  });
+
+  it('further marks are added next to the existing ones', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().markRegion(60, 70));
+    act(() => dialog().markRegion(10, 20));
+    expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([
+      [60, 70],
+      [10, 20],
+    ]);
+  });
+
+  it('an adjusted proposal is the user\'s own region: a later mark is added, not swapped in', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    const proposalId = dialog().regions[0].id;
+    act(() => dialog().updateRegion(proposalId, 30, 40));
+    act(() => dialog().markRegion(60, 70));
+    expect(dialog().regions).toHaveLength(2);
+    expect(dialog().regions[0]).toMatchObject({ id: proposalId, start: 30, end: 40 });
+  });
+
+  it('marking orders and clamps the points, and refuses a span with no length', () => {
+    const { dialog } = probe();
+    act(() => dialog().attachSession(session));
+    // Out point before the in point, and past the session end.
+    act(() => dialog().markRegion(70, 60));
+    act(() => dialog().markRegion(95, 500));
+    expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([
+      [60, 70],
+      [95, 100],
+    ]);
+    // Both points on the same frame — nothing to clip.
+    act(() => dialog().markRegion(30, 30));
+    expect(dialog().regions).toHaveLength(2);
+  });
+
+  it('closing the dialog keeps the marked segments; clearing them is explicit', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().markRegion(60, 70));
+    act(() => dialog().closeDialog());
+    expect(dialog().regions).toHaveLength(1);
+    act(() => dialog().openDialog(session, 10));
+    expect(dialog().regions).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all regions' }));
+    expect(dialog().regions).toHaveLength(0);
+    expect(dialog().selectedRegionId).toBeNull();
+  });
+
+  it('attaching a different session drops the marks made on the previous one', () => {
+    const { dialog } = probe();
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(60, 70));
+    act(() => dialog().attachSession({ ...session, filePath: 'sessions/other.mp4' }));
+    expect(dialog().regions).toHaveLength(0);
+  });
+
+  it('the empty state says how to mark a segment', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().removeRegion(dialog().regions[0].id));
+    const empty = screen.getByText(/No regions yet/).textContent ?? '';
+    expect(empty).toMatch(/press I/);
+    expect(empty).toMatch(/then O/);
+    expect(empty).toMatch(/M for a 10s segment/);
+  });
+});
+
+describe('clip dialog — adjusting a region', () => {
+  it('typed bounds change the region, including the seeded default', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '30' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '52.5' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    expect(dialog().regions[0]).toMatchObject({ start: 30, end: 52.5 });
+    expect(screen.getByRole('button', { name: /Deselect region 1/ }).textContent).toContain('0:30 – 0:52');
+  });
+
+  it('an end typed before the start parks against it instead of inverting the region', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '10' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    expect(dialog().regions[0]).toMatchObject({ start: 37, end: 37 + MIN_REGION_SECONDS });
+  });
+
+  it('bounds beyond the session are clamped to it', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '500' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '-20' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    expect(dialog().regions[0]).toMatchObject({ start: 0, end: 100 });
+  });
+
+  it('a blank or unparsable field leaves the region alone', () => {
+    const { dialog } = probe();
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    expect(dialog().regions[0]).toMatchObject({ start: 37, end: 47 });
+  });
+
+  it('snapping the start to the playhead moves only the start', () => {
+    const { dialog } = probe(undefined, 40);
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.click(screen.getByRole('button', { name: 'Set region 1 start to the playhead' }));
+    expect(dialog().regions[0]).toMatchObject({ start: 40, end: 47 });
+  });
+
+  it('snapping the end to the playhead moves only the end', () => {
+    const { dialog } = probe(undefined, 40);
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.click(screen.getByRole('button', { name: 'Set region 1 end to the playhead' }));
+    expect(dialog().regions[0]).toMatchObject({ start: 37, end: 40 });
+  });
+
+  it('an adjusted region reaches CreateClip with the corrected bounds', () => {
+    const { dialog, sent } = probe();
+    act(() => dialog().openDialog(session, 42));
+    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '20' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '30' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    act(() => dialog().create());
+    const payload = sent[0].params as Record<string, unknown>;
+    expect(payload.segments).toEqual([{ startTime: 20, endTime: 30 }]);
+    expect(payload.startTime).toBe(20);
+    expect(payload.endTime).toBe(30);
+  });
+
+  it('adjusting one region never disturbs the others', () => {
+    const { dialog } = probe();
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(10, 20));
+    act(() => dialog().markRegion(60, 70));
+    const first = dialog().regions[0].id;
+    // Dragged/typed right across the second region: an edit is not a mark, so it merges nothing away.
+    act(() => dialog().updateRegion(first, 55, 80));
+    expect(dialog().regions).toHaveLength(2);
+    expect(dialog().regions[0]).toMatchObject({ id: first, start: 55, end: 80 });
+    expect(dialog().regions[1]).toMatchObject({ start: 60, end: 70 });
+  });
+});
+
 describe('clip dialog — create payloads', () => {
   it('combine sends ONE CreateClip carrying all marked regions as segments', () => {
     const { dialog, sent } = probe();
@@ -159,6 +333,37 @@ describe('clip dialog — create payloads', () => {
       (a, b) => a - b,
     );
     expect(starts).toEqual([37, 60]);
+  });
+
+  it('two marked segments become two segments of one clip in combine mode', () => {
+    const { dialog, sent } = probe();
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(60, 70));
+    act(() => dialog().markRegion(10, 20));
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().create());
+    expect(sent).toHaveLength(1);
+    const payload = sent[0].params as Record<string, unknown>;
+    expect(payload.outputMode).toBe('combine');
+    expect(payload.segments).toEqual([
+      { startTime: 10, endTime: 20 },
+      { startTime: 60, endTime: 70 },
+    ]);
+  });
+
+  it('two marked segments become two CreateClip calls in separate mode', () => {
+    const { dialog, sent } = probe();
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(60, 70));
+    act(() => dialog().markRegion(10, 20));
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().setMode('separate'));
+    act(() => dialog().create());
+    expect(sent).toHaveLength(2);
+    const starts = sent
+      .map((entry) => (entry.params as Record<string, unknown>).startTime as number)
+      .sort((a, b) => a - b);
+    expect(starts).toEqual([10, 60]);
   });
 });
 
@@ -202,5 +407,142 @@ describe('clip dialog — importProgress surface', () => {
     const { dialog } = probe();
     act(() => dialog().applyImportProgress({ status: 'done', content: session }));
     expect(dialog().progress).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The clippable duration: the bound the controller holds its regions inside.
+//
+// The player resolves it from the media itself and passes it in. Until it does, the length in force
+// is provisional — the session's declared `endTime`, or nothing at all — so the controller has to do
+// two things when the real one arrives: stop allowing edits beyond it, and correct the regions that
+// were marked before it was known.
+
+/** A probe whose clippable duration can change under the controller, as the media's metadata does. */
+function boundedProbe(initialDuration: number): {
+  dialog: () => ClipDialogController;
+  setDuration(seconds: number): void;
+  sent: SentCommand[];
+} {
+  const sent: SentCommand[] = [];
+  const ref: {
+    dialog: ClipDialogController | null;
+    setDuration: ((seconds: number) => void) | null;
+  } = { dialog: null, setDuration: null };
+  function Probe() {
+    const [duration, setDuration] = useState(initialDuration);
+    const dialog = useClipDialog(duration);
+    ref.dialog = dialog;
+    ref.setDuration = setDuration;
+    return <ClipDialog client={clientStub} dialog={dialog} currentTime={0} />;
+  }
+  render(<Probe />);
+  const dialog = () => {
+    if (!ref.dialog) {
+      throw new Error('probe did not mount');
+    }
+    return ref.dialog;
+  };
+  act(() =>
+    dialog().addImportHandler((content) => {
+      sent.push({ method: 'CreateClip', params: content });
+    }),
+  );
+  return {
+    dialog,
+    setDuration: (seconds: number) => {
+      act(() => ref.setDuration?.(seconds));
+    },
+    sent,
+  };
+}
+
+describe('clip dialog — the clippable duration', () => {
+  it('clamps marks to the media length even when the session claims to be longer', () => {
+    // The record says 100s (see `session`); the media reported 8s, and the media is what gets cut.
+    const { dialog } = boundedProbe(8);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(2, 50));
+    expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([[2, 8]]);
+    expect(dialog().duration).toBe(8);
+  });
+
+  it('reconciles regions marked against a longer duration when the real one arrives', () => {
+    const { dialog, setDuration } = boundedProbe(100);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(1, 3));
+    act(() => dialog().markRegion(5, 15));
+    act(() => dialog().markRegion(37, 47));
+    expect(dialog().regions).toHaveLength(3);
+
+    setDuration(8);
+    // Straddling the real end → truncated; entirely beyond it → dropped, not squashed to a sliver.
+    expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([
+      [1, 3],
+      [5, 8],
+    ]);
+  });
+
+  it('drops the loop selection with the region it was pointing at', () => {
+    const { dialog, setDuration } = boundedProbe(100);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(37, 47));
+    expect(dialog().selectedRegionId).toBe(dialog().regions[0].id);
+    setDuration(8);
+    expect(dialog().regions).toHaveLength(0);
+    expect(dialog().selectedRegionId).toBeNull();
+  });
+
+  it('sends nothing when no marked segment survives the real duration', () => {
+    const { dialog, sent, setDuration } = boundedProbe(100);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(37, 47));
+    act(() => dialog().openDialog(session, 42));
+    setDuration(8);
+    act(() => dialog().create());
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses every edit while no length is known, and proposes nothing', () => {
+    const { dialog, sent } = boundedProbe(0);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(10, 20));
+    act(() => dialog().addRegion(10, 20));
+    expect(dialog().regions).toHaveLength(0);
+    // Opening the dialog seeds a default proposal only when it can be placed inside the media.
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().regions).toHaveLength(0);
+    act(() => dialog().create());
+    expect(sent).toHaveLength(0);
+    expect(screen.getByText(/length unknown/)).toBeTruthy();
+  });
+
+  it('proposes a default region inside a media shorter than the default length', () => {
+    const { dialog } = boundedProbe(3);
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([[0, 3]]);
+  });
+
+  it('clamps a typed bound to the media length, not the declared one', () => {
+    const { dialog } = boundedProbe(8);
+    act(() => dialog().openDialog(session, 4));
+    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '95' } });
+    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    expect(dialog().regions[0]).toMatchObject({ end: 8 });
+    expect(dialog().regions[0].start).toBeGreaterThanOrEqual(0);
+  });
+
+  it('sends only the part of a segment that exists', () => {
+    const { dialog, sent, setDuration } = boundedProbe(100);
+    act(() => dialog().attachSession(session));
+    act(() => dialog().markRegion(5, 60));
+    act(() => dialog().openDialog(session, 10));
+    setDuration(8);
+    act(() => dialog().create());
+    expect(sent).toHaveLength(1);
+    const payload = sent[0].params as Record<string, unknown>;
+    expect(payload.segments).toEqual([{ startTime: 5, endTime: 8 }]);
+    expect(payload.startTime).toBe(5);
+    expect(payload.endTime).toBe(8);
   });
 });

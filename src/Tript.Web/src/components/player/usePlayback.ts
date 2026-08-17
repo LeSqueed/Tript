@@ -13,18 +13,26 @@
 // through a ref. `duration` starts at the session's fallback length and is replaced by the video's
 // metadata when it arrives; if the video reports NaN (e.g. placeholder data with no media file)
 // the fallback is kept.
+//
+// The fallback is a *guess* and the hook says so: `durationKnown` is false until the media itself
+// reports its length. That distinction is load-bearing rather than cosmetic — the caller's fallback
+// can be a fabricated constant (DEFAULT_SESSION_SECONDS = 120s for a recording with no metadata
+// record), and clip segments clamped against it were allowed to run past the end of an 8s file. Only
+// a duration the media vouched for may be used as a bound; see clipModel's `resolveClipBounds`.
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
-/** The minimum seekable duration when no video metadata has arrived yet. */
-const MIN_DURATION = 1;
-
 export interface PlaybackState {
   /** The playhead position, seconds. The single source of truth for every timeline. */
   currentTime: number;
-  /** The session length, seconds. Video metadata wins once it arrives. */
+  /**
+   * The session length, seconds — the media's own duration once known, the caller's fallback until
+   * then. Good enough to lay out a timeline; use it as a *bound* only together with `durationKnown`.
+   */
   duration: number;
+  /** Whether `duration` came from the media element rather than from the caller's fallback. */
+  durationKnown: boolean;
   playing: boolean;
   /** Seek the playhead. Safe from any timeline; clamps to the duration. */
   seek(time: number): void;
@@ -45,22 +53,28 @@ export interface PlaybackState {
 export function usePlayback(itemKey: string, fallbackDuration: number): PlaybackState {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(fallbackDuration);
+  // The media's own duration, or null while nothing has been measured. Kept separate from the
+  // fallback rather than seeded with it, so that (a) "measured" is distinguishable from "guessed" and
+  // (b) a later change of the fallback (a `content` push filling in the metadata length) cannot
+  // overwrite a duration the media already reported.
+  const [mediaDuration, setMediaDuration] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
+  const duration = mediaDuration ?? Math.max(0, fallbackDuration);
+  const durationKnown = mediaDuration !== null;
 
   // A change of session resets the playhead — keyed on the item identity, not the duration, so
-  // navigating between two sessions of the same length still resets. The fallback duration is the
-  // item's declared length, replaced by video metadata when it arrives.
+  // navigating between two sessions of the same length still resets, and a metadata update for the
+  // session being watched does not yank the playhead back to 0.
   useEffect(() => {
     setCurrentTime(0);
-    setDuration(fallbackDuration);
+    setMediaDuration(null);
     setPlaying(false);
     const video = videoRef.current;
     if (video) {
       video.currentTime = 0;
       video.pause();
     }
-  }, [itemKey, fallbackDuration]);
+  }, [itemKey]);
 
   function seek(time: number): void {
     const target = Math.max(0, Math.min(time, duration));
@@ -88,6 +102,7 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
   return {
     currentTime,
     duration,
+    durationKnown,
     playing,
     seek,
     togglePlayPause,
@@ -95,9 +110,17 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
       setCurrentTime(time);
     },
     onVideoDuration(videoDuration: number): void {
-      if (Number.isFinite(videoDuration) && videoDuration > MIN_DURATION) {
-        setDuration(videoDuration);
+      // Any finite positive duration counts: the element reports NaN before its metadata is loaded
+      // and Infinity for an open-ended stream, and both must stay "unknown", but a genuinely short
+      // recording is a measurement like any other. (This used to require > 1s, which left a 0.8s file
+      // bounded by the 120s placeholder.)
+      if (!Number.isFinite(videoDuration) || videoDuration <= 0) {
+        return;
       }
+      setMediaDuration(videoDuration);
+      // The media turned out to be shorter than the fallback suggested: the playhead cannot stand
+      // where it does.
+      setCurrentTime((time) => Math.min(time, videoDuration));
     },
     onVideoPlay(): void {
       setPlaying(true);

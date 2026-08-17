@@ -9,20 +9,39 @@
 // the `segments` of a single clip), one per region for separate. The backend result arrives as an
 // `importProgress` message and is rendered in the dialog (in-progress / done / error).
 //
-// Regions are marked on the timeline via the T9 seam — the dialog only lists and edits them.
+// Regions are *marked* in the player (in/out points at the playhead — the dialog is a modal panel,
+// so the playhead cannot be moved while it is open) and *adjusted* here as well as by dragging them
+// on the timeline. Each row therefore carries three affordances beyond select/remove:
+//
+//   - typed start/end fields — the precise path, seconds, committed on blur or Enter;
+//   - "Start ←" / "End ←" — snap that bound to the playhead, the fast path, and the exact
+//     counterpart of the I/O marking keys in the player;
+//   - (on the timeline) drag the body to slide the segment, drag an edge to trim it.
+//
+// All three commit through `dialog.updateRegion`, which normalises and clamps bounds once
+// (clipModel.normalizeRegionBounds), so a typed edit, a playhead snap and a dragged edge cannot
+// disagree about the region that reaches CreateClip.
 
+import { useState } from 'react';
 import type { IpcClient } from '../../ipc/websocketClient';
 import { formatTime } from './timelineModel';
 import type { TimelineRegion } from './clipSeam';
+import { DEFAULT_REGION_SECONDS, resizeRegionEnd, resizeRegionStart } from './clipModel';
 import type { ClipDialogController, ClipProgressState } from './useClipDialog';
 
 export interface ClipDialogProps {
   client: IpcClient;
   /** The dialog controller from useClipDialog. */
   dialog: ClipDialogController;
+  /**
+   * The playhead position, so a region bound can be snapped to it ("Start ←" / "End ←"). The dialog
+   * covers the timeline, so the readout on those buttons is the only place the user sees where the
+   * playhead is standing.
+   */
+  currentTime?: number;
 }
 
-export function ClipDialog({ dialog }: ClipDialogProps) {
+export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
   if (!dialog.open || !dialog.session) {
     return null;
   }
@@ -61,7 +80,8 @@ export function ClipDialog({ dialog }: ClipDialogProps) {
             spellCheck={false}
           />
           <span className="clip-field-hint">
-            {dialog.session.title ?? dialog.session.fileName} · {formatTime(dialog.session.endTime ?? 0)}
+            {dialog.session.title ?? dialog.session.fileName} ·{' '}
+            {dialog.duration > 0 ? formatTime(dialog.duration) : 'length unknown'}
           </span>
         </div>
 
@@ -98,13 +118,42 @@ export function ClipDialog({ dialog }: ClipDialogProps) {
                 ? `${dialog.regions.length} region${dialog.regions.length === 1 ? '' : 's'} → one video`
                 : `${dialog.regions.length} region${dialog.regions.length === 1 ? '' : 's'} → ${dialog.regions.length} clip${dialog.regions.length === 1 ? '' : 's'}`}
             </span>
+            {dialog.regions.length > 0 && (
+              <button
+                type="button"
+                className="btn ghost small"
+                onClick={dialog.clearRegions}
+                aria-label="Clear all regions"
+              >
+                Clear all
+              </button>
+            )}
           </div>
-          {dialog.regions.length === 0 && (
-            <p className="muted small">No regions yet. Mark a region on the timeline to add it.</p>
+          {dialog.regions.length === 0 ? (
+            <p className="muted small">
+              No regions yet — mark a segment in the player: press I at the in point, then O at the out
+              point (or M for a {DEFAULT_REGION_SECONDS}s segment around the playhead). Close this
+              dialog to reach the timeline; marked segments stay put.
+            </p>
+          ) : (
+            <p className="muted small">
+              Adjust a segment by typing its bounds, snapping them to the playhead, or dragging the
+              segment (or its edges) on the timeline. Marking more: I / O in the player.
+            </p>
           )}
           <ul className="clip-region-list">
             {dialog.regions.map((region, index) => (
-              <RegionRow key={region.id} region={region} index={index} dialog={dialog} />
+              <RegionRow
+                key={region.id}
+                region={region}
+                index={index}
+                dialog={dialog}
+                // The clippable length of the media, not the session's declared `endTime`: the two
+                // disagree when the file is shorter than its metadata claims, and the typed fields
+                // clamp against the file (see useClipDialog's note on the clippable duration).
+                duration={dialog.duration}
+                currentTime={currentTime}
+              />
             ))}
           </ul>
         </div>
@@ -195,38 +244,142 @@ function RegionRow({
   region,
   index,
   dialog,
+  duration,
+  currentTime,
 }: {
   region: TimelineRegion;
   index: number;
   dialog: ClipDialogController;
+  duration: number;
+  currentTime: number;
 }) {
+  // The typed fields are drafts: a half-typed number ("4" on the way to "42") must not be committed
+  // as a bound, so the region only changes on blur or Enter. No draft → the fields mirror the region,
+  // which is what keeps them live while the segment is dragged on the timeline.
+  const [draft, setDraft] = useState<{ start: string; end: string } | null>(null);
+  const startField = draft ? draft.start : secondsField(region.start);
+  const endField = draft ? draft.end : secondsField(region.end);
+
+  function commitDraft(): void {
+    if (!draft) {
+      return;
+    }
+    setDraft(null);
+    const start = Number(draft.start.trim());
+    const end = Number(draft.end.trim());
+    if (draft.start.trim() === '' || draft.end.trim() === '' || !Number.isFinite(start) || !Number.isFinite(end)) {
+      return;
+    }
+    // Apply the bounds through the same clamping helpers the timeline drag uses: out-of-session
+    // values are pulled back to the session, and a bound typed past the opposite one parks against
+    // it (MIN_REGION_SECONDS away) instead of inverting the region.
+    const withStart = resizeRegionStart(region, start, duration);
+    const withEnd = resizeRegionEnd(withStart, end, duration);
+    dialog.updateRegion(region.id, withEnd.start, withEnd.end);
+  }
+
+  function snapTo(edge: 'start' | 'end'): void {
+    const next =
+      edge === 'start'
+        ? resizeRegionStart(region, currentTime, duration)
+        : resizeRegionEnd(region, currentTime, duration);
+    dialog.updateRegion(region.id, next.start, next.end);
+  }
+
   return (
     <li className={`clip-region-row ${dialog.selectedRegionId === region.id ? 'selected' : ''}`}>
-      <button
-        type="button"
-        className="clip-region-select"
-        onClick={() => dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id)}
-        aria-label={dialog.selectedRegionId === region.id ? `Deselect region ${index + 1}` : `Select region ${index + 1}`}
-        title="Select on timeline to loop while the playhead is inside it"
-      >
-        <span className="clip-region-index">{index + 1}</span>
-        <span className="clip-region-times">
-          {formatTime(region.start)} – {formatTime(region.end)}
-        </span>
-        <span className="clip-region-length">
-          {formatDuration(region.end - region.start)}
-        </span>
-      </button>
-      <button
-        type="button"
-        className="btn ghost small"
-        onClick={() => dialog.removeRegion(region.id)}
-        aria-label={`Remove region ${index + 1}`}
-      >
-        Remove
-      </button>
+      <div className="clip-region-main">
+        <button
+          type="button"
+          className="clip-region-select"
+          onClick={() => dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id)}
+          aria-label={dialog.selectedRegionId === region.id ? `Deselect region ${index + 1}` : `Select region ${index + 1}`}
+          title="Select on timeline to loop while the playhead is inside it"
+        >
+          <span className="clip-region-index">{index + 1}</span>
+          <span className="clip-region-times">
+            {formatTime(region.start)} – {formatTime(region.end)}
+          </span>
+          <span className="clip-region-length">
+            {formatDuration(region.end - region.start)}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={() => dialog.removeRegion(region.id)}
+          aria-label={`Remove region ${index + 1}`}
+        >
+          Remove
+        </button>
+      </div>
+      <div className="clip-region-edit">
+        <label className="clip-region-time">
+          <span className="clip-region-time-label">Start</span>
+          <input
+            type="number"
+            className="settings-input clip-region-time-input"
+            min={0}
+            max={Math.max(0, duration)}
+            step={0.1}
+            value={startField}
+            aria-label={`Region ${index + 1} start, seconds`}
+            onChange={(event) => setDraft({ start: event.target.value, end: endField })}
+            onBlur={commitDraft}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitDraft();
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={() => snapTo('start')}
+          aria-label={`Set region ${index + 1} start to the playhead`}
+          title={`Set the start to the playhead (${formatTime(currentTime)})`}
+        >
+          Start ← {formatTime(currentTime)}
+        </button>
+        <label className="clip-region-time">
+          <span className="clip-region-time-label">End</span>
+          <input
+            type="number"
+            className="settings-input clip-region-time-input"
+            min={0}
+            max={Math.max(0, duration)}
+            step={0.1}
+            value={endField}
+            aria-label={`Region ${index + 1} end, seconds`}
+            onChange={(event) => setDraft({ start: startField, end: event.target.value })}
+            onBlur={commitDraft}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitDraft();
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={() => snapTo('end')}
+          aria-label={`Set region ${index + 1} end to the playhead`}
+          title={`Set the end to the playhead (${formatTime(currentTime)})`}
+        >
+          End ← {formatTime(currentTime)}
+        </button>
+      </div>
     </li>
   );
+}
+
+/** A bound as the numeric field shows it: seconds, at most two decimals, no trailing zeroes. */
+function secondsField(seconds: number): string {
+  return String(Math.round(Math.max(0, seconds) * 100) / 100);
 }
 
 function formatDuration(seconds: number): string {

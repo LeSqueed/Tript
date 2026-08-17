@@ -18,6 +18,33 @@
 //
 // Regions are in seconds (TimelineRegion.start/end), as are CreateClip's startTime/endTime and
 // segments.
+//
+// Marking happens *outside* the dialog. The dialog is a modal panel over the player, so the playhead
+// cannot be moved while it is open; the in/out marking controls therefore live in the player and the
+// controller must hold marks before the dialog is ever opened. Two consequences shape the state
+// below:
+//
+//   - `attachSession` — the player attaches the session under review as it plays, so marks can be
+//     made (and clamped to the session) with the dialog closed. Attaching a *different* session
+//     drops the marks: they belong to the session they were marked on.
+//   - the seeded default is a *proposal*, tracked by id. It is only seeded when nothing is marked
+//     yet, and the user's first real mark replaces it — nobody wants to clip a region they never
+//     asked for. Once a proposal is edited or marked over it stops being a proposal.
+//
+// Editing (`updateRegion`) replaces a region's bounds in place: same id, same row position, no
+// overlap merging. The merge rules in `addRegion` belong to *marking* — applying them to an edit
+// would let a drag across a neighbour eat that neighbour irreversibly, mid-gesture, while the
+// pointer is still down. An edit is therefore never destructive to other regions.
+//
+// THE CLIPPABLE DURATION. Every mark, edit and payload is clamped against the duration the caller
+// passes in (`useClipDialog(clipDuration)`), which the player resolves from the media itself
+// (clipModel's `resolveClipBounds`). It used to be `session.endTime ?? Infinity` — literally
+// unbounded for any recording whose content record carries no length, which is the normal case for a
+// recording with no metadata record. Because marks deliberately outlive the dialog (closing it keeps
+// them), a segment marked against a wrong duration could still be sitting there at Create time, so
+// the duration is not only a gate on new edits: when it changes, the regions are reconciled against
+// it (clipModel's `reconcileRegions` — truncate what straddles the real end, drop what lies beyond
+// it), and it is applied once more when the payloads are built.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContentItem, CreateClipParameters } from '../../ipc/protocol';
@@ -28,8 +55,11 @@ import {
   buildDefaultRegion,
   buildRegionClipPayload,
   clampTime,
+  MIN_REGION_SECONDS,
   newClipId,
   newRegionId,
+  normalizeRegionBounds,
+  reconcileRegions,
   removeRegion,
 } from './clipModel';
 import type { ClipMode } from './clipModel';
@@ -51,8 +81,14 @@ export interface ClipDialogController {
   open: boolean;
   /** The session the clip is cut from. */
   session: ContentItem | null;
-  /** The marked regions, in insertion (display) order. */
+  /** The marked regions, in insertion (display) order. Always inside [0, `duration`]. */
   regions: TimelineRegion[];
+  /**
+   * The clippable length of the session, seconds — the bound every region is held inside. 0 means
+   * nothing authoritative is known yet (the media has not reported its length and the content record
+   * carries none), in which case no region can be marked or created.
+   */
+  duration: number;
   /** The region selected on the timeline (segment looping target). */
   selectedRegionId: string | null;
   /** The clipping mode. */
@@ -67,12 +103,35 @@ export interface ClipDialogController {
   };
   /** The most recent clip result, keyed per clip id. */
   progress: Record<string, ClipProgressState>;
-  /** Open the dialog for a session, proposing a default region centred on the playbar cursor. */
+  /**
+   * Attach the session under review, so regions can be marked from the player before the dialog is
+   * ever opened. Attaching a different session drops the marks made on the previous one.
+   */
+  attachSession(session: ContentItem | null): void;
+  /**
+   * Open the dialog for a session. Regions already marked on that session are kept as they are;
+   * only when nothing is marked yet is a default region proposed around the playbar cursor.
+   */
   openDialog(session: ContentItem, cursorTime: number): void;
   closeDialog(): void;
   /** Mark a region on the timeline. A fresh id is generated unless `id` is supplied. */
   addRegion(start: number, end: number, id?: string): void;
+  /**
+   * Mark a segment from the player (the in/out points). Bounds are ordered and clamped to the
+   * session; a span shorter than MIN_REGION_SECONDS is ignored. The untouched default proposal (if
+   * one is showing) is replaced by the first mark, and the new mark becomes the loop selection.
+   */
+  markRegion(start: number, end: number): void;
+  /**
+   * Replace a region's bounds — the one seam behind every adjustment (the numeric fields, the
+   * set-from-playhead buttons and the timeline drag), so all three produce identical clip bounds.
+   * The row keeps its id and its position; bounds are ordered and clamped, and an unusable span
+   * (shorter than MIN_REGION_SECONDS) leaves the region alone.
+   */
+  updateRegion(id: string, start: number, end: number): void;
   removeRegion(id: string): void;
+  /** Drop every marked region (the dialog's "Clear all"). */
+  clearRegions(): void;
   setMode(mode: ClipMode): void;
   setTitle(title: string): void;
   selectRegion(id: string | null): void;
@@ -87,7 +146,25 @@ export interface ClipDialogController {
   applyImportProgress(content: ImportProgressContent): void;
 }
 
-export function useClipDialog(): ClipDialogController {
+/**
+ * The session's own declared length, or 0 when it declares none.
+ *
+ * The stand-in when the caller passes no duration. Note what it is *not*: a fallback constant. A
+ * content record with no `endTime` says nothing about how long the file is, so the answer is 0 —
+ * "nothing markable yet" — and never a number that merely looks plausible.
+ */
+function declaredDuration(session: ContentItem | null): number {
+  const endTime = session?.endTime;
+  return endTime !== undefined && Number.isFinite(endTime) && endTime > 0 ? endTime : 0;
+}
+
+/**
+ * @param clipDuration The media length regions are clamped against, seconds — the player resolves it
+ *   from the video element with the content record as a stand-in (clipModel's `resolveClipBounds`).
+ *   Omitted, the controller falls back to the session's own declared length, and to 0 (nothing
+ *   markable) when it has none: an unbounded default is what this parameter exists to remove.
+ */
+export function useClipDialog(clipDuration?: number): ClipDialogController {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<ContentItem | null>(null);
   const [regions, setRegions] = useState<TimelineRegion[]>([]);
@@ -101,43 +178,141 @@ export function useClipDialog(): ClipDialogController {
   }>({ tracks: [], volumes: {}, muted: [] });
   const [progress, setProgress] = useState<Record<string, ClipProgressState>>({});
   const payloadHandlers = useRef(new Set<(content: unknown) => void>());
+  // The attached session, mirrored in a ref so marking (which happens with the dialog closed) can
+  // clamp to the session duration from a callback with no state dependencies.
+  const sessionRef = useRef<ContentItem | null>(null);
+  // The id of the *proposed* default region, while it is still untouched. Null once the user has
+  // marked, edited or removed it — a proposal only gets replaced silently while it is still a
+  // proposal.
+  const proposalIdRef = useRef<string | null>(null);
+  // The caller's duration, mirrored in a ref for the same reason the session is: marking runs from
+  // the player's keyboard handler with no state dependencies. Assigned during render rather than in
+  // an effect so a mark can never be clamped against the previous render's duration.
+  const clipDurationRef = useRef<number | undefined>(clipDuration);
+  clipDurationRef.current = clipDuration;
 
-  const openDialog = useCallback((sessionItem: ContentItem, cursorTime: number) => {
-    const duration = sessionItem?.endTime ?? 0;
-    const region = buildDefaultRegion(cursorTime, duration, newRegionId());
-    setSession(sessionItem);
-    setRegions([region]);
-    setSelectedRegionId(region.id);
-    setMode('combine');
-    setTitle(sessionItem.title ?? sessionItem.fileName ?? 'Clip');
-    setProgress({});
-    // Keep any audio tracks the state message already reported (they may arrive before the
-    // dialog opens); a fresh `setAudioTracks` from the player replaces them wholesale.
-    setAudio((current) => ({ ...current, volumes: {}, muted: [] }));
-    setOpen(true);
-  }, []);
+  /** The duration marks/edits/payloads are clamped to. 0 when nothing authoritative is known. */
+  const duration = clipDuration ?? declaredDuration(session);
+  const markDuration = (): number => clipDurationRef.current ?? declaredDuration(sessionRef.current);
 
-  const closeDialog = useCallback(() => {
-    setOpen(false);
-    setSession(null);
+  const attachSession = useCallback((next: ContentItem | null) => {
+    if (sessionRef.current?.filePath === next?.filePath) {
+      return;
+    }
+    // A different recording is under review: its marks are not the previous session's marks.
+    sessionRef.current = next;
+    proposalIdRef.current = null;
+    setSession(next);
     setRegions([]);
     setSelectedRegionId(null);
+  }, []);
+
+  const openDialog = useCallback(
+    (sessionItem: ContentItem, cursorTime: number) => {
+      const changed = sessionRef.current?.filePath !== sessionItem.filePath;
+      const marked = changed ? [] : regions;
+      sessionRef.current = sessionItem;
+      setSession(sessionItem);
+      if (marked.length > 0) {
+        // Marks made in the player are the user's work — opening the dialog reviews them, it does
+        // not restart from a proposal.
+        setRegions(marked);
+      } else {
+        // The proposal is built against the resolved clip duration, not the session's declared
+        // length: on a session with no declared length the latter is 0, which used to propose the
+        // empty region [0, 0], and on a session whose real media is shorter than its metadata claims
+        // it would propose a span past the end of the file.
+        const region = buildDefaultRegion(cursorTime, markDuration(), newRegionId());
+        if (region.end - region.start >= MIN_REGION_SECONDS) {
+          proposalIdRef.current = region.id;
+          setRegions([region]);
+          setSelectedRegionId(region.id);
+        } else {
+          // Nothing measured yet (or media too short to hold a region): propose nothing rather than
+          // a span that is not inside the media.
+          proposalIdRef.current = null;
+          setRegions([]);
+          setSelectedRegionId(null);
+        }
+      }
+      setMode('combine');
+      setTitle(sessionItem.title ?? sessionItem.fileName ?? 'Clip');
+      setProgress({});
+      // Keep any audio tracks the state message already reported (they may arrive before the
+      // dialog opens); a fresh `setAudioTracks` from the player replaces them wholesale.
+      setAudio((current) => ({ ...current, volumes: {}, muted: [] }));
+      setOpen(true);
+    },
+    [regions],
+  );
+
+  // Closing the dialog only closes the panel: the marks stay on the timeline so the user can keep
+  // scrubbing, marking and adjusting, then reopen to create. "Clear all" is the explicit discard.
+  const closeDialog = useCallback(() => {
+    setOpen(false);
     setProgress({});
   }, []);
 
+  // Adding goes through the same gate as marking: this is a public entry point on the controller, so
+  // it cannot be the one path that trusts its caller's numbers.
   const handleAddRegion = useCallback((start: number, end: number, id?: string) => {
+    const bounds = normalizeRegionBounds(start, end, markDuration());
+    if (!bounds) {
+      return;
+    }
+    setRegions((current) => addRegion(current, { id: id ?? newRegionId(), ...bounds }));
+  }, []);
+
+  const handleMarkRegion = useCallback((start: number, end: number) => {
+    const bounds = normalizeRegionBounds(start, end, markDuration());
+    if (!bounds) {
+      // Both points landed on (almost) the same frame — nothing to clip, so the in point is left
+      // standing for the user to try again rather than a sliver of a region being created.
+      return;
+    }
+    const id = newRegionId();
+    // Read the proposal id *now*: the updater below runs during the next render, by which time the
+    // ref has already been cleared.
+    const proposalId = proposalIdRef.current;
+    proposalIdRef.current = null;
+    setRegions((current) => {
+      const base =
+        proposalId && current.some((region) => region.id === proposalId)
+          ? removeRegion(current, proposalId)
+          : current;
+      return addRegion(base, { id, ...bounds });
+    });
+    // The freshly marked segment becomes the loop target, so pressing play immediately replays it.
+    setSelectedRegionId(id);
+  }, []);
+
+  const handleUpdateRegion = useCallback((id: string, start: number, end: number) => {
+    const bounds = normalizeRegionBounds(start, end, markDuration());
+    if (!bounds) {
+      return;
+    }
+    // In place: same id, same row position, other regions untouched (see the header note on why an
+    // edit does not run addRegion's merge rules).
     setRegions((current) =>
-      addRegion(current, {
-        id: id ?? newRegionId(),
-        start: Math.min(start, end),
-        end: Math.max(start, end),
-      }),
+      current.map((region) => (region.id === id ? { ...region, ...bounds } : region)),
     );
+    if (proposalIdRef.current === id) {
+      proposalIdRef.current = null;
+    }
   }, []);
 
   const handleRemoveRegion = useCallback((id: string) => {
     setRegions((current) => removeRegion(current, id));
     setSelectedRegionId((selected) => (selected === id ? null : selected));
+    if (proposalIdRef.current === id) {
+      proposalIdRef.current = null;
+    }
+  }, []);
+
+  const handleClearRegions = useCallback(() => {
+    setRegions([]);
+    setSelectedRegionId(null);
+    proposalIdRef.current = null;
   }, []);
 
   const handleSelectRegion = useCallback((id: string | null) => {
@@ -197,20 +372,25 @@ export function useClipDialog(): ClipDialogController {
     }
     const common = {
       session,
+      duration,
       title: title.trim() || session.title || session.fileName || 'Clip',
       audioTrackVolumes: audioOverrides?.audioTrackVolumes,
       mutedAudioTracks: audioOverrides?.mutedAudioTracks,
     };
-    let payloads: CreateClipParameters[];
+    let built: (CreateClipParameters | null)[];
     if (mode === 'separate') {
       // Each marked region becomes its own clip file: one CreateClip per region.
-      payloads = regions.map((region) =>
+      built = regions.map((region) =>
         buildRegionClipPayload({ ...common, region, id: newClipId(), outputMode: mode }),
       );
     } else {
       // Combine: all marked regions joined into one clip — one CreateClip with all the segments.
-      payloads = [buildCombineClipPayload({ ...common, regions, id: newClipId() })];
+      built = [buildCombineClipPayload({ ...common, regions, id: newClipId() })];
     }
+    // The builders return null for a clip with no in-bounds segment left. Nothing is sent for it: the
+    // last thing this controller does before the payload leaves the frontend is check it against the
+    // media length, and a payload that fails that check is not repaired, it is dropped.
+    const payloads = built.filter((payload): payload is CreateClipParameters => payload !== null);
     for (const payload of payloads) {
       setProgress((current) => ({
         ...current,
@@ -224,7 +404,7 @@ export function useClipDialog(): ClipDialogController {
         }
       }
     }
-  }, [session, title, mode, regions, audioOverrides]);
+  }, [session, duration, title, mode, regions, audioOverrides]);
 
   const applyImportProgress = useCallback((content: ImportProgressContent) => {
     if (
@@ -275,20 +455,45 @@ export function useClipDialog(): ClipDialogController {
     }
   }, [open]);
 
+  // Reconcile the marks whenever the clippable duration changes — the regression guard for the
+  // provisional-duration hole. A mark made while the player was still going on a placeholder or
+  // metadata length must not survive as an out-of-bounds region once the media reports how long it
+  // really is: a region straddling the real end is truncated to it, and one lying entirely beyond it
+  // is dropped (see clipModel's `reconcileRegions`). No-op when everything already fits, so this does
+  // not fight the user mid-edit.
+  useEffect(() => {
+    setRegions((current) => reconcileRegions(current, duration));
+  }, [duration]);
+
+  // A region the reconciliation dropped cannot stay the loop target or the pending proposal.
+  useEffect(() => {
+    if (proposalIdRef.current && !regions.some((region) => region.id === proposalIdRef.current)) {
+      proposalIdRef.current = null;
+    }
+    setSelectedRegionId((selected) =>
+      selected !== null && !regions.some((region) => region.id === selected) ? null : selected,
+    );
+  }, [regions]);
+
   const controller = useMemo<ClipDialogController>(
     () => ({
       open,
       session,
       regions,
+      duration,
       selectedRegionId,
       mode,
       title,
       audio,
       progress,
+      attachSession,
       openDialog,
       closeDialog,
       addRegion: handleAddRegion,
+      markRegion: handleMarkRegion,
+      updateRegion: handleUpdateRegion,
       removeRegion: handleRemoveRegion,
+      clearRegions: handleClearRegions,
       setMode,
       setTitle,
       selectRegion: handleSelectRegion,
@@ -303,15 +508,20 @@ export function useClipDialog(): ClipDialogController {
       open,
       session,
       regions,
+      duration,
       selectedRegionId,
       mode,
       title,
       audio,
       progress,
+      attachSession,
       openDialog,
       closeDialog,
       handleAddRegion,
+      handleMarkRegion,
+      handleUpdateRegion,
       handleRemoveRegion,
+      handleClearRegions,
       handleSelectRegion,
       handleSetAudioTracks,
       handleSetAudioVolume,

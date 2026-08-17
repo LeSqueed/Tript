@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+/* Shared primitives. They live in this file for historical reasons (it was the first view) and are
+ * used across the shell — .panel by the settings pages, .muted/.small/.btn everywhere. */
+
 .panel {
   background: var(--color-base-200);
   border: var(--border);
@@ -34,6 +37,264 @@
   filter: brightness(1.05);
 }
 
+/* ------------------------------------------------------------------ */
+/* The library page                                                    */
+/* ------------------------------------------------------------------ */
+
+/* The library is the app's home and is deliberately NOT a .panel: it spans the content column so the
+ * grid can use the whole width, rather than being boxed to the 760px a settings form wants. */
+
+.library-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.library-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.library-header h2 {
+  margin: 0;
+}
+
+.library-range {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar: type segments + filters                                    */
+/* ------------------------------------------------------------------ */
+
+.library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+/* A segmented control, styled like the shell's nav so "All / Sessions / Clips" reads as the same kind
+ * of choice the nav offers — which is what it is, now that the clips tab is one of these. */
+
+.library-types {
+  display: flex;
+  gap: var(--space-1);
+  padding: 2px;
+  background: var(--color-base-300);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.library-type {
+  background: transparent;
+  color: var(--color-base-content);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.library-type:hover {
+  opacity: 1;
+}
+
+.library-type.active {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+  opacity: 1;
+}
+
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+/* The filters reuse the settings form primitives (.settings-field / .settings-input), so a select in
+ * the library and a select in settings are the same control. Only the widths are library-specific. */
+
+.library-filters .settings-field {
+  min-width: 150px;
+}
+
+.library-filters .settings-input {
+  padding: var(--space-1) var(--space-2);
+}
+
+.library-filters .settings-select {
+  padding-right: var(--space-6);
+}
+
+.library-clear {
+  align-self: flex-end;
+}
+
+/* ------------------------------------------------------------------ */
+/* The grid                                                            */
+/* ------------------------------------------------------------------ */
+
+/* auto-fill with a 240px floor: the column count follows the window, and every column is at least
+ * wide enough for a 16:9 thumbnail to be worth looking at. */
+
+.library-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+
+.content-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  color: var(--color-base-content);
+  cursor: pointer;
+  text-align: left;
+}
+
+.content-card:hover {
+  border-color: var(--color-accent);
+}
+
+.content-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.content-card-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  background: var(--color-base-300);
+}
+
+.content-card-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The placeholder tile — what a 204 (no thumbnail available) looks like. Deliberately a quiet glyph
+ * on the card's own surface rather than a broken-image icon: there is nothing wrong, the frame just
+ * has not been extracted. */
+
+.content-card-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  color: var(--color-base-content);
+  opacity: 0.25;
+}
+
+.content-card-duration {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(6, 9, 13, 0.78);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.content-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  min-width: 0;
+}
+
+.content-card-title {
+  font-weight: 600;
+  /* Two lines, then ellipsis: titles are user-supplied and a long one must not push the chips out of
+   * alignment across the row. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.content-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.content-card-type {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  color: var(--color-accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty states + pagination                                           */
+/* ------------------------------------------------------------------ */
+
+.library-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.library-empty p {
+  margin: 0;
+}
+
+.library-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.library-page-indicator {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* ------------------------------------------------------------------ */
+/* The connection probe (collapsed; the shell's only start/stop)        */
+/* ------------------------------------------------------------------ */
+
+.live-probe {
+  margin-top: auto;
+  padding: var(--space-3);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.live-probe summary {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
 .probe-actions {
   display: flex;
   gap: var(--space-2);
@@ -42,49 +303,50 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Content lists (library sessions + clips)                            */
+/* The player overlay                                                  */
 /* ------------------------------------------------------------------ */
 
-.library-view,
-.clips-view {
+/* Full-bleed over the whole shell — nav and recorder bar included — so nothing behind it can be
+ * clicked while it is up. Its z-index sits below the clip dialog's (40), which is opened from inside
+ * the player and must stack above it. */
+
+.player-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--color-base-100);
+}
+
+.player-overlay-bar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-base-200);
+  border-bottom: var(--border);
 }
 
-.content-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+.player-overlay-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.content-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  width: 100%;
-  background: var(--color-base-300);
-  border: var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  color: var(--color-base-content);
-  cursor: pointer;
-  text-align: left;
+.player-overlay-hint {
+  margin-left: auto;
 }
 
-.content-row:hover {
-  border-color: var(--color-accent);
+.player-overlay-body {
+  overflow: auto;
+  padding: var(--space-4);
 }
 
-.content-name {
-  font-weight: 500;
-}
+/* The player is width-capped (960px) and centred in the overlay, so a full-bleed layer does not mean
+ * a video stretched across an ultrawide display. */
 
-.content-time,
-.content-source {
-  flex: none;
+.player-overlay-body .player-view {
+  margin: 0 auto;
 }

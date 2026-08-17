@@ -28,6 +28,8 @@ interface ContentMessageContent {
 export interface IpcSessionSource extends SessionSource {
   /** Clips (contentType === 'clip') in the same list order. */
   getClips(): ContentItem[];
+  /** The whole pushed list, in the backend's order — what the library grid renders over. */
+  getItems(): ContentItem[];
   /** Monotonic version, incremented on every `content` push. The reactivity hook. */
   getVersion(): number;
   /** Drop the `content` and reconnect subscriptions (for tests / teardown). */
@@ -79,6 +81,12 @@ export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
     },
     getClips(): ContentItem[] {
       return items.filter((item) => item.contentType === 'clip');
+    },
+    getItems(): ContentItem[] {
+      // The pushed array itself, not a copy: consumers treat it as immutable (the library sorts into
+      // a new array), and copying it on every read would defeat the version-keyed memoisation the
+      // reactive hook relies on.
+      return items;
     },
     getBookmarks(item: ContentItem): BookmarkItem[] {
       return item.bookmarks ?? [];

@@ -25,6 +25,16 @@ export interface SessionSource {
   getVersion?: () => number;
   /** Clips (contentType === 'clip') in list order. The IPC-backed source implements it. */
   getClips?: () => ContentItem[];
+  /**
+   * The WHOLE content list in the backend's own order, sessions and clips interleaved. The library
+   * grid needs this: it renders one list over both types, and `getSessions()` concatenated with
+   * `getClips()` is not the same list — the concatenation loses the backend's ordering across the two
+   * types, which is the order the default "newest first" sort starts from.
+   *
+   * Optional so a static source (the stub, a test's injected source) stays valid without it; the
+   * reactive read falls back to the concatenation for those. The IPC-backed source implements it.
+   */
+  getItems?: () => ContentItem[];
 }
 
 /** Fallback session length before video metadata arrives (placeholder data has no media files). */

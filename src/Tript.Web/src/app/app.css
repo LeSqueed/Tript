@@ -38,3 +38,11 @@
   overflow: auto;
   padding: var(--space-4);
 }
+
+/* While the player overlay is up, the library underneath stays mounted (that is how the user's
+ * filters, sort, page and scroll position survive) but must not scroll behind the overlay. The shell
+ * captures the offset on open and writes it back on close — see App.tsx. */
+
+.app-shell.player-open .app-content {
+  overflow: hidden;
+}

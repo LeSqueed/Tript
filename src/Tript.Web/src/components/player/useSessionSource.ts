@@ -27,6 +27,12 @@ export interface SessionList {
   sessions: ContentItem[];
   /** Clips (contentType === 'clip') in list order. */
   clips: ContentItem[];
+  /**
+   * The whole list in the backend's order — what the library grid renders over. Falls back to
+   * sessions-then-clips for a static source that has no `getItems` (see the seam's note on why the
+   * concatenation is a fallback and not the definition).
+   */
+  items: ContentItem[];
 }
 
 /**
@@ -70,6 +76,10 @@ export function useSessionSource(source: SessionSource | null): SessionList {
 
   const sessions = useMemo(() => (source ? source.getSessions() : []), [source, version]);
   const clips = useMemo(() => (source?.getClips ? source.getClips() : []), [source, version]);
+  const items = useMemo(
+    () => (source?.getItems ? source.getItems() : [...sessions, ...clips]),
+    [source, version, sessions, clips],
+  );
 
-  return { sessions, clips };
+  return { sessions, clips, items };
 }

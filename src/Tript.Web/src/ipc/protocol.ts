@@ -46,13 +46,43 @@ export type ChangeCause = string;
 /** Content-type discriminator. */
 export type ContentType = 'recording' | 'clip' | 'highlight' | 'buffer';
 
+/**
+ * One item in the backend's content list.
+ *
+ * EVERY field but the three the content server cannot serve without (`contentType`, `fileName`,
+ * `filePath`) is optional, and that is not defensive decoration — it is the observed shape of the
+ * wire. A recording that was never post-processed has no metadata record, so it arrives with no
+ * `title`, no `game` and no duration; an older backend does not send `game`, `durationSeconds` or
+ * `fileSizeBytes` at all. The library therefore renders a fallback for each of them (see
+ * components/library/libraryModel.ts) rather than gating a card on any one being present: a missing
+ * field must never be able to hide content the user recorded.
+ */
 export interface ContentItem {
   contentType: ContentType;
   fileName: string;
   filePath: string;
   title?: string;
+  /**
+   * When the recording started, in Unix epoch SECONDS (not milliseconds). Absent when the item has
+   * no metadata record. Epoch 0 is treated as absent by the library — it is a placeholder written by
+   * a code path that had no clock, not a recording made in 1970.
+   */
   startTime?: number;
   endTime?: number;
+  /**
+   * The game the item was recorded from, as the backend detected it. Nullable *and* optional: null
+   * from a backend that looked and found nothing, absent from one that does not report it. Both mean
+   * "unknown" to the library.
+   */
+  game?: string | null;
+  /**
+   * The item's length in seconds, from its metadata record. A DECLARED length: good enough for a
+   * chip on a card, never good enough to bound a clip segment — see player/clipModel.ts, which
+   * documents a record declaring 100s in front of a 9.13s file.
+   */
+  durationSeconds?: number;
+  /** The file's size in bytes, when the backend reports it. */
+  fileSizeBytes?: number;
   /** Bookmark events inside a recording. Absent (never empty) on clips. */
   bookmarks?: BookmarkItem[];
 }

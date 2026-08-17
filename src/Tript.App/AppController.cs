@@ -47,9 +47,15 @@ internal sealed class AppController
             ["ImportFile"] = (_, _) => { /* No import surface in the alpha. */ },
             ["AddBookmark"] = (parameters, _) => _host.AddBookmark(parameters.Deserialize<AddBookmarkParameters>()),
             ["DeleteBookmark"] = (parameters, _) => _host.DeleteBookmark(parameters.Deserialize<DeleteBookmarkParameters>()),
+            // The settings counterpart of ListContent. OnNewConnection already pushes settings when
+            // the socket opens, but the settings UI mounts on demand — the route is not the landing
+            // one — so by then that push is long gone and the page would render on its own defaults
+            // until the user's first edit triggered one. The machine facts riding the push
+            // (availableEncoders) would be missing for exactly that window.
+            ["ListSettings"] = (_, _) => _host.PushSettings(),
             ["UpdateSettings"] = (parameters, _) => _host.UpdateSettings(
                 parameters.Deserialize<UpdateSettingsParameters>()?.Settings),
-            ["SetVideoLocation"] = (_, _) => { /* No native folder picker in the alpha. */ },
+            ["SetVideoLocation"] = (_, _) => _host.RequestVideoLocation(),
             ["SetCacheLocation"] = (_, _) => { /* No native folder picker in the alpha. */ },
             ["SelectGameExecutable"] = (_, client) =>
             {
@@ -113,6 +119,7 @@ internal sealed class AppController
             OutputPath = outputPath,
             AudioTrackAdjustments = [],
             EncoderFamily = "libx264",
+            Title = parsed.Title,
             Progress = null,
         };
     }

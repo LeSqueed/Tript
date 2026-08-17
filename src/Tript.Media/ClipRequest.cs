@@ -32,6 +32,11 @@ public sealed class ClipRequest
     // decision rule describes: "can the target codec carry 10-bit".
     public string EncoderFamily { get; init; } = "libx265";
 
+    // The user's clip title from the clip dialog ("The clutch"), carried through so the host can
+    // persist it against the finished clip(s). Empty means the user set no title and the clip
+    // falls back to its file-name-without-extension.
+    public string Title { get; init; } = string.Empty;
+
     // A low-latency "one line of ffmpeg stderr" channel, in the same spirit as the training
     // surface's progress messages. Invoked on the engine's worker thread as ffmpeg streams output.
     public Action<ClipProgress>? Progress { get; init; }

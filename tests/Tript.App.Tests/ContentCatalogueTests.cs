@@ -111,6 +111,27 @@ public sealed class ContentCatalogueTests : IDisposable
             "deleting a video's metadata record must remove the record");
     }
 
+    // A write failure (read-only media, disk full, permissions) must be reported to the caller:
+    // Save/Delete return false instead of only logging to stderr, so a user bookmark or title
+    // that failed to persist is never silently lost.
+    [Fact]
+    public void MetadataStore_SaveAndDelete_ReturnFalse_WhenTheWriteFails()
+    {
+        // The metadata root sits on a path whose parent is a regular file, so creating the
+        // metadata directory (and writing a record under it) fails with IOException. Deterministic
+        // across platforms, unlike chmod-based read-only dirs.
+        var root = _contentRoot;
+        var fileAsDirectory = Path.Combine(root, "a-file");
+        File.WriteAllText(fileAsDirectory, "in the way");
+
+        var store = new RecordingMetadataStore(Path.Combine(fileAsDirectory, "metadata"));
+
+        Assert.False(store.Save(new RecordingMetadata { VideoPath = "sessions/session-1.mp4" }),
+            "Save must report a failed write instead of swallowing it");
+        Assert.False(store.Delete("session-1.mp4"),
+            "Delete must report a failed delete instead of swallowing it");
+    }
+
     // ---- the catalogue, over the wire ----
 
     [Fact]
@@ -252,6 +273,105 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    // A bookmark that cannot be persisted must reach the user: the host broadcasts an 'error'
+    // message carrying a human-readable message, instead of silently dropping the bookmark.
+    [Fact]
+    public async Task AddBookmark_SaveFails_BroadcastsError()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+
+        // A regular file where the metadata directory would be created forces the metadata write
+        // to fail, deterministically (the host creates the metadata root lazily on first save).
+        File.WriteAllText(Path.Combine(_contentRoot, "metadata"), "in the way");
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"AddBookmark","parameters":{"filePath":"sessions/session-1.mp4","id":"","time":5,"type":"manual"}}""");
+
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("error", method);
+        var message = content.GetProperty("message").GetString();
+        Assert.NotNull(message);
+        Assert.Contains("could not be saved", message, StringComparison.OrdinalIgnoreCase);
+
+        await host.ShutdownAsync();
+    }
+
+    // A bookmark whose deletion could not be persisted must reach the user the same way.
+    [Fact]
+    public async Task DeleteBookmark_SaveFails_BroadcastsError()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+
+        // A record exists on disk already; making it read-only then makes the post-delete save
+        // fail (UnauthorizedAccessException) while the record still loads. The ReadOnly attribute
+        // is honoured on both platforms: on Unix it clears the file's write bits, on Windows it
+        // sets the read-only flag, and File.WriteAllText rejects either with
+        // UnauthorizedAccessException.
+        var recordPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/session-1.mp4",
+            Bookmarks = { new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(5) } },
+        });
+        Assert.True(File.Exists(recordPath));
+        File.SetAttributes(recordPath, FileAttributes.ReadOnly);
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync(
+            """{"method":"DeleteBookmark","parameters":{"filePath":"sessions/session-1.mp4","id":"11111111-2222-3333-4444-555555555555"}}""");
+
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("error", method);
+        var message = content.GetProperty("message").GetString();
+        Assert.NotNull(message);
+        Assert.Contains("could not be removed", message, StringComparison.OrdinalIgnoreCase);
+
+        await host.ShutdownAsync();
+    }
+
+    // A title that cannot be persisted must reach the user too — and the content list must not
+    // be pushed as if the rename had succeeded (the old title stays on screen).
+    [Fact]
+    public async Task RenameContent_SaveFails_BroadcastsError_AndDoesNotPushContent()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+
+        File.WriteAllText(Path.Combine(_contentRoot, "metadata"), "in the way");
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync(
+            """{"method":"RenameContent","parameters":{"fileName":"sessions/session-1.mp4","title":"Renamed session"}}""");
+
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("error", method);
+        var message = content.GetProperty("message").GetString();
+        Assert.NotNull(message);
+        Assert.Contains("could not be saved", message, StringComparison.OrdinalIgnoreCase);
+
+        // The rename must not be echoed as a successful content change: only the error message
+        // is broadcast for the failed command.
+        await host.ShutdownAsync();
+    }
+
     [Fact]
     public async Task RenameContent_StoresTheTitleInMetadata()
     {
@@ -348,6 +468,52 @@ public sealed class ContentCatalogueTests : IDisposable
 
         Assert.False(File.Exists(recordPath), "the metadata record must be deleted even when the video is gone");
         var stray = Directory.GetFiles(Path.Combine(_contentRoot, "metadata"), "*.metadata.json");
+        Assert.Empty(stray);
+
+        await host.ShutdownAsync();
+    }
+
+    // A clip's user title (from the clip dialog) is stored in its own record in the metadata/
+    // tree, read back into the library list instead of the file-name-without-extension, and
+    // cascade-deleted with the clip.
+    [Fact]
+    public async Task ClipTitle_RoundTripsThroughTheStore_AndDeletesWithTheClip()
+    {
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(clips, "session-1-clip-x.mp4"), "clip");
+
+        // A clip has no RecordingMetadata record; its title lives in a dedicated clip-title
+        // record, written the way the host writes it when a clip completes.
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.Save("session-1-clip-x.mp4", "The clutch"));
+
+        // The record lands in metadata/, keyed by the clip's file name — never next to the .mp4.
+        var recordPath = Path.Combine(_contentRoot, "metadata", "session-1-clip-x.mp4.title.json");
+        Assert.True(File.Exists(recordPath), "the clip title record must live in metadata/, not next to the video");
+        Assert.False(File.Exists(Path.Combine(clips, "session-1-clip-x.mp4.title.json")),
+            "no clip title record may sit next to the .mp4");
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+
+        var clip = content.GetProperty("content").EnumerateArray()
+            .Single(i => i.GetProperty("contentType").GetString() == "clip");
+        Assert.Equal("The clutch", clip.GetProperty("title").GetString());
+
+        // Cascade delete: deleting the clip removes its title record too.
+        await host.SendAsync("""{"method":"DeleteContent","parameters":{"fileName":"clips/session-1-clip-x.mp4","contentType":"clip"}}""");
+        var (method, _) = await host.ReceiveAsyncParsed();
+        Assert.Equal("content", method);
+
+        Assert.False(File.Exists(Path.Combine(clips, "session-1-clip-x.mp4")), "the clip must be deleted");
+        Assert.False(File.Exists(recordPath), "the clip title record must be deleted with its clip");
+        var stray = Directory.GetFiles(Path.Combine(_contentRoot, "metadata"), "*.title.json");
         Assert.Empty(stray);
 
         await host.ShutdownAsync();

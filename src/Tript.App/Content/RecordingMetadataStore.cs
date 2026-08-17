@@ -56,32 +56,41 @@ internal sealed class RecordingMetadataStore
         }
     }
 
-    internal void Save(RecordingMetadata metadata)
+    // Persists the metadata record. Returns true when the record was written, false when the
+    // write failed (read-only media, disk full, permissions). The caller decides what to surface:
+    // a user bookmark or title that cannot be written must not silently vanish, so the boolean is
+    // the primary signal and the stderr line is a secondary trace.
+    internal bool Save(RecordingMetadata metadata)
     {
-        Directory.CreateDirectory(_metadataRoot);
         try
         {
+            Directory.CreateDirectory(_metadataRoot);
             File.WriteAllText(PathFor(metadata.VideoFileName()),
                 JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"Tript.App: could not write metadata record: {exception.Message}");
+            return false;
         }
     }
 
     // Removes the record for a video, when there is one. Deleting a video removes its record too
     // (the cascade-delete contract): the metadata/ tree never keeps an orphaned record for a
-    // video that is gone.
-    internal void Delete(string videoFileName)
+    // video that is gone. Returns false when the record could not be removed; a stale record is
+    // worse than a silent failure, so the caller can surface it.
+    internal bool Delete(string videoFileName)
     {
         try
         {
             File.Delete(PathFor(videoFileName));
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"Tript.App: could not delete metadata record: {exception.Message}");
+            return false;
         }
     }
 

@@ -39,6 +39,7 @@ internal sealed class AppHost : IDisposable
     private readonly ContentServer _content;
     private readonly UiHost _ui;
     private readonly RecordingMetadataStore _metadata;
+    private readonly ClipTitleStore _clipTitles;
 
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
@@ -68,6 +69,7 @@ internal sealed class AppHost : IDisposable
         _content = new ContentServer(EffectiveRoot);
         _ui = new UiHost(options.WebRoot);
         _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
+        _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
 
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
@@ -234,7 +236,9 @@ internal sealed class AppHost : IDisposable
     // automatic bookmarks the detection host produced and the link key back to the video — into
     // the metadata store (spec/config-and-storage.md), so bookmarks survive the process. The
     // record is written only when the recording actually exists. A session is now part of the
-    // library, so the content list is pushed.
+    // library, so the content list is pushed. The auto bookmarks are best-effort: a failed write
+    // is logged (inside the store) but does not abort the stop or push an error — the record the
+    // session built is still offered to the library.
     private void WriteMetadataRecord(RecordingMetadata metadata)
     {
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
@@ -270,6 +274,51 @@ internal sealed class AppHost : IDisposable
     internal void MigrateContent()
     {
         // No migration needed for a fresh install.
+    }
+
+    // ---- native folder picker ----
+
+    // The seam the desktop shell installs: a function that opens a native folder picker and returns
+    // the chosen directory, or null when the user cancels. The headless host has no window, so the
+    // delegate stays null there and RequestVideoLocation is a documented no-op. The shell installs
+    // it after the Photino window is created (a WindowCreated handler), so it is never set before
+    // the native window exists.
+    internal Func<string?>? FolderPicker { get; set; }
+
+    // The SetVideoLocation command. Invokes the shell's native picker (when one is installed) and
+    // applies the picked directory as the recording output directory through the normal settings
+    // path, so the field updates exactly as if the user had typed it: the settings file is saved
+    // and a settings push tells every client the new value. Cancelling the picker is a no-op.
+    internal void RequestVideoLocation()
+    {
+        var picker = FolderPicker;
+        if (picker is null)
+            return;
+
+        string? path;
+        try
+        {
+            path = picker();
+        }
+        catch (Exception exception)
+        {
+            // A picker failure (no native dialog, a refused GTK loop) must not crash the host or
+            // tear down the IPC channel; the user simply stays where they were.
+            Console.Error.WriteLine($"Tript.App: the folder picker failed: {exception.Message}");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var patch = JsonSerializer.SerializeToElement(new
+        {
+            recording = new
+            {
+                outputDirectory = path,
+            },
+        });
+        UpdateSettings(patch);
     }
 
     // ---- detection ----
@@ -350,6 +399,7 @@ internal sealed class AppHost : IDisposable
             EffectiveRoot = effectiveRoot;
             _content.UpdateRoot(effectiveRoot);
             _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
+            _clipTitles.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             Directory.CreateDirectory(effectiveRoot);
         }
 
@@ -468,6 +518,11 @@ internal sealed class AppHost : IDisposable
         _ipc.Broadcast("settings", JsonSerializer.SerializeToElement(new
         {
             settings = settingsElement,
+            // The encoder list is the machine's actual H.264 set, settled by the runtime. It can
+            // only be probed when libobs is loaded — the fake-recorder host never starts it, so a
+            // P/Invoke there would segfault rather than answer — so the list is absent (null) and
+            // the frontend falls back to the current value plus obs_x264.
+            availableEncoders = _runtime is null ? null : ObsRecorderSession.EnumerateUsableEncoderIds(),
         }, Wire.Options));
     }
 
@@ -491,6 +546,18 @@ internal sealed class AppHost : IDisposable
         _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
         {
             content = ListContent(),
+        }, Wire.Options));
+    }
+
+    // Surfaces a metadata write failure to the user. A bookmark or title that failed to persist
+    // must not silently vanish: this broadcasts the error so the frontend can show it (and keep
+    // the in-memory change out of the list). The 'error' method is a backend -> frontend message;
+    // the frontend registers it the same way it registers state/content pushes.
+    private void PushMetadataSaveError(string message)
+    {
+        _ipc.Broadcast("error", JsonSerializer.SerializeToElement(new
+        {
+            message,
         }, Wire.Options));
     }
 
@@ -539,6 +606,14 @@ internal sealed class AppHost : IDisposable
                     item.Bookmarks = [];
                 }
             }
+            else
+            {
+                // A clip with a stored user title shows it; a clip without one falls back to its
+                // file-name-without-extension, exactly like a session with no metadata record.
+                var title = _clipTitles.Load(file.Name);
+                if (!string.IsNullOrWhiteSpace(title))
+                    item.Title = title;
+            }
 
             items.Add(item);
         }
@@ -575,9 +650,11 @@ internal sealed class AppHost : IDisposable
         try
         {
             File.Delete(target);
-            // The cascade-delete contract: a deleted video takes its metadata record with it, so
-            // the metadata/ tree never keeps an orphaned record for a video that is gone.
+            // The cascade-delete contract: a deleted video takes its metadata records with it, so
+            // the metadata/ tree never keeps an orphaned record for a video that is gone. Clips
+            // have no RecordingMetadata record, but a clip's title record is deleted the same way.
             _metadata.Delete(Path.GetFileName(target));
+            _clipTitles.Delete(Path.GetFileName(target));
             PushContent();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -613,7 +690,14 @@ internal sealed class AppHost : IDisposable
         };
         metadata.Title = parameters.Title;
 
-        _metadata.Save(metadata);
+        if (!_metadata.Save(metadata))
+        {
+            // A title that could not be written must not silently vanish: surface the failure to
+            // the user and leave the library list as it was — no content push, so the old title
+            // stays on screen.
+            PushMetadataSaveError("The recording title could not be saved — check the recording folder is writable.");
+            return;
+        }
         PushContent();
     }
 
@@ -670,7 +754,12 @@ internal sealed class AppHost : IDisposable
             Time = TimeSpan.FromSeconds(parameters.Time),
         });
 
-        _metadata.Save(metadata);
+        if (!_metadata.Save(metadata))
+        {
+            // A bookmark that could not be written must not silently vanish: the frontend needs
+            // to know the add failed so it does not keep the bookmark in the UI.
+            PushMetadataSaveError("The bookmark could not be saved — check the recording folder is writable.");
+        }
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
@@ -689,7 +778,12 @@ internal sealed class AppHost : IDisposable
 
         var id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.Empty;
         metadata.Bookmarks.RemoveAll(b => b.Id == id);
-        _metadata.Save(metadata);
+        if (!_metadata.Save(metadata))
+        {
+            // A bookmark whose removal could not be persisted must not silently reappear on the
+            // next list build: the frontend needs to know the delete failed.
+            PushMetadataSaveError("The bookmark could not be removed — check the recording folder is writable.");
+        }
     }
 
     private static Tript.Core.BookmarkType ParseBookmarkType(string type)
@@ -780,6 +874,16 @@ internal sealed class AppHost : IDisposable
 
                 var results = _clipEngine.CreateClips(request);
 
+                // The user's clip title is persisted against every produced file (one in combine
+                // mode, one per region in separate mode), so the clips list shows it across
+                // restarts. A failed write is logged inside the store and does not fail the clip;
+                // the clip still lists, just under its file name.
+                if (!string.IsNullOrWhiteSpace(request.Title))
+                {
+                    foreach (var result in results)
+                        _clipTitles.Save(Path.GetFileName(result), request.Title);
+                }
+
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
                 {
                     status = "done",
@@ -788,6 +892,7 @@ internal sealed class AppHost : IDisposable
                         ContentType = "clip",
                         FileName = Path.GetFileName(results[0]),
                         FilePath = Path.GetRelativePath(EffectiveRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
+                        Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title,
                     },
                 }, Wire.Options));
 

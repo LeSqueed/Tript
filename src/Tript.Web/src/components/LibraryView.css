@@ -40,3 +40,51 @@
   flex-wrap: wrap;
   margin: var(--space-3) 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Content lists (library sessions + clips)                            */
+/* ------------------------------------------------------------------ */
+
+.library-view,
+.clips-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.content-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.content-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  background: var(--color-base-300);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-base-content);
+  cursor: pointer;
+  text-align: left;
+}
+
+.content-row:hover {
+  border-color: var(--color-accent);
+}
+
+.content-name {
+  font-weight: 500;
+}
+
+.content-time,
+.content-source {
+  flex: none;
+}

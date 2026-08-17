@@ -7,6 +7,7 @@ import './theme/theme.css';
 import './app/app.css';
 import './components/RecorderBar.css';
 import './components/LibraryView.css';
+import './components/ClipsView.css';
 import './components/PlayerView.css';
 import './components/player/clipDialog.css';
 import './components/SettingsView.css';

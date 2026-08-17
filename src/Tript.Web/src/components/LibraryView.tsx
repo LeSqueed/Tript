@@ -1,18 +1,56 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The library / session list. In the alpha this is a stub list; the IPC round-trip proof lives in
-// the live-connection panel below it. The IPC client is owned by the app shell and passed down.
+// The library / session list. Sessions are read from the shared IPC session source (owned by the
+// App shell), so the list is live: new recordings appear after StopRecording, deletes and renames
+// are reflected. Clicking a session opens it in the player via the shell's `onOpen` seam.
+//
+// The IPC client is owned by the app shell and passed down.
 
 import type { IpcClient } from '../ipc/websocketClient';
+import type { ContentItem } from '../ipc/protocol';
 
-export function LibraryView({ client }: { client: IpcClient }) {
+export function LibraryView({
+  client,
+  sessions,
+  onOpen,
+}: {
+  client: IpcClient;
+  /** The session list, already filtered and reactive (owned by the App shell's source). */
+  sessions: ContentItem[];
+  /** The App shell's player seam: called with the session the user clicked. */
+  onOpen?: (item: ContentItem) => void;
+}) {
   return (
-    <section className="panel">
+    <section className="panel library-view">
       <h2>Library</h2>
-      <p className="muted">Your recordings will appear here.</p>
+      {sessions.length === 0 ? (
+        <p className="muted">Your recordings will appear here.</p>
+      ) : (
+        <ul className="content-list" data-testid="library-list">
+          {sessions.map((item) => (
+            <li key={item.filePath}>
+              <button
+                type="button"
+                className="content-row"
+                onClick={() => onOpen?.(item)}
+                aria-label={`Open ${item.title ?? item.fileName}`}
+              >
+                <span className="content-name">{item.title ?? item.fileName}</span>
+                <span className="content-time muted small">
+                  {item.startTime !== undefined ? formatStartTime(item.startTime) : 'No start time'}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <LiveIpcProbe client={client} />
     </section>
   );
+}
+
+function formatStartTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString();
 }
 
 /**

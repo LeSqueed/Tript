@@ -13,8 +13,9 @@
 //
 // Navigation (previous/next) moves between sessions in the current context, wrapping at both ends.
 //
-// Data comes from the player session source seam (player/sessionSource.ts) — the alpha stub. The
-// real IPC-backed source plugs in behind the same interface.
+// Data comes from the player session source seam (player/sessionSource.ts). The default source is
+// IPC-backed (player/ipcSessionSource.ts) and re-renders on the control socket's `content` push;
+// tests inject their own static source through the `source` prop.
 //
 // This view is the seam owner for the clip dialog (T9): it renders the dialog in the player,
 // feeds it the session's regions, and wires the `importProgress` message (the clip result arrives
@@ -28,7 +29,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { BookmarkItem, ContentItem, RecordingState } from '../ipc/protocol';
 import { contentUrl } from '../ipc/endpoints';
-import { DEFAULT_SESSION_SECONDS, stubSessionSource, type SessionSource } from './player/sessionSource';
+import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
+import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
 import type { TimelineRegion } from './player/clipSeam';
 import { clampWindow, zoomWindow, DEFAULT_WINDOW_SECONDS, type WindowState } from './player/timelineModel';
 import { usePlayback } from './player/usePlayback';
@@ -42,8 +44,17 @@ import { clampTime } from './player/clipModel';
 
 export interface PlayerViewProps {
   client: IpcClient;
-  /** The session source seam. Defaults to the alpha stub; the real source plugs in here. */
-  source?: SessionSource;
+  /**
+   * The session source seam. When the App shell passes its shared source, that is used; when the
+   * source is null (the shell's source is created in an effect) or absent, the player owns an
+   * IPC-backed source of its own. Tests inject their own static source through this prop.
+   */
+  source?: SessionSource | null;
+  /**
+   * The item to open (from a library/clips click). When present the player starts on that item and
+   * its index within the session list becomes the navigation base. Absent, the first session plays.
+   */
+  item?: ContentItem;
   /**
    * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns
    * the region list; a caller can alternatively supply regions for a read-only region view.
@@ -54,19 +65,52 @@ export interface PlayerViewProps {
   onRegionSelect?(region: TimelineRegion): void;
 }
 
-const sessionSource: SessionSource = stubSessionSource;
-
 export function PlayerView({
   client,
-  source = sessionSource,
+  source: injectedSource,
+  item: requestedItem,
   regions: externalRegions,
   selectedRegionId: externalSelectedRegionId,
   onRegionSelect: externalOnRegionSelect,
 }: PlayerViewProps) {
-  const sessions = useMemo(() => source.getSessions(), [source]);
+  // No injected source → own an IPC-backed one for this view's lifetime. It sends ListContent on
+  // creation and re-reads the `content` push, so the list is live. Tests that inject their own
+  // source opt out of the IPC source entirely (`enabled = false` — no stray ListContent). A null
+  // injected source is the shell's shared source that has not been created in its effect yet — the
+  // player waits for it rather than creating a second IPC source (which would double-ask the
+  // backend for the list).
+  const ipcSource = useIpcSessionSource(client, injectedSource === undefined);
+  const source = injectedSource ?? ipcSource;
+  const { sessions } = useSessionSource(source);
   const [itemIndex, setItemIndex] = useState(0);
-  const item: ContentItem = sessions[itemIndex] ?? sessions[0] ?? sessionSource.getSessions()[0];
-  const bookmarks = useMemo(() => (item ? source.getBookmarks(item) : []), [source, item]);
+
+  // Keep the selection in range when the content list changes (a `content` push can remove or
+  // reorder sessions): clamp back to the first session, matching the fallback below.
+  useEffect(() => {
+    if (itemIndex >= sessions.length) {
+      setItemIndex(0);
+    }
+  }, [itemIndex, sessions.length]);
+
+  // The requested item's position in the session list, when it is one of the sessions. Once it is,
+  // it becomes the navigation base; navigating away moves within the list as usual.
+  const requestedIndex = useMemo(
+    () => (requestedItem ? sessions.findIndex((s) => s.filePath === requestedItem.filePath) : -1),
+    [requestedItem, sessions],
+  );
+  useEffect(() => {
+    if (requestedIndex >= 0) {
+      setItemIndex(requestedIndex);
+    }
+  }, [requestedIndex]);
+
+  // Priority: the requested item (it may be a clip — the player plays whatever path it carries),
+  // then the session list at the navigation index, then the first session, then nothing.
+  const item: ContentItem | undefined =
+    requestedIndex >= 0 ? sessions[requestedIndex] : (requestedItem ?? sessions[itemIndex] ?? sessions[0]);
+  // The IPC source is created in an effect, so `source` is null on the first render — the short
+  // circuit keeps bookmarks at [] until the source exists (and `item` is undefined then anyway).
+  const bookmarks = useMemo(() => (item && source ? source.getBookmarks(item) : []), [source, item]);
 
   const fallbackDuration =
     item?.endTime !== undefined && item.endTime > 0 ? item.endTime : DEFAULT_SESSION_SECONDS;

@@ -53,6 +53,8 @@ export interface ContentItem {
   title?: string;
   startTime?: number;
   endTime?: number;
+  /** Bookmark events inside a recording. Absent (never empty) on clips. */
+  bookmarks?: BookmarkItem[];
 }
 
 export interface BookmarkItem {
@@ -277,6 +279,7 @@ export type CommandName =
   | 'OpenLogsLocation'
   | 'MigrateContent'
   // Content
+  | 'ListContent'
   | 'CreateClip'
   | 'CancelClip'
   | 'DeleteContent'
@@ -311,6 +314,7 @@ export type CommandName =
 export type MessageName =
   | 'settings'
   | 'state'
+  | 'content'
   | 'importProgress'
   | 'updateProgress'
   | 'releaseNotes'

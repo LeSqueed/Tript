@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The player's data seam. The alpha has no backend session model yet, so the player reads from a
-// clearly-marked stub source. A later task plugs the real source — fed by the IPC `gameList` /
-// `state` / `settings` pushes over the control socket — in behind the same interface; nothing in
-// the player changes then.
+// The player's data seam. The player reads from a `SessionSource`; the real implementation is
+// IPC-backed (player/ipcSessionSource.ts — fed by the control socket's `content` push). The stub
+// below is the alpha placeholder, kept for tests and as a reference for the seam's shape.
 
 import type { BookmarkItem, ContentItem } from '../../ipc/protocol';
 
@@ -13,10 +12,19 @@ export interface SessionSource {
   /** Bookmarks for a session. `time` is a seconds offset into the session. */
   getBookmarks(item: ContentItem): BookmarkItem[];
   /**
-   * Optional push seam. The real source will be driven by IPC messages and calls `onChange` to
-   * make the player re-read. Returns an unsubscribe. The stub has no external updates.
+   * Optional push seam. The IPC-backed source is driven by the `content` push and calls `onChange`
+   * to make consumers re-read. Returns an unsubscribe. A static source (the stub) has no external
+   * updates.
    */
   observeSessions?(onChange: () => void): () => void;
+  /**
+   * Optional monotonic version, incremented whenever the source's content changes externally. The
+   * IPC-backed source implements it; consumers subscribe via `observeSessions` and use `getVersion`
+   * as the `useSyncExternalStore` snapshot. A static source has no external updates and omits it.
+   */
+  getVersion?: () => number;
+  /** Clips (contentType === 'clip') in list order. The IPC-backed source implements it. */
+  getClips?: () => ContentItem[];
 }
 
 /** Fallback session length before video metadata arrives (placeholder data has no media files). */
@@ -24,7 +32,8 @@ export const DEFAULT_SESSION_SECONDS = 120;
 
 /**
  * PLACEHOLDER — the alpha session source. Data is fabricated; only the shape is meaningful.
- * Replace with an IPC-backed implementation in the task that wires the backend session model.
+ * Tests that inject their own source through the player's `source` prop use the same shape.
+ * The real source is IPC-backed (player/ipcSessionSource.ts).
  */
 export const stubSessionSource: SessionSource = {
   getSessions(): ContentItem[] {

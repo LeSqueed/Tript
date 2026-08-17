@@ -83,6 +83,33 @@ public sealed class SmokeTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    // A configured recording output directory must be honoured by the host's output-path builder.
+    // BuildOutputPath creates the sessions/<date> directory unconditionally, so a fake-recorder
+    // StartRecording is enough to observe where the recording would land — no libobs, no real file.
+    [Fact]
+    public async Task StartRecording_withConfiguredOutputDirectory_createsIt()
+    {
+        var outputRoot = Path.Combine(_contentRoot, "custom-recordings");
+        var seeded = new Tript.Settings.Settings { Recording = { OutputDirectory = outputRoot } };
+        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        File.WriteAllText(_settingsPath, Tript.Settings.SettingsSerialization.Serialize(seeded));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"StartRecording"}""");
+        var (startMethod, startContent) = await host.ReceiveAsyncParsed();
+        Assert.Equal("state", startMethod);
+        Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
+
+        var expected = Path.Combine(outputRoot, "sessions", DateTime.Now.ToString("yyyy-MM-dd"));
+        Assert.True(Directory.Exists(expected), $"The configured output directory was not created: {expected}");
+
+        await host.ShutdownAsync();
+    }
+
     [Fact]
     public async Task UpdateSettings_pushes_the_change()
     {

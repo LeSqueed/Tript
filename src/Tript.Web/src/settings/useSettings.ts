@@ -37,7 +37,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
 
 /** The default settings object, so the pages render even before the first push. */
 const DEFAULT_SETTINGS: SettingsModel = {
-  recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10 },
+  recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10, outputDirectory: null },
   buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
   audio: { outputMode: 'Normal', tracks: [], devices: [], mic: null, desktop: null },
   capture: { method: 'Auto', display: null },

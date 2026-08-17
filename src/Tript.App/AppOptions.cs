@@ -27,7 +27,11 @@ internal sealed class AppOptions
 
     public static AppOptions? Parse(string[] args)
     {
-        string contentRoot = Path.Combine(Path.GetTempPath(), "tript-app", "content");
+        // The content root doubles as the default recording location: recordings live under
+        // <contentRoot>/sessions/<date>/ and the UI lists and streams them from there. On a fresh
+        // install the default is the platform recordings directory (Videos/Tript), so sessions land
+        // somewhere the user can find them; --content-root overrides it for tests and headless runs.
+        string contentRoot = Tript.Settings.RecordingLocations.DefaultDirectory();
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
         string webRoot = DefaultWebRoot();
         var fakeRecorder = false;

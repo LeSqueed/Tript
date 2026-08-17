@@ -121,6 +121,14 @@ export function RecordingPage({
         />
       </Field>
 
+      <Field label="Output directory" hint="Where recordings are saved. Leave empty for the default (Videos/Tript).">
+        <TextField
+          value={settings.outputDirectory ?? ''}
+          onChange={(value) => update(page, { outputDirectory: value === '' ? null : value })}
+          placeholder="e.g. D:\\Recordings"
+        />
+      </Field>
+
       <Field label="Quality" hint="Applied when a game has no override of its own.">
         <SelectField
           value={String(settings.quality)}

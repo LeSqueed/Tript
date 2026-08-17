@@ -64,6 +64,34 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(GameCaptureMode.GameOnly, reloaded.Game.CaptureMode);
     }
 
+    // The recording page's output-directory setting must survive a full save/load round trip so a
+    // user-chosen recording location persists across launches.
+    [Fact]
+    public void SaveThenLoad_RoundTripsTheOutputDirectory()
+    {
+        var settings = _store.Load();
+        settings.Recording.OutputDirectory = "/home/tester/Videos/Tript";
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+
+        Assert.Equal("/home/tester/Videos/Tript", reloaded.Recording.OutputDirectory);
+    }
+
+    // An empty output directory is the default ("use the platform default"): it is written as a
+    // JSON null (WhenWritingNull) and reads back as null rather than a stale value.
+    [Fact]
+    public void SaveThenLoad_EmptyOutputDirectory_ReadsBackAsNull()
+    {
+        var settings = _store.Load();
+        settings.Recording.OutputDirectory = null;
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+
+        Assert.Null(reloaded.Recording.OutputDirectory);
+    }
+
     // A build that models only part of the settings surface must not lose fields it does not
     // model. The file carries a top-level field this model does not know about; a save after a
     // load must re-emit it, and a load must not choke on it.

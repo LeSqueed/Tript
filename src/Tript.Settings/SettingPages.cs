@@ -31,6 +31,10 @@ public sealed class RecordingSettings
 
     // The quality profile applied when a game has no override of its own.
     public int Quality { get; set; } = 10;
+
+    // The directory recordings are written to, or empty for the platform default (Videos/Tript).
+    // The host resolves the effective path; the recorder never sees this field.
+    public string? OutputDirectory { get; set; }
 }
 
 // The buffer page, its own first-class settings surface even though the buffer itself is

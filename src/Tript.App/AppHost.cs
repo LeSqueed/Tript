@@ -765,9 +765,17 @@ internal sealed class AppHost : IDisposable
         _recorder = new RecorderStateMachine(_recorderSession, settings);
     }
 
+    // The output path for a recording. A configured Recording.OutputDirectory overrides the
+    // content root (still under sessions/<date>/ so the layout stays consistent), and empty means
+    // the platform default (Videos/Tript on both platforms). The sessions/<date> subfolder is kept
+    // under a configured directory so the file tree matches the content-root layout exactly.
     private string BuildOutputPath(SettingsModel settings)
     {
-        var directory = Path.Combine(_options.ContentRoot, "sessions",
+        var outputRoot = string.IsNullOrWhiteSpace(settings.Recording.OutputDirectory)
+            ? _options.ContentRoot
+            : settings.Recording.OutputDirectory;
+
+        var directory = Path.Combine(outputRoot, "sessions",
             DateTime.Now.ToString("yyyy-MM-dd"));
         Directory.CreateDirectory(directory);
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmss}.mp4";

@@ -22,7 +22,7 @@ function activeSocket(): MockWebSocket {
 /** The full settings object pushed by the backend. */
 function makeSettings(): SettingsMessageContent['settings'] {
   return {
-    recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10 },
+    recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10, outputDirectory: null },
     buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
     audio: {
       outputMode: 'Normal',
@@ -96,6 +96,7 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Recording mode/)).toBeTruthy();
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     expect(screen.getByLabelText(/^Encoder/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
   });
 
   it('renders the buffer page controls', () => {
@@ -133,6 +134,27 @@ describe('SettingsView', () => {
     const sent = sentUpdates(ws);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ recording: { fps: 144 } });
+  });
+
+  it('output directory edit sends a partial recording page', () => {
+    const { ws } = renderSettings();
+    fireEvent.change(screen.getByLabelText(/^Output directory/), {
+      target: { value: '/home/tester/Videos/Tript' },
+    });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { outputDirectory: '/home/tester/Videos/Tript' } });
+  });
+
+  it('clearing the output directory sends null (use the platform default)', () => {
+    const { ws } = renderSettings();
+    const withDirectory = makeSettings();
+    withDirectory.recording.outputDirectory = '/home/tester/Videos/Tript';
+    pushSettings(ws, withDirectory);
+    fireEvent.change(screen.getByLabelText(/^Output directory/), { target: { value: '' } });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { outputDirectory: null } });
   });
 
   it('recording mode change sends a partial recording page', () => {

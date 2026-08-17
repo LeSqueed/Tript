@@ -17,6 +17,11 @@ export interface RecordingSettings {
   fps: number;
   encoder: string;
   quality: number;
+  /**
+   * The directory recordings are written to, or empty/null for the platform default
+   * (Videos/Tript). A path the user types is a local draft, committed on blur like resolution.
+   */
+  outputDirectory?: string | null;
   [key: string]: unknown;
 }
 

@@ -102,10 +102,8 @@ internal sealed class AppHost : IDisposable
         Console.WriteLine("READY");
         Console.Out.Flush();
 
-        // The UI is a browser page, not a window of our own; open it once the host is serving.
-        // Best-effort — headless boxes and smoke tests get the URL on stdout regardless.
-        BrowserLauncher.Open("http://localhost:2882/");
-
+        // The UI is served over HTTP at the UI host; the URL is the contract on stdout. No browser
+        // is opened — the desktop shell renders the UI in its own window.
         WaitForShutdown();
     }
 

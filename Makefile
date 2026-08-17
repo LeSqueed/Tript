@@ -30,8 +30,8 @@
 # The desktop shell (shell/publish-shell) publishes src/Tript.Shell next to the app host. The shell
 # reuses the app host's construction seam and points a native Photino window at the same UI. On
 # Linux it needs the webkit2gtk-4.1 system package (NOT webkitgtk-6.0) — see README. `run` prefers
-# the shell binary when it has been built and falls back to the headless host (which opens the
-# browser at http://localhost:2882/).
+# the shell binary when it has been built and falls back to the headless host (which prints the UI
+# URL at http://localhost:2882/).
 
 CONFIG ?= Debug
 RID ?= linux-x64
@@ -155,7 +155,7 @@ release:
 	@echo "Built the release app at: $(DIST_DIR)/Release/"
 	@echo "Run it with:              make run CONFIG=Release   (prefers the native window)"
 	@echo "Or run the window directly: ./$(DIST_DIR)/Release/Tript.Shell"
-	@echo "The headless host (opens a browser) is: ./$(DIST_DIR)/Release/Tript.App"
+	@echo "The headless host (prints the UI URL) is: ./$(DIST_DIR)/Release/Tript.App"
 
 linux: publish-linux
 
@@ -163,10 +163,10 @@ windows: publish-windows
 
 # ---- run ----
 # The app host is headless: it prints READY on stdout and serves its UI over HTTP. There is no
-# window; it opens the default browser at the UI URL itself (best-effort), and the URL is printed
-# too in case that does not work. Use FAKE_RECORDER=false to record with real OBS (needs a display
-# server and a system obs-studio install). `run` prefers the desktop shell (Tript.Shell) when it has
-# been built (make shell) and falls back to the headless host otherwise.
+# window; the URL is printed on stdout and no browser is opened. Use FAKE_RECORDER=false to record
+# with real OBS (needs a display server and a system obs-studio install). `run` prefers the desktop
+# shell (Tript.Shell) when it has been built (make shell) and falls back to the headless host
+# otherwise.
 run:
 	@if [ -x "$(SHELL_BIN)" ]; then \
 		echo "Launching desktop shell..."; \
@@ -174,7 +174,7 @@ run:
 	else \
 		echo "No shell binary at $(SHELL_BIN); falling back to headless host."; \
 		cd $(PUBLISH_DIR) && ./Tript.App $$([ "$(FAKE_RECORDER)" = "true" ] && echo --fake-recorder) \
-			& echo "Tript is up — open http://localhost:2882/ (Ctrl-C to stop)"; wait; \
+			& echo "Tript is up — UI served at http://localhost:2882/ (Ctrl-C to stop)"; wait; \
 	fi
 
 # ---- test ----

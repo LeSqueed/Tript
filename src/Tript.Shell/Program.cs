@@ -103,9 +103,9 @@ internal static class Program
         }
     }
 
-    // Polls the UI host until it answers. The host prints READY after starting its servers and
-    // then calls BrowserLauncher.Open (best-effort, swallowed) before blocking in WaitForShutdown;
-    // by the time READY has been observed the UI host is accepting connections.
+    // Polls the UI host until it answers. The host prints READY after starting its servers, serves
+    // the UI over HTTP and blocks in WaitForShutdown; by the time READY has been observed the UI
+    // host is accepting connections.
     private static bool WaitForUi(string url, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;

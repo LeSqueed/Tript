@@ -6,7 +6,7 @@ Tript is a clean-room screen recorder that watches for a supported game to be de
 
 There are two ways to run Tript — same app host, different front end:
 
-- **Headless** (`Tript.App`): no window. The host starts and serves the UI over HTTP; it opens your default browser at <http://localhost:2882/> (best-effort) and prints the URL too.
+- **Headless** (`Tript.App`): no window. The host starts and serves the UI over HTTP at <http://localhost:2882/> and prints the URL; no browser is opened.
 - **Desktop shell** (`Tript.Shell`): a native window via Photino that hosts the same React UI, pointing the webview at `http://localhost:2882/`.
 
 `make run` prefers the shell binary when it has been built (`make shell`) and falls back to the headless host otherwise.

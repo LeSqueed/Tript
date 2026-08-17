@@ -149,12 +149,13 @@ dev: publish-linux
 	$(MAKE) run
 
 release:
-	@echo "Building the release binary..."
-	$(MAKE) CONFIG=Release linux
+	@echo "Building the release app (headless host + desktop shell)..."
+	$(MAKE) CONFIG=Release linux publish-shell
 	@echo ""
-	@echo "Built the release binary at: $(DIST_DIR)/Release/Tript.App"
-	@echo "Run it with:                make run CONFIG=Release"
-	@echo "Then open the UI at:        http://localhost:2882/"
+	@echo "Built the release app at: $(DIST_DIR)/Release/"
+	@echo "Run it with:              make run CONFIG=Release   (prefers the native window)"
+	@echo "Or run the window directly: ./$(DIST_DIR)/Release/Tript.Shell"
+	@echo "The headless host (opens a browser) is: ./$(DIST_DIR)/Release/Tript.App"
 
 linux: publish-linux
 

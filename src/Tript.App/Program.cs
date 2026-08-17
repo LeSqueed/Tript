@@ -14,7 +14,10 @@ namespace Tript.App;
 //   1. libobs context — safe module allowlist plus the audio module, display handed over the same
 //      way the harness and integration tests do (libobs cannot discover the display server on Linux),
 //      video and audio mixes reset, modules loaded.
-//   2. SettingsStore (file-backed, at the platform config directory; overridable for tests).
+//   2. SettingsStore (file-backed, at the platform config directory; overridable for tests), plus
+//      the primary display's resolution — detected once, used as the fresh-install resolution
+//      default and offered to the settings UI. Constructed before the libobs context because the
+//      canvas and the frame rate are both read from the settings.
 //   3. FrameSourceRegistry resolver. ObsRuntime.Start installs one at startup; the app host is where
 //      the resolution is verified to exist before the first detection is asked to start.
 //   4. RecordingSessionTracker.Register() — the process-wide resolver the detection host writes
@@ -51,8 +54,16 @@ internal static class Program
     internal static AppHost BuildApp(AppOptions options)
     {
         // The settings store is constructed before the runtime so the runtime can be initialised
-        // with the recording frame rate from the settings (the FPS selector must affect the mix).
+        // with the recording resolution and frame rate from the settings (both must affect the mix).
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
+
+        // Detected once per launch, before anything reads the settings. Two consumers: the
+        // resolution a fresh install defaults to, and the "(display)" option the settings UI offers
+        // (AppHost.PushSettings). Detecting once rather than per push keeps the X round trip off
+        // every settings mutation, and the answer cannot change without a restart anyway — the
+        // canvas is fixed at startup (see StartObsRuntime).
+        var primaryDisplay = PrimaryDisplay.Detect();
+        ApplyFirstRunDefaults(store, primaryDisplay);
 
         // The libobs context, when the recording path is real. The seam mode (--fake-recorder)
         // records through a fake recorder session, so no libobs is started at all — the smoke
@@ -60,7 +71,7 @@ internal static class Program
         ObsRuntime? runtime = null;
         if (!options.FakeRecorder)
         {
-            runtime = StartObsRuntime(store.Load().Recording.Fps);
+            runtime = StartObsRuntime(store.Load().Recording);
 
             // The detection host resolves the live frame source through the registry.
             // ObsRuntime.Start installs the resolver; this is where the alpha verifies the
@@ -73,14 +84,46 @@ internal static class Program
         // the tracker is what makes that true for this process.
         var tracker = new RecordingSessionTracker().Register();
 
-        return new AppHost(options, store, runtime, tracker);
+        return new AppHost(options, store, runtime, tracker, primaryDisplay);
+    }
+
+    // The fresh-install resolution default: the primary display's own size, so a first launch
+    // records at the resolution the user actually plays at rather than at whatever the model's
+    // literal default happens to be.
+    //
+    // It lives here, in the host, rather than on RecordingSettings, for two reasons. Display
+    // enumeration is platform P/Invoke and Tript.Settings is a model layer that has to stay unit
+    // testable on a machine with no display at all. And a *default on the property* would apply to
+    // every load, including a load of an existing settings file that simply has no resolution key —
+    // which is the forward-compatibility case JsonExtensionData exists to protect. Applying it only
+    // when there is no settings file keeps the rule narrow and legible: a file that exists is the
+    // user's, whatever is in it.
+    //
+    // The file is written on the way out so the first run is a first run exactly once; from then on
+    // the stored value is what the canvas and the encoder both read.
+    internal static bool ApplyFirstRunDefaults(SettingsStore store, DisplaySize? primaryDisplay)
+    {
+        if (File.Exists(store.FilePath))
+            return false;
+
+        var settings = store.Load();
+        if (primaryDisplay is { IsUsable: true } display)
+        {
+            settings.Recording.ResolutionWidth = display.Width;
+            settings.Recording.ResolutionHeight = display.Height;
+        }
+
+        // No detection: the model's own 1920x1080 stands. Nothing to correct — a safe default beats
+        // a guess, and the user can pick their resolution in the settings UI.
+        store.Save();
+        return true;
     }
 
     // The startup is platform-split. On Linux, OBS is a system dependency and the runtime needs
     // the display handed over explicitly (libobs cannot discover the display server for itself).
     // On Windows, OBS is bundled next to the app and needs no X11. The runtime itself — video and
     // audio reset, module load — is shared.
-    private static ObsRuntime StartObsRuntime(int fps)
+    private static ObsRuntime StartObsRuntime(RecordingSettings recording)
     {
         var locations = ObsRuntimeLocator.Discover();
         if (!locations.Found)
@@ -120,19 +163,7 @@ internal static class Program
 
         var runtime = ObsRuntime.Start(startup);
 
-        var video = new ObsVideoSettings
-        {
-            BaseWidth = 1920,
-            BaseHeight = 1080,
-            OutputWidth = 1920,
-            OutputHeight = 1080,
-            // The recording frame rate comes from the settings, so the FPS selector actually
-            // affects the recorded mix (libobs runs the compositor at fps_num/fps_den).
-            FpsNumerator = (uint)Math.Max(1, fps),
-            FpsDenominator = 1
-        };
-
-        if (runtime.ResetVideo(video) != ObsVideoResetResult.Success)
+        if (runtime.ResetVideo(BuildVideoSettings(recording)) != ObsVideoResetResult.Success)
             throw new InvalidOperationException("obs_reset_video refused the settings.");
 
         if (!runtime.ResetAudio(new ObsAudioSettings()))
@@ -168,6 +199,47 @@ internal static class Program
             throw new InvalidOperationException("The runtime has no video or audio mix after reset.");
 
         return runtime;
+    }
+
+    // The video mix the runtime is reset with: the canvas the compositor renders at, and the frame
+    // rate it renders at.
+    //
+    // **The canvas comes from the settings, not from a constant.** It used to be a hardcoded
+    // 1920x1080 while the frame rate was read from the settings, and the asymmetry was a real
+    // recording-quality bug rather than a tidiness one: ObsRecorderSession.CreateOutput calls
+    // videoEncoder.SetScaledSize(ResolutionWidth, ResolutionHeight), so a user who chose 2560x1440
+    // got the encoder scaling a 1080p canvas *up* to 1440p — a soft, upscaled recording in a file
+    // labelled 1440p, with the cost of encoding 1440p and none of the detail. The canvas has to be
+    // at least the size the encoder is asked to emit, and making it exactly that size means the
+    // scaler does nothing at all.
+    //
+    // **The canvas is fixed for the life of the process.** obs_reset_video is called once here, at
+    // startup, and libobs refuses it outright while an output is active; nothing re-runs it when the
+    // settings change. So a resolution changed in the UI reaches the *encoder's* scaled size on the
+    // next recording (that is per-output, and read from the settings each time) but does not move
+    // the canvas until the app is restarted — a resolution raised mid-session is still an upscale
+    // until then. Making the canvas follow a live settings change means tearing down and rebuilding
+    // the video mix with every source and encoder bound to it, which is a larger change than this.
+    //
+    // Both dimensions and the frame rate are floored at 1: a zero in any of them is the one
+    // combination libobs rejects outright, and a corrupt settings file should not be a failure to
+    // start.
+    internal static ObsVideoSettings BuildVideoSettings(RecordingSettings recording)
+    {
+        var width = (uint)Math.Max(1, recording.ResolutionWidth);
+        var height = (uint)Math.Max(1, recording.ResolutionHeight);
+
+        return new ObsVideoSettings
+        {
+            BaseWidth = width,
+            BaseHeight = height,
+            OutputWidth = width,
+            OutputHeight = height,
+            // The recording frame rate comes from the settings, so the FPS selector actually
+            // affects the recorded mix (libobs runs the compositor at fps_num/fps_den).
+            FpsNumerator = (uint)Math.Max(1, recording.Fps),
+            FpsDenominator = 1
+        };
     }
 
     // The module allowlist. Kept small: the recorder needs the x264/ffmpeg encoders, the capture

@@ -92,6 +92,63 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Null(reloaded.Recording.OutputDirectory);
     }
 
+    // The recording resolution must survive a round trip because it is read twice per launch and by
+    // two different consumers: the host resets the OBS canvas to it at startup, and the recorder
+    // scales the video encoder to it per recording. A resolution that reverted to the default on
+    // every launch would silently change what every subsequent recording looks like.
+    [Fact]
+    public void SaveThenLoad_RoundTripsTheResolution()
+    {
+        var settings = _store.Load();
+        settings.Recording.ResolutionWidth = 2560;
+        settings.Recording.ResolutionHeight = 1440;
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+
+        Assert.Equal(2560, reloaded.Recording.ResolutionWidth);
+        Assert.Equal(1440, reloaded.Recording.ResolutionHeight);
+    }
+
+    // The model's own default is 1080p, and it is reached without asking the platform anything.
+    //
+    // A fresh install actually starts at the primary display's resolution, but that default is
+    // applied by the host (Tript.App/Program.ApplyFirstRunDefaults) when it creates a settings file
+    // that does not exist yet — deliberately not here. Display enumeration is platform P/Invoke, and
+    // this layer has to stay unit testable on a machine with no display at all, which is exactly what
+    // this test asserts: no display server is running in the test process and the default still
+    // resolves.
+    [Fact]
+    public void TheDefaultResolution_IsTheSafeFallback_AndNeedsNoDisplay()
+    {
+        var settings = new Settings();
+
+        Assert.Equal(1920, settings.Recording.ResolutionWidth);
+        Assert.Equal(1080, settings.Recording.ResolutionHeight);
+    }
+
+    // An existing settings file keeps exactly the resolution it carries. This is the other half of
+    // the first-run rule: the host applies a detected display size only when there is no file, so a
+    // user who chose 1280x720 on a 1440p screen keeps 1280x720 — a load must never "correct" a stored
+    // resolution towards the hardware.
+    [Fact]
+    public void ALoadOfAnExistingFile_KeepsItsStoredResolution()
+    {
+        File.WriteAllText(_provider.FilePath,
+            """{"version":1,"recording":{"resolutionWidth":1280,"resolutionHeight":720}}""");
+
+        var settings = _store.Load();
+        Assert.Equal(1280, settings.Recording.ResolutionWidth);
+        Assert.Equal(720, settings.Recording.ResolutionHeight);
+
+        // And a save re-emits it rather than the model default.
+        _store.Save();
+        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
+        var recording = doc.RootElement.GetProperty("recording");
+        Assert.Equal(1280, recording.GetProperty("resolutionWidth").GetInt32());
+        Assert.Equal(720, recording.GetProperty("resolutionHeight").GetInt32());
+    }
+
     // The recording page's codec-and-quality surface: the rate-control choice and the two bitrate
     // figures the rate-targeted modes use. These must survive a round trip for the same reason the
     // encoder id must — the recorder resolves them per machine, but the *choice* is the user's and is

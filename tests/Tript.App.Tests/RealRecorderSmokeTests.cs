@@ -55,8 +55,9 @@ public sealed class RealRecorderSmokeTests : IDisposable
         var (startMethod, startContent) = await DrainUntilState(host);
         Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
 
-        // Let the recorder produce real frames; the alpha records Session at 1080p60 through the
-        // muxer, so a few seconds is plenty for a real file.
+        // Let the recorder produce real frames; the alpha records a Session through the muxer at
+        // whatever the settings say (a fresh settings file starts at this machine's primary display
+        // resolution — Program.ApplyFirstRunDefaults), so a few seconds is plenty for a real file.
         await Task.Delay(TimeSpan.FromSeconds(4));
 
         await host.SendAsync("""{"method":"StopRecording"}""");

@@ -28,6 +28,10 @@ internal sealed class ContentItem
     public double? StartTime { get; set; }
 
     public double? EndTime { get; set; }
+
+    // The bookmarks the recording carries on the wire, null when the item has none (clips never
+    // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).
+    public List<BookmarkItem>? Bookmarks { get; set; }
 }
 
 internal sealed class GameInfo

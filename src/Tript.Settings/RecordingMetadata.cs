@@ -11,6 +11,12 @@ namespace Tript.Settings;
 
 public sealed class RecordingMetadata
 {
+    // The link key back to the video, as the '/' separated path relative to the recording root
+    // (for example "sessions/session-20260817-083000.mp4"). The metadata lives in a separate
+    // metadata/ tree — never next to the video — so this field is how a record is connected to
+    // the file it describes.
+    public string VideoPath { get; set; } = string.Empty;
+
     // The game this recording belongs to, when a game was associated with it. Free-form by
     // choice: the game may be a known catalogue entry or an ad-hoc attribution made at recovery
     // time, and the metadata is not the place to enforce the catalogue.
@@ -19,6 +25,10 @@ public sealed class RecordingMetadata
     public ContentType ContentType { get; set; } = ContentType.Recording;
 
     public DateTime StartTime { get; set; }
+
+    // The user-facing title, when the user renamed the recording (RenameContent). Null or empty
+    // means the file-name-without-extension is the title.
+    public string? Title { get; set; }
 
     // The audio track layout: which track holds which device. The layout is part of the
     // recording's metadata contract and is preserved across compression.

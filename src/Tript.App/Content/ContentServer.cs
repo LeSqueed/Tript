@@ -34,7 +34,7 @@ internal sealed class ContentServer : IDisposable
     private static readonly Regex PathSegment =
         new(@"(^|/)\.\.(/|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private readonly string _contentRoot;
+    private string _contentRoot;
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
 
@@ -47,6 +47,14 @@ internal sealed class ContentServer : IDisposable
     }
 
     internal string ContentRoot => _contentRoot;
+
+    // Switches the guard root to a new directory. A settings change that moves the recording
+    // output directory rebuilds the root the traversal guard resolves against; the listener stays
+    // up and keeps serving from the new root.
+    internal void UpdateRoot(string contentRoot)
+    {
+        _contentRoot = Path.GetFullPath(contentRoot);
+    }
 
     public void Start()
     {

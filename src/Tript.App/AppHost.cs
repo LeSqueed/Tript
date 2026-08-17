@@ -38,6 +38,7 @@ internal sealed class AppHost : IDisposable
     private readonly IpcServer _ipc;
     private readonly ContentServer _content;
     private readonly UiHost _ui;
+    private readonly RecordingMetadataStore _metadata;
 
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
@@ -60,12 +61,15 @@ internal sealed class AppHost : IDisposable
         _runtime = runtime;
         _sessionTracker = sessionTracker;
 
+        EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
+
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller);
-        _content = new ContentServer(options.ContentRoot);
+        _content = new ContentServer(EffectiveRoot);
         _ui = new UiHost(options.WebRoot);
+        _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
 
-        Directory.CreateDirectory(options.ContentRoot);
+        Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
     }
 
@@ -86,6 +90,18 @@ internal sealed class AppHost : IDisposable
         : null;
 
     private string? _currentGameId;
+
+    // The single root everything content lives under: sessions, clips, the metadata tree and the
+    // content server's traversal guard all resolve against it. A configured
+    // Recording.OutputDirectory is the effective root; empty falls back to the content root. A
+    // settings change that moves OutputDirectory updates it in place.
+    internal string EffectiveRoot { get; private set; }
+
+    private static string ResolveEffectiveRoot(AppOptions options, SettingsStore settingsStore)
+    {
+        var configured = settingsStore.Load().Recording.OutputDirectory;
+        return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
+    }
 
     // ---- lifetime ----
 
@@ -203,7 +219,7 @@ internal sealed class AppHost : IDisposable
         if (session is not null && _pendingMetadata is not null)
         {
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
-            WriteMetadataSidecar(_pendingMetadata);
+            WriteMetadataRecord(_pendingMetadata);
         }
 
         _pendingMetadata = null;
@@ -214,26 +230,22 @@ internal sealed class AppHost : IDisposable
         return true;
     }
 
-    // Persists the recording's metadata — game, start time, content type, audio tracks and the
-    // automatic bookmarks the detection host produced (spec/config-and-storage.md) — next to the
-    // file, so a finished recording carries its metadata on disk and bookmarks survive the process.
-    // The .bookmarks.json sidecar is the user-driven bookmark path (AddBookmark/DeleteBookmark) and
-    // is left alone here. A failed start leaves no file, so the sidecar is written only when the
-    // recording actually exists.
-    private void WriteMetadataSidecar(RecordingMetadata metadata)
+    // Persists the recording's metadata — game, start time, content type, audio tracks, the
+    // automatic bookmarks the detection host produced and the link key back to the video — into
+    // the metadata store (spec/config-and-storage.md), so bookmarks survive the process. The
+    // record is written only when the recording actually exists. A session is now part of the
+    // library, so the content list is pushed.
+    private void WriteMetadataRecord(RecordingMetadata metadata)
     {
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
             return;
 
-        var sidecar = _activeOutputPath + ".metadata.json";
-        try
-        {
-            File.WriteAllText(sidecar, JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not write metadata sidecar: {exception.Message}");
-        }
+        var relative = Path.GetRelativePath(EffectiveRoot, _activeOutputPath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        metadata.VideoPath = relative;
+
+        _metadata.Save(metadata);
+        PushContent();
     }
 
     // ---- lifecycle no-ops (the commands the alpha accepts but does not implement) ----
@@ -328,6 +340,19 @@ internal sealed class AppHost : IDisposable
         }
 
         _settingsStore.Save();
+
+        // A changed OutputDirectory takes effect immediately, without a restart: the effective
+        // root, the content server's guard root and the metadata store are rebuilt from the
+        // updated settings.
+        var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, _settingsStore));
+        if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))
+        {
+            EffectiveRoot = effectiveRoot;
+            _content.UpdateRoot(effectiveRoot);
+            _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
+            Directory.CreateDirectory(effectiveRoot);
+        }
+
         PushSettings();
         return true;
     }
@@ -454,30 +479,83 @@ internal sealed class AppHost : IDisposable
 
     // ---- content ----
 
-    internal string ContentRoot => _options.ContentRoot;
+    // The path every content URL is resolved against. ContentServer holds the same root (it owns
+    // the traversal guard), so this is kept for callers that need the root without the server.
+    internal string ContentRoot => EffectiveRoot;
+
+    // Rebuilds the content catalogue from disk and broadcasts it as the "content" message. The
+    // frontend requests it on mount (the ListContent command) and the host pushes it whenever the
+    // catalogue changes — after a recording stops, a clip completes, a rename, or a delete.
+    internal void PushContent()
+    {
+        _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
+        {
+            content = ListContent(),
+        }, Wire.Options));
+    }
 
     internal List<ContentItem> ListContent()
     {
         var items = new List<ContentItem>();
-        var root = new DirectoryInfo(_options.ContentRoot);
+        var root = new DirectoryInfo(EffectiveRoot);
         if (!root.Exists)
             return items;
 
         foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(_options.ContentRoot, file.FullName)
+            var relative = Path.GetRelativePath(EffectiveRoot, file.FullName)
                 .Replace(Path.DirectorySeparatorChar, '/');
-            items.Add(new ContentItem
+            var topLevel = TopLevelDirectory(relative);
+            var contentType = topLevel.Equals("clips", StringComparison.Ordinal) ? "clip" : "recording";
+
+            var item = new ContentItem
             {
-                ContentType = "recording",
+                ContentType = contentType,
                 FileName = file.Name,
                 FilePath = relative,
                 Title = Path.GetFileNameWithoutExtension(file.Name),
-            });
+            };
+
+            if (contentType == "recording")
+            {
+                var metadata = _metadata.Load(file.Name);
+                if (metadata is not null)
+                {
+                    item.Bookmarks = metadata.Bookmarks
+                        .Select(bookmark => new BookmarkItem
+                        {
+                            Id = bookmark.Id.ToString(),
+                            Type = bookmark.Type.ToString().ToLowerInvariant(),
+                            Subtype = bookmark.Subtype,
+                            Time = bookmark.Time.TotalSeconds,
+                        })
+                        .ToList();
+                    item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
+                    item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
+                }
+                else
+                {
+                    // A session with no metadata record still lists — empty bookmarks, no title.
+                    item.Bookmarks = [];
+                }
+            }
+
+            items.Add(item);
         }
 
         return items;
     }
+
+    // The first path segment of a '/' separated relative path. Used to classify an item by its
+    // top-level directory (sessions/ -> recording, clips/ -> clip).
+    private static string TopLevelDirectory(string relativePath)
+    {
+        var separator = relativePath.IndexOf('/');
+        return separator >= 0 ? relativePath[..separator] : relativePath;
+    }
+
+    private static double? DateTimeToUnixSeconds(DateTime dateTime)
+        => dateTime == default ? null : new DateTimeOffset(dateTime).ToUnixTimeSeconds();
 
     // ---- content operations ----
 
@@ -486,13 +564,21 @@ internal sealed class AppHost : IDisposable
         if (parameters is null || string.IsNullOrEmpty(parameters.FileName))
             return;
 
-        var target = ResolveContentFile(parameters.FileName);
+        // Resolve against the root even when the file is missing: a delete for a video whose file
+        // was removed out-of-band must still drop the metadata record (cascade-delete contract).
+        // ResolveContentFile refuses paths with no file on disk, so use the traversal-safe
+        // resolver directly and let File.Delete be the no-op it already is.
+        var target = _content.ResolveWithinRoot(parameters.FileName);
         if (target is null)
             return;
 
         try
         {
             File.Delete(target);
+            // The cascade-delete contract: a deleted video takes its metadata record with it, so
+            // the metadata/ tree never keeps an orphaned record for a video that is gone.
+            _metadata.Delete(Path.GetFileName(target));
+            PushContent();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -517,18 +603,18 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
-        // The alpha renames by writing a sidecar title next to the file. A real rename would
-        // rewrite the metadata; the alpha has no per-file metadata store, so the title change is
-        // recorded as a .title file the library reads when it builds the list.
-        try
+        // The title is stored on the video's metadata record; a video with no record yet gets one
+        // (the record is created with just the link key and the title). The library reads the
+        // title back when it builds the list.
+        var fileName = Path.GetFileName(target);
+        var metadata = _metadata.Load(fileName) ?? new RecordingMetadata
         {
-            var sidecar = target + ".title";
-            File.WriteAllText(sidecar, parameters.Title ?? string.Empty);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not rename '{target}': {exception.Message}");
-        }
+            VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
+        };
+        metadata.Title = parameters.Title;
+
+        _metadata.Save(metadata);
+        PushContent();
     }
 
     private string? ResolveContentFile(string fileName)
@@ -563,42 +649,28 @@ internal sealed class AppHost : IDisposable
             return;
         }
 
-        // A finished recording: the bookmark is written to the metadata sidecar. The alpha has no
-        // per-file metadata store beyond RecordingMetadata; the bookmark is appended to the file's
-        // .bookmarks.json sidecar.
+        // A finished recording: the bookmark is appended to the video's metadata record in the
+        // metadata store. A video with no record yet gets one (just the link key and the
+        // bookmark).
         var target = ResolveContentFile(parameters.FilePath);
         if (target is null)
             return;
 
-        var sidecar = target + ".bookmarks.json";
-        var bookmarks = new List<BookmarkItem>();
-        if (File.Exists(sidecar))
+        var fileName = Path.GetFileName(target);
+        var metadata = _metadata.Load(fileName) ?? new RecordingMetadata
         {
-            try
-            {
-                bookmarks = JsonSerializer.Deserialize<List<BookmarkItem>>(File.ReadAllText(sidecar), Wire.Options) ?? [];
-            }
-            catch (JsonException)
-            {
-                bookmarks = [];
-            }
-        }
-
-        bookmarks.Add(new BookmarkItem
+            VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
+        };
+        metadata.Bookmarks.Add(new Tript.Core.Bookmark
         {
-            Id = string.IsNullOrEmpty(parameters.Id) ? Guid.NewGuid().ToString("N") : parameters.Id,
-            Type = parameters.Type,
-            Time = parameters.Time,
+            // The frontend may send its own id or none at all; the store keys bookmarks by a
+            // GUID, so an unparseable or absent id gets a fresh one.
+            Id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.NewGuid(),
+            Type = ParseBookmarkType(parameters.Type),
+            Time = TimeSpan.FromSeconds(parameters.Time),
         });
 
-        try
-        {
-            File.WriteAllText(sidecar, JsonSerializer.Serialize(bookmarks, Wire.Options));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not write bookmark sidecar: {exception.Message}");
-        }
+        _metadata.Save(metadata);
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
@@ -610,20 +682,14 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
-        var sidecar = target + ".bookmarks.json";
-        if (!File.Exists(sidecar))
+        var fileName = Path.GetFileName(target);
+        var metadata = _metadata.Load(fileName);
+        if (metadata is null)
             return;
 
-        try
-        {
-            var bookmarks = JsonSerializer.Deserialize<List<BookmarkItem>>(File.ReadAllText(sidecar), Wire.Options) ?? [];
-            bookmarks.RemoveAll(b => b.Id == parameters.Id);
-            File.WriteAllText(sidecar, JsonSerializer.Serialize(bookmarks, Wire.Options));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not write bookmark sidecar: {exception.Message}");
-        }
+        var id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.Empty;
+        metadata.Bookmarks.RemoveAll(b => b.Id == id);
+        _metadata.Save(metadata);
     }
 
     private static Tript.Core.BookmarkType ParseBookmarkType(string type)
@@ -635,9 +701,9 @@ internal sealed class AppHost : IDisposable
 
     // ---- recovery ----
 
-    // The minimal orphan recovery: scan the content root for files that exist on disk but have no
+    // The minimal orphan recovery: scan the recording root for files that exist on disk but have no
     // entry in the library list (a crashed recording leaves an .mp4.part or an .mp4 without a
-    // metadata sidecar), and offer them via recoveryPrompt. The alpha does not have a full recovery
+    // metadata record), and offer them via recoveryPrompt. The alpha does not have a full recovery
     // catalogue; it lists the orphan candidates and the frontend can confirm or decline.
     internal void RaiseRecoveryPromptIfNeeded(ClientHandle client)
     {
@@ -660,18 +726,17 @@ internal sealed class AppHost : IDisposable
     private List<string> FindOrphanFiles()
     {
         var orphans = new List<string>();
-        var root = new DirectoryInfo(_options.ContentRoot);
+        var root = new DirectoryInfo(EffectiveRoot);
         if (!root.Exists)
             return orphans;
 
         foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(_options.ContentRoot, file.FullName);
+            var relative = Path.GetRelativePath(EffectiveRoot, file.FullName);
             var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
 
-            // A file is orphaned when it is not part of the catalogue the library builds. The
-            // catalogue has no metadata store yet; for the alpha, "in the catalogue" means the
-            // file is a session path the host would have built. A file in clips/ is never orphaned.
+            // A file is orphaned when it is not part of the catalogue the library builds — the
+            // session paths the host would have built. A file in clips/ is never orphaned.
             if (normalized.StartsWith("sessions/", StringComparison.Ordinal))
                 continue;
             if (normalized.StartsWith("clips/", StringComparison.Ordinal))
@@ -722,9 +787,12 @@ internal sealed class AppHost : IDisposable
                     {
                         ContentType = "clip",
                         FileName = Path.GetFileName(results[0]),
-                        FilePath = Path.GetRelativePath(_options.ContentRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
+                        FilePath = Path.GetRelativePath(EffectiveRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
                     },
                 }, Wire.Options));
+
+                // A clip completed: the catalogue changed, so the content list is pushed.
+                PushContent();
             }
             catch (Exception exception)
             {
@@ -765,18 +833,12 @@ internal sealed class AppHost : IDisposable
         _recorder = new RecorderStateMachine(_recorderSession, settings);
     }
 
-    // The output path for a recording. A configured Recording.OutputDirectory overrides the
-    // content root (still under sessions/<date>/ so the layout stays consistent), and empty means
-    // the platform default (Videos/Tript on both platforms). The sessions/<date> subfolder is kept
-    // under a configured directory so the file tree matches the content-root layout exactly.
+    // The output path for a recording. Sessions are flat under <effectiveRoot>/sessions/ — the
+    // timestamp is already in the file name, so there is no date subfolder. The sessions directory
+    // is created unconditionally, as before.
     private string BuildOutputPath(SettingsModel settings)
     {
-        var outputRoot = string.IsNullOrWhiteSpace(settings.Recording.OutputDirectory)
-            ? _options.ContentRoot
-            : settings.Recording.OutputDirectory;
-
-        var directory = Path.Combine(outputRoot, "sessions",
-            DateTime.Now.ToString("yyyy-MM-dd"));
+        var directory = Path.Combine(EffectiveRoot, "sessions");
         Directory.CreateDirectory(directory);
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmss}.mp4";
         return Path.Combine(directory, name);

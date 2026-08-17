@@ -38,6 +38,7 @@ internal sealed class AppController
             ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
             ["CreateClip"] = (parameters, _) => _host.CreateClip(BuildClipRequest(parameters)),
+            ["ListContent"] = (_, _) => _host.PushContent(),
             ["CancelClip"] = (_, _) => { /* The engine is not cancellable in the alpha. */ },
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
@@ -90,7 +91,7 @@ internal sealed class AppController
         _host.RaiseRecoveryPromptIfNeeded(client);
     }
 
-    private static ClipRequest BuildClipRequest(JsonElement? parameters)
+    private ClipRequest BuildClipRequest(JsonElement? parameters)
     {
         var parsed = parameters.Deserialize<CreateClipParameters>() ?? new CreateClipParameters();
 
@@ -102,7 +103,7 @@ internal sealed class AppController
             ? parsed.Segments.Select(segment => ClipRegion.FromSeconds(segment.StartTime, segment.EndTime)).ToList()
             : [ClipRegion.FromSeconds(parsed.StartTime, parsed.EndTime)];
 
-        var outputPath = BuildClipOutputPath(parsed);
+        var outputPath = BuildClipOutputPath(parsed, _host.EffectiveRoot);
 
         return new ClipRequest
         {
@@ -116,14 +117,25 @@ internal sealed class AppController
         };
     }
 
-    private static string BuildClipOutputPath(CreateClipParameters parameters)
+    // Where a clip is written. Clips live in a single top-level clips/ directory under the
+    // recording root. The name carries both the source session and the clip id (the frontend's
+    // newClipId()), so a combine clip and a separate-mode batch all stay distinct:
+    //   <root>/clips/session-20260817-083000-clip-k2m3xq.mp4
+    //   <root>/clips/session-20260817-083000-clip-1-0s-10s.mp4   (separate mode)
+    // Separate mode contributes only the directory; the engine (BuildFileName) supplies the
+    // per-region file names inside it.
+    internal static string BuildClipOutputPath(CreateClipParameters parameters, string effectiveRoot)
     {
-        // The clip lands next to its source in the content tree, named after the request's id so a
-        // separate-mode batch produces distinct files.
-        var directory = Path.GetDirectoryName(parameters.FilePath) ?? string.Empty;
-        var outputDirectory = Path.Combine(directory, "clips");
-        var baseName = parameters.Id.Length > 0 ? parameters.Id : Guid.NewGuid().ToString("N");
-        return Path.Combine(outputDirectory, $"{baseName}.mp4");
+        var outputDirectory = Path.Combine(effectiveRoot, "clips");
+
+        if (parameters.OutputMode.Equals("separate", StringComparison.OrdinalIgnoreCase))
+        {
+            return outputDirectory;
+        }
+
+        var sourceBaseName = Path.GetFileNameWithoutExtension(parameters.FilePath);
+        var id = parameters.Id.Length > 0 ? parameters.Id : Guid.NewGuid().ToString("N");
+        return Path.Combine(outputDirectory, $"{sourceBaseName}-{id}.mp4");
     }
 }
 

@@ -36,7 +36,7 @@ public sealed class ContentServerTests : IDisposable
     {
         // A 20-byte payload so ranges are predictable.
         const string payload = "0123456789abcdefghij";
-        var file = Path.Combine(_contentRoot, "sessions", "2026-08-16", "clip.mp4");
+        var file = Path.Combine(_contentRoot, "sessions", "clip.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         await File.WriteAllTextAsync(file, payload);
 
@@ -44,20 +44,20 @@ public sealed class ContentServerTests : IDisposable
         await using var _ = host;
 
         // A range in the middle: bytes 4..8 -> "45678".
-        using var response = await GetWithRange("sessions/2026-08-16/clip.mp4", "bytes=4-8");
+        using var response = await GetWithRange("sessions/clip.mp4", "bytes=4-8");
         Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
         Assert.Equal("bytes 4-8/20", response.Content.Headers.GetValues("Content-Range").Single());
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("45678", body);
 
         // A suffix range: the final 5 bytes -> "fghij".
-        using var suffix = await GetWithRange("sessions/2026-08-16/clip.mp4", "bytes=-5");
+        using var suffix = await GetWithRange("sessions/clip.mp4", "bytes=-5");
         Assert.Equal(HttpStatusCode.PartialContent, suffix.StatusCode);
         Assert.Equal("bytes 15-19/20", suffix.Content.Headers.GetValues("Content-Range").Single());
         Assert.Equal("fghij", await suffix.Content.ReadAsStringAsync());
 
         // An out-of-bounds range -> 416.
-        using var oob = await GetWithRange("sessions/2026-08-16/clip.mp4", "bytes=200-300");
+        using var oob = await GetWithRange("sessions/clip.mp4", "bytes=200-300");
         Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, oob.StatusCode);
 
         await host.ShutdownAsync();
@@ -90,7 +90,7 @@ public sealed class ContentServerTests : IDisposable
         Assert.Equal("TOP SECRET", await File.ReadAllTextAsync(outside));
 
         // A missing file inside the root is a clean 404, not a 403 or a leak.
-        using var missing = await SendRawAsync("/api/content/sessions/2026-08-16/nope.mp4");
+        using var missing = await SendRawAsync("/api/content/sessions/nope.mp4");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
 
         await host.ShutdownAsync();

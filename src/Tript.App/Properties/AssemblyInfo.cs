@@ -8,3 +8,4 @@ using System.Runtime.CompilerServices;
 // host, not two divergent copies. Exposing the internal construction seam is all the shell needs;
 // nothing else about the host is public.
 [assembly: InternalsVisibleTo("Tript.Shell")]
+[assembly: InternalsVisibleTo("Tript.App.Tests")]

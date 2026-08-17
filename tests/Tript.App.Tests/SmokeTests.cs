@@ -84,8 +84,9 @@ public sealed class SmokeTests : IDisposable
     }
 
     // A configured recording output directory must be honoured by the host's output-path builder.
-    // BuildOutputPath creates the sessions/<date> directory unconditionally, so a fake-recorder
-    // StartRecording is enough to observe where the recording would land — no libobs, no real file.
+    // BuildOutputPath creates the sessions/ directory unconditionally — flat, no date subfolder —
+    // so a fake-recorder StartRecording is enough to observe where the recording would land: no
+    // libobs, no real file.
     [Fact]
     public async Task StartRecording_withConfiguredOutputDirectory_createsIt()
     {
@@ -104,8 +105,10 @@ public sealed class SmokeTests : IDisposable
         Assert.Equal("state", startMethod);
         Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
 
-        var expected = Path.Combine(outputRoot, "sessions", DateTime.Now.ToString("yyyy-MM-dd"));
+        var expected = Path.Combine(outputRoot, "sessions");
         Assert.True(Directory.Exists(expected), $"The configured output directory was not created: {expected}");
+        // Sessions are flat: the timestamp is in the file name, so there is no date subfolder.
+        Assert.Empty(Directory.GetDirectories(expected));
 
         await host.ShutdownAsync();
     }
@@ -144,14 +147,14 @@ public sealed class SmokeTests : IDisposable
         // A fake source file for the clip engine to chew on. The engine runs real ffmpeg, so the
         // clip may succeed or fail depending on the machine; the round trip is that importProgress
         // arrives either way.
-        var source = Path.Combine(_contentRoot, "sessions", "2026-08-16", "source.mp4");
+        var source = Path.Combine(_contentRoot, "sessions", "source.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
         File.WriteAllText(source, "not a real mp4 but the path is what matters");
 
         var request = """
             {"method":"CreateClip","parameters":{
               "id":"clip-test-1",
-              "filePath":"sessions/2026-08-16/source.mp4",
+              "filePath":"sessions/source.mp4",
               "outputMode":"combine",
               "startTime":0,"endTime":1,
               "segments":[]

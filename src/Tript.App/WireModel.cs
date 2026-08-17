@@ -25,9 +25,30 @@ internal sealed class ContentItem
 
     public string? Title { get; set; }
 
+    // The game this content belongs to, or null when nothing associated one with it. The library
+    // filters and groups by this, so it is populated for clips too — inherited from the source
+    // session, since a clip has no metadata record of its own (see AppHost.InheritedGame).
+    public string? Game { get; set; }
+
+    // When the content starts, as unix seconds. The metadata record's StartTime when there is one —
+    // the authoritative capture time — and the file's last-write time otherwise. The meaning is
+    // unchanged; only the fallback is new, because the library shows a date on every card and a clip
+    // has no record to carry one.
     public double? StartTime { get; set; }
 
+    // Unchanged: the end offset a metadata record declares, in seconds into the media. Nothing
+    // populates it today, and the player already prefers the media's own measured duration over it.
+    // The library's duration is DurationSeconds, not this.
     public double? EndTime { get; set; }
+
+    // The content's playing length in seconds, or null when it is not known yet. Persisted (the
+    // recording's metadata record, the clip's own record) rather than measured per list, so the
+    // library can show a length without loading the video and without an ffprobe per item per push.
+    public double? DurationSeconds { get; set; }
+
+    // The file's size on disk. The library sorts and reports on it, and it is free to read while the
+    // directory is being enumerated.
+    public long FileSizeBytes { get; set; }
 
     // The bookmarks the recording carries on the wire, null when the item has none (clips never
     // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).

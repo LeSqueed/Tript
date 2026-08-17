@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Tript.App.Content;
 using Tript.Core;
+using Tript.Media;
 using Tript.Settings;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Tript.App.Tests;
 
 // The content catalogue and its metadata store. The library the frontend lists is rebuilt from the
 // recording root on every push; this suite pins how the catalogue classifies sessions vs clips,
-// where the metadata records live, and how user bookmarks and titles round-trip through the store
-// rather than next to the video.
+// where the metadata records live, how user bookmarks and titles round-trip through the store
+// rather than next to the video, and which fields the library grid is drawn from.
 [Collection(AppHostCollection.Name)]
 public sealed class ContentCatalogueTests : IDisposable
 {
@@ -517,6 +520,523 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Empty(stray);
 
         await host.ShutdownAsync();
+    }
+
+    // ---- the fields the library grid needs ----
+
+    // The library is a grid of cards filtered by game and sorted by date, so every card needs a game,
+    // a date, a length and a size. The game comes from the recording's metadata record; the size is
+    // read while the directory is enumerated; the duration is the persisted one (no probe is needed
+    // when the record already carries it, which is the point of persisting it).
+    [Fact]
+    public async Task ListContent_ProjectsGameSizeAndDuration_FromTheMetadataRecord()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "with-record.mp4"), new string('x', 4096));
+        await File.WriteAllTextAsync(Path.Combine(sessions, "no-record.mp4"), "session");
+
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/with-record.mp4",
+            Game = "Overwatch",
+            StartTime = new DateTime(2026, 8, 17, 12, 0, 0, DateTimeKind.Local),
+            DurationSeconds = 137.5,
+        });
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        var withRecord = items.Single(i => i.GetProperty("fileName").GetString() == "with-record.mp4");
+        Assert.Equal("Overwatch", withRecord.GetProperty("game").GetString());
+        Assert.Equal(137.5, withRecord.GetProperty("durationSeconds").GetDouble());
+        Assert.Equal(4096, withRecord.GetProperty("fileSizeBytes").GetInt64());
+
+        // A recording with no record still lists, with no game. Its date falls back to the file's
+        // last-write time so the grid can still place the card.
+        var without = items.Single(i => i.GetProperty("fileName").GetString() == "no-record.mp4");
+        Assert.False(without.TryGetProperty("game", out var _noGame), "a recording with no record has no game");
+        Assert.Equal(7, without.GetProperty("fileSizeBytes").GetInt64());
+        Assert.True(without.GetProperty("startTime").GetDouble() > 0,
+            "an item with no metadata record still carries a date");
+
+        await host.ShutdownAsync();
+    }
+
+    // A clip has no metadata record of its own, so it inherits its game from the session it was cut
+    // from — recognised by its file name, which both clip naming paths start with the source
+    // session's base name.
+    [Fact]
+    public async Task ListContent_ClipInheritsItsGame_FromTheSourceSessionName()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(sessions);
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-10.mp4"), "session");
+        // The two shapes the two clip paths produce (AppController.BuildClipOutputPath for combine,
+        // ClipEngine.BuildFileName for separate mode).
+        await File.WriteAllTextAsync(Path.Combine(clips, "session-1-clip-k2m3xq.mp4"), "clip");
+        await File.WriteAllTextAsync(Path.Combine(clips, "session-10-clip-1-0s-10s.mp4"), "clip");
+        // A clip whose source is gone (or never had a game) has no game rather than a wrong one.
+        await File.WriteAllTextAsync(Path.Combine(clips, "session-99-clip-x.mp4"), "clip");
+
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata { VideoPath = "sessions/session-1.mp4", Game = "Overwatch" });
+        store.Save(new RecordingMetadata { VideoPath = "sessions/session-10.mp4", Game = "Deep Rock Galactic" });
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        Assert.Equal("Overwatch", GameOf(items, "session-1-clip-k2m3xq.mp4"));
+        // The boundary check: "session-1" must not claim a clip of "session-10".
+        Assert.Equal("Deep Rock Galactic", GameOf(items, "session-10-clip-1-0s-10s.mp4"));
+        Assert.Null(GameOf(items, "session-99-clip-x.mp4"));
+
+        await host.ShutdownAsync();
+    }
+
+    // The frontend paginates over this list, so the order must be newest first and must be total —
+    // two items with the same timestamp may not swap places between two pushes (List.Sort is
+    // unstable, and the directory enumeration order is the file system's).
+    [Fact]
+    public async Task ListContent_IsOrderedNewestFirst_Deterministically()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        foreach (var name in new[] { "oldest.mp4", "middle.mp4", "newest.mp4", "tied-b.mp4", "tied-a.mp4" })
+            await File.WriteAllTextAsync(Path.Combine(sessions, name), "session");
+
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        var baseTime = new DateTime(2026, 8, 17, 12, 0, 0, DateTimeKind.Local);
+        store.Save(new RecordingMetadata { VideoPath = "sessions/oldest.mp4", StartTime = baseTime });
+        store.Save(new RecordingMetadata { VideoPath = "sessions/middle.mp4", StartTime = baseTime.AddHours(1) });
+        store.Save(new RecordingMetadata { VideoPath = "sessions/newest.mp4", StartTime = baseTime.AddHours(2) });
+        // Two records sharing one timestamp: the relative path is the tiebreak.
+        store.Save(new RecordingMetadata { VideoPath = "sessions/tied-a.mp4", StartTime = baseTime.AddMinutes(30) });
+        store.Save(new RecordingMetadata { VideoPath = "sessions/tied-b.mp4", StartTime = baseTime.AddMinutes(30) });
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, first) = await host.ReceiveAsyncParsed();
+        var order = first.GetProperty("content").EnumerateArray()
+            .Select(i => i.GetProperty("fileName").GetString()).ToList();
+
+        Assert.Equal(
+            ["newest.mp4", "middle.mp4", "tied-a.mp4", "tied-b.mp4", "oldest.mp4"],
+            order);
+
+        // The same list again is the same order: nothing about it depends on enumeration order.
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, second) = await host.ReceiveAsyncParsed();
+        Assert.Equal(order, second.GetProperty("content").EnumerateArray()
+            .Select(i => i.GetProperty("fileName").GetString()).ToList());
+
+        await host.ShutdownAsync();
+    }
+
+    // The duration is read once per file and persisted, so it is not an ffprobe per item per push.
+    // With a real (probeable) source the first list fills the record in; the value on the wire is the
+    // container's duration.
+    [Fact]
+    public async Task ListContent_ReadsTheDurationOnce_AndPersistsItOnTheRecord()
+    {
+        if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
+            throw SkipException.ForSkip(reason);
+
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        GenerateTestVideo(ffmpeg, Path.Combine(sessions, "probeable.mp4"));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var item = content.GetProperty("content").EnumerateArray()
+            .Single(i => i.GetProperty("fileName").GetString() == "probeable.mp4");
+
+        var duration = item.GetProperty("durationSeconds").GetDouble();
+        Assert.InRange(duration, 1.5, 2.5);
+
+        // The value landed on a metadata record, which is what makes every later push free.
+        var recordPath = Path.Combine(_contentRoot, "metadata", "probeable.mp4.metadata.json");
+        Assert.True(File.Exists(recordPath), "the duration must be persisted on the record");
+        var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
+            SettingsSerialization.Options)!;
+        Assert.NotNull(record.DurationSeconds);
+        Assert.Equal(duration, record.DurationSeconds!.Value, 3);
+        Assert.Equal("sessions/probeable.mp4", record.VideoPath);
+
+        await host.ShutdownAsync();
+    }
+
+    // ---- a record that exists but cannot be read ----
+
+    // The three states a load can find. The read path collapses two of them into null (an item lists
+    // either way, which is the point), so the store has to report them separately for the callers
+    // that write back — that is the whole defence against a blank record replacing a good one.
+    [Fact]
+    public void MetadataStore_Read_TellsAnAbsentRecordFromAnUnreadableOne()
+    {
+        var metadataRoot = Path.Combine(_contentRoot, "metadata");
+        var store = new RecordingMetadataStore(metadataRoot);
+
+        Assert.Equal(StoredRecordState.Absent, store.Read("nothing-here.mp4").State);
+
+        store.Save(new RecordingMetadata { VideoPath = "sessions/good.mp4", Game = "Overwatch" });
+        var loaded = store.Read("good.mp4");
+        Assert.Equal(StoredRecordState.Loaded, loaded.State);
+        Assert.Equal("Overwatch", loaded.Record!.Game);
+        Assert.False(loaded.MustNotBeOverwritten);
+
+        // Garbage bytes: there is a file, and nothing in it can be recovered.
+        Directory.CreateDirectory(metadataRoot);
+        File.WriteAllText(Path.Combine(metadataRoot, "broken.mp4.metadata.json"), "{ this is not json");
+        var unreadable = store.Read("broken.mp4");
+        Assert.Equal(StoredRecordState.Unreadable, unreadable.State);
+        Assert.Null(unreadable.Record);
+        Assert.True(unreadable.MustNotBeOverwritten);
+        Assert.False(string.IsNullOrWhiteSpace(unreadable.Failure), "the reason must be kept for the log line");
+
+        // A file holding the literal "null" parses without an exception and yields no record; there
+        // is still a file, so it counts as present, not absent.
+        File.WriteAllText(Path.Combine(metadataRoot, "nulled.mp4.metadata.json"), "null");
+        Assert.Equal(StoredRecordState.Unreadable, store.Read("nulled.mp4").State);
+
+        // The read path is unchanged: an unreadable record still loads as "no record", so the video
+        // keeps its entry in the library.
+        Assert.Null(store.Load("broken.mp4"));
+    }
+
+    // The bug this suite grew for. A record that exists but cannot be parsed used to be reported as
+    // null, which the duration-persisting path read as "there is no record" — so it wrote a fresh
+    // record holding a video path and a duration over a file that held the recording's game, title
+    // and bookmarks. The file's bytes must survive a list untouched, and the video must still list.
+    [Fact]
+    public async Task ListContent_LeavesAnUnreadableRecordUntouched_AndStillListsTheVideo()
+    {
+        if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
+            throw SkipException.ForSkip(reason);
+
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        GenerateTestVideo(ffmpeg, Path.Combine(sessions, "probeable.mp4"));
+
+        var metadataRoot = Path.Combine(_contentRoot, "metadata");
+        Directory.CreateDirectory(metadataRoot);
+        var recordPath = Path.Combine(metadataRoot, "probeable.mp4.metadata.json");
+        await File.WriteAllTextAsync(recordPath, "{ \"game\": \"Overwatch\", this record is broken");
+        var before = await File.ReadAllBytesAsync(recordPath);
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+
+        // The item lists — an unreadable record may not take the library entry down with it.
+        var item = content.GetProperty("content").EnumerateArray()
+            .Single(i => i.GetProperty("fileName").GetString() == "probeable.mp4");
+        Assert.Equal("probeable", item.GetProperty("title").GetString());
+
+        // And the record is byte-for-byte what it was: the duration is recomputable, whatever is in
+        // this file is not.
+        Assert.Equal(before, await File.ReadAllBytesAsync(recordPath));
+
+        // No half-written sibling left in the tree either (the write is a rename over the target).
+        Assert.Empty(Directory.GetFiles(metadataRoot, "*.tmp"));
+
+        await host.ShutdownAsync();
+    }
+
+    // The regression test for the reported data loss: a record carrying a game, a user title and
+    // bookmarks goes through a ListContent that fills in the duration, and comes out with all three
+    // still in it.
+    [Fact]
+    public async Task ListContent_PersistingADuration_KeepsTheGameTitleAndBookmarks()
+    {
+        if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
+            throw SkipException.ForSkip(reason);
+
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        GenerateTestVideo(ffmpeg, Path.Combine(sessions, "probeable.mp4"));
+
+        // Deliberately no DurationSeconds: this is the record the probe wants to write into.
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/probeable.mp4",
+            Game = "Overwatch",
+            Title = "Ranked win",
+            StartTime = new DateTime(2026, 8, 17, 15, 20, 46, DateTimeKind.Local),
+            Bookmarks =
+            {
+                new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(12.5) },
+                new Bookmark { Type = BookmarkType.Death, Time = TimeSpan.FromSeconds(34) },
+            },
+        }));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var item = content.GetProperty("content").EnumerateArray()
+            .Single(i => i.GetProperty("fileName").GetString() == "probeable.mp4");
+
+        Assert.Equal("Overwatch", item.GetProperty("game").GetString());
+        Assert.Equal("Ranked win", item.GetProperty("title").GetString());
+        Assert.InRange(item.GetProperty("durationSeconds").GetDouble(), 1.5, 2.5);
+
+        // On disk: the duration was added, and nothing else was traded for it.
+        var recordPath = Path.Combine(_contentRoot, "metadata", "probeable.mp4.metadata.json");
+        var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
+            SettingsSerialization.Options)!;
+        Assert.Equal("Overwatch", record.Game);
+        Assert.Equal("Ranked win", record.Title);
+        Assert.Equal(new DateTime(2026, 8, 17, 15, 20, 46, DateTimeKind.Local), record.StartTime);
+        Assert.Equal(2, record.Bookmarks.Count);
+        Assert.Equal(BookmarkType.Kill, record.Bookmarks[0].Type);
+        Assert.NotNull(record.DurationSeconds);
+
+        await host.ShutdownAsync();
+    }
+
+    // A hand-written record, exactly as a user recovering a recording would type it: camelCase
+    // members, a content type by name, and a start time carrying a local offset. Every part of it
+    // loads (the offset form is the same one the app itself writes), so the game reaches the wire and
+    // the timestamp is not reset when the duration is filled in.
+    [Fact]
+    public async Task ListContent_HandWrittenRecordWithAnOffsetTimestamp_KeepsItsGameAndStartTime()
+    {
+        if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
+            throw SkipException.ForSkip(reason);
+
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        GenerateTestVideo(ffmpeg, Path.Combine(sessions, "session-20260817-152046741.mp4"));
+
+        var metadataRoot = Path.Combine(_contentRoot, "metadata");
+        Directory.CreateDirectory(metadataRoot);
+        var recordPath = Path.Combine(metadataRoot, "session-20260817-152046741.mp4.metadata.json");
+        await File.WriteAllTextAsync(recordPath, """
+            {
+              "videoPath": "sessions/session-20260817-152046741.mp4",
+              "game": "Overwatch",
+              "contentType": "Recording",
+              "startTime": "2026-08-17T15:20:46.7558115+02:00"
+            }
+            """);
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var item = content.GetProperty("content").EnumerateArray()
+            .Single(i => i.GetProperty("fileName").GetString() == "session-20260817-152046741.mp4");
+
+        // The instant the file names, not the machine's idea of it: the assertions compare
+        // DateTimeOffsets, so they hold in any time zone the tests run in.
+        var written = new DateTimeOffset(2026, 8, 17, 15, 20, 46, TimeSpan.FromHours(2))
+            .AddTicks(7558115);
+        Assert.Equal("Overwatch", item.GetProperty("game").GetString());
+        Assert.Equal(written.ToUnixTimeSeconds(), item.GetProperty("startTime").GetInt64());
+
+        // The record kept the game and the instant after the duration was written into it.
+        var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
+            SettingsSerialization.Options)!;
+        Assert.Equal("Overwatch", record.Game);
+        Assert.Equal(written, new DateTimeOffset(record.StartTime));
+        Assert.NotNull(record.DurationSeconds);
+
+        await host.ShutdownAsync();
+    }
+
+    // A record is rewritten by a rename over the target rather than in place, because the host reads
+    // and writes these records from two threads: a finished clip pushes content from its own thread
+    // while the IPC thread may be listing, and a list both reads records and writes durations into
+    // them. Measured on the plain File.WriteAllText this replaced: 115041 of 506391 concurrent reads
+    // (22.7%) threw JsonException, most often "The input does not contain any JSON tokens" — the
+    // window where the file has been truncated and not yet rewritten. Every one of those used to be
+    // a good record reported as unreadable.
+    [Fact]
+    public void MetadataStore_ARecordBeingRewritten_IsNeverReadHalfWritten()
+    {
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        var record = new RecordingMetadata
+        {
+            VideoPath = "sessions/hot.mp4",
+            Game = "Overwatch",
+            Title = "Ranked win",
+            Bookmarks = { new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(12) } },
+        };
+        Assert.True(store.Save(record));
+
+        var stop = false;
+        var writer = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stop))
+                store.Save(record);
+        });
+        writer.Start();
+
+        var reads = 0;
+        var unreadable = 0;
+        try
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+            while (DateTime.UtcNow < deadline)
+            {
+                reads++;
+                var read = store.Read("hot.mp4");
+                if (read.State != StoredRecordState.Loaded || read.Record!.Game != "Overwatch")
+                    unreadable++;
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref stop, true);
+            writer.Join();
+        }
+
+        Assert.True(reads > 100, $"the race needs to have actually run; only {reads} reads happened");
+        Assert.Equal(0, unreadable);
+    }
+
+    // A read-only record is still not written, now that the write is a rename over the target. This
+    // needs its own test because the rename does not check the destination's permissions at all: on
+    // Unix rename(2) only needs a writable directory, so an atomic write silently gained the ability
+    // to replace a record that the read-only bit exists to protect (DeleteBookmark_SaveFails_
+    // BroadcastsError depends on this, and it hung when the save unexpectedly succeeded).
+    [Fact]
+    public void MetadataStore_AReadOnlyRecord_IsNotRewritten()
+    {
+        var metadataRoot = Path.Combine(_contentRoot, "metadata");
+        var store = new RecordingMetadataStore(metadataRoot);
+        Assert.True(store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/protected.mp4",
+            Game = "Overwatch",
+        }));
+
+        var recordPath = Path.Combine(metadataRoot, "protected.mp4.metadata.json");
+        File.SetAttributes(recordPath, FileAttributes.ReadOnly);
+        var before = File.ReadAllBytes(recordPath);
+
+        try
+        {
+            Assert.False(store.Save(new RecordingMetadata { VideoPath = "sessions/protected.mp4" }),
+                "a read-only record must report a failed write, not be replaced");
+            Assert.Equal(before, File.ReadAllBytes(recordPath));
+            Assert.Empty(Directory.GetFiles(metadataRoot, "*.tmp"));
+        }
+        finally
+        {
+            File.SetAttributes(recordPath, FileAttributes.Normal);
+        }
+    }
+
+    // The clip record carries the user's clip title, so it gets the same protection: a record that
+    // cannot be read is not replaced by one holding just a duration.
+    [Fact]
+    public void ClipStore_LeavesAnUnreadableRecordUntouched_AndReportsTheFailure()
+    {
+        var metadataRoot = Path.Combine(_contentRoot, "metadata");
+        Directory.CreateDirectory(metadataRoot);
+        var recordPath = Path.Combine(metadataRoot, "session-1-clip-x.mp4.title.json");
+        File.WriteAllText(recordPath, "{ \"title\": \"The clutch\", broken");
+        var before = File.ReadAllBytes(recordPath);
+
+        var store = new ClipTitleStore(metadataRoot);
+        Assert.Equal(StoredRecordState.Unreadable, store.Read("session-1-clip-x.mp4").State);
+
+        Assert.False(store.SaveDuration("session-1-clip-x.mp4", 9.13),
+            "a duration must not be written over a record that could not be read");
+        Assert.False(store.Save("session-1-clip-x.mp4", "A new title"),
+            "a title must not be written over a record that could not be read");
+        Assert.Equal(before, File.ReadAllBytes(recordPath));
+
+        // A clip with no record at all is the normal case and still gets one.
+        Assert.True(store.SaveDuration("session-2-clip-y.mp4", 9.13));
+        Assert.Equal(9.13, store.LoadRecord("session-2-clip-y.mp4")!.DurationSeconds);
+    }
+
+    private static string? GameOf(List<JsonElement> items, string fileName)
+    {
+        var item = items.Single(i => i.GetProperty("fileName").GetString() == fileName);
+        return item.TryGetProperty("game", out var game) ? game.GetString() : null;
+    }
+
+    private static bool TryLocateFfmpeg(out string ffmpeg, out string reason)
+    {
+        try
+        {
+            (ffmpeg, _) = new FfmpegLocator().Locate();
+            reason = string.Empty;
+            return true;
+        }
+        catch (FfmpegNotFoundException exception)
+        {
+            ffmpeg = string.Empty;
+            reason = $"A real duration needs ffprobe: {exception.Message}";
+            return false;
+        }
+    }
+
+    private static void GenerateTestVideo(string ffmpeg, string path)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-y", "-loglevel", "error",
+                     "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=30",
+                     "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                     path,
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("ffmpeg could not be started to build the test source.");
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0 || !File.Exists(path))
+            throw SkipException.ForSkip($"The test source could not be generated by ffmpeg: {stderr.Trim()}");
     }
 
     private static async Task WaitUntil(Func<bool> condition)

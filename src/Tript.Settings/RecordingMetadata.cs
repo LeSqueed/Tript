@@ -30,6 +30,13 @@ public sealed class RecordingMetadata
     // means the file-name-without-extension is the title.
     public string? Title { get; set; }
 
+    // The recording's playing length in seconds, as the container reports it. Null on a record
+    // written before the length was known; the library then shows no length for that item until it
+    // is filled in. It is stored rather than measured on demand because the library lists every
+    // recording on every content push, and reading a duration otherwise means an ffprobe per item
+    // per push.
+    public double? DurationSeconds { get; set; }
+
     // The audio track layout: which track holds which device. The layout is part of the
     // recording's metadata contract and is preserved across compression.
     public List<AudioTrackLayout> AudioTracks { get; set; } = [];

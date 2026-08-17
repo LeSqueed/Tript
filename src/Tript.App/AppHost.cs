@@ -45,6 +45,33 @@ internal sealed class AppHost : IDisposable
     private readonly UiHost _ui;
     private readonly RecordingMetadataStore _metadata;
     private readonly ClipTitleStore _clipTitles;
+    private readonly ThumbnailStore _thumbnails;
+
+    // ffmpeg/ffprobe for the library surfaces (thumbnails and the duration backfill), located at
+    // most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on both
+    // binaries to verify them, which is four processes, and the answer cannot change while the host
+    // runs. Null means the machine has no usable ffmpeg — the library then shows placeholder cards
+    // and no durations, and nothing else about it changes. The clip engine keeps its own Locate call:
+    // its failure is user-facing (the clip dialog shows the locator's message) rather than silent.
+    private readonly Lazy<(string Ffmpeg, string Ffprobe)?> _libraryTools = new(() =>
+    {
+        try
+        {
+            return new FfmpegLocator().Locate();
+        }
+        catch (FfmpegNotFoundException exception)
+        {
+            Console.Error.WriteLine(
+                $"Tript.App: no thumbnails or durations in the library — {exception.Message}");
+            return null;
+        }
+    }, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private MediaProbe? _libraryProbe;
+
+    // Files whose duration could not be read, so a broken or non-video file is probed at most once
+    // per process instead of on every content push. Absolute paths.
+    private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
 
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
@@ -74,10 +101,11 @@ internal sealed class AppHost : IDisposable
 
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller);
-        _content = new ContentServer(EffectiveRoot);
-        _ui = new UiHost(options.WebRoot);
         _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
         _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
+        _thumbnails = new ThumbnailStore(ThumbnailRootFor(EffectiveRoot), CreateThumbnailExtractor);
+        _content = new ContentServer(EffectiveRoot, _thumbnails);
+        _ui = new UiHost(options.WebRoot);
 
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
@@ -111,6 +139,19 @@ internal sealed class AppHost : IDisposable
     {
         var configured = settingsStore.Load().Recording.OutputDirectory;
         return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
+    }
+
+    // The thumbnail cache sits inside the metadata tree (see ThumbnailStore for why), in its own
+    // subdirectory so the record directory stays hand-readable.
+    private static string ThumbnailRootFor(string effectiveRoot) =>
+        Path.Combine(effectiveRoot, "metadata", "thumbnails");
+
+    // The library's frame extractor, or null when this machine has no usable ffmpeg. Called at most
+    // once, by the thumbnail store's own lazy.
+    private IThumbnailExtractor? CreateThumbnailExtractor()
+    {
+        var tools = _libraryTools.Value;
+        return tools is null ? null : new FfmpegThumbnailExtractor(tools.Value.Ffmpeg);
     }
 
     // ---- lifetime ----
@@ -255,6 +296,22 @@ internal sealed class AppHost : IDisposable
         var relative = Path.GetRelativePath(EffectiveRoot, _activeOutputPath)
             .Replace(Path.DirectorySeparatorChar, '/');
         metadata.VideoPath = relative;
+
+        // The one write that is allowed to replace whatever is on disk, because here the in-memory
+        // record is the authoritative one: this process just made the recording, and it holds the
+        // game, the start time, the audio track layout and the session's bookmarks. Anything already
+        // at this key belongs to a file that no longer exists (the name carries a millisecond
+        // timestamp) or is the stub the library's duration probe wrote while the recording ran — so
+        // there is nothing here that "unreadable" could be protecting.
+        //
+        // A probed duration is the exception worth carrying over: it is the one field the stub can
+        // have and the session cannot know.
+        if (metadata.DurationSeconds is null)
+        {
+            var existing = _metadata.Read(Path.GetFileName(_activeOutputPath));
+            if (existing.State == StoredRecordState.Loaded)
+                metadata.DurationSeconds = existing.Record!.DurationSeconds;
+        }
 
         _metadata.Save(metadata);
         PushContent();
@@ -408,6 +465,7 @@ internal sealed class AppHost : IDisposable
             _content.UpdateRoot(effectiveRoot);
             _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             _clipTitles.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
+            _thumbnails.UpdateRoot(ThumbnailRootFor(effectiveRoot));
             Directory.CreateDirectory(effectiveRoot);
         }
 
@@ -578,12 +636,31 @@ internal sealed class AppHost : IDisposable
         }, Wire.Options));
     }
 
+    // How many previously-unseen files one call may probe for a duration. See TryReadDuration for
+    // why probing happens at all; the budget is what keeps a first list of a large existing library
+    // from becoming an ffprobe per item in one go. A library fills in over a few pushes and then
+    // never probes those files again, in this process or a later one.
+    private const int DurationProbeBudget = 12;
+
+    // The library, rebuilt from disk. Every field the grid needs is here: the thumbnail is a URL
+    // built from FilePath (the content server's /api/thumbnail route), the game, the date, the
+    // duration and the size.
+    //
+    // The order is newest first, and it is a total order — the frontend paginates over this list, so
+    // two items with the same timestamp must not be able to swap places between two pushes (and
+    // EnumerateFiles' order is the file system's, not one we can rely on).
     internal List<ContentItem> ListContent()
     {
         var items = new List<ContentItem>();
         var root = new DirectoryInfo(EffectiveRoot);
         if (!root.Exists)
             return items;
+
+        // Recording base name -> game, collected while the recordings are projected and used to give
+        // the clips a game afterwards (a clip's file name starts with its source session's).
+        var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
+        var clips = new List<ContentItem>();
+        var probeBudget = DurationProbeBudget;
 
         foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
         {
@@ -598,6 +675,7 @@ internal sealed class AppHost : IDisposable
                 FileName = file.Name,
                 FilePath = relative,
                 Title = Path.GetFileNameWithoutExtension(file.Name),
+                FileSizeBytes = SafeLength(file),
             };
 
             if (contentType == "recording")
@@ -616,6 +694,11 @@ internal sealed class AppHost : IDisposable
                         .ToList();
                     item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
                     item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
+                    item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
+                    item.DurationSeconds = metadata.DurationSeconds;
+
+                    if (item.Game is not null)
+                        gamesByRecording[Path.GetFileNameWithoutExtension(file.Name)] = item.Game;
                 }
                 else
                 {
@@ -626,16 +709,207 @@ internal sealed class AppHost : IDisposable
             else
             {
                 // A clip with a stored user title shows it; a clip without one falls back to its
-                // file-name-without-extension, exactly like a session with no metadata record.
-                var title = _clipTitles.Load(file.Name);
-                if (!string.IsNullOrWhiteSpace(title))
-                    item.Title = title;
+                // file-name-without-extension, exactly like a session with no metadata record. The
+                // clip's own record carries its duration too.
+                var record = _clipTitles.LoadRecord(file.Name);
+                if (!string.IsNullOrWhiteSpace(record?.Title))
+                    item.Title = record.Title;
+                item.DurationSeconds = record?.DurationSeconds;
+
+                // The game is resolved after the loop: the source session may be listed after its
+                // clip, so its record has not necessarily been read yet.
+                clips.Add(item);
+            }
+
+            // The library shows a date on every card. A metadata record's StartTime is the
+            // authoritative capture time; the file's last-write time is the fallback for content that
+            // has no record — every clip, and a recording copied in by hand.
+            item.StartTime ??= DateTimeToUnixSeconds(file.LastWriteTime);
+
+            // The budget is spent on files that will actually be probed: a file already known to be
+            // unreadable must not consume a slot a real recording later in the enumeration needs.
+            if (item.DurationSeconds is null && probeBudget > 0 && !IsUnprobeable(file.FullName))
+            {
+                probeBudget--;
+                item.DurationSeconds = TryReadDuration(file, relative, contentType == "recording");
             }
 
             items.Add(item);
         }
 
+        foreach (var clip in clips)
+            clip.Game = InheritedGame(clip.FileName, gamesByRecording);
+
+        // Newest first, with the relative path as the tiebreak so the order is total: List.Sort is
+        // unstable, and two files written in the same second would otherwise be free to swap between
+        // pushes and shuffle a paginated grid under the user.
+        items.Sort((left, right) =>
+        {
+            var byDate = (right.StartTime ?? 0).CompareTo(left.StartTime ?? 0);
+            return byDate != 0 ? byDate : string.CompareOrdinal(left.FilePath, right.FilePath);
+        });
+
         return items;
+    }
+
+    // The game a clip inherits from the session it was cut from. A clip has no metadata record of its
+    // own, and nothing on the wire carries the game into CreateClip's output, so the file name is the
+    // link: both clip naming paths start the name with the source session's base name —
+    // AppController.BuildClipOutputPath writes "<sourceBaseName>-<clipId>.mp4" for a combine clip and
+    // ClipEngine.BuildFileName writes "<sourceBaseName>-clip-<n>-<start>s-<end>s.mp4" per region in
+    // separate mode.
+    //
+    // The longest matching session name wins, and the match must end on a '-' boundary: with sessions
+    // "session-1" and "session-10" both present, "session-10-clip-x" belongs to the second, and if
+    // only "session-1" has a record the boundary check stops it from claiming the other's clips.
+    //
+    // A clip whose source has been deleted, or whose source never had a game, simply has no game —
+    // the same state as a recording with no metadata record.
+    private static string? InheritedGame(string clipFileName, Dictionary<string, string> gamesByRecording)
+    {
+        var clipBaseName = Path.GetFileNameWithoutExtension(clipFileName);
+        string? game = null;
+        var matched = 0;
+
+        foreach (var (recording, recordingGame) in gamesByRecording)
+        {
+            if (recording.Length <= matched)
+                continue;
+            if (!clipBaseName.StartsWith(recording, StringComparison.Ordinal))
+                continue;
+            if (clipBaseName.Length != recording.Length && clipBaseName[recording.Length] != '-')
+                continue;
+
+            game = recordingGame;
+            matched = recording.Length;
+        }
+
+        return game;
+    }
+
+    // Reads a file's duration and persists it, so it is read once per file and then served from the
+    // record forever after.
+    //
+    // Probing is the honest answer here and it is bounded rather than avoided. The alternatives were
+    // weighed: StartTime/EndTime cannot supply it (StartTime is a wall-clock date, EndTime is never
+    // written); writing the duration at production time is free but only ever covers content this
+    // build produced, leaves every existing recording blank, and for a clip would record the
+    // requested region length rather than the file's real length, which stream copy shifts by up to a
+    // GOP; and MediaProbe's cache alone is per-process, so it would re-probe the whole library on
+    // every start. Persisting a probed value combines the two: one ffprobe per file ever, at most
+    // DurationProbeBudget of them per push, and MediaProbe's own cache absorbs repeats within the
+    // process while the record absorbs them across restarts.
+    private double? TryReadDuration(FileInfo file, string relativePath, bool isRecording)
+    {
+        var probe = LibraryProbe;
+        if (probe is null)
+            return null;
+
+        double seconds;
+        try
+        {
+            seconds = probe.Probe(file.FullName).DurationSeconds;
+        }
+        catch (Exception exception)
+        {
+            // A text file with an .mp4 name, a truncated recording, an ffprobe that will not start:
+            // the item still lists, just without a length, and it is not probed again this process.
+            Console.Error.WriteLine($"Tript.App: could not read the duration of '{relativePath}': {exception.Message}");
+            MarkUnprobeable(file.FullName);
+            return null;
+        }
+
+        if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds <= 0)
+        {
+            // ffprobe reports no duration at all for some containers; MediaProbe normalises that to
+            // NaN. Nothing to show and nothing to store.
+            MarkUnprobeable(file.FullName);
+            return null;
+        }
+
+        // Persisted best-effort: a write failure (read-only media, a file where the metadata
+        // directory should be) is logged inside the store and costs one probe on the next push, which
+        // is not worth surfacing to the user for a duration label.
+        //
+        // The read-modify-write is over Read, not Load, and the difference is the whole point. Load
+        // reports an unreadable record as null, which reads as "there is no record" — and this path
+        // would then write a fresh record with nothing but a video path and a duration in it, over a
+        // file that holds the recording's game, its user title and its bookmarks. That is a real
+        // trade the wrong way round: a duration is one ffprobe away, a game and a bookmark list are
+        // gone for good. So an unreadable record is left exactly as it is.
+        //
+        // The item still shows the duration this push — the value is measured and correct, it is only
+        // not persisted — so the cost of the refusal is one probe per push for that file, bounded by
+        // DurationProbeBudget. The file is deliberately not marked unprobeable: that would make the
+        // length disappear from the card instead.
+        if (isRecording)
+        {
+            var existing = _metadata.Read(file.Name);
+            if (existing.MustNotBeOverwritten)
+            {
+                Console.Error.WriteLine(
+                    $"Tript.App: '{relativePath}' has a metadata record that could not be read " +
+                    $"({existing.Failure}); its duration is not persisted, so the record — the game, " +
+                    "the title and the bookmarks in it — is left untouched.");
+            }
+            else
+            {
+                var metadata = existing.Record ?? new RecordingMetadata { VideoPath = relativePath };
+                metadata.DurationSeconds = seconds;
+                _metadata.Save(metadata);
+            }
+        }
+        else
+        {
+            // The clip store makes the same distinction internally, for the same reason: a clip's
+            // record carries the user's clip title.
+            _clipTitles.SaveDuration(file.Name, seconds);
+        }
+
+        return seconds;
+    }
+
+    private void MarkUnprobeable(string absolutePath)
+    {
+        lock (_unprobeable)
+            _unprobeable.Add(absolutePath);
+    }
+
+    private bool IsUnprobeable(string absolutePath)
+    {
+        lock (_unprobeable)
+            return _unprobeable.Contains(absolutePath);
+    }
+
+    // The probe the library shares, built once. Separate from the clip engine's probe only because
+    // the engine is built on demand; both are just an ffprobe path plus a per-path cache.
+    private MediaProbe? LibraryProbe
+    {
+        get
+        {
+            var tools = _libraryTools.Value;
+            if (tools is null)
+                return null;
+
+            // Deliberately unguarded. A clip finishing pushes content from its own thread while the
+            // IPC thread may be listing, so two probes can be built; a reference assignment cannot
+            // tear, MediaProbe locks its own cache, and the loser only costs a cold cache.
+            return _libraryProbe ??= new MediaProbe(tools.Value.Ffprobe);
+        }
+    }
+
+    private static long SafeLength(FileInfo file)
+    {
+        try
+        {
+            return file.Length;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The file went away between the enumeration and this read; a size of 0 is better than
+            // failing the whole list for it.
+            return 0;
+        }
     }
 
     // The first path segment of a '/' separated relative path. Used to classify an item by its
@@ -669,9 +943,12 @@ internal sealed class AppHost : IDisposable
             File.Delete(target);
             // The cascade-delete contract: a deleted video takes its metadata records with it, so
             // the metadata/ tree never keeps an orphaned record for a video that is gone. Clips
-            // have no RecordingMetadata record, but a clip's title record is deleted the same way.
+            // have no RecordingMetadata record, but a clip's own record is deleted the same way, and
+            // so is the cached thumbnail — an image left behind would both leak the deleted
+            // recording's contents and be inherited by the next recording to reuse the name.
             _metadata.Delete(Path.GetFileName(target));
             _clipTitles.Delete(Path.GetFileName(target));
+            _thumbnails.Delete(Path.GetFileName(target));
             PushContent();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -700,8 +977,23 @@ internal sealed class AppHost : IDisposable
         // The title is stored on the video's metadata record; a video with no record yet gets one
         // (the record is created with just the link key and the title). The library reads the
         // title back when it builds the list.
+        //
+        // A record that exists but could not be read is not a record to replace: writing a fresh
+        // one would trade the recording's game and bookmarks for a title. The rename fails instead,
+        // loudly — the user asked for this write, so they are told it did not happen.
         var fileName = Path.GetFileName(target);
-        var metadata = _metadata.Load(fileName) ?? new RecordingMetadata
+        var existing = _metadata.Read(fileName);
+        if (existing.MustNotBeOverwritten)
+        {
+            Console.Error.WriteLine(
+                $"Tript.App: '{fileName}' has a metadata record that could not be read " +
+                $"({existing.Failure}); the rename is refused rather than replacing it.");
+            PushMetadataSaveError(
+                "The recording title could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
+            return;
+        }
+
+        var metadata = existing.Record ?? new RecordingMetadata
         {
             VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
         };
@@ -757,8 +1049,22 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
+        // As in RenameContent: an unreadable record is preserved, not replaced. A blank record with
+        // one bookmark in it would cost the recording's game, title and every bookmark already on
+        // it, so the add fails and the frontend is told.
         var fileName = Path.GetFileName(target);
-        var metadata = _metadata.Load(fileName) ?? new RecordingMetadata
+        var existing = _metadata.Read(fileName);
+        if (existing.MustNotBeOverwritten)
+        {
+            Console.Error.WriteLine(
+                $"Tript.App: '{fileName}' has a metadata record that could not be read " +
+                $"({existing.Failure}); the bookmark is refused rather than replacing it.");
+            PushMetadataSaveError(
+                "The bookmark could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
+            return;
+        }
+
+        var metadata = existing.Record ?? new RecordingMetadata
         {
             VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
         };
@@ -788,8 +1094,23 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
+        // This path already refused to write when the record would not load — it returned early on
+        // null — but it said nothing, so an unreadable record made a delete look like it worked and
+        // the bookmark came back on the next list. The two states are now told apart: nothing to
+        // delete is silence, a record that could not be read is an error the frontend must see.
         var fileName = Path.GetFileName(target);
-        var metadata = _metadata.Load(fileName);
+        var existing = _metadata.Read(fileName);
+        if (existing.MustNotBeOverwritten)
+        {
+            Console.Error.WriteLine(
+                $"Tript.App: '{fileName}' has a metadata record that could not be read " +
+                $"({existing.Failure}); the bookmark removal is refused rather than replacing it.");
+            PushMetadataSaveError(
+                "The bookmark could not be removed — this recording's metadata record could not be read.");
+            return;
+        }
+
+        var metadata = existing.Record;
         if (metadata is null)
             return;
 

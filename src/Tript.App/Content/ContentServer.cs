@@ -8,7 +8,7 @@ namespace Tript.App.Content;
 
 // The HTTP content server (http://localhost:2222/, spec/local-ipc.md). Serves two routes:
 //   /api/content/<path>  range-request video streaming (206 partial content, Content-Range)
-//   /api/thumbnail/<path> first-frame thumbnails (alpha: a 204 no-content stand-in)
+//   /api/thumbnail/<path> a cached still frame from the video, as JPEG (204 when there is none)
 // Anything else is 404.
 //
 // Path-traversal guard (spec/local-ipc.md — "that is a path-traversal guard, not an
@@ -38,12 +38,18 @@ internal sealed class ContentServer : IDisposable
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
 
+    // The thumbnail cache the /api/thumbnail route serves from. Optional: a server built without one
+    // answers every thumbnail request with 204, which is the same answer the frontend already
+    // handles for a video no frame could be taken from.
+    private readonly ThumbnailStore? _thumbnails;
+
     private Thread? _serverThread;
     private volatile bool _running;
 
-    internal ContentServer(string contentRoot)
+    internal ContentServer(string contentRoot, ThumbnailStore? thumbnails = null)
     {
         _contentRoot = Path.GetFullPath(contentRoot);
+        _thumbnails = thumbnails;
     }
 
     internal string ContentRoot => _contentRoot;
@@ -329,6 +335,19 @@ internal sealed class ContentServer : IDisposable
 
     // ---- thumbnail ----
 
+    // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract is
+    // deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
+    // placeholder card". Every reason there might be no image collapses into 204 — the source file
+    // is gone, it is not decodable, ffmpeg is not installed, the extraction failed or overran its
+    // timeout, the cache directory is not writable. A grid of two dozen cards is two dozen requests,
+    // and a 404 or a 500 among them would fill the webview console with errors for a case the UI
+    // already renders correctly.
+    //
+    // 403 is the one exception and stays distinct: a path that escapes the recording root is a
+    // security refusal, not a missing image, and must remain visible as one.
+    //
+    // The route keeps going through ResolveWithinRoot — the guard's single choke point — before it
+    // touches the file system at all.
     private void ServeThumbnail(HttpListenerContext context, string requestPath)
     {
         var resolved = ResolveWithinRoot(requestPath);
@@ -339,16 +358,45 @@ internal sealed class ContentServer : IDisposable
             return;
         }
 
-        if (!File.Exists(resolved))
+        byte[]? image = null;
+        try
         {
-            context.Response.StatusCode = 404;
+            if (File.Exists(resolved))
+            {
+                var cached = _thumbnails?.Ensure(resolved);
+                if (cached is not null)
+                    image = File.ReadAllBytes(cached);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Ensure already contains its own failures; this catches the read of the cached file
+            // (deleted between the Ensure and the read, permissions changed underneath) so that no
+            // thumbnail request can ever produce a 500 or an unhandled exception on a worker thread.
+            Console.Error.WriteLine($"Tript.App: could not serve a thumbnail for '{resolved}': {exception.Message}");
+            image = null;
+        }
+
+        if (image is null || image.Length == 0)
+        {
+            context.Response.StatusCode = 204;
             context.Response.Close();
             return;
         }
 
-        // The alpha has no thumbnail pipeline; a 204 tells the frontend the content exists without
-        // pretending to have an image.
-        context.Response.StatusCode = 204;
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "image/jpeg";
+        context.Response.ContentLength64 = image.Length;
+        // The webview re-mounts the grid on every navigation, so without a cache header each visit
+        // re-fetches every card. An hour is long enough to make scrolling and route changes free and
+        // short enough that a video replaced in place under the same name (the only way a thumbnail
+        // changes) is picked up in the same session. Conditional GETs are not implemented — the
+        // max-age is what suppresses the re-fetch; Last-Modified is sent for the browser's own
+        // heuristics.
+        context.Response.Headers.Add("Cache-Control", "private, max-age=3600");
+        context.Response.Headers.Add("Last-Modified",
+            File.GetLastWriteTimeUtc(resolved).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        context.Response.OutputStream.Write(image, 0, image.Length);
         context.Response.Close();
     }
 

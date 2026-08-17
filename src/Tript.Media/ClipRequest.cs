@@ -14,6 +14,11 @@ public sealed class ClipRequest
 
     // The marked regions, in timeline order. In Separate mode each becomes its own file; in Combine
     // mode they are concatenated into one.
+    //
+    // These are what the caller asked for, not what is cut: the engine fits them to the source's
+    // probed duration first (ClipRegionBounds), so a region that runs past the end is truncated and
+    // one that cannot be salvaged is dropped. A request whose regions all drop is refused rather than
+    // handed to ffmpeg, which reports every out-of-bounds region as exit code 0.
     public required IReadOnlyList<ClipRegion> Regions { get; init; }
 
     public required ClipMode Mode { get; init; }

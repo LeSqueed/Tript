@@ -29,16 +29,27 @@ public sealed class ClipEngine : IClipEngine
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var sourceInfo = Validate(request);
+        var (sourceInfo, regions) = Validate(request);
 
         return request.Mode == ClipMode.Combine
-            ? CreateCombined(request, sourceInfo)
-            : CreateSeparate(request, sourceInfo);
+            ? CreateCombined(request, sourceInfo, regions)
+            : CreateSeparate(request, sourceInfo, regions);
     }
 
     // ---- Validation ----
 
-    private MediaInfo Validate(ClipRequest request)
+    // Checks the request and fits its regions to the source's real length. The probe result is the
+    // authoritative bound and it is already needed for the colour decision, so the duration costs
+    // nothing extra here (MediaProbe caches per file in any case).
+    //
+    // Regions are clamped rather than refused. The bounds a client sends are a selection, and a
+    // selection that runs past the end of the file still names a real piece of it — ffmpeg truncates
+    // such a cut correctly by itself (measured; see ClipRegionBounds), so refusing the whole request
+    // over one long region turned a clip the user could have had into an error. What cannot be
+    // clamped into something cuttable is dropped, and a request with nothing left is refused: every
+    // out-of-bounds region ffmpeg is actually handed comes back as exit code 0 with an empty or
+    // wrong-length file, so a silent pass-through is indistinguishable from success.
+    private (MediaInfo SourceInfo, IReadOnlyList<ClipRegion> Regions) Validate(ClipRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.SourcePath))
             throw new ClipSourceException("A source file path is required.");
@@ -49,19 +60,21 @@ public sealed class ClipEngine : IClipEngine
 
         var sourceInfo = _probe.Probe(request.SourcePath);
 
-        foreach (var region in request.Regions)
+        var regions = ClipRegionBounds.ClampAll(request.Regions, sourceInfo.DurationSeconds);
+        if (regions.Count == 0)
         {
-            if (region.Start < TimeSpan.Zero)
-                throw new ClipSourceException($"Region starts before the recording begins: {region.Start}.");
-            if (region.End <= region.Start)
-                throw new ClipSourceException($"Region end ({region.End}) is not after its start ({region.Start}).");
-            if (region.End > TimeSpan.FromSeconds(sourceInfo.DurationSeconds))
-                throw new ClipSourceException(
-                    $"Region end {FormatSeconds(region.End.TotalSeconds)} is beyond the recording's duration "
-                    + $"({FormatSeconds(sourceInfo.DurationSeconds)}s).");
+            // The message names the recording's real length, because "past the end" is only
+            // actionable if the user is told where the end is. A duration the container did not
+            // carry (NaN) leaves the length out rather than printing "NaN".
+            var length = double.IsFinite(sourceInfo.DurationSeconds) && sourceInfo.DurationSeconds > 0
+                ? $" The recording is {FormatSeconds(sourceInfo.DurationSeconds)}s long."
+                : string.Empty;
+            throw new ClipSourceException(
+                "None of the marked regions falls inside the recording, so there was nothing to clip."
+                + length);
         }
 
-        return sourceInfo;
+        return (sourceInfo, regions);
     }
 
     // ---- The clip extraction decision ----
@@ -125,14 +138,15 @@ public sealed class ClipEngine : IClipEngine
 
     // ---- Combine: several regions, one output file ----
 
-    private IReadOnlyList<string> CreateCombined(ClipRequest request, MediaInfo sourceInfo)
+    private IReadOnlyList<string> CreateCombined(ClipRequest request, MediaInfo sourceInfo,
+        IReadOnlyList<ClipRegion> regions)
     {
         var outputPath = Path.GetFullPath(request.OutputPath);
         EnsureOutputDirectory(outputPath);
 
-        var colorPlan = ResolveColorPlan(sourceInfo, request.Regions, request.EncoderFamily);
+        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily);
         var audioTrackCount = sourceInfo.AudioStreamCount;
-        var regionCount = request.Regions.Count;
+        var regionCount = regions.Count;
 
         var args = new List<string>();
 
@@ -141,9 +155,9 @@ public sealed class ClipEngine : IClipEngine
         for (var i = 0; i < regionCount; i++)
         {
             args.Add("-ss");
-            args.Add(FormatSeconds(request.Regions[i].Start.TotalSeconds));
+            args.Add(FormatSeconds(regions[i].Start.TotalSeconds));
             args.Add("-t");
-            args.Add(FormatSeconds(request.Regions[i].Duration.TotalSeconds));
+            args.Add(FormatSeconds(regions[i].Duration.TotalSeconds));
             args.Add("-i");
             args.Add(request.SourcePath);
         }
@@ -232,18 +246,19 @@ public sealed class ClipEngine : IClipEngine
 
     // ---- Separate: each region its own file ----
 
-    private IReadOnlyList<string> CreateSeparate(ClipRequest request, MediaInfo sourceInfo)
+    private IReadOnlyList<string> CreateSeparate(ClipRequest request, MediaInfo sourceInfo,
+        IReadOnlyList<ClipRegion> regions)
     {
         var outputDirectory = Path.GetFullPath(request.OutputPath);
         Directory.CreateDirectory(outputDirectory);
 
-        var colorPlan = ResolveColorPlan(sourceInfo, request.Regions, request.EncoderFamily);
+        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily);
         var audioTrackCount = sourceInfo.AudioStreamCount;
 
         var results = new List<string>();
-        for (var i = 0; i < request.Regions.Count; i++)
+        for (var i = 0; i < regions.Count; i++)
         {
-            var region = request.Regions[i];
+            var region = regions[i];
             var outputPath = Path.Combine(outputDirectory, BuildFileName(request.SourcePath, region, i));
 
             var args = new List<string>
@@ -274,7 +289,7 @@ public sealed class ClipEngine : IClipEngine
 
             args.Add(outputPath);
 
-            FfmpegRunner.Run(_ffmpegPath, args, request, $"separate region {i + 1}/{request.Regions.Count}");
+            FfmpegRunner.Run(_ffmpegPath, args, request, $"separate region {i + 1}/{regions.Count}");
             results.Add(outputPath);
         }
 

@@ -361,21 +361,55 @@ public class ClipEngineTests
         Assert.Contains("does not exist", ex.Message);
     }
 
+    // A region that runs past the end of the recording is truncated at the end, not refused. It still
+    // names a real piece of the file, and ffmpeg cuts exactly this clip on its own for a straddling
+    // region — refusing the request turned a clip the user could have had into an error, which is what
+    // the frontend's 120 s placeholder duration produced for every recording whose metadata carried no
+    // endTime.
     [Fact]
-    public void CreateClips_RegionBeyondDuration_ThrowsClearError()
+    public void CreateClips_RegionStraddlingTheEnd_IsClampedToTheDuration()
     {
         var source = MediaTestFixture.CreateSdrSource("short.mp4", durationSeconds: 2);
         var engine = NewEngine();
+        var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-straddle");
 
-        var ex = Assert.Throws<ClipSourceException>(() => engine.CreateClips(new ClipRequest
+        var paths = engine.CreateClips(new ClipRequest
         {
             SourcePath = source,
             Regions = [ClipRegion.FromSeconds(1.0, 5.0)],
             Mode = ClipMode.Separate,
-            OutputPath = Path.Combine(MediaTestFixture.ScratchRoot, "never-clips"),
+            OutputPath = outputDir,
+        });
+
+        var clip = Assert.Single(paths);
+        var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
+        // 1.0s of a 2.0s source survives the clamp; the requested 4.0s does not.
+        Assert.InRange(duration, 0.9, 1.1);
+    }
+
+    // Nothing survivable is left, so the request fails rather than reaching ffmpeg — which would
+    // report exit code 0 and write a 261-byte MP4 with no video stream (measured).
+    [Fact]
+    public void CreateClips_RegionWhollyBeyondDuration_ThrowsClearError()
+    {
+        var source = MediaTestFixture.CreateSdrSource("beyond.mp4", durationSeconds: 2);
+        var engine = NewEngine();
+        var neverClips = Path.Combine(MediaTestFixture.ScratchRoot, "never-clips-beyond");
+
+        var ex = Assert.Throws<ClipSourceException>(() => engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(60.0, 120.0)],
+            Mode = ClipMode.Separate,
+            OutputPath = neverClips,
         }));
 
-        Assert.Contains("beyond", ex.Message);
+        Assert.Contains("nothing to clip", ex.Message);
+        // The real length is in the message, because "past the end" is only actionable if the user is
+        // told where the end is.
+        Assert.Contains("The recording is", ex.Message);
+        Assert.Contains("long", ex.Message);
+        Assert.False(Directory.Exists(neverClips), "no output directory may be created for a refused clip");
     }
 
     [Fact]
@@ -395,21 +429,49 @@ public class ClipEngineTests
         Assert.Contains("At least one region", ex.Message);
     }
 
+    // A swapped pair names exactly one interval, so it is ordered rather than refused: a timeline drag
+    // whose anchor ends up after its cursor produces one for ordinary reasons, and the only remedy a
+    // refusal could offer is "draw the same region the other way round".
     [Fact]
-    public void CreateClips_RegionEndNotAfterStart_ThrowsClearError()
+    public void CreateClips_RegionEndBeforeStart_IsOrderedAndClipped()
     {
         var source = MediaTestFixture.CreateSdrSource("reversed.mp4");
         var engine = NewEngine();
+        var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-reversed");
+
+        var paths = engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(3.0, 1.0)],
+            Mode = ClipMode.Separate,
+            OutputPath = outputDir,
+        });
+
+        var clip = Assert.Single(paths);
+        var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
+        Assert.InRange(duration, 1.9, 2.1); // 1.0s - 3.0s, the interval the swapped pair names
+    }
+
+    // The swap does not rescue a degenerate pair: an equal start and end has no interval to order, and
+    // ffmpeg reads the resulting "-t 0" as "no limit" and returns the entire recording (measured), so
+    // it must never reach the argument builder.
+    [Fact]
+    public void CreateClips_ZeroLengthRegion_ThrowsClearError()
+    {
+        var source = MediaTestFixture.CreateSdrSource("degenerate.mp4");
+        var engine = NewEngine();
+        var neverClips = Path.Combine(MediaTestFixture.ScratchRoot, "never-clips-degenerate");
 
         var ex = Assert.Throws<ClipSourceException>(() => engine.CreateClips(new ClipRequest
         {
             SourcePath = source,
-            Regions = [ClipRegion.FromSeconds(2.0, 1.0)],
+            Regions = [ClipRegion.FromSeconds(2.0, 2.0)],
             Mode = ClipMode.Separate,
-            OutputPath = Path.Combine(MediaTestFixture.ScratchRoot, "never-clips"),
+            OutputPath = neverClips,
         }));
 
-        Assert.Contains("not after", ex.Message);
+        Assert.Contains("nothing to clip", ex.Message);
+        Assert.False(Directory.Exists(neverClips), "no output directory may be created for a refused clip");
     }
 
     // A missing ffmpeg binary must be a clear error, not a silent empty output.

@@ -11,6 +11,7 @@ import './components/ClipsView.css';
 import './components/PlayerView.css';
 import './components/player/clipDialog.css';
 import './components/SettingsView.css';
+import './components/ErrorBanner.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

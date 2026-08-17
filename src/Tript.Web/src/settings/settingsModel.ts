@@ -10,13 +10,45 @@
 /** Recording mode — Session, Buffer, or Hybrid (both at once). Hybrid is the default. */
 export type RecordingMode = 'Session' | 'Buffer' | 'Hybrid';
 
+/**
+ * How the encoder is told to spend its bits. The four members are the modes the encoder families
+ * actually accept: `Crf` is x264's constant-quality mode and exists nowhere else, `Cqp` is the
+ * hardware families' spelling of the same idea, and `Cbr`/`Vbr` are the rate-targeted modes.
+ *
+ * Which of them a given encoder accepts is a per-family fact, and getting it wrong is not a cosmetic
+ * bug: the mode name is written into the encoder's own `rate_control` key, and obs-ffmpeg's VAAPI
+ * encoder segfaults on a name it does not know. The backend has the final say — it coerces a mode the
+ * resolved encoder cannot use into that family's constant-quality mode — so any value here is a
+ * request rather than a promise (see RecordingPage).
+ */
+export type RateControlMode = 'Crf' | 'Cqp' | 'Cbr' | 'Vbr';
+
 export interface RecordingSettings {
   mode: RecordingMode;
   resolutionWidth: number;
   resolutionHeight: number;
   fps: number;
+  /**
+   * The encoder id. The settings UI offers the ids the machine supports (the `availableEncoders`
+   * field on the settings *message*, not on this page — see SettingsMessageContent); a value from
+   * an older config or a per-game override that is not in that list still round-trips.
+   */
   encoder: string;
+  /**
+   * The quality profile, on the backend's own 1..20 scale with higher being better. Only the
+   * constant-quality rate-control modes read it; the recorder maps it onto the H.264 quantiser scale
+   * the resolved encoder family uses.
+   */
   quality: number;
+  /**
+   * How the encoder spends its bits. Optional on this type because a push from a backend older than
+   * this field carries no value at all, and the page must render rather than offer an empty selector.
+   */
+  rateControl?: RateControlMode;
+  /** The target bitrate in kbps, read by the rate-targeted modes (CBR and VBR) only. */
+  bitrateKbps?: number;
+  /** The VBR ceiling in kbps, or 0 for "derive one from the target". */
+  maxBitrateKbps?: number;
   /**
    * The directory recordings are written to, or empty/null for the platform default
    * (Videos/Tript). A path the user types is a local draft, committed on blur like resolution.
@@ -156,4 +188,16 @@ export interface SettingsModel {
 export interface SettingsMessageContent {
   settings: SettingsModel;
   cause?: string;
+  /**
+   * The H.264 encoder ids this machine's runtime actually registered, settled on the backend
+   * (`ObsRecorderSession.EnumerateUsableEncoderIds`). It rides the settings push as a **sibling**
+   * of `settings` rather than as a field of the recording page, because it is a property of the
+   * running machine and not a persisted setting — the backend's recording page has no such
+   * property, so a nested copy would be round-tripped into its extension data and written to disk.
+   *
+   * Absent from an older backend, and explicitly null from a host that cannot probe the encoder
+   * registry (the fake-recorder host never loads libobs, so asking would crash rather than answer).
+   * Both mean "unknown" and the encoder selector falls back.
+   */
+  availableEncoders?: string[] | null;
 }

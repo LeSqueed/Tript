@@ -4,7 +4,7 @@
 // light teal on a dark primary, so the contrast trap is avoided by construction: dark text on the
 // accent (`--color-accent-content`), light text on the dark ground (`--color-base-content`).
 
-import type { ReactNode, SelectHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
 
 export function Field({
   label,
@@ -24,30 +24,27 @@ export function Field({
   );
 }
 
-/** A text/number field bound to a value and an onChange. */
+/**
+ * A text/number field bound to a value and an onChange. Remaining input attributes (placeholder,
+ * min/step, aria-label…) pass straight through, the same way SelectField forwards select
+ * attributes — so a caller never has to drop down to a raw `<input>` just to set one of them.
+ */
 export function TextField({
   value,
   onChange,
   type = 'text',
-  min,
-  step,
-  placeholder,
+  ...rest
 }: {
   value: string | number;
   onChange: (value: string) => void;
   type?: 'text' | 'number' | 'url';
-  min?: number;
-  step?: number;
-  placeholder?: string;
-}) {
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
   return (
     <input
+      {...rest}
       type={type}
       className="settings-input"
       value={value}
-      min={min}
-      step={step}
-      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
     />
   );
@@ -162,9 +159,4 @@ export function DangerButton({
       {children}
     </button>
   );
-}
-
-/** A status pill for a field that only the backend can settle (e.g. encoder availability). */
-export function Pill({ tone, children }: { tone: 'muted' | 'info' | 'success' | 'warning'; children: ReactNode }) {
-  return <span className={`pill pill-${tone}`}>{children}</span>;
 }

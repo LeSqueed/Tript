@@ -85,6 +85,13 @@ export interface Settings {
 export interface SettingsMessage {
   settings: Settings;
   cause?: ChangeCause;
+  /**
+   * The H.264 encoder ids this machine's runtime actually registered. A SIBLING of `settings`, not
+   * a field inside it: it is not a persisted setting but a property of the running machine, so it
+   * is never written back by UpdateSettings. Absent from an older backend, and explicitly null from
+   * a host that cannot probe the encoder registry — both mean "unknown".
+   */
+  availableEncoders?: string[] | null;
 }
 
 export interface RecordingState {
@@ -136,6 +143,14 @@ export interface RecoveryPromptMessage {
 
 export interface SelectedGameExecutableMessage {
   filePath: string;
+}
+
+/**
+ * The `error` push content. Sent when a user action could not be persisted — e.g. a bookmark,
+ * title or delete could not be saved because the recording folder is unwritable.
+ */
+export interface ErrorMessage {
+  message: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +304,7 @@ export type CommandName =
   | 'AddBookmark'
   | 'DeleteBookmark'
   // Settings and presets
+  | 'ListSettings'
   | 'UpdateSettings'
   | 'SetVideoLocation'
   | 'SetCacheLocation'
@@ -323,4 +339,5 @@ export type MessageName =
   | 'storageWarning'
   | 'recoveryPrompt'
   | 'selectedGameExecutable'
-  | 'gameList';
+  | 'gameList'
+  | 'error';

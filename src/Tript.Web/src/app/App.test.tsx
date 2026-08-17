@@ -100,6 +100,26 @@ describe('App shell', () => {
     expect(screen.getByTestId('connection-state').textContent).toBe('Connected');
   });
 
+  it('shows an error banner for an error push and dismisses it', () => {
+    renderApp();
+    const ws = activeSocket();
+    act(() => {
+      ws.serverOpen();
+      ws.serverMessage(
+        JSON.stringify({
+          method: 'error',
+          content: { message: 'The bookmark could not be saved — check the recording folder is writable.' },
+        }),
+      );
+    });
+    expect(screen.getByRole('alert').textContent).toContain(
+      'The bookmark could not be saved — check the recording folder is writable.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('recorder bar shows a state push from the backend', () => {
     renderApp();
     const ws = activeSocket();

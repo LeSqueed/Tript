@@ -19,6 +19,10 @@
 // the backend's Settings model nests each page under its camelCase property (spec/frontend.md,
 // the settings-page structure; Tript.Settings/Settings.cs). An update carries that whole nested
 // page object, never the top-level settings object.
+//
+// The push also carries fields that are *not* settings — machine facts the UI needs to render the
+// settings sensibly, `availableEncoders` being the only one so far. Those sit beside `settings` in
+// the message, not inside it, and are surfaced on the controller rather than merged into the model.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -37,7 +41,20 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
 
 /** The default settings object, so the pages render even before the first push. */
 const DEFAULT_SETTINGS: SettingsModel = {
-  recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10, outputDirectory: null },
+  recording: {
+    mode: 'Hybrid',
+    resolutionWidth: 1920,
+    resolutionHeight: 1080,
+    fps: 60,
+    encoder: 'x264',
+    quality: 10,
+    // The backend's own defaults (Tript.Settings/SettingPages.cs): constant quality, and a bitrate
+    // that only the rate-targeted modes read.
+    rateControl: 'Cqp',
+    bitrateKbps: 15000,
+    maxBitrateKbps: 0,
+    outputDirectory: null,
+  },
   buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
   audio: { outputMode: 'Normal', tracks: [], devices: [], mic: null, desktop: null },
   capture: { method: 'Auto', display: null },
@@ -57,6 +74,12 @@ export interface SettingsController {
    * free-text drafts re-sync them from the model on this change, never on their own echo.
    */
   externalPushCount: number;
+  /**
+   * The H.264 encoder ids this machine supports, from the settings push. Undefined means "unknown"
+   * (an older backend, or a host that cannot probe the encoder registry and sends null) — the
+   * recording page falls back rather than showing an empty selector.
+   */
+  availableEncoders?: string[];
 }
 
 export function useSettings(client: IpcClient): SettingsController {
@@ -64,11 +87,12 @@ export function useSettings(client: IpcClient): SettingsController {
   const [hasSettings, setHasSettings] = useState(false);
   const [lastCause, setLastCause] = useState<string | undefined>(undefined);
   const [externalPushCount, setExternalPushCount] = useState(0);
+  const [availableEncoders, setAvailableEncoders] = useState<string[] | undefined>(undefined);
   const pendingCauses = useRef(new Set<string>());
   const causeSerial = useRef(0);
 
   useEffect(() => {
-    return client.on('settings', (content) => {
+    const unsubscribe = client.on('settings', (content) => {
       const message = content as SettingsMessageContent;
       const pushed = message?.settings;
       if (!pushed || typeof pushed !== 'object') {
@@ -81,11 +105,31 @@ export function useSettings(client: IpcClient): SettingsController {
       }
       setLastCause(cause);
       setSettings(pushed);
+      // The encoder list is a sibling of `settings` on the wire, not a field inside it: it is what
+      // this machine's runtime registered, not a persisted setting. Anything that is not an array
+      // of ids (absent, null, or a shape we do not recognise) is "unknown", and the recording page
+      // falls back rather than offering an empty selector.
+      setAvailableEncoders(
+        Array.isArray(message.availableEncoders)
+          ? message.availableEncoders.filter((id): id is string => typeof id === 'string' && id !== '')
+          : undefined,
+      );
       setHasSettings(true);
       if (!isSelfEcho) {
         setExternalPushCount((count) => count + 1);
       }
     });
+
+    // Ask for a push now that the handler is installed. The backend's connect-time push
+    // (NewConnection) is broadcast when the socket opens, and the settings route mounts on demand —
+    // usually long after — so this hook would otherwise sit on DEFAULT_SETTINGS with
+    // `availableEncoders` unknown until the user's first edit provoked a push. That was visible: the
+    // encoder selector offered only the stored value plus obs_x264, then grew the machine's real
+    // hardware ids the moment anything was changed. Dropped harmlessly when the socket is not open
+    // yet, because then the NewConnection push is still coming.
+    client.send('ListSettings');
+
+    return unsubscribe;
   }, [client]);
 
   const update = useMemo(
@@ -97,5 +141,5 @@ export function useSettings(client: IpcClient): SettingsController {
     [client],
   );
 
-  return { settings, update, hasSettings, lastCause, externalPushCount };
+  return { settings, update, hasSettings, lastCause, externalPushCount, availableEncoders };
 }

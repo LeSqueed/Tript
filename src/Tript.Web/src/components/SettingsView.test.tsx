@@ -2,9 +2,11 @@
 //
 // Settings page tests: each page renders its controls, editing a field sends the right
 // UpdateSettings partial, the audio routing model behaves (assigning a source to a track,
-// per-source volume, two sources on one track), and the cause-echo discipline holds (an echo of
-// our own cause does not clobber an in-progress edit). The IPC client is exercised over a real
-// IpcClient bound to a mock socket, so the wire shape is asserted on the sent frames.
+// per-source volume, two sources on one track), the recording page's two selectors offer the right
+// options (frame-rate presets; only the encoders this machine registered) without coercing a stored
+// value they do not offer, and every settings push lands on the model whether or not it echoes our
+// own cause. The IPC client is exercised over a real IpcClient bound to a mock socket, so the wire
+// shape is asserted on both the sent frames and the pushed content.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
@@ -22,7 +24,18 @@ function activeSocket(): MockWebSocket {
 /** The full settings object pushed by the backend. */
 function makeSettings(): SettingsMessageContent['settings'] {
   return {
-    recording: { mode: 'Hybrid', resolutionWidth: 1920, resolutionHeight: 1080, fps: 60, encoder: 'x264', quality: 10, outputDirectory: null },
+    recording: {
+      mode: 'Hybrid',
+      resolutionWidth: 1920,
+      resolutionHeight: 1080,
+      fps: 60,
+      encoder: 'x264',
+      quality: 10,
+      rateControl: 'Cqp',
+      bitrateKbps: 15000,
+      maxBitrateKbps: 0,
+      outputDirectory: null,
+    },
     buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
     audio: {
       outputMode: 'Normal',
@@ -39,10 +52,24 @@ function makeSettings(): SettingsMessageContent['settings'] {
   };
 }
 
-function pushSettings(ws: MockWebSocket, settings = makeSettings(), cause?: string) {
+/**
+ * Push a `settings` message. `availableEncoders` rides the content as a **sibling** of `settings`,
+ * exactly as AppHost.PushSettings sends it: it is a fact about the machine's encoder registry, not a
+ * persisted setting, so it is not nested under the recording page. Pass `null` for a host that
+ * cannot probe the registry, and omit it for a backend that does not send the field at all.
+ */
+function pushSettings(
+  ws: MockWebSocket,
+  settings = makeSettings(),
+  cause?: string,
+  availableEncoders?: string[] | null,
+) {
   const content: SettingsMessageContent = { settings };
   if (cause !== undefined) {
     content.cause = cause;
+  }
+  if (availableEncoders !== undefined) {
+    content.availableEncoders = availableEncoders;
   }
   act(() => {
     ws.serverMessage(JSON.stringify({ method: 'settings', content }));
@@ -70,7 +97,7 @@ function sentUpdates(ws: MockWebSocket): Record<string, unknown>[] {
     .map((frame: { parameters?: { settings?: Record<string, unknown> } }) => frame.parameters?.settings ?? {});
 }
 
-/** Set a number input's value (React's controlled-input quirk: fire change then blur). */
+/** Set a control's value and commit it (React's controlled-input quirk: fire change then blur). */
 function changeInput(label: RegExp, value: string) {
   const input = screen.getByLabelText(label) as HTMLInputElement;
   fireEvent.change(input, { target: { value } });
@@ -96,6 +123,8 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Recording mode/)).toBeTruthy();
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     expect(screen.getByLabelText(/^Encoder/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Rate control/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
     expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
   });
 
@@ -136,6 +165,245 @@ describe('SettingsView', () => {
     expect(sent[0]).toEqual({ recording: { fps: 144 } });
   });
 
+  it('frame rate is a selector over the common values, defaulting to 60', () => {
+    const { ws } = renderSettings();
+    const select = screen.getByLabelText(/^Frame rate/) as HTMLSelectElement;
+    // Default 60 is offered and current.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['30', '60', '90', '144']);
+    expect(select.value).toBe('60');
+
+    // Picking a preset sends a partial update.
+    fireEvent.change(select, { target: { value: '90' } });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { fps: 90 } });
+  });
+
+  it('frame rate keeps showing a non-preset value so a per-game override is not lost', () => {
+    const withCustom = makeSettings();
+    withCustom.recording.fps = 75;
+    const { ws } = renderSettings();
+    pushSettings(ws, withCustom, 'server:init');
+    const select = screen.getByLabelText(/^Frame rate/) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['30', '60', '90', '144', '75']);
+    expect(select.value).toBe('75');
+  });
+
+  it('encoder is a selector over the available encoders sent beside the settings', () => {
+    const withEncoder = makeSettings();
+    withEncoder.recording.encoder = 'obs_x264';
+    const { ws } = renderSettings();
+    pushSettings(ws, withEncoder, 'server:init', ['obs_x264', 'ffmpeg_vaapi']);
+    const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['obs_x264', 'ffmpeg_vaapi']);
+    expect(select.value).toBe('obs_x264');
+
+    // Picking a supported encoder sends a partial update — and only the encoder, never the list.
+    fireEvent.change(select, { target: { value: 'ffmpeg_vaapi' } });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { encoder: 'ffmpeg_vaapi' } });
+  });
+
+  it('encoder selector hides unsupported encoders but keeps the stored one selectable', () => {
+    const withEncoder = makeSettings();
+    withEncoder.recording.encoder = 'obs_nvenc_h264_tex'; // not registered on this machine
+    const { ws } = renderSettings();
+    pushSettings(ws, withEncoder, 'server:init', ['obs_x264']);
+    const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+    // Unsupported ids are not offered; the stored value is appended so the select cannot silently
+    // render (and later persist) an encoder the user never chose.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'obs_x264',
+      'obs_nvenc_h264_tex',
+    ]);
+    expect(select.value).toBe('obs_nvenc_h264_tex');
+    // Marked custom, under the same human label an available NVENC id would carry: the label says
+    // which encoder it is, "(custom)" says this machine does not have it.
+    expect(select.options[1].text).toBe('NVIDIA (NVENC) (custom)');
+  });
+
+  it('encoder options are labelled by family while the id is what goes on the wire', () => {
+    const withEncoder = makeSettings();
+    withEncoder.recording.encoder = 'obs_x264';
+    const { ws } = renderSettings();
+    pushSettings(ws, withEncoder, 'server:init', ['obs_x264', 'ffmpeg_vaapi', 'h264_texture_amf']);
+    const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+
+    expect(Array.from(select.options).map((option) => option.text)).toEqual([
+      'Software (x264)',
+      'AMD/Intel (VAAPI)',
+      'AMD (AMF)',
+    ]);
+    // The values are still the raw ids — the label is for the user, the id is for the backend.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'obs_x264',
+      'ffmpeg_vaapi',
+      'h264_texture_amf',
+    ]);
+
+    fireEvent.change(select, { target: { value: 'h264_texture_amf' } });
+    expect(sentUpdates(ws)[0]).toEqual({ recording: { encoder: 'h264_texture_amf' } });
+  });
+
+  it('two encoders of one family keep their ids in the label so both are pickable', () => {
+    const { ws } = renderSettings();
+    // Both NVENC key sets are live at once on an OBS 31+ NVIDIA machine, so two options would
+    // otherwise read "NVIDIA (NVENC)" and neither could be told from the other.
+    pushSettings(ws, makeSettings(), 'server:init', ['jim_nvenc', 'obs_nvenc_h264_tex', 'obs_x264']);
+    const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+    const labels = Array.from(select.options).map((option) => option.text);
+
+    expect(labels).toContain('NVIDIA (NVENC) — jim_nvenc');
+    expect(labels).toContain('NVIDIA (NVENC) — obs_nvenc_h264_tex');
+    expect(labels).toContain('Software (x264)');
+  });
+
+  it('an unrecognised encoder id is offered under its own id rather than hidden', () => {
+    const { ws } = renderSettings();
+    pushSettings(ws, makeSettings(), 'server:init', ['obs_x264', 'some_future_h264_encoder']);
+    const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+
+    expect(Array.from(select.options).map((option) => option.text)).toContain('some_future_h264_encoder');
+  });
+
+  it('encoder falls back to the stored value plus obs_x264 when the list is unknown', () => {
+    const { ws } = renderSettings(); // no availableEncoders field at all — an older backend
+    const select = () => screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
+    expect(Array.from(select().options).map((option) => option.value)).toEqual(['x264', 'obs_x264']);
+    expect(select().value).toBe('x264');
+
+    // An explicit null is the same "unknown": the fake-recorder host never loads libobs, so it
+    // cannot probe the encoder registry and says so rather than sending an empty list.
+    pushSettings(ws, makeSettings(), 'server:init', null);
+    expect(Array.from(select().options).map((option) => option.value)).toEqual(['x264', 'obs_x264']);
+    expect(select().value).toBe('x264');
+  });
+
+  // ---- rate control: the codec-and-quality surface ----
+  //
+  // The mode list is per-encoder because a mode name is written into the encoder's own rate_control
+  // key, and a name a family does not know segfaults obs-ffmpeg's VAAPI encoder. The backend coerces
+  // anything unsupported, so these tests are about the page not *offering* a choice the backend would
+  // override — not about the crash itself, which is pinned in the recorder's own tests.
+
+  it('rate control offers only the modes the selected encoder supports', () => {
+    const withEncoder = makeSettings();
+    withEncoder.recording.encoder = 'obs_x264';
+    const { ws } = renderSettings();
+    pushSettings(ws, withEncoder, 'server:init', ['obs_x264', 'ffmpeg_vaapi']);
+    const select = () => screen.getByLabelText(/^Rate control/) as HTMLSelectElement;
+
+    // x264: CRF is its constant-quality mode, and it has no CQP mode at all.
+    expect(Array.from(select().options).map((option) => option.value)).toEqual(['Crf', 'Cbr', 'Vbr']);
+    expect(Array.from(select().options).map((option) => option.text)).toEqual([
+      'Constant quality (CRF)',
+      'Constant bitrate (CBR)',
+      'Variable bitrate (VBR)',
+    ]);
+
+    // VAAPI: CQP rather than CRF, and no VBR — the specification has no VAAPI table, so its VBR
+    // ceiling key is not something we are willing to guess at.
+    const withVaapi = makeSettings();
+    withVaapi.recording.encoder = 'ffmpeg_vaapi';
+    pushSettings(ws, withVaapi, 'server:init', ['obs_x264', 'ffmpeg_vaapi']);
+    expect(Array.from(select().options).map((option) => option.value)).toEqual(['Cqp', 'Cbr']);
+  });
+
+  it('rate control change sends a partial recording page', () => {
+    const { ws } = renderSettings();
+    fireEvent.change(screen.getByLabelText(/^Rate control/), { target: { value: 'Cbr' } });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { rateControl: 'Cbr' } });
+  });
+
+  it('the quality profile is shown for constant quality and the bitrate for CBR', () => {
+    const { ws } = renderSettings();
+    // Default is constant quality: the quality preset selector is the control, and no bitrate field
+    // exists to be filled in for a mode that does not read one.
+    expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Bitrate/)).toBeNull();
+    expect(screen.queryByLabelText(/^Maximum bitrate/)).toBeNull();
+
+    const cbr = makeSettings();
+    cbr.recording.rateControl = 'Cbr';
+    pushSettings(ws, cbr, 'server:init');
+    expect(screen.queryByLabelText(/^Quality/)).toBeNull();
+    expect((screen.getByLabelText(/^Bitrate/) as HTMLInputElement).value).toBe('15000');
+    // CBR has no ceiling: max_bitrate is a VBR-only key on every family that has one at all.
+    expect(screen.queryByLabelText(/^Maximum bitrate/)).toBeNull();
+  });
+
+  it('VBR adds the ceiling field alongside the target bitrate', () => {
+    const { ws } = renderSettings();
+    const vbr = makeSettings();
+    vbr.recording.encoder = 'obs_nvenc_h264_tex';
+    vbr.recording.rateControl = 'Vbr';
+    vbr.recording.maxBitrateKbps = 24000;
+    pushSettings(ws, vbr, 'server:init', ['obs_nvenc_h264_tex']);
+
+    expect((screen.getByLabelText(/^Bitrate/) as HTMLInputElement).value).toBe('15000');
+    expect((screen.getByLabelText(/^Maximum bitrate/) as HTMLInputElement).value).toBe('24000');
+  });
+
+  it('a bitrate edit commits on blur and sends kbps', () => {
+    const { ws } = renderSettings();
+    const cbr = makeSettings();
+    cbr.recording.rateControl = 'Cbr';
+    pushSettings(ws, cbr, 'server:init');
+
+    changeInput(/^Bitrate/, '30000');
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { bitrateKbps: 30000 } });
+  });
+
+  it('a non-numeric bitrate draft is discarded rather than sent', () => {
+    const { ws } = renderSettings();
+    const cbr = makeSettings();
+    cbr.recording.rateControl = 'Cbr';
+    pushSettings(ws, cbr, 'server:init');
+
+    changeInput(/^Bitrate/, 'lots');
+    expect(sentUpdates(ws)).toHaveLength(0);
+    // The field re-syncs to the stored value, so the user is never left looking at a draft that was
+    // silently dropped.
+    expect((screen.getByLabelText(/^Bitrate/) as HTMLInputElement).value).toBe('15000');
+  });
+
+  it('a stored mode the encoder cannot use is shown coerced, and nothing is sent', () => {
+    const { ws } = renderSettings();
+    // A settings file written on a software-only machine carries CRF; here the encoder is VAAPI,
+    // whose family rejects that string. The recorder coerces it to CQP, so the page shows CQP —
+    // displaying CRF would be a selector lying about what the next recording will do.
+    const carried = makeSettings();
+    carried.recording.encoder = 'ffmpeg_vaapi';
+    carried.recording.rateControl = 'Crf';
+    pushSettings(ws, carried, 'server:init', ['ffmpeg_vaapi']);
+
+    const select = screen.getByLabelText(/^Rate control/) as HTMLSelectElement;
+    expect(select.value).toBe('Cqp');
+    expect(Array.from(select.options).map((option) => option.value)).not.toContain('Crf');
+    // Showing the coerced value must not persist it: the stored choice is the user's, and rewriting
+    // it on their behalf would lose it the moment they moved the config back to the other machine.
+    expect(sentUpdates(ws)).toHaveLength(0);
+    expect(screen.getByText(/does not support it/)).toBeTruthy();
+  });
+
+  it('rate control renders from the defaults when the backend sends no mode at all', () => {
+    const { ws } = renderSettings();
+    const older = makeSettings();
+    delete older.recording.rateControl;
+    delete older.recording.bitrateKbps;
+    pushSettings(ws, older, 'server:init');
+
+    // An older backend's push carries neither field. The selector still renders, on the safe
+    // constant-quality default, rather than showing an empty value.
+    expect((screen.getByLabelText(/^Rate control/) as HTMLSelectElement).value).toBe('Cqp');
+    expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
+  });
+
   it('output directory edit sends a partial recording page', () => {
     const { ws } = renderSettings();
     fireEvent.change(screen.getByLabelText(/^Output directory/), {
@@ -155,6 +423,25 @@ describe('SettingsView', () => {
     const sent = sentUpdates(ws);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ recording: { outputDirectory: null } });
+  });
+
+  it('browse sends SetVideoLocation (no parameters) and a push fills the field', () => {
+    const { ws } = renderSettings();
+
+    // Clicking Browse asks the backend to open its native folder picker; the command carries no
+    // parameters, so the frame has no `parameters` field at all.
+    fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
+    const browseFrame = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(browseFrame).toEqual({ method: 'SetVideoLocation' });
+
+    // The backend persists the picked directory and broadcasts a full settings push. A foreign
+    // cause (not our own echo) re-syncs the page, so the field shows the picked path.
+    const picked = makeSettings();
+    picked.recording.outputDirectory = '/home/tester/Videos/Picked';
+    pushSettings(ws, picked, 'server:picked');
+    expect((screen.getByLabelText(/^Output directory/) as HTMLInputElement).value).toBe(
+      '/home/tester/Videos/Picked',
+    );
   });
 
   it('recording mode change sends a partial recording page', () => {
@@ -255,25 +542,26 @@ describe('SettingsView', () => {
     expect(finalTracks[0].sources[1].volume).toBe(1);
   });
 
-  it('a push with our own cause does not clobber an in-progress edit', () => {
+  it('every push is applied to the model, whether it echoes our own cause or not', () => {
     const { ws } = renderSettings();
-    // The user edits the frame rate; the send is tagged with our cause.
+    const frameRate = () => screen.getByLabelText(/^Frame rate/) as HTMLSelectElement;
+    // The user picks a frame rate; the send is tagged with our cause.
     changeInput(/^Frame rate/, '144');
     expect(sentUpdates(ws)).toHaveLength(1);
 
-    // The backend echoes the full model with the same cause (its persistence has the new value).
+    // The backend echoes the full model with the same cause. The echo is its acceptance of the
+    // change and carries the newly-persisted values, so it must render — the cause only gates the
+    // re-sync of free-text drafts (useSettings.ts), and a selector has no draft to protect.
     const echo = makeSettings();
     echo.recording.fps = 144;
     pushSettings(ws, echo, 'tript:recording:1');
+    expect(frameRate().value).toBe('144');
 
-    // The UI must NOT have been re-rendered from the echo (it already shows the user's value).
-    expect((screen.getByLabelText(/^Frame rate/) as HTMLInputElement).value).toBe('144');
-
-    // A push with a foreign cause is a real external change and replaces the model.
+    // A push with a foreign cause is a real external change and equally replaces the model.
     const external = makeSettings();
     external.recording.fps = 30;
     pushSettings(ws, external, 'otherProcess:init');
-    expect((screen.getByLabelText(/^Frame rate/) as HTMLInputElement).value).toBe('30');
+    expect(frameRate().value).toBe('30');
   });
 
   it('reads from the settings message, not a stale shadow copy', () => {
@@ -297,10 +585,10 @@ describe('SettingsView', () => {
     });
     // No settings push yet — the page still renders with defaults and is editable.
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
-    changeInput(/^Frame rate/, '120');
+    changeInput(/^Frame rate/, '144');
     const sent = sentUpdates(ws);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toEqual({ recording: { fps: 120 } });
+    expect(sent[0]).toEqual({ recording: { fps: 144 } });
   });
 });
 

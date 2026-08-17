@@ -57,6 +57,8 @@ export function SettingsView({ client }: { client: IpcClient }) {
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
+            availableEncoders={controller.availableEncoders}
+            onBrowse={() => client.send('SetVideoLocation')}
           />
         )}
         {page === 'buffer' && (

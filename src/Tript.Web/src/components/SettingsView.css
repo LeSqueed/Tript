@@ -63,6 +63,18 @@
   font-size: 12px;
 }
 
+/* An input with an adjacent control (e.g. the output-directory field next to its Browse button). */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-row .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-input {
   background: var(--color-base-300);
   color: var(--color-base-content);

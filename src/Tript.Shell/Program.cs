@@ -69,7 +69,7 @@ internal static class Program
 
                 // WaitForClose runs the Photino/GTK event loop and returns when the window closes.
                 // The window is the whole shell UI, so the process exits when it is gone.
-                OpenWindow(UiUrl);
+                OpenWindow(UiUrl, host);
             }
             catch (Exception exception)
             {
@@ -137,7 +137,7 @@ internal static class Program
         }
     }
 
-    private static void OpenWindow(string url)
+    private static void OpenWindow(string url, AppHost host)
     {
         var window = new PhotinoWindow
         {
@@ -155,7 +155,41 @@ internal static class Program
         // The handler is kept so a future windowed build can intercept close (unsaved state,
         // an in-flight recording); for now a close always goes through.
         window.RegisterWindowClosingHandler((_, _) => false);
+
+        // Install the host's native folder picker once the window exists. Photino fires the
+        // WindowCreated handler inside WaitForClose, after it has created the native window
+        // (_nativeInstance is set), so the picker's ShowOpenFolder can marshal onto the GTK
+        // thread safely when SetVideoLocation arrives on an IPC thread.
+        window.RegisterWindowCreatedHandler((_, _) =>
+        {
+            host.FolderPicker = () => PickRecordingFolder(window, host);
+        });
+
         window.Load(url);
         window.WaitForClose();
+    }
+
+    // Runs the native "select a folder" dialog and returns the chosen directory, or null when the
+    // user cancels. SetVideoLocation arrives on the host's IPC receive thread, so the dialog must
+    // be marshalled onto the window's UI thread: Invoke dispatches the workItem to the GTK main
+    // thread (gdk_threads_add_idle) and blocks until it returns. ShowOpenFolder's nested GTK loop
+    // keeps the window responsive while the dialog is up.
+    private static string? PickRecordingFolder(PhotinoWindow window, AppHost host)
+    {
+        // Start the dialog at the current setting so the user sees where recordings go today;
+        // fall back to the platform default when the field is empty.
+        var configured = host.SettingsStore.Load().Recording.OutputDirectory;
+        var defaultPath = string.IsNullOrWhiteSpace(configured)
+            ? Tript.Settings.RecordingLocations.DefaultDirectory()
+            : configured;
+
+        string? result = null;
+        window.Invoke(() =>
+        {
+            var picked = window.ShowOpenFolder("Select recordings folder", defaultPath, multiSelect: false);
+            if (picked.Length > 0)
+                result = picked[0];
+        });
+        return result;
     }
 }

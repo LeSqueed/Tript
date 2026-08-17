@@ -2,18 +2,23 @@
 //
 // Settings page tests: each page renders its controls, editing a field sends the right
 // UpdateSettings partial, the audio routing model behaves (assigning a source to a track,
-// per-source volume, two sources on one track), the recording page's two selectors offer the right
-// options (frame-rate presets; only the encoders this machine registered) without coercing a stored
-// value they do not offer, and every settings push lands on the model whether or not it echoes our
-// own cause. The IPC client is exercised over a real IpcClient bound to a mock socket, so the wire
-// shape is asserted on both the sent frames and the pushed content.
+// per-source volume, two sources on one track), the recording page's three selectors offer the right
+// options (resolution presets plus this machine's display; frame-rate presets; only the encoders this
+// machine registered) without coercing a stored value they do not offer, and every settings push
+// lands on the model whether or not it echoes our own cause. The IPC client is exercised over a real
+// IpcClient bound to a mock socket, so the wire shape is asserted on both the sent frames and the
+// pushed content.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { createIpcClient } from '../ipc/websocketClient';
 import { MockWebSocket, createMockSocketFactory } from '../ipc/test/mockWebSocket';
 import { SettingsView } from './SettingsView';
-import type { AudioSourceKind, SettingsMessageContent } from '../settings/settingsModel';
+import type {
+  AudioSourceKind,
+  DisplayResolution,
+  SettingsMessageContent,
+} from '../settings/settingsModel';
 
 /** The active socket — the app's live socket is last under StrictMode's double effect. */
 function activeSocket(): MockWebSocket {
@@ -53,16 +58,19 @@ function makeSettings(): SettingsMessageContent['settings'] {
 }
 
 /**
- * Push a `settings` message. `availableEncoders` rides the content as a **sibling** of `settings`,
- * exactly as AppHost.PushSettings sends it: it is a fact about the machine's encoder registry, not a
- * persisted setting, so it is not nested under the recording page. Pass `null` for a host that
- * cannot probe the registry, and omit it for a backend that does not send the field at all.
+ * Push a `settings` message. `availableEncoders` and `displayResolution` ride the content as
+ * **siblings** of `settings`, exactly as AppHost.PushSettings sends them: they are facts about the
+ * machine — its encoder registry and its primary display — not persisted settings, so neither is
+ * nested under the recording page (RecordingSettings carries JsonExtensionData, so a nested field
+ * would be round-tripped into the settings file). Pass `null` for a host that could not determine
+ * one, and omit it for a backend that does not send the field at all.
  */
 function pushSettings(
   ws: MockWebSocket,
   settings = makeSettings(),
   cause?: string,
   availableEncoders?: string[] | null,
+  displayResolution?: DisplayResolution | null,
 ) {
   const content: SettingsMessageContent = { settings };
   if (cause !== undefined) {
@@ -70,6 +78,9 @@ function pushSettings(
   }
   if (availableEncoders !== undefined) {
     content.availableEncoders = availableEncoders;
+  }
+  if (displayResolution !== undefined) {
+    content.displayResolution = displayResolution;
   }
   act(() => {
     ws.serverMessage(JSON.stringify({ method: 'settings', content }));
@@ -121,6 +132,7 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'Capture' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Game' })).toBeTruthy();
     expect(screen.getByLabelText(/^Recording mode/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Resolution/)).toBeTruthy();
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     expect(screen.getByLabelText(/^Encoder/)).toBeTruthy();
     expect(screen.getByLabelText(/^Rate control/)).toBeTruthy();
@@ -163,6 +175,113 @@ describe('SettingsView', () => {
     const sent = sentUpdates(ws);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ recording: { fps: 144 } });
+  });
+
+  // ---- resolution ----
+  //
+  // The resolution the user picks is not only the encoder's scaled size: the host resets the OBS
+  // canvas to it at startup (Program.BuildVideoSettings). Offering a size nobody chose would
+  // therefore change what the next recording actually looks like, which is why the selector never
+  // coerces a stored value it does not list.
+
+  it('resolution is a selector over the common sizes', () => {
+    const { ws } = renderSettings(); // no displayResolution field at all — an older backend
+    const select = screen.getByLabelText(/^Resolution/) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440',
+      '3840x2160',
+    ]);
+    expect(select.value).toBe('1920x1080');
+    // With no display reported there is nothing to mark, so every label is the bare size.
+    expect(Array.from(select.options).map((option) => option.text)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440',
+      '3840x2160',
+    ]);
+
+    // An explicit null is the same "unknown": a host whose display detection failed says so rather
+    // than inventing a size.
+    pushSettings(ws, makeSettings(), 'server:init', undefined, null);
+    const reread = screen.getByLabelText(/^Resolution/) as HTMLSelectElement;
+    expect(Array.from(reread.options).map((option) => option.text)).not.toContain('1920x1080 (display)');
+  });
+
+  it('picking a resolution sends both dimensions as a partial recording page', () => {
+    const { ws } = renderSettings();
+    fireEvent.change(screen.getByLabelText(/^Resolution/), { target: { value: '2560x1440' } });
+    const sent = sentUpdates(ws);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ recording: { resolutionWidth: 2560, resolutionHeight: 1440 } });
+  });
+
+  it("the display's own size is marked, so the user can tell which option is their screen", () => {
+    const onDisplay = makeSettings();
+    onDisplay.recording.resolutionWidth = 2560;
+    onDisplay.recording.resolutionHeight = 1440;
+    const { ws } = renderSettings();
+    pushSettings(ws, onDisplay, 'server:init', undefined, { width: 2560, height: 1440 });
+    const select = screen.getByLabelText(/^Resolution/) as HTMLSelectElement;
+
+    // The display coincides with a preset here, so it adds no option — it marks the one it matches.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440',
+      '3840x2160',
+    ]);
+    expect(Array.from(select.options).map((option) => option.text)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440 (display)',
+      '3840x2160',
+    ]);
+    expect(select.value).toBe('2560x1440');
+  });
+
+  it('a display size outside the common list is offered, sorted by size', () => {
+    const { ws } = renderSettings();
+    // An ultrawide is not a 16:9 preset, and recording at a preset instead would letterbox or crop
+    // the picture the user actually plays on.
+    pushSettings(ws, makeSettings(), 'server:init', undefined, { width: 3440, height: 1440 });
+    const select = screen.getByLabelText(/^Resolution/) as HTMLSelectElement;
+
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440',
+      '3440x1440',
+      '3840x2160',
+    ]);
+    expect(select.options[3].text).toBe('3440x1440 (display)');
+
+    fireEvent.change(select, { target: { value: '3440x1440' } });
+    expect(sentUpdates(ws)[0]).toEqual({ recording: { resolutionWidth: 3440, resolutionHeight: 1440 } });
+  });
+
+  it('resolution keeps showing a stored size outside the list rather than coercing it', () => {
+    const withCustom = makeSettings();
+    withCustom.recording.resolutionWidth = 1600;
+    withCustom.recording.resolutionHeight = 900;
+    const { ws } = renderSettings();
+    pushSettings(ws, withCustom, 'server:init', undefined, { width: 2560, height: 1440 });
+    const select = screen.getByLabelText(/^Resolution/) as HTMLSelectElement;
+
+    // A `<select>` whose value matches no option renders its first option instead — 1280x720 here —
+    // and the next unrelated edit would persist that. The stored size stays, marked custom.
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      '1280x720',
+      '1920x1080',
+      '2560x1440',
+      '3840x2160',
+      '1600x900',
+    ]);
+    expect(select.options[4].text).toBe('1600x900 (custom)');
+    expect(select.value).toBe('1600x900');
+    // Showing it must not persist it: nothing was sent just by rendering the page.
+    expect(sentUpdates(ws)).toHaveLength(0);
   });
 
   it('frame rate is a selector over the common values, defaulting to 60', () => {

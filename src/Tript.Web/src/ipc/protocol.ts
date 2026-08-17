@@ -92,6 +92,12 @@ export interface SettingsMessage {
    * a host that cannot probe the encoder registry — both mean "unknown".
    */
   availableEncoders?: string[] | null;
+  /**
+   * The primary display's pixel size. A SIBLING of `settings` for the same reason
+   * `availableEncoders` is one: it describes the machine, not the configuration, so it must never be
+   * written back by UpdateSettings. Null when the host could not read a display from the platform.
+   */
+  displayResolution?: { width: number; height: number } | null;
 }
 
 export interface RecordingState {

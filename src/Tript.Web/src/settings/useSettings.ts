@@ -21,12 +21,14 @@
 // page object, never the top-level settings object.
 //
 // The push also carries fields that are *not* settings — machine facts the UI needs to render the
-// settings sensibly, `availableEncoders` being the only one so far. Those sit beside `settings` in
-// the message, not inside it, and are surfaced on the controller rather than merged into the model.
+// settings sensibly: `availableEncoders` (which encoders exist here) and `displayResolution` (how
+// big the primary display is). Those sit beside `settings` in the message, not inside it, and are
+// surfaced on the controller rather than merged into the model — the backend's page objects carry
+// JsonExtensionData, so a machine fact nested inside one would be persisted to the settings file.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { SettingsMessageContent, SettingsModel } from './settingsModel';
+import type { DisplayResolution, SettingsMessageContent, SettingsModel } from './settingsModel';
 
 export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game';
 
@@ -80,6 +82,32 @@ export interface SettingsController {
    * recording page falls back rather than showing an empty selector.
    */
   availableEncoders?: string[];
+  /**
+   * The primary display's pixel size, from the settings push. Undefined means "unknown" (an older
+   * backend, or a host whose display detection failed and sends null) — the resolution selector then
+   * offers its presets alone rather than an option built from a garbage size.
+   */
+  displayResolution?: DisplayResolution;
+}
+
+/**
+ * The display resolution from a push, or undefined when it is not a usable pair of pixel counts.
+ * Validated rather than trusted because it ends up in a `<select>` option the user can pick and the
+ * backend then records at: a zero, a negative, a non-integer or a non-number is not a resolution,
+ * and offering it would be worse than offering nothing.
+ */
+function readDisplayResolution(value: unknown): DisplayResolution | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const { width, height } = value as { width?: unknown; height?: unknown };
+  if (typeof width !== 'number' || typeof height !== 'number') {
+    return undefined;
+  }
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return { width, height };
 }
 
 export function useSettings(client: IpcClient): SettingsController {
@@ -88,6 +116,7 @@ export function useSettings(client: IpcClient): SettingsController {
   const [lastCause, setLastCause] = useState<string | undefined>(undefined);
   const [externalPushCount, setExternalPushCount] = useState(0);
   const [availableEncoders, setAvailableEncoders] = useState<string[] | undefined>(undefined);
+  const [displayResolution, setDisplayResolution] = useState<DisplayResolution | undefined>(undefined);
   const pendingCauses = useRef(new Set<string>());
   const causeSerial = useRef(0);
 
@@ -114,6 +143,9 @@ export function useSettings(client: IpcClient): SettingsController {
           ? message.availableEncoders.filter((id): id is string => typeof id === 'string' && id !== '')
           : undefined,
       );
+      // Same reasoning for the display size: a sibling of `settings`, because it is what this
+      // machine's primary display measures rather than something the user configured.
+      setDisplayResolution(readDisplayResolution(message.displayResolution));
       setHasSettings(true);
       if (!isSelfEcho) {
         setExternalPushCount((count) => count + 1);
@@ -141,5 +173,13 @@ export function useSettings(client: IpcClient): SettingsController {
     [client],
   );
 
-  return { settings, update, hasSettings, lastCause, externalPushCount, availableEncoders };
+  return {
+    settings,
+    update,
+    hasSettings,
+    lastCause,
+    externalPushCount,
+    availableEncoders,
+    displayResolution,
+  };
 }

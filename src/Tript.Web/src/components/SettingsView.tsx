@@ -58,6 +58,7 @@ export function SettingsView({ client }: { client: IpcClient }) {
             page={page}
             externalPushCount={controller.externalPushCount}
             availableEncoders={controller.availableEncoders}
+            displayResolution={controller.displayResolution}
             onBrowse={() => client.send('SetVideoLocation')}
           />
         )}

@@ -200,4 +200,22 @@ export interface SettingsMessageContent {
    * Both mean "unknown" and the encoder selector falls back.
    */
   availableEncoders?: string[] | null;
+  /**
+   * The primary display's pixel size, detected once by the host at startup
+   * (`Tript.App/PrimaryDisplay.cs`). Like `availableEncoders` it rides the push as a **sibling** of
+   * `settings`: it describes this machine rather than the configuration, and nesting it under the
+   * recording page would round-trip it into that page's extension data and write it to the settings
+   * file.
+   *
+   * Absent from an older backend and explicitly null when detection failed (no display server, or a
+   * platform we could not read a monitor from). Both mean "unknown", and the resolution selector
+   * then offers its preset list alone.
+   */
+  displayResolution?: DisplayResolution | null;
+}
+
+/** The pixel size of a display, as the settings push reports it. */
+export interface DisplayResolution {
+  width: number;
+  height: number;
 }

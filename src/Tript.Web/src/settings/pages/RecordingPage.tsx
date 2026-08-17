@@ -29,21 +29,33 @@
 // or a settings file from another machine cannot write a crashing mode. It is mirrored here only so
 // the page does not offer a choice the backend would silently override.
 //
-// Neither the frame-rate nor the encoder selector ever coerces a stored value it does not offer: an
-// out-of-list frame rate or encoder (a per-game override, or a config written by another build) is
-// appended as "(custom)" so picking something else is a deliberate act, not a side effect of opening
-// the page. The rate-control selector is the one exception, and deliberately so — an unsupported mode
-// there is not a value we can offer, because the backend will not write it; the page shows the mode
-// the recording will actually use and says why.
+// Resolution is a selector over the common 16:9 sizes plus this machine's own primary display, which
+// rides the settings push beside `settings` as `displayResolution` exactly as `availableEncoders`
+// does. It is not a setting — it is what the host measured at startup — so it is never nested inside
+// the settings object. A fresh install already defaults to the display's size (the host applies that
+// when it creates the settings file), so the display option is normally the selected one; it is still
+// listed because a user who changed their mind needs a way back to it.
 //
-// Free-text fields (resolution, the two bitrates) hold local drafts so the user's typing is never
-// clobbered by the echo of their own edit. The draft commits on blur or Enter; it re-syncs from the
-// model only when an *external* push arrives (`externalPushCount` changes). The frame rate and the
-// quality profile are fixed sets of presets picked directly, so they have no draft.
+// None of the resolution, frame-rate or encoder selectors ever coerces a stored value it does not
+// offer: an out-of-list resolution, frame rate or encoder (a per-game override, or a config written by
+// another build) is appended as "(custom)" so picking something else is a deliberate act, not a side
+// effect of opening the page. The rate-control selector is the one exception, and deliberately so —
+// an unsupported mode there is not a value we can offer, because the backend will not write it; the
+// page shows the mode the recording will actually use and says why.
+//
+// Free-text fields (the two bitrates) hold local drafts so the user's typing is never clobbered by
+// the echo of their own edit. The draft commits on blur or Enter; it re-syncs from the model only when
+// an *external* push arrives (`externalPushCount` changes). Resolution, the frame rate and the quality
+// profile are fixed sets of presets picked directly, so they have no draft.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
-import type { RateControlMode, RecordingMode, RecordingSettings } from '../settingsModel';
+import type {
+  DisplayResolution,
+  RateControlMode,
+  RecordingMode,
+  RecordingSettings,
+} from '../settingsModel';
 import { ActionButton, Field, GhostButton, SelectField, TextField, type SelectOption } from '../form';
 
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
@@ -70,6 +82,19 @@ const QUALITY_OPTIONS: SelectOption[] = [
  * every integer rate here is fine). 60 is the default.
  */
 const FPS_PRESETS = [30, 60, 90, 144];
+
+/**
+ * The common 16:9 recording sizes, smallest first. Every entry is a multiple of four wide and of two
+ * high, which is what libobs silently rounds to — it accepts 1366 and records 1364 while still
+ * reporting success, so a preset list is also how the page avoids offering a size that quietly
+ * becomes a different one.
+ */
+const RESOLUTION_PRESETS: [number, number][] = [
+  [1280, 720],
+  [1920, 1080],
+  [2560, 1440],
+  [3840, 2160],
+];
 
 /**
  * The software encoder every libobs build registers. Offered as the floor when the machine's real
@@ -164,13 +189,65 @@ const QUANTISER_MODES: RateControlMode[] = ['Crf', 'Cqp'];
  * Appends the stored value to `options` when it is not already one of them. A `<select>` whose
  * value matches no option renders its *first* option instead, which would show the user a setting
  * they do not have — and the next unrelated edit would then persist that lie. Keeping the value as
- * an explicit "(custom)" option is what makes both selectors on this page non-destructive.
+ * an explicit "(custom)" option is what makes the resolution, frame-rate and encoder selectors on
+ * this page non-destructive.
  */
 function withStoredValue(options: SelectOption[], stored: string): SelectOption[] {
   if (!stored || options.some((option) => option.value === stored)) {
     return options;
   }
   return [...options, { value: stored, label: `${stored} (custom)` }];
+}
+
+/**
+ * The wire form of a resolution in this selector: `<width>x<height>`, which is also what the user
+ * reads. The option *value* has to be a single string because that is what a `<select>` carries, and
+ * the two numbers are split back out when the choice is sent.
+ */
+function resolutionValue(width: number, height: number): string {
+  return `${width}x${height}`;
+}
+
+/** The two numbers back out of an option value, or null when it is not one of ours. */
+function parseResolution(value: string): { width: number; height: number } | null {
+  const match = /^(\d+)x(\d+)$/.exec(value);
+  return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
+}
+
+/**
+ * The resolution options: the common sizes, plus this machine's primary display when it is not one of
+ * them, plus the stored size when it is outside both.
+ *
+ * The display's own size is marked "(display)" wherever it appears — including when it coincides with
+ * a preset, because "which of these is my screen" is the question the label answers and 2560x1440
+ * looks no different from 1920x1080 without it. It is sorted into place by pixel count rather than
+ * appended, so the list always reads smallest to largest.
+ *
+ * A non-integer or non-positive stored size is a corrupt setting rather than a custom one, so it is
+ * not offered as a choice (the same rule the frame rate applies to a non-finite value).
+ */
+function resolutionOptions(
+  storedWidth: number,
+  storedHeight: number,
+  display?: DisplayResolution,
+): SelectOption[] {
+  const sizes: [number, number][] = [...RESOLUTION_PRESETS];
+  if (display && !sizes.some(([width, height]) => width === display.width && height === display.height)) {
+    sizes.push([display.width, display.height]);
+  }
+  sizes.sort(([aWidth, aHeight], [bWidth, bHeight]) => aWidth * aHeight - bWidth * bHeight);
+
+  const options = sizes.map(([width, height]) => ({
+    value: resolutionValue(width, height),
+    label:
+      display && width === display.width && height === display.height
+        ? `${resolutionValue(width, height)} (display)`
+        : resolutionValue(width, height),
+  }));
+
+  const storedIsSane =
+    Number.isInteger(storedWidth) && Number.isInteger(storedHeight) && storedWidth > 0 && storedHeight > 0;
+  return storedIsSane ? withStoredValue(options, resolutionValue(storedWidth, storedHeight)) : options;
 }
 
 /**
@@ -250,6 +327,7 @@ export function RecordingPage({
   page,
   externalPushCount,
   availableEncoders,
+  displayResolution,
   onBrowse,
 }: {
   settings: RecordingSettings;
@@ -261,36 +339,27 @@ export function RecordingPage({
    * field of it). Undefined means the backend could not tell us; the selector then falls back.
    */
   availableEncoders?: string[];
+  /**
+   * The primary display's size, from the settings push (a sibling of `settings` for the same reason).
+   * Undefined when the host could not detect a display; the selector then offers the presets alone.
+   */
+  displayResolution?: DisplayResolution;
   /** Opens the native folder picker. The picked directory arrives as a settings push, like any edit. */
   onBrowse: () => void;
 }) {
-  const [resolution, setResolution] = useState<string>(
-    `${settings.resolutionWidth}x${settings.resolutionHeight}`,
-  );
   const [bitrate, setBitrate] = useState<string>(String(settings.bitrateKbps ?? ''));
   const [maxBitrate, setMaxBitrate] = useState<string>(String(settings.maxBitrateKbps ?? ''));
 
   // Re-sync drafts from the model only on an external push, never on the echo of our own edit.
   useEffect(() => {
-    setResolution(`${settings.resolutionWidth}x${settings.resolutionHeight}`);
     setBitrate(String(settings.bitrateKbps ?? ''));
     setMaxBitrate(String(settings.maxBitrateKbps ?? ''));
-  }, [
-    externalPushCount,
-    settings.resolutionWidth,
-    settings.resolutionHeight,
-    settings.bitrateKbps,
-    settings.maxBitrateKbps,
-  ]);
+  }, [externalPushCount, settings.bitrateKbps, settings.maxBitrateKbps]);
 
-  function commitResolution() {
-    const match = /^\s*(\d+)\s*[x×]\s*(\d+)\s*$/.exec(resolution);
-    if (match) {
-      const width = Number(match[1]);
-      const height = Number(match[2]);
-      update(page, { resolutionWidth: width, resolutionHeight: height });
-    } else {
-      setResolution(`${settings.resolutionWidth}x${settings.resolutionHeight}`);
+  function commitResolution(value: string) {
+    const parsed = parseResolution(value);
+    if (parsed) {
+      update(page, { resolutionWidth: parsed.width, resolutionHeight: parsed.height });
     }
   }
 
@@ -330,19 +399,18 @@ export function RecordingPage({
         />
       </Field>
 
-      <Field label="Resolution" hint="Width × height of the recorded picture.">
-        <input
-          type="text"
-          className="settings-input"
-          value={resolution}
-          onChange={(event) => setResolution(event.target.value)}
-          onBlur={commitResolution}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              commitResolution();
-            }
-          }}
-          aria-label="Resolution"
+      <Field
+        label="Resolution"
+        hint={
+          displayResolution
+            ? 'Width × height of the recorded picture. Your display’s own size is marked; a stored size outside this list is kept and marked custom.'
+            : 'Width × height of the recorded picture. A stored size outside this list is kept and marked custom.'
+        }
+      >
+        <SelectField
+          value={resolutionValue(settings.resolutionWidth, settings.resolutionHeight)}
+          onChange={commitResolution}
+          options={resolutionOptions(settings.resolutionWidth, settings.resolutionHeight, displayResolution)}
         />
       </Field>
 

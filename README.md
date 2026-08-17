@@ -16,6 +16,14 @@ There are two ways to run Tript — same app host, different front end:
 - **`webkit2gtk-4.1`** — required for the desktop shell. This is the 4.1 ABI, **not** `webkitgtk-6.0`.
   - Arch / CachyOS: `sudo pacman -S webkit2gtk-4.1`
   - Debian / Ubuntu: `sudo apt install libwebkit2gtk-4.1-0`
+- **`gst-plugins-good`** — also required for the desktop shell, even though nothing in the UI
+  plays audio. WebKitGTK builds a GStreamer media pipeline at startup and needs an audio sink
+  (`autoaudiosink`, which lives in this package). Without it the render process aborts and the
+  window appears frozen while the host keeps running, so the symptom points nowhere near the
+  cause. The tell is `GStreamer element autoaudiosink not found` followed by a
+  `g_signal_connect_data` NULL-instance assertion.
+  - Arch / CachyOS: `sudo pacman -S gst-plugins-good`
+  - Debian / Ubuntu: `sudo apt install gstreamer1.0-plugins-good`
 - **`obs-studio` + `obs-ffmpeg-mux`** — required for real recording. Discovered at runtime; on Windows OBS is bundled instead.
   - Arch / CachyOS: `sudo pacman -S obs-studio`
   - Debian / Ubuntu: `sudo apt install obs-studio obs-ffmpeg-mux` (or your distro's equivalent)

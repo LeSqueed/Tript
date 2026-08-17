@@ -17,5 +17,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.App\Tript.App.csproj" />
+    <!-- The desktop shell is here for its startup preflight only (WebviewAudioSinkTests): pure
+         decision logic over injected probes, no window and no Photino call. The shell has no test
+         project of its own, and the host's other platform preflight (SafeModuleAllowlistTests) is
+         already pinned here. -->
+    <ProjectReference Include="..\..\src\Tript.Shell\Tript.Shell.csproj" />
   </ItemGroup>
 </Project>

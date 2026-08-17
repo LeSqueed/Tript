@@ -23,6 +23,15 @@
     <PackageReference Include="Photino.NET" Version="4.0.16" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The shell's startup preflights are decision logic worth asserting (WebviewAudioSink refuses
+         to open a window WebKitGTK would abort behind), and the app test suite is where the host's
+         other platform preflight is pinned, so it sees the shell's internals too. Nothing in the
+         window itself is testable off a display, and none of these tests start a host. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.App.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Tript.App/Tript.App.csproj" />
   </ItemGroup>
 </Project>

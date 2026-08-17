@@ -67,6 +67,18 @@ internal static class Program
                     return 1;
                 }
 
+                // Same principle, the other hang: on Linux the webview's WebKitGTK render process
+                // aborts when GStreamer has no audio sink, which shows up as a window that opens
+                // and appears frozen while this host stays perfectly healthy. The check is a no-op
+                // on Windows (WebView2) and fails open whenever it cannot tell — see
+                // WebviewAudioSink for the measured detail and why absence is only ever reported
+                // on positive evidence.
+                if (!WebviewAudioSink.IsPresent())
+                {
+                    Console.Error.WriteLine(WebviewAudioSink.MissingSinkMessage);
+                    return 1;
+                }
+
                 // WaitForClose runs the Photino/GTK event loop and returns when the window closes.
                 // The window is the whole shell UI, so the process exits when it is gone.
                 OpenWindow(UiUrl, host);

@@ -34,25 +34,47 @@ internal sealed class RecordingMetadataStore
         _metadataRoot = metadataRoot;
     }
 
-    // The record for a video, or null when the video has no metadata record yet. A video with no
+    // The record for a video, or null when the video has no usable metadata record. A video with no
     // record still lists — empty bookmarks, no title — so "no record" is a normal state, not an
-    // error.
-    internal RecordingMetadata? Load(string videoFileName)
+    // error, and a malformed record must not take the video's list entry down with it either: the
+    // read path deliberately cannot tell the two apart.
+    //
+    // Every caller that goes on to write must use Read instead. Collapsing "absent" and
+    // "unreadable" into null is safe for building a list and destructive for a read-modify-write:
+    // it is exactly how a present-but-unreadable record was replaced by a blank one.
+    internal RecordingMetadata? Load(string videoFileName) => Read(videoFileName).Record;
+
+    // The record together with what the load actually found, for the callers that write back. The
+    // three states are genuinely different outcomes and only this method reports them.
+    internal StoredRecord<RecordingMetadata> Read(string videoFileName)
     {
         var path = PathFor(videoFileName);
         if (!File.Exists(path))
-            return null;
+            return StoredRecord<RecordingMetadata>.Absent;
 
         try
         {
-            return JsonSerializer.Deserialize<RecordingMetadata>(File.ReadAllText(path),
+            var record = JsonSerializer.Deserialize<RecordingMetadata>(File.ReadAllText(path),
                 SettingsSerialization.Options);
+            // A file holding the literal "null" parses to no record at all. There is nothing to
+            // preserve in it, but there is a file, so it counts as present-and-unreadable rather
+            // than absent — the write path may replace it, the same as any other unusable record,
+            // only after saying so.
+            return record is null
+                ? StoredRecord<RecordingMetadata>.Unreadable
+                : new StoredRecord<RecordingMetadata>(StoredRecordState.Loaded, record);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            // A malformed record must not take the video's list entry down with it; the caller
-            // treats a failed load exactly like an absent record.
-            return null;
+            return new StoredRecord<RecordingMetadata>(StoredRecordState.Unreadable, null,
+                exception.Message);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The record exists and this process cannot read it (a lock, a permission, a failing
+            // disk). Least of all may it be overwritten now: the state is "unreadable", not "gone".
+            return new StoredRecord<RecordingMetadata>(StoredRecordState.Unreadable, null,
+                exception.Message);
         }
     }
 
@@ -62,10 +84,21 @@ internal sealed class RecordingMetadataStore
     // the primary signal and the stderr line is a secondary trace.
     internal bool Save(RecordingMetadata metadata)
     {
+        var videoFileName = metadata.VideoFileName();
+        if (string.IsNullOrWhiteSpace(videoFileName))
+        {
+            // The record's own link key is its file name. A record with no VideoPath would be
+            // written as "<metadataRoot>/.metadata.json", a file no video can ever be matched to,
+            // so it is refused rather than left as litter in the metadata tree.
+            Console.Error.WriteLine(
+                "Tript.App: refusing to write a metadata record with no videoPath — it would not belong to any video.");
+            return false;
+        }
+
         try
         {
             Directory.CreateDirectory(_metadataRoot);
-            File.WriteAllText(PathFor(metadata.VideoFileName()),
+            RecordFile.WriteAtomically(PathFor(videoFileName),
                 JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
             return true;
         }

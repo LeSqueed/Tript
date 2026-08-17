@@ -115,4 +115,80 @@ public class BookmarkMetadataTests
 
         Assert.Equal(ContentType.Recording, metadata.ContentType);
     }
+
+    // ---- how much a record may be off and still load ----
+
+    // The form the app itself writes: StartTime comes from DateTime.Now, which serializes with the
+    // local offset ("2026-08-17T15:20:46.7558115+02:00"). It reads back as the same instant. This is
+    // pinned because it was suspected of being the cause of a lost record — it is not, and a "fix"
+    // that changed the field's type or its written form would silently move the on-disk contract.
+    [Fact]
+    public void RecordingMetadata_StartTimeWithAnOffset_RoundTripsAsTheSameInstant()
+    {
+        var json = """
+            {
+              "videoPath": "sessions/session-20260817-152046741.mp4",
+              "game": "Overwatch",
+              "contentType": "Recording",
+              "startTime": "2026-08-17T15:20:46.7558115+02:00"
+            }
+            """;
+
+        var metadata = JsonSerializer.Deserialize<RecordingMetadata>(json, SettingsSerialization.Options)!;
+
+        Assert.Equal("Overwatch", metadata.Game);
+        Assert.Equal("sessions/session-20260817-152046741.mp4", metadata.VideoPath);
+        var expected = new DateTimeOffset(2026, 8, 17, 15, 20, 46, TimeSpan.FromHours(2)).AddTicks(7558115);
+        Assert.Equal(expected, new DateTimeOffset(metadata.StartTime));
+
+        // And writing it again keeps the instant, in the same offset form.
+        var again = JsonSerializer.Serialize(metadata, SettingsSerialization.Options);
+        Assert.Equal(expected,
+            new DateTimeOffset(JsonSerializer.Deserialize<RecordingMetadata>(again,
+                SettingsSerialization.Options)!.StartTime));
+    }
+
+    // A record does not have to be perfect to be worth reading: what is in it (a game, a title, a
+    // bookmark list) cannot be recomputed, so anything unambiguous is accepted. Each case below threw
+    // JsonException before, which made the record count as garbage.
+    [Fact]
+    public void RecordingMetadata_ANearlyRightRecord_StillLoads()
+    {
+        Assert.Equal("Overwatch", Load("""{"videoPath":"a.mp4","game":"Overwatch",}""").Game);
+        Assert.Equal("Overwatch", Load("{\n// the game this belongs to\n\"videoPath\":\"a.mp4\",\"game\":\"Overwatch\"}").Game);
+        Assert.Equal(9.13, Load("""{"videoPath":"a.mp4","game":"Overwatch","durationSeconds":"9.13"}""").DurationSeconds);
+
+        // PascalCase members used to parse into an empty record — no exception, and silently no
+        // videoPath and no game, which is worse than a failure.
+        var pascal = Load("""{"VideoPath":"a.mp4","Game":"Overwatch"}""");
+        Assert.Equal("a.mp4", pascal.VideoPath);
+        Assert.Equal("Overwatch", pascal.Game);
+
+        static RecordingMetadata Load(string json) =>
+            JsonSerializer.Deserialize<RecordingMetadata>(json, SettingsSerialization.Options)!;
+    }
+
+    // A timestamp is the one field the library can do without — the list falls back to the video's
+    // last-write time — so an unreadable one degrades to no timestamp instead of failing the record
+    // and putting the game and the bookmarks at risk. Epoch seconds are read rather than dropped:
+    // they name the same instant unambiguously.
+    [Fact]
+    public void RecordingMetadata_AnUnreadableStartTime_DoesNotFailTheRecord()
+    {
+        var epoch = JsonSerializer.Deserialize<RecordingMetadata>(
+            """{"game":"Overwatch","startTime":1786972846}""", SettingsSerialization.Options)!;
+        Assert.Equal("Overwatch", epoch.Game);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1786972846), new DateTimeOffset(epoch.StartTime));
+
+        foreach (var unreadable in new[] { "\"\"", "\"17/08/2026 15:20:46\"", "null", "{\"y\":2026}" })
+        {
+            var metadata = JsonSerializer.Deserialize<RecordingMetadata>(
+                $"{{\"game\":\"Overwatch\",\"startTime\":{unreadable},\"title\":\"Ranked win\"}}",
+                SettingsSerialization.Options)!;
+
+            Assert.Equal("Overwatch", metadata.Game);
+            Assert.Equal("Ranked win", metadata.Title);
+            Assert.Equal(default, metadata.StartTime);
+        }
+    }
 }

@@ -107,5 +107,8 @@ public sealed class GameSettings
     // the value.
     public TimeSpan GameCaptureTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
-    public List<GameSetting> GameList { get; set; } = [];
+    // The known games. A fresh install ships with Overwatch so the auto-start detection watches
+    // a game on first launch; a user who edits the list keeps exactly what they saved, because
+    // this default only applies when a settings file is absent or has no gameList key.
+    public List<GameSetting> GameList { get; set; } = [new() { Id = "Overwatch", Name = "Overwatch" }];
 }

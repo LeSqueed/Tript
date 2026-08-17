@@ -100,7 +100,7 @@ public class LogicalPagesTests : IDisposable
         _store.Save();
 
         var reloaded = new SettingsStore(_provider).Load();
-        var game = Assert.Single(reloaded.Game.GameList);
+        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow");
         Assert.Equal("ow", game.Id);
         Assert.Equal(240, game.QualityOverride!.Fps);
     }

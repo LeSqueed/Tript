@@ -34,6 +34,11 @@ internal sealed class AppHost : IDisposable
     private readonly ObsRuntime? _runtime;
     private readonly RecordingSessionTracker _sessionTracker;
 
+    // The primary display's resolution, detected once at startup (Program.BuildApp), or null when
+    // this machine would not say. Offered to the settings UI on every settings push; never
+    // persisted, because it is a fact about the machine rather than a setting.
+    private readonly DisplaySize? _primaryDisplay;
+
     private readonly AppController _controller;
     private readonly IpcServer _ipc;
     private readonly ContentServer _content;
@@ -54,13 +59,16 @@ internal sealed class AppHost : IDisposable
 
     private bool _disposed;
 
+    // primaryDisplay is optional: a host constructed without one (the folder-picker tests) simply
+    // pushes no display resolution, and the settings UI offers its preset list alone.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
-        RecordingSessionTracker sessionTracker)
+        RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null)
     {
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
         _sessionTracker = sessionTracker;
+        _primaryDisplay = primaryDisplay;
 
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
@@ -523,6 +531,15 @@ internal sealed class AppHost : IDisposable
             // P/Invoke there would segfault rather than answer — so the list is absent (null) and
             // the frontend falls back to the current value plus obs_x264.
             availableEncoders = _runtime is null ? null : ObsRecorderSession.EnumerateUsableEncoderIds(),
+            // The primary display's resolution, so the resolution selector can offer this machine's
+            // own size. A sibling of `settings` for the same reason the encoder list is one: it is a
+            // property of the machine, not a persisted setting, and RecordingSettings carries
+            // JsonExtensionData — a field nested under `recording` would be round-tripped straight
+            // into the settings file on the next save. Null when detection failed, and the frontend
+            // then offers the presets alone.
+            displayResolution = _primaryDisplay is { IsUsable: true } display
+                ? (object?)new { width = display.Width, height = display.Height }
+                : null,
         }, Wire.Options));
     }
 
@@ -856,6 +873,19 @@ internal sealed class AppHost : IDisposable
     }
 
     // ---- clipping ----
+
+    // Reports a clip that could not even be started — a source path that does not resolve inside the
+    // recording root (AppController.CreateClip). It uses the same importProgress "error" frame the
+    // engine's failures below use, because that is the message the clip dialog already renders its
+    // failure state from; a refusal must not look like a clip that silently never happened.
+    internal void PushClipError(string message)
+    {
+        _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
+        {
+            status = "error",
+            error = message,
+        }, Wire.Options));
+    }
 
     internal void CreateClip(ClipRequest request)
     {

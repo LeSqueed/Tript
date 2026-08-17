@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.Json;
+using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.Media;
 
@@ -37,7 +38,7 @@ internal sealed class AppController
             ["RefreshStorageStats"] = (_, _) => _host.RefreshStorageStats(),
             ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
-            ["CreateClip"] = (parameters, _) => _host.CreateClip(BuildClipRequest(parameters)),
+            ["CreateClip"] = (parameters, _) => CreateClip(parameters),
             ["ListContent"] = (_, _) => _host.PushContent(),
             ["CancelClip"] = (_, _) => { /* The engine is not cancellable in the alpha. */ },
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
@@ -97,23 +98,107 @@ internal sealed class AppController
         _host.RaiseRecoveryPromptIfNeeded(client);
     }
 
-    private ClipRequest BuildClipRequest(JsonElement? parameters)
+    // ---- CreateClip ----
+
+    // The wire's filePath is relative to the effective recording root, by design: ListContent builds
+    // ContentItem.FilePath with Path.GetRelativePath against EffectiveRoot and '/' separators
+    // (AppHost.ListContent), because that is the form the content server's URLs take, and the
+    // frontend echoes that exact string back in CreateClip. Every consumer that then touches the
+    // file system has to resolve it against the root first. The output path always did
+    // (BuildClipOutputPath joins EffectiveRoot); the source path did not, so ffmpeg and MediaProbe
+    // resolved it against the process CWD and clipping only worked when the CWD happened to equal
+    // the recording root. In the real app, with recording.outputDirectory pointing elsewhere, it
+    // failed as "Source file does not exist: <cwd>/sessions/session-....mp4" for a session file that
+    // existed under the configured directory and listed fine in the player.
+    private void CreateClip(JsonElement? parameters)
     {
         var parsed = parameters.Deserialize<CreateClipParameters>() ?? new CreateClipParameters();
+        var request = BuildClipRequest(parsed, _host.EffectiveRoot, out var refusal);
+        if (request is null)
+        {
+            // The request never reaches the engine: either the source path did not resolve inside
+            // the recording root (a traversal, an absolute path outside it, or an empty filePath) or
+            // its segment times were not real times at all. The refusal rides the importProgress
+            // "error" the engine's own failures already use, so the clip dialog surfaces it exactly
+            // like a bad source file instead of the command dying silently. A path that does resolve
+            // but has no file behind it still fails downstream, where MediaProbe throws
+            // ClipSourceException and AppHost.CreateClip broadcasts it.
+            _host.PushClipError(refusal
+                ?? $"That clip's source is not inside the recording folder, so it was not read: '{parsed.FilePath}'.");
+            return;
+        }
+
+        _host.CreateClip(request);
+    }
+
+    // Builds the engine request, or null (with the reason in `refusal`) when the source path cannot
+    // be resolved inside the recording root or the segment times are not usable. Static and internal
+    // so the resolution can be asserted directly: the suite's hosts run with a CWD that is not the
+    // content root, but the bug hid behind the engine's ffmpeg dependency, so the absoluteness of
+    // SourcePath is worth pinning on its own.
+    internal static ClipRequest? BuildClipRequest(CreateClipParameters parsed, string effectiveRoot) =>
+        BuildClipRequest(parsed, effectiveRoot, out _);
+
+    internal static ClipRequest? BuildClipRequest(CreateClipParameters parsed, string effectiveRoot,
+        out string? refusal)
+    {
+        refusal = null;
 
         var mode = parsed.OutputMode.Equals("separate", StringComparison.OrdinalIgnoreCase)
             ? ClipMode.Separate
             : ClipMode.Combine;
 
-        var regions = parsed.Segments.Count > 0
-            ? parsed.Segments.Select(segment => ClipRegion.FromSeconds(segment.StartTime, segment.EndTime)).ToList()
-            : [ClipRegion.FromSeconds(parsed.StartTime, parsed.EndTime)];
+        // The wire's seconds become TimeSpans here, which is the one conversion that can throw on
+        // input this method does not control: TimeSpan.FromSeconds throws ArgumentException on NaN
+        // and OverflowException on anything past ~9.22e11 seconds — including 1e18, a JSON number a
+        // client can send without trying. This runs on the IPC dispatch thread, where
+        // IpcServer.Dispatch catches the throw and only writes it to stderr, so the frontend would
+        // receive no frame at all: not the "importing" one, not an error, nothing for the clip dialog
+        // to render. Refusing is strictly better than throwing, so the conversion goes through
+        // ClipRegionBounds.TryFromSeconds and unusable segments are dropped here.
+        //
+        // Only the times are checked at this layer. The source's real duration is not known until
+        // MediaProbe has run, so the clamp to [0, duration] belongs to the engine, which probes
+        // anyway (ClipEngine.Validate).
+        var wireSegments = parsed.Segments.Count > 0
+            ? parsed.Segments.Select(segment => (segment.StartTime, segment.EndTime)).ToList()
+            : [(parsed.StartTime, parsed.EndTime)];
 
-        var outputPath = BuildClipOutputPath(parsed, _host.EffectiveRoot);
+        // The content server's traversal guard, reused rather than re-derived: it joins the
+        // '/' separated wire path onto the root, normalizes separators for the platform, and
+        // returns null for anything that escapes the root — a "../../etc/passwd" filePath is
+        // refused here, and an already-absolute path is accepted only when it points inside the
+        // root. The result is always absolute, so the engine no longer depends on the CWD.
+        //
+        // Checked before the times so the security refusal is never masked by a message about
+        // timestamps: a traversal attempt with nonsense times is still reported as a traversal.
+        var sourcePath = ContentServer.ResolveWithinRoot(effectiveRoot, parsed.FilePath);
+        if (sourcePath is null)
+        {
+            refusal =
+                $"That clip's source is not inside the recording folder, so it was not read: '{parsed.FilePath}'.";
+            return null;
+        }
+
+        var regions = new List<ClipRegion>(wireSegments.Count);
+        foreach (var (start, end) in wireSegments)
+        {
+            if (ClipRegionBounds.TryFromSeconds(start, end, out var region))
+                regions.Add(region);
+        }
+
+        if (regions.Count == 0)
+        {
+            refusal = "That clip's marked times are not real times (not a number, infinite, or out of "
+                + "range), so nothing was clipped. Re-mark the region and try again.";
+            return null;
+        }
+
+        var outputPath = BuildClipOutputPath(parsed, effectiveRoot);
 
         return new ClipRequest
         {
-            SourcePath = parsed.FilePath,
+            SourcePath = sourcePath,
             Regions = regions,
             Mode = mode,
             OutputPath = outputPath,

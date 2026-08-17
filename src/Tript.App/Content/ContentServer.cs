@@ -154,43 +154,64 @@ internal sealed class ContentServer : IDisposable
 
     // Resolves a request path against the content root, or returns null when the path escapes the
     // root. This is the single choke point every content/thumbnail request passes through.
-    internal string? ResolveWithinRoot(string requestPath)
+    internal string? ResolveWithinRoot(string requestPath) => ResolveWithinRoot(_contentRoot, requestPath);
+
+    // The same guard against an explicit root, callable without a server instance. The clip surface
+    // needs it: the wire's filePath is relative to the effective recording root by design (the
+    // content server serves the catalogue that way), so AppController.BuildClipRequest has to
+    // resolve it against that root before handing it to ffmpeg — and it must refuse a traversal
+    // exactly as an HTTP request would. Sharing this method keeps one implementation of "is this
+    // path inside the root", so the guard stays the single choke point it is documented to be.
+    internal static string? ResolveWithinRoot(string contentRoot, string requestPath)
     {
         if (string.IsNullOrWhiteSpace(requestPath))
             return null;
 
         // A raw traversal segment is refused at the route boundary; this re-checks so the method is
         // safe to call directly too. The check runs before any path combine, so ".." never reaches
-        // the file system.
+        // the file system. The pattern only sees '/' separators (the wire's), which is enough for
+        // an early refusal — a Windows-style "..\.." form survives to the root comparison below,
+        // and that comparison is the final authority either way.
         if (PathSegment.IsMatch(requestPath))
             return null;
 
-        // Combine and normalize. GetFullPath collapses any ".." the checks above missed and gives
-        // an absolute canonical path; the root comparison is the final authority.
-        var candidate = Path.GetFullPath(Path.Combine(_contentRoot, requestPath));
-        if (!IsUnderRoot(candidate))
+        try
+        {
+            // Combine and normalize. Path.Combine returns the second argument unchanged when it is
+            // already rooted, so an absolute incoming path is kept and then judged by the root
+            // comparison — accepted when it points inside the root, refused when it does not.
+            // GetFullPath collapses any ".." the checks above missed, and converts the wire's '/'
+            // separators to the platform's on Windows.
+            var root = Path.GetFullPath(contentRoot);
+            var candidate = Path.GetFullPath(Path.Combine(root, requestPath));
+            return IsUnderRoot(candidate, root) ? candidate : null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException
+                                             or PathTooLongException)
+        {
+            // A path the platform cannot even express (an embedded NUL, a reserved device name) is
+            // refused rather than thrown: to every caller it is simply not a path inside the root.
             return null;
-
-        return candidate;
+        }
     }
 
     // Whether a resolved path is the root itself or a path below it. The directory separator
     // suffix guards the classic prefix trap: "/content-root-other" must not pass for
     // "/content-root".
-    private bool IsUnderRoot(string candidate)
+    private static bool IsUnderRoot(string candidate, string root)
     {
         var comparison = ComparisonFor();
-        if (string.Compare(candidate, _contentRoot, comparison) == 0)
+        if (string.Compare(candidate, root, comparison) == 0)
             return true;
 
-        var prefix = _contentRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? _contentRoot
-            : _contentRoot + Path.DirectorySeparatorChar;
+        var prefix = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
 
         return candidate.StartsWith(prefix, comparison);
     }
 
-    private StringComparison ComparisonFor() => OperatingSystem.IsWindows()
+    private static StringComparison ComparisonFor() => OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
 

@@ -56,6 +56,7 @@ import {
   buildDefaultRegion,
   clampTime,
   DEFAULT_REGION_SECONDS,
+  markableDuration,
   MIN_REGION_SECONDS,
   newRegionId,
   resolveClipBounds,
@@ -132,17 +133,17 @@ export function PlayerView({
   // circuit keeps bookmarks at [] until the source exists (and `item` is undefined then anyway).
   const bookmarks = useMemo(() => (item && source ? source.getBookmarks(item) : []), [source, item]);
 
-  // The session's declared length, when the content record carries one. `DEFAULT_SESSION_SECONDS` is
-  // NOT a length: it is a placeholder that keeps the timeline drawable for a recording with no
-  // metadata record (the normal case for one that was never post-processed) until the <video> element
-  // reports its own duration. Good enough to lay out a timeline, useless as a bound — see below.
+  // The session's declared length, when the content record carries one. Neither this nor
+  // `DEFAULT_SESSION_SECONDS` is a length: the constant is a placeholder that keeps the timeline
+  // drawable for a recording with no metadata record (the normal case for one that was never
+  // post-processed), and the declared length is a second-hand number that has been seen claiming 100s
+  // for a 9.13s file. Both are good enough to lay out a timeline and useless as a bound — see below.
   const declaredDuration = item?.endTime !== undefined && item.endTime > 0 ? item.endTime : undefined;
   const fallbackDuration = declaredDuration ?? DEFAULT_SESSION_SECONDS;
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
 
-  // The bound every marked segment lives inside — the media's own duration once it has reported one,
-  // the declared length until then, and 0 when neither exists.
+  // The bound every marked segment lives inside — the media's own duration, and nothing else.
   //
   // MEASURED BUG (this is the hole this resolution closes): `duration` above starts at
   // `fallbackDuration`, so on a session with no `endTime` the player believed the video was 120s long
@@ -151,10 +152,21 @@ export function PlayerView({
   // really 8s long, and because marks deliberately survive closing the dialog, that segment was still
   // there at Create time. Segments are therefore bounded by `clipDuration`, never by the placeholder,
   // and the controller re-checks its regions against it whenever it changes.
+  //
+  // MEASURED AGAIN, and why `markableDuration` and not `clipBounds.seconds`: the same hole was still
+  // open one step further in, for the *declared* length. `resolveClipBounds` falls back to the content
+  // record's `endTime` and flags it `known: false`, and nothing read that flag — the guess was clamped
+  // against as if it were measured. On a record declaring 100s in front of a 9.13s file, `Mark 10s` at
+  // 0:95 marked a segment ending at 1:40, ~91s past the last frame. A declared length can overstate
+  // the media (a record written by another code path, a recording a crash cut short, a re-encode), so
+  // it is not a bound at all: until the media reports its own length there is nothing to mark inside.
   const clipBounds = resolveClipBounds(durationKnown ? duration : undefined, declaredDuration);
-  const clipDuration = clipBounds.seconds;
-  // Nothing can be marked inside a media that has no measured length, or one too short to hold the
-  // shortest allowed segment. The mark controls say so rather than silently doing nothing.
+  const clipDuration = markableDuration(clipBounds);
+  // Nothing can be marked inside a media whose length nobody has measured, or one too short to hold
+  // the shortest allowed segment. The mark controls say so rather than silently doing nothing. The
+  // wait is the media's `durationchange`, which the element fires as soon as it has read the file's
+  // header — the same load that has to finish before the first frame can be shown, i.e. before there
+  // is anything to mark against by eye either.
   const canMark = clipDuration >= MIN_REGION_SECONDS;
 
   // NOTE: the state variable is `viewWindow`, never `window` — `window` is the DOM global and
@@ -260,7 +272,10 @@ export function PlayerView({
 
   // The three marking gestures clamp against `clipDuration`, not the timeline's display duration:
   // an in point, an out point and a default-length segment must all land inside the media, and only
-  // `clipDuration` knows how long that is.
+  // `clipDuration` knows how long that is. It is 0 while nothing has been measured, which is what
+  // refuses all three — the buttons are disabled (`canMark`) and the keyboard path is refused by the
+  // model itself (`buildDefaultRegion`/`markRegion` cannot place a region inside a 0s media), so the
+  // shortcuts cannot get in behind the disabled buttons.
   const markIn = useCallback(() => {
     if (!canMark) {
       return;
@@ -568,7 +583,9 @@ export function PlayerView({
           <span className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ? // Honest about why the controls are dead: the alternative was to let segments be
-                // marked against a length nobody has measured, which is the bug this replaces.
+                // marked against a length nobody has measured — the placeholder constant, or the
+                // content record's declared length, which has been seen overstating the file by 91s.
+                // The wait lasts as long as the video element takes to read the file's header.
                 'Waiting for the video length — segments can only be marked once the media reports how long it is.'
               : markInTime !== null
               ? `In point at ${formatTime(markInTime)} — press O (or Mark out) at the playhead to close the segment.`

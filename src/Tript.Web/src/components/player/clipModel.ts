@@ -24,9 +24,14 @@
 // against the player's fallback length (DEFAULT_SESSION_SECONDS = 120s, a fabricated placeholder
 // used until the <video> element reports its metadata), which meant a segment could be marked out to
 // 0:45 on a file that was really 8s long and every clamp would allow it — the clamping was correct
-// and the number was a lie. Hence `resolveClipBounds` (which duration is authoritative) and
+// and the number was a lie. Hence `resolveClipBounds` (which duration is authoritative),
+// `markableDuration` (when there is no authoritative one at all, and so nothing may be marked) and
 // `reconcileRegion` (what happens to regions when the authoritative duration turns out to be
 // shorter than what they were clamped against).
+//
+// The metadata record's declared length is not a lesser measurement, it is not a measurement: it was
+// observed declaring 100s for a file that was really 9.13s. It lays out a timeline; it never bounds a
+// segment.
 
 import type { ContentItem, CreateClipParameters, ClipSegment } from '../../ipc/protocol';
 import type { TimelineRegion } from './clipSeam';
@@ -51,8 +56,11 @@ export const MIN_REGION_SECONDS = 0.25;
  * The clippable length of the media and where that number came from.
  *
  * `known` is true only when the media itself reported the duration. It is not a UI nicety: a bound
- * nobody measured is not a bound, and `seconds` is 0 in that case rather than a placeholder, so
- * every helper here refuses to place a region until something real is known.
+ * nobody measured is not a bound. When it is false, `seconds` is at best a *declared* length (the
+ * content record's) and at worst 0 — good enough to lay out a timeline, never good enough to place a
+ * segment inside. `markableDuration` below is the only sanctioned way to turn these two fields into
+ * a bound, because reading `seconds` on its own is exactly the mistake that produced the bug it
+ * documents.
  */
 export interface ClipBounds {
   /** The end of the clippable range, seconds. 0 when nothing authoritative is known yet. */
@@ -72,6 +80,10 @@ export interface ClipBounds {
  * When neither is available the answer is 0, deliberately: the player's fallback session length is a
  * placeholder constant, and clamping against it is what let out-of-bounds segments exist in the first
  * place. Refusing to mark for the moment it takes the media to load is the honest alternative.
+ *
+ * Note what "stand-in" does and does not license. The metadata length is a stand-in for *drawing* —
+ * a timeline has to be laid out against something — and never for bounding a segment; `known: false`
+ * is how this function says so. See `markableDuration`.
  */
 export function resolveClipBounds(
   mediaDuration: number | undefined,
@@ -84,6 +96,29 @@ export function resolveClipBounds(
     return { seconds: metadataDuration, known: false };
   }
   return { seconds: 0, known: false };
+}
+
+/**
+ * The bound a segment may actually be created against: the measured length, or 0 (nothing markable)
+ * when nothing has been measured.
+ *
+ * MEASURED BUG (this function is the fix, and its whole reason to exist). A session whose content
+ * record declared 100s pointed at a file that was really 9.13s long. With the <video> element not yet
+ * having reported its metadata, `resolveClipBounds` answered `{ seconds: 100, known: false }` — the
+ * declared length, flagged as a guess — and every caller then read `.seconds` and clamped against it:
+ * `Mark 10s` at 0:95 produced a segment ending at 1:40, some 91 seconds past the last frame that
+ * exists. `known` had been there from the start and said the number was unmeasured; nothing anywhere
+ * read it. A later reconciliation pass truncated the segment once the media loaded, but the mark was
+ * wrong the moment it was made, and "a later pass will clean it up" is not a bound.
+ *
+ * The declared length cannot be repaired into a bound, only replaced by one: it can overstate the
+ * media (a record written by a different code path than the file, a recording a crash cut short, an
+ * imported or re-encoded record), and there is no second measurement to take the minimum against.
+ * So the conversion from `ClipBounds` to a number lives here, in one place, and refuses an unmeasured
+ * one — the alternative is every call site remembering to check a flag, which is what failed.
+ */
+export function markableDuration(bounds: ClipBounds): number {
+  return bounds.known ? bounds.seconds : 0;
 }
 
 /**

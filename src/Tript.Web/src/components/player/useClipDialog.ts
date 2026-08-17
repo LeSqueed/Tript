@@ -38,13 +38,15 @@
 //
 // THE CLIPPABLE DURATION. Every mark, edit and payload is clamped against the duration the caller
 // passes in (`useClipDialog(clipDuration)`), which the player resolves from the media itself
-// (clipModel's `resolveClipBounds`). It used to be `session.endTime ?? Infinity` — literally
-// unbounded for any recording whose content record carries no length, which is the normal case for a
-// recording with no metadata record. Because marks deliberately outlive the dialog (closing it keeps
-// them), a segment marked against a wrong duration could still be sitting there at Create time, so
-// the duration is not only a gate on new edits: when it changes, the regions are reconciled against
-// it (clipModel's `reconcileRegions` — truncate what straddles the real end, drop what lies beyond
-// it), and it is applied once more when the payloads are built.
+// (clipModel's `resolveClipBounds` + `markableDuration`, i.e. only a length the media itself
+// reported). It used to be `session.endTime ?? Infinity` — literally unbounded for any recording whose
+// content record carries no length, which is the normal case for a recording with no metadata record —
+// and then, briefly, the record's declared `endTime`, which is not a measurement of the file either:
+// one was seen declaring 100s in front of a 9.13s file. Because marks deliberately outlive the dialog
+// (closing it keeps them), a segment marked against a wrong duration could still be sitting there at
+// Create time, so the duration is not only a gate on new edits: when it changes, the regions are
+// reconciled against it (clipModel's `reconcileRegions` — truncate what straddles the real end, drop
+// what lies beyond it), and it is applied once more when the payloads are built.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContentItem, CreateClipParameters } from '../../ipc/protocol';
@@ -84,9 +86,9 @@ export interface ClipDialogController {
   /** The marked regions, in insertion (display) order. Always inside [0, `duration`]. */
   regions: TimelineRegion[];
   /**
-   * The clippable length of the session, seconds — the bound every region is held inside. 0 means
-   * nothing authoritative is known yet (the media has not reported its length and the content record
-   * carries none), in which case no region can be marked or created.
+   * The clippable length of the session, seconds — the bound every region is held inside. 0 means the
+   * media has not reported its length yet (the content record's declared length does not count: it can
+   * overstate the file), in which case no region can be marked or created.
    */
   duration: number;
   /** The region selected on the timeline (segment looping target). */
@@ -147,24 +149,17 @@ export interface ClipDialogController {
 }
 
 /**
- * The session's own declared length, or 0 when it declares none.
+ * @param clipDuration The media length regions are clamped against, seconds — the *measured* one, as
+ *   the player resolves it from the video element (clipModel's `resolveClipBounds` +
+ *   `markableDuration`). 0 means nothing has been measured yet, and nothing is markable until it has.
  *
- * The stand-in when the caller passes no duration. Note what it is *not*: a fallback constant. A
- * content record with no `endTime` says nothing about how long the file is, so the answer is 0 —
- * "nothing markable yet" — and never a number that merely looks plausible.
+ *   Required, and deliberately so. This used to be optional, falling back to the attached session's
+ *   own declared `endTime` — a number that has been observed claiming 100s for a 9.13s file, i.e. the
+ *   very hole `markableDuration` closes on the player's side, reopened one layer down for any caller
+ *   that omitted the argument. There is no honest default here: a controller that does not know how
+ *   long the media is has to be told, not guess.
  */
-function declaredDuration(session: ContentItem | null): number {
-  const endTime = session?.endTime;
-  return endTime !== undefined && Number.isFinite(endTime) && endTime > 0 ? endTime : 0;
-}
-
-/**
- * @param clipDuration The media length regions are clamped against, seconds — the player resolves it
- *   from the video element with the content record as a stand-in (clipModel's `resolveClipBounds`).
- *   Omitted, the controller falls back to the session's own declared length, and to 0 (nothing
- *   markable) when it has none: an unbounded default is what this parameter exists to remove.
- */
-export function useClipDialog(clipDuration?: number): ClipDialogController {
+export function useClipDialog(clipDuration: number): ClipDialogController {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<ContentItem | null>(null);
   const [regions, setRegions] = useState<TimelineRegion[]>([]);
@@ -188,12 +183,12 @@ export function useClipDialog(clipDuration?: number): ClipDialogController {
   // The caller's duration, mirrored in a ref for the same reason the session is: marking runs from
   // the player's keyboard handler with no state dependencies. Assigned during render rather than in
   // an effect so a mark can never be clamped against the previous render's duration.
-  const clipDurationRef = useRef<number | undefined>(clipDuration);
+  const clipDurationRef = useRef<number>(clipDuration);
   clipDurationRef.current = clipDuration;
 
   /** The duration marks/edits/payloads are clamped to. 0 when nothing authoritative is known. */
-  const duration = clipDuration ?? declaredDuration(session);
-  const markDuration = (): number => clipDurationRef.current ?? declaredDuration(sessionRef.current);
+  const duration = clipDuration;
+  const markDuration = (): number => clipDurationRef.current;
 
   const attachSession = useCallback((next: ContentItem | null) => {
     if (sessionRef.current?.filePath === next?.filePath) {

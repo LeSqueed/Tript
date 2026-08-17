@@ -15,6 +15,7 @@ import {
   clampTime,
   DEFAULT_REGION_SECONDS,
   isInsideRegion,
+  markableDuration,
   reconcileRegion,
   reconcileRegions,
   resolveClipBounds,
@@ -606,5 +607,56 @@ describe('resolveClipBounds — which duration is authoritative', () => {
     expect(resolveClipBounds(undefined, undefined)).toEqual({ seconds: 0, known: false });
     expect(resolveClipBounds(undefined, 0)).toEqual({ seconds: 0, known: false });
     expect(resolveClipBounds(0, undefined)).toEqual({ seconds: 0, known: false });
+  });
+});
+
+describe('markableDuration — only a measured length bounds a segment', () => {
+  // MEASURED: a content record declaring 100s in front of a file that is really 9.13s long. The
+  // declared length reaches `resolveClipBounds` flagged `known: false`; nothing read the flag, so it
+  // was clamped against as if the media had vouched for it. These cases pin the flag being read.
+  const declaredSeconds = 100;
+  const realSeconds = 9.13;
+
+  it('is the media length once the media has reported one', () => {
+    expect(markableDuration(resolveClipBounds(realSeconds, declaredSeconds))).toBe(realSeconds);
+    // Longer than declared is still measured, and still the bound: the file is what gets cut.
+    expect(markableDuration(resolveClipBounds(140, declaredSeconds))).toBe(140);
+  });
+
+  it('is 0 while only the declared length is known, however plausible it looks', () => {
+    expect(markableDuration(resolveClipBounds(undefined, declaredSeconds))).toBe(0);
+    // NaN is what a <video> reports before its metadata loads; Infinity is an open-ended stream.
+    expect(markableDuration(resolveClipBounds(Number.NaN, declaredSeconds))).toBe(0);
+    expect(markableDuration(resolveClipBounds(Number.POSITIVE_INFINITY, declaredSeconds))).toBe(0);
+    expect(markableDuration(resolveClipBounds(undefined, undefined))).toBe(0);
+  });
+
+  it('leaves no marking gesture able to reach past the real media length', () => {
+    // The three gestures, all run against the bound in force while only the declaration is known.
+    const bound = markableDuration(resolveClipBounds(undefined, declaredSeconds));
+
+    // Mark 10s at 0:95 — the one-click gesture the bug was reported through. Against the declared
+    // length this proposed [90, 100], i.e. an end 91s past the last frame that exists.
+    const proposal = buildDefaultRegion(95, bound, 'r1');
+    expect(proposal.end - proposal.start).toBeLessThan(MIN_REGION_SECONDS);
+    expect(proposal.end).toBeLessThanOrEqual(realSeconds);
+    // Which is refused rather than committed: nothing survives the gate every mark goes through.
+    expect(normalizeRegionBounds(proposal.start, proposal.end, bound)).toBeNull();
+
+    // Mark in / mark out at the same two playhead positions: same answer, same reason.
+    expect(normalizeRegionBounds(90, 100, bound)).toBeNull();
+    expect(clampTime(95, bound)).toBe(0);
+
+    // And a region that somehow existed against the declaration cannot be edited or sent.
+    expect(reconcileRegion(region('r1', 90, 100), bound)).toBeNull();
+    expect(regionsToSegments([region('r1', 90, 100)], bound)).toEqual([]);
+  });
+
+  it('bounds the same gestures by the media length once it is measured', () => {
+    const bound = markableDuration(resolveClipBounds(realSeconds, declaredSeconds));
+    // The fixed 10s proposal shrinks to the whole media rather than running past its end.
+    expect(buildDefaultRegion(95, bound, 'r1')).toEqual({ id: 'r1', start: 0, end: realSeconds });
+    expect(normalizeRegionBounds(90, 100, bound)).toBeNull();
+    expect(normalizeRegionBounds(5, 100, bound)).toEqual({ start: 5, end: realSeconds });
   });
 });

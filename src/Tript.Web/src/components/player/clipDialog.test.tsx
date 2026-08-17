@@ -38,6 +38,18 @@ interface SentCommand {
 }
 
 /**
+ * The measured media length these tests run against, seconds.
+ *
+ * It matches `session.endTime` on purpose — the tests below check region/payload logic, not bounds
+ * provenance — but it is passed in as the *measured* length, because that is the only kind the
+ * controller accepts. It used to be left out, and the controller fell back to `session.endTime`; the
+ * declared length is not a measurement of the file (one was seen declaring 100s for a 9.13s file), so
+ * the fallback is gone and a caller has to say how long the media is. The provenance rules themselves
+ * live in `clipModel.test.ts` (`resolveClipBounds`/`markableDuration`) and in the player's tests.
+ */
+const MEASURED_SECONDS = 100;
+
+/**
  * Mount the real hook + dialog. Returns `dialog()` (the live controller, re-read after every
  * state change) and the commands the seam owner would send over the socket.
  */
@@ -51,7 +63,7 @@ function probe(
   const sent: SentCommand[] = [];
   const ref: { dialog: ClipDialogController | null } = { dialog: null };
   function Probe() {
-    const dialog = useClipDialog();
+    const dialog = useClipDialog(MEASURED_SECONDS);
     // Keep the ref fresh across re-renders so the test reads the live controller.
     ref.dialog = dialog;
     return <ClipDialog client={clientStub} dialog={dialog} currentTime={currentTime} />;

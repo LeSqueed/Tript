@@ -51,7 +51,8 @@ OBS_ARCHIVE := third_party/obs-studio-$(OBS_VERSION).zip
 OBS_DIR := third_party/obs-studio-$(OBS_VERSION)
 OBS_EXTRACTED := third_party/obs-studio-$(OBS_VERSION)-x64
 
-.PHONY: all dev release linux windows obs-fetch test run clean shell publish-shell
+.PHONY: all dev release linux windows obs-fetch test test-dotnet test-web test-integration test-all
+.PHONY: run clean shell publish-shell
 .PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows
 
 all: linux
@@ -213,13 +214,49 @@ run:
 	fi
 
 # ---- test ----
+# `test` is the gate that is meant to be green on any developer machine: the .NET unit suites plus
+# the frontend. The OBS integration suite is NOT in it — see `test-integration` below for why.
+#
+# Both halves always run, and the exit code reflects both. They used to be two recipe lines, which
+# meant make stopped at the first failure and the entire frontend suite was silently skipped
+# whenever anything on the .NET side failed.
+UNIT_TEST_PROJECTS := tests/Tript.App.Tests tests/Tript.Detection.Tests tests/Tript.Media.Tests \
+	tests/Tript.Recorder.Tests tests/Tript.Settings.Tests
+
 test:
-	# -m:1 serializes the test projects. The Obs integration suite and the App.Tests smoke tests
-	# both drive a real libobs context (real recordings spawn obs-ffmpeg-mux helpers), and running
-	# their testhosts in parallel trips an intermittent libobs JSON-parse crash. Serializing keeps
-	# one libobs workload in the process tree at a time.
-	dotnet test Tript.slnx -c $(CONFIG) -f net10.0 --nologo -m:1
+	@fail=0; \
+	$(MAKE) --no-print-directory test-dotnet || fail=1; \
+	$(MAKE) --no-print-directory test-web || fail=1; \
+	if [ $$fail -ne 0 ]; then echo ""; echo "make test: FAILED"; fi; \
+	exit $$fail
+
+# -m:1 serializes the test projects. App.Tests drives a real libobs context (real recordings spawn
+# obs-ffmpeg-mux helpers), and running testhosts in parallel trips an intermittent libobs JSON-parse
+# crash. Serializing keeps one libobs workload in the process tree at a time.
+# A loop rather than one invocation over the solution: it keeps the integration suite out by naming
+# what is in, and one failing project no longer hides the results of the ones after it.
+test-dotnet:
+	@fail=0; \
+	for project in $(UNIT_TEST_PROJECTS); do \
+		dotnet test $$project -c $(CONFIG) -f net10.0 --nologo -m:1 || fail=1; \
+	done; \
+	exit $$fail
+
+# The typecheck is not optional: vitest strips types rather than checking them, so without this a
+# type error passes `make test` and only surfaces at `make web`.
+test-web:
+	cd $(WEB_SRC) && [ -d node_modules ] || (cd $(WEB_SRC) && npm ci)
+	cd $(WEB_SRC) && npx tsc -b --noEmit
 	cd $(WEB_SRC) && npx vitest run
+
+# The OBS binding's integration suite. Kept out of `test` because it needs more than a checkout:
+# OBS >= 30.1 (the binding P/Invokes entry points absent from earlier builds), a display server, and
+# the obs-ffmpeg-mux helper. On a machine that does not have them it fails for reasons that have
+# nothing to do with the change under test, which is exactly how a gate stops being read.
+test-integration:
+	dotnet test tests/Tript.Obs.IntegrationTests -c $(CONFIG) -f net10.0 --nologo -m:1
+
+test-all: test test-integration
 
 # ---- clean ----
 clean:

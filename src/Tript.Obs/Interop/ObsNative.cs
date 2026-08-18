@@ -137,14 +137,20 @@ internal static unsafe partial class ObsNative
 
     // Returns an obs_properties_t; free with obs_properties_destroy. Null for an id that is not
     // registered or declares no properties.
+    //
+    // This calls the plugin's own get_properties with a NULL instance pointer, and whether that is
+    // survivable is the plugin's business, not libobs's — there is no way to ask in advance. A
+    // well-behaved builder tests the pointer (image-source opens with `if (s && ...)`);
+    // linux-capture's xshm_properties does not, and reads data->source straight through the NULL.
+    // Measured in plain C against the system libobs, and still the case in 32.2.2. Use
+    // obs_source_properties for anything whose builder might want its instance.
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_get_source_properties(string id);
 
     // Returns an obs_properties_t for a *created* source; free with obs_properties_destroy. Some
-    // source types build a different property list for an instance than for the type-level probe —
-    // measured on linux-capture 32.2.1, where the type-level obs_get_source_properties crashes on
-    // an Xwayland server while the instance-level call succeeds because the instance already holds
-    // its display connection. This is the reliable route for capture sources.
+    // source types build a different property list for an instance than for the type-level probe,
+    // and for the capture sources this is the only route that is safe at all: the instance is
+    // exactly what their builders dereference. See obs_get_source_properties above.
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_source_properties(nint source);
 
@@ -573,6 +579,11 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_encoder_release(nint encoder);
 
+    // Takes a strong reference and hands the same pointer back, or null when the encoder is already
+    // being destroyed. obs_encoder_addref is the deprecated spelling and is deliberately absent.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_encoder_get_ref(nint encoder);
+
     // Borrowed.
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_encoder_get_name(nint encoder);
@@ -840,13 +851,16 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_output_set_audio_encoder(nint output, nint encoder, nuint index);
 
+    // All three getters return the output's own pointer with no reference taken — they are a plain
+    // read of output->{video,audio}_encoders[idx], in 30.0.2 and 32.2.2 alike. Releasing what they
+    // hand back frees an encoder the output is still pointing at, and the damage only surfaces at
+    // obs_shutdown. Take a reference with obs_encoder_get_ref before wrapping one.
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_video_encoder(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_video_encoder2(nint output, nuint index);
 
-    // Incremented; the caller releases.
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_audio_encoder(nint output, nuint index);
 

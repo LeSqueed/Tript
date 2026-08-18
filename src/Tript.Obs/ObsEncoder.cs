@@ -44,6 +44,18 @@ public sealed class ObsEncoder : IDisposable
     internal static ObsEncoder? FromOwnedPointerOrNull(nint pointer) =>
         pointer == nint.Zero ? null : new ObsEncoder(pointer);
 
+    // Takes the reference this object owns. The pointer libobs handed over stays its holder's — the
+    // output's, for the encoder-slot getters. obs_encoder_get_ref returns null for an encoder that
+    // is already being destroyed, which is the one case where there is nothing to wrap.
+    internal static ObsEncoder? FromBorrowedPointerOrNull(nint pointer)
+    {
+        if (pointer == nint.Zero)
+            return null;
+
+        var referenced = ObsNative.obs_encoder_get_ref(pointer);
+        return referenced == nint.Zero ? null : new ObsEncoder(referenced);
+    }
+
     internal nint Pointer
     {
         get

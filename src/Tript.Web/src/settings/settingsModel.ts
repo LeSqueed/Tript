@@ -166,6 +166,11 @@ export interface GameIntegrationSettings {
 export interface GameSetting {
   id: string;
   name: string;
+  /**
+   * The process name the recorder watches for and attaches game capture to. Absent or null means
+   * "the same as `name`", which is what every settings file written before this field existed says.
+   */
+  executable?: string | null;
   iconId?: string | null;
   recordingModeOverride?: GameRecordingModeOverride | null;
   qualityOverride?: GameQualityOverride | null;

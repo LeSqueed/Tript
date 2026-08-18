@@ -222,6 +222,29 @@ public sealed class DetectionHostTests
         }
     }
 
+    // A detection whose ClassId no definition covers is dropped before the cooldown tracker sees it:
+    // the model can emit classes events.json says nothing about, and there is no bookmark type to
+    // give them. Ported from _pending/DetectionSessionTests, whose subsystem never landed — this
+    // guard is DetectionHost's, and it shipped without a test.
+    [Fact]
+    public void Detections_WithNoDefinitionForTheirClass_AreDropped()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0, BookmarkType.Kill)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(7));
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
     // ---- lifecycle tests (no recording needed) ----
 
     [Fact]
@@ -313,6 +336,29 @@ public sealed class DetectionHostTests
         Assert.Equal(1, detector.StopCount);
         Assert.Equal(2, detector.StartCount);
         Assert.Equal("Valorant", detector.StartedGameId);
+    }
+
+    // A Start that declines still tears the previous game's run down. The teardown sits before the
+    // decision to start, so every refusing path — no model, no frame source — goes through it; a
+    // teardown reached only on the succeeding path would leave the old game's detector subscribed and
+    // writing its bookmarks into the new game's recording. Ported from
+    // _pending/DetectorTeardownOnGameSwitchTests, whose subsystem never landed.
+    [Fact]
+    public void Start_ForAGameItRefuses_StillStopsThePreviousDetector()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0)],
+        });
+
+        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+
+        Assert.True(host.Start("Overwatch"));
+        Assert.False(host.Start("A Game That Ships No Model"));
+
+        Assert.False(host.IsRunning);
+        Assert.Null(host.CurrentGameId);
+        Assert.Equal(1, detector.StopCount);
     }
 
     // Starting the same game twice is idempotent — no restart, no double subscription.

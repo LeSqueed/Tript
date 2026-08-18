@@ -16,6 +16,10 @@ namespace Tript.Detection.Tests;
 // one. Every path that declines — no game name, no model on disk, integration toggled off — left
 // the previous game's detector subscribed to OBS raw video, running its inference thread, and
 // appending bookmarks to AppState.Instance.Recording, which by then belonged to a different game.
+//
+// Tript.Recorder's DetectionHost has the same guarantee, and DetectionHostTests now pins it:
+// Start_ForAGameItRefuses_StillStopsThePreviousDetector for the no-model path, plus
+// Stop_StopsTheDetectorAndClearsTheCurrentGame and Dispose_StopsTheDetector for the other two.
 [Collection(RecordingStateCollection.Name)]
 public class DetectorTeardownOnGameSwitchTests
 {
@@ -58,28 +62,6 @@ public class DetectorTeardownOnGameSwitchTests
             Assert.Null(SessionField.GetValue(null));
             Assert.True(cts.IsCancellationRequested,
                 "the previous game's detector was left running when Start() declined to begin ML detection");
-        }
-        finally
-        {
-            SessionField.SetValue(null, null);
-            cts.Dispose();
-        }
-    }
-
-    // The same guarantee for a recognised game that simply has no model shipped for it: the
-    // HasModelForGame miss must not be a path that skips teardown either.
-    [Fact]
-    public async Task Start_ForAGameWithNoModelOnDisk_StopsThePreviousDetector()
-    {
-        var (_, cts) = SeedRunningSession();
-
-        try
-        {
-            await GameIntegrationService.Start(igdbId: null, gameName: "A Game That Ships No Model");
-
-            Assert.Null(SessionField.GetValue(null));
-            Assert.True(cts.IsCancellationRequested,
-                "the previous game's detector was left running when the new game had no model");
         }
         finally
         {

@@ -4,6 +4,9 @@
 // frontend. Nothing can share a constant across that boundary, so this pins the two copies to each
 // other by reading the C# file off disk. A port changed on one side only would otherwise show up as
 // a UI that reconnects forever, or a player that 404s every video.
+//
+// The vite dev/preview server is pinned the other way round: it must NOT land on a port the app
+// already binds, or the two cannot be up at once.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -58,15 +61,29 @@ describe('the loopback ports pinned against the backend', () => {
     ).toBe(backendPort('Content'));
   });
 
-  // The dev host's port is the one the backend puts on the control socket's Origin allowlist; a
-  // `vite dev` on any other port is refused at the WebSocket handshake with a 403.
-  it('runs the dev and preview hosts on the port the backend allows as an Origin', () => {
+  // The dev server used to be pinned TO the app's UI port, on the theory that it had to match the
+  // control socket's Origin allowlist. It never bought that: the host serves the SPA only to a
+  // request carrying the per-launch key, which `vite dev` cannot mint, so a dev server reaches the
+  // "missing key" notice and no further whatever port it is on. What it did buy was a collision —
+  // the app host and the dev server both binding 2882, so a developer could not have the real
+  // backend up while using the dev server, which is the one arrangement that setup exists for.
+  //
+  // So the pin is inverted: the dev/preview port must be one the app does NOT bind.
+  it('runs the dev and preview hosts off every port the app binds', () => {
     const declared = [...readFromRepo(VITE_CONFIG_TS).matchAll(/\bport:\s*(\d+)/g)]
       .map((match) => Number(match[1]));
 
-    // Both the `server` and the `preview` block; neither may drift from the other or the backend.
+    // Both the `server` and the `preview` block; a dev server and a preview server on different
+    // ports is a bookmark that works for one of them.
     expect(declared.length).toBe(2);
-    expect(declared, mismatch('The UI host ports', 'Ui', VITE_CONFIG_TS))
-      .toEqual([backendPort('Ui'), backendPort('Ui')]);
+    expect(declared[0], `${VITE_CONFIG_TS} declares different \`server\` and \`preview\` ports.`)
+      .toBe(declared[1]);
+
+    const appPorts = ['Ui', 'Content', 'ControlSocket'].map(backendPort);
+    expect(
+      appPorts.includes(declared[0]),
+      `${VITE_CONFIG_TS} serves on ${declared[0]}, which ${LOCAL_PORTS_CS} already binds. `
+        + 'Move the dev server, so it and the app can run at the same time.',
+    ).toBe(false);
   });
 });

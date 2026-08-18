@@ -193,6 +193,28 @@ public sealed class ObsOutputTests
         Assert.Null(output.GetAudioEncoder(1));
     }
 
+    // obs_output_get_audio_encoder is a plain read of the slot and takes no reference. While the
+    // binding treated it as owned, each read-back disposed dropped one of the *output's* references:
+    // the test itself still passed and the process died later, inside obs_shutdown. Reading the slot
+    // repeatedly and disposing each result is the shape that fails while that is true.
+    [SkippableFact]
+    public void ReadingAnEncoderSlot_DoesNotConsumeTheOutputsOwnReference()
+    {
+        using var session = ObsSession.StartWithSourceTypes();
+        using var output = ObsOutput.Create(FfmpegMuxerId, "slot refcount");
+        using var audio = ObsEncoder.CreateAudio("ffmpeg_aac", "slot refcount audio");
+        output.SetAudioEncoder(audio, 0);
+
+        for (var read = 0; read < 4; read++)
+        {
+            using var readBack = output.GetAudioEncoder(0);
+            Assert.Equal("slot refcount audio", readBack!.Name);
+        }
+
+        using var stillThere = output.GetAudioEncoder(0);
+        Assert.Equal("slot refcount audio", stillThere!.Name);
+    }
+
     [SkippableFact]
     public void AWrittenSettingsKey_IsReadBackThroughTheOutput()
     {

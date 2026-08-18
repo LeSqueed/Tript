@@ -14,7 +14,7 @@ namespace Tript.Obs.IntegrationTests;
 public sealed class ObsCaptureSourceTests
 {
     private const string XshmInputId = "xshm_input";
-    private const string XCompositeInputId = "xcomposite_input";
+    private const string ImageSourceId = "image_source";
     private const string PulseInputCaptureId = "pulse_input_capture";
     private const string PulseOutputCaptureId = "pulse_output_capture";
     private const string ColourSourceId = "color_source";
@@ -101,14 +101,28 @@ public sealed class ObsCaptureSourceTests
             Assert.Equal(ObsComboFormat.Int, choice.Format);
     }
 
-    // The type-level property probe works for capture-source types whose property builder is safe —
-    // xcomposite_input on this machine. This is the pre-creation discovery route.
+    // The pre-creation discovery route itself works — for a type whose property builder does not
+    // need an instance. image_source's builder opens with `if (s && s->file && *s->file)`, so the
+    // NULL libobs passes for a type-level probe is fine.
+    //
+    // Neither of linux-capture's capture types can be probed this way, which is why this is not
+    // asserted with one of them and why the recorder takes the instance route (see
+    // TheDisplayCaptureInstanceProperties_IncludeTheScreenSelection). Both were measured here in
+    // plain C against the system libobs, with no binding in the picture:
+    //
+    //   * xshm_input: xshm_properties() opens with XSHM_DATA(vptr) and then reads data->source. The
+    //     NULL is dereferenced unconditionally — still true in 32.2.2, so this is not a version gap.
+    //   * xcomposite_input: xcompcap_props() sorts the live window list with a comparator that
+    //     strcmp'd dstr.array with no NULL check before 31.0.0, and dstr_to_lower leaves that array
+    //     NULL for any title it cannot round-trip through the process's wide-char locale. So it
+    //     crashes only when some window on screen has a non-ASCII title — which is what made the
+    //     failure move around between runs.
     [SkippableFact]
-    public void TheTypeLevelPropertyProbe_WorksForACaptureSourceType()
+    public void TheTypeLevelPropertyProbe_WorksForATypeWhosePropertyBuilderNeedsNoInstance()
     {
         using var session = ObsSession.StartWithSourceTypes();
 
-        var properties = ObsSourceProperties.EnumerateTypeProperties(XCompositeInputId);
+        var properties = ObsSourceProperties.EnumerateTypeProperties(ImageSourceId);
 
         Assert.NotEmpty(properties);
         Assert.Contains(properties, property => property.Name.Length > 0);

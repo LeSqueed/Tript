@@ -197,10 +197,12 @@ public sealed class ObsOutput : IDisposable
         ObsNative.obs_output_set_audio_encoder(Pointer, encoder.Pointer, index);
     }
 
-    // The audio encoder on slot index, or null when no encoder is assigned there. The reference is
-    // incremented, so the result is the caller's to dispose.
+    // The audio encoder on slot index, or null when no encoder is assigned there. libobs hands back
+    // the slot's own pointer without taking a reference, so this takes one: disposing what the raw
+    // call returns would free an encoder the output still points at, and the process only dies for
+    // it at obs_shutdown. The result is the caller's to dispose.
     public ObsEncoder? GetAudioEncoder(nuint index) =>
-        ObsEncoder.FromOwnedPointerOrNull(ObsNative.obs_output_get_audio_encoder(Pointer, index));
+        ObsEncoder.FromBorrowedPointerOrNull(ObsNative.obs_output_get_audio_encoder(Pointer, index));
 
     // Binds the raw media feeds for a *non-encoded* output, which takes the mix directly rather than
     // encoder packets. Either feed may be null; an encoded output ignores both. Passing the handles

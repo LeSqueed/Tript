@@ -528,17 +528,62 @@ internal sealed class AppHost : IDisposable
         if (_recorder is null)
             return;
 
-        var gameNames = GameList.Select(game => game.Name).Where(name => name.Length > 0).Distinct().ToList();
-        if (gameNames.Count == 0)
+        // Executables, not display names: the detector matches the running process list, and a game
+        // whose display name differs from its executable ("Counter-Strike 2" / cs2.exe) would never
+        // be seen if the name were watched instead.
+        var executables = GameList
+            .Select(ExecutableOf)
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (executables.Count == 0)
             return;
 
         // The detector is subscribed straight to the same host methods the IPC path uses, so an
         // auto-recorded session gets the whole lifecycle — metadata sidecar, session tracking, detection
         // and state pushes — rather than a bare recorder Start/Stop.
-        _detector = new ProcessNameGameDetector(gameNames);
-        _detector.GameStarted += name => StartRecording(name);
+        // What the detector can actually report, as catalogue ids — the vocabulary PushState asks it
+        // about. Left empty, `game.detected` on every state push was permanently false.
+        _detectorGameNames.Clear();
+        foreach (var id in WatchableGameIds(GameList))
+            _detectorGameNames.Add(id);
+
+        _detector = new ProcessNameGameDetector(executables);
+        _detector.GameStarted += processName => StartRecording(ResolveDetectedGameId(processName));
         _detector.GameStopped += () => StopRecording();
         _detector.Start();
+    }
+
+    // The catalogue ids a process watcher could report. Pure and separate from WireAutoStart because
+    // that method needs a real recorder, so nothing reachable from a test would otherwise cover it.
+    internal static IReadOnlyList<string> WatchableGameIds(IEnumerable<GameInfo> games) =>
+        games.Where(game => ExecutableOf(game).Length > 0 && game.Id.Length > 0)
+            .Select(game => game.Id)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    // What the catalogue says this game runs as. Null Executable means the entry predates the field,
+    // where the display name was also the process name.
+    private static string ExecutableOf(GameInfo game) => game.Executable ?? game.Name;
+
+    // The detector reports a normalized process name; every path downstream of StartRecording keys off
+    // a catalogue Id (per-game settings, the display name in the metadata record, the detection model).
+    // Translating here is what keeps those lookups working once an executable is not also the Id — the
+    // `?? gameId` fallbacks below only ever agreed with the process name by coincidence. An unmatched
+    // name is passed through unchanged, which is what a manual StartRecording for an unlisted game does.
+    internal string ResolveDetectedGameId(string processName)
+    {
+        foreach (var game in GameList)
+        {
+            if (game.Id.Length == 0)
+                continue;
+
+            var executable = ProcessNameGameDetector.NormalizeProcessName(ExecutableOf(game));
+            if (string.Equals(executable, processName, StringComparison.OrdinalIgnoreCase))
+                return game.Id;
+        }
+
+        return processName;
     }
 
     private void StartDetection(string gameId)
@@ -740,7 +785,9 @@ internal sealed class AppHost : IDisposable
         }
     }
 
-    private readonly HashSet<string> _detectorGameNames = [];
+    // The catalogue ids the auto-start detector is watching, so a state push can say whether the
+    // game being recorded is one it found itself.
+    private readonly HashSet<string> _detectorGameNames = new(StringComparer.OrdinalIgnoreCase);
 
     internal void PushSettings()
     {
@@ -1771,17 +1818,26 @@ internal sealed class AppHost : IDisposable
         StopRecording();
     }
 
-    // Re-points the session's game-capture source at the game being recorded. ProcessNameGameDetector
-    // matches by process name, so the executable key is that name plus the platform extension. A no-op
-    // when the platform has no game capture (Linux) or the session is the fake.
+    // Re-points the session's game-capture source at the game being recorded. win-capture keys on the
+    // executable, so this is the catalogue's Executable (never the display name) with the platform
+    // extension put back — normalized first, because a settings entry may spell it either way and
+    // "cs2.exe.exe" hooks nothing. A no-op when the platform has no game capture (Linux) or the
+    // session is the fake.
     private void RetargetGameCapture(string gameId)
     {
         if (_recorderSession is not ObsRecorderSession session)
             return;
 
-        var gameName = GameList.FirstOrDefault(g => g.Id == gameId)?.Name ?? gameId;
-        var executable = OperatingSystem.IsWindows() ? $"{gameName}.exe" : gameName;
+        var name = GameCaptureName(gameId);
+        var executable = OperatingSystem.IsWindows() ? $"{name}.exe" : name;
         session.RetargetGame(new ObsGameCaptureTarget(null, null, executable));
+    }
+
+    // The extension-free executable for a game, or the id itself when the catalogue does not list it.
+    internal string GameCaptureName(string gameId)
+    {
+        var entry = GameList.FirstOrDefault(g => g.Id == gameId);
+        return ProcessNameGameDetector.NormalizeProcessName(entry is null ? gameId : ExecutableOf(entry));
     }
 
     // Sessions are flat under <effectiveRoot>/sessions/ — the timestamp is already in the file name.

@@ -25,7 +25,8 @@ public sealed record ObsRuntimeLocations(
     string? RuntimeDirectory,
     string? ModuleBinaryDir,
     string? ModuleDataDir,
-    string? CoreDataDir)
+    string? CoreDataDir,
+    string? LibobsDataDir = null)
 {
     public bool Found => ModuleBinaryDir is not null;
 }
@@ -55,9 +56,21 @@ public static class ObsRuntimeLocator
             return new ObsRuntimeLocations(null, null, null, null);
 
         // Trailing separator so obs_find_data_file concatenates the root with the relative path.
-        var coreDataDir = Path.GetFullPath(Path.Combine(baseDir, "data", "obs-studio")) +
-            Path.DirectorySeparatorChar;
-        return new ObsRuntimeLocations(runtimeDir, moduleBinaryDir, moduleDataDir, coreDataDir);
+        // The Windows portable layout splits libobs's own data across two sibling dirs under data/:
+        // the effects live in data/libobs and the rest (locale, themes) in data/obs-studio. Both
+        // are search roots, so both are returned; a distro install (Linux) has one obs-studio dir.
+        //
+        // Forward slashes, not the platform separator: libobs's effect preprocessor resolves a
+        // #include by prepending the including file's directory to the include name, and it splits
+        // on '/' specifically (cf-lexer.c insert_path). A data root that uses backslashes defeats
+        // that split, the include resolves against the process CWD instead and the effect fails to
+        // load — a Windows-only failure. Windows file APIs accept '/' paths, so both forms work
+        // everywhere else.
+        var libobsDataDir = Path.GetFullPath(Path.Combine(baseDir, "data", "libobs"))
+            .Replace('\\', '/') + "/";
+        var coreDataDir = Path.GetFullPath(Path.Combine(baseDir, "data", "obs-studio"))
+            .Replace('\\', '/') + "/";
+        return new ObsRuntimeLocations(runtimeDir, moduleBinaryDir, moduleDataDir, coreDataDir, libobsDataDir);
     }
 
     private static ObsRuntimeLocations DiscoverLinux()

@@ -29,9 +29,10 @@ public sealed class SafeModuleAllowlistTests
     [Fact]
     public void TheWindowsAllowlist_IsTheBundledModulesAndNothingElse() =>
         // Every name here exists in the bundled runtime's obs-plugins/64bit as <name>.dll; a name
-        // that matches no file would load nothing and report nothing.
+        // that matches no file would load nothing and report nothing. obs-nvenc and obs-qsv11 ship
+        // in OBS 32 (obs-amf does not), and each registers its H.264 ids only when its GPU is present.
         Assert.Equal(
-            ["obs-x264", "obs-ffmpeg", "win-capture", "image-source", "win-wasapi"],
+            ["obs-x264", "obs-ffmpeg", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi"],
             Program.SafeModules(isWindows: true));
 
     [Fact]

@@ -170,6 +170,48 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(40_000, reloaded.Recording.MaxBitrateKbps);
     }
 
+    // The audio source's device selection is persisted by id so it survives a settings round trip:
+    // the frontend saves a deviceId per source, and the recorder reads it back to attach the
+    // capture source to that device. It is serialized as the camelCase "deviceId" key inside the
+    // source object.
+    [Fact]
+    public void SaveThenLoad_RoundTripsTheAudioSourceDeviceId()
+    {
+        const string deviceId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}";
+        var settings = _store.Load();
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Game",
+            Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, DeviceId = deviceId } },
+        });
+        _store.Save();
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
+        var source = doc.RootElement.GetProperty("audio").GetProperty("tracks")[0].GetProperty("sources")[0];
+        Assert.Equal(deviceId, source.GetProperty("deviceId").GetString());
+
+        var reloaded = new SettingsStore(_provider).Load();
+        var reloadedSource = Assert.Single(Assert.Single(reloaded.Audio.Tracks).Sources);
+        Assert.Equal(deviceId, reloadedSource.DeviceId);
+    }
+
+    // A source without a device selection reads back with a null DeviceId rather than a stale or
+    // empty value, so a config that never chose a device keeps meaning "the platform default".
+    [Fact]
+    public void SaveThenLoad_ASourceWithoutADevice_ReadsBackNull()
+    {
+        var settings = _store.Load();
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Game",
+            Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output } },
+        });
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+        Assert.Null(Assert.Single(Assert.Single(reloaded.Audio.Tracks).Sources).DeviceId);
+    }
+
     // The rate-control mode is persisted by name, not by ordinal: the member names are the
     // compatibility surface (SettingsSerialization registers JsonStringEnumConverter), so a member
     // added or reordered later cannot silently reinterpret an existing file as a different mode — and

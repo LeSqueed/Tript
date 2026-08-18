@@ -29,6 +29,16 @@ public sealed record ObsGameCaptureTarget(string? WindowTitle, string? WindowCla
     public bool IsEmpty => WindowTitle is null && WindowClass is null && ExecutablePath is null;
 }
 
+// The field the game-capture plugin matches a window on when it searches for the target, mirroring
+// win-capture's window_priority (WINDOW_PRIORITY_TITLE/CLASS/EXE = 0/1/2, the same values its
+// "priority" property's list items carry). An exe-only target can only be matched by EXE.
+internal enum WindowPriority
+{
+    Title = 0,
+    Class = 1,
+    Exe = 2
+}
+
 // The capture-source surface: creating the platform's game or display capture source, attaching it
 // to a detected game, and re-targeting an existing source without restarting it (spec/recorder.md,
 // "Sources" — the target window can change during a session as the game re-creates its window, so
@@ -178,17 +188,48 @@ public static class ObsCaptureSource
     {
         var wrote = false;
 
-        // The window key is the more precise handle — it is the window the game actually presents —
-        // so it is written when the target has one. A null value erases the key rather than writing
-        // "null", which is what libobs does with a NULL char*.
-        if (target.WindowTitle is not null &&
-            FindKey(properties, "window", "title", "capture_window") is { } windowTitleKey)
+        // The win-capture plugin targets a game by a single window string — "title:class:exe",
+        // parsed by ms_build_window_strings (game-capture.c get_config) — carried in its "window"
+        // property; the separate exe/title/class keys are not read by modern builds. The string is
+        // written whenever any part of the target is known, with empty parts left empty, so an
+        // exe-only target becomes "::Overwatch.exe". The property is an editable list, so an
+        // arbitrary string is accepted.
+        if (FindKey(properties, "window") is { } windowKey)
         {
-            settings.SetString(windowTitleKey, target.WindowTitle);
+            var windowString = string.Join(
+                ":",
+                target.WindowTitle ?? string.Empty,
+                target.WindowClass ?? string.Empty,
+                target.ExecutablePath ?? string.Empty);
+
+            if (windowString.Length > 0)
+            {
+                settings.SetString(windowKey, windowString);
+                wrote = true;
+            }
+        }
+
+        // The window match is by title, class or executable depending on the "priority" property.
+        // An exe-only target is only ever matched with priority EXE, so that is forced whenever no
+        // title or class is present rather than relying on the plugin default.
+        if (target.WindowTitle is null && target.WindowClass is null &&
+            target.ExecutablePath is not null &&
+            FindKey(properties, "priority") is { } priorityKey)
+        {
+            settings.SetInt(priorityKey, (int)WindowPriority.Exe);
+            wrote = true;
+        }
+
+        // Older plugin builds that still expose separate per-window keys get them too; harmless
+        // alongside the window string on the modern plugin.
+        if (target.WindowTitle is not null &&
+            FindKey(properties, "title") is { } titleKey)
+        {
+            settings.SetString(titleKey, target.WindowTitle);
             wrote = true;
         }
         else if (target.WindowClass is not null &&
-                 FindKey(properties, "window", "class") is { } windowClassKey)
+                 FindKey(properties, "class") is { } windowClassKey)
         {
             settings.SetString(windowClassKey, target.WindowClass);
             wrote = true;

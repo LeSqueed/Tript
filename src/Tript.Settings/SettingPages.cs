@@ -97,12 +97,16 @@ public sealed class AudioSettings
 }
 
 // An audio device selection from the device list, by id, with the human-readable name recorded
-// for the metadata and the settings UI.
+// for the metadata and the settings UI. Direction is the endpoint's data flow: Input for capture
+// endpoints (mics and other capture devices), Output for render endpoints (speakers), so the
+// routing picks the matching capture source type (wasapi_input_capture vs wasapi_output_capture).
 public sealed class AudioDeviceSetting
 {
     public string Id { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
+
+    public AudioSourceKind Direction { get; set; }
 }
 
 // The capture page: which capture path supplies the picture, and the optional display selection

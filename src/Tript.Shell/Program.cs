@@ -24,6 +24,13 @@ internal static class Program
 {
     private const string UiUrl = "http://localhost:2882/";
 
+    // STAThread on the entry point: WebView2's CoreWebView2Controller must be created on a
+    // single-threaded apartment (the controller holds COM state the apartment owns). The .NET
+    // runtime initialises the main thread as MTA by default, and without this the Photino webview
+    // opens as a black window — the browser processes start, the page is reachable, nothing renders.
+    // libobs runs on its own dedicated STA thread (Tript.App.Program.StartRuntimeOnHostThread), so
+    // the two apartments stay separate.
+    [STAThread]
     private static int Main(string[] args)
     {
         var options = AppOptions.Parse(args);

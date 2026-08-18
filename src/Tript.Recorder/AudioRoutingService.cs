@@ -38,7 +38,7 @@ public sealed class AudioRoutingService
         {
             foreach (var source in track.Sources)
             {
-                var capture = _sink.CreateCaptureSource(source.Kind, source.Name);
+                var capture = _sink.CreateCaptureSource(source.Kind, source.Name, source.DeviceId);
                 _sink.RouteSourceToMixer(capture, track.MixerIndex);
                 _sink.SetSourceVolume(capture, source.Volume);
                 _sink.ActivateSource(capture);

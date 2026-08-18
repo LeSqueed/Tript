@@ -44,6 +44,32 @@ public sealed class AudioRoutingServiceTests
         Assert.Empty(sink.Deactivated);
     }
 
+    // A source's device selection must reach the sink so the capture source is created against the
+    // right device: the WASAPI-free assertion that the routing writes device_id is that the sink
+    // receives it per source. A source without a selection still gets a source, for the platform
+    // default device (deviceId null).
+    [Fact]
+    public void TheService_PassesEachSourcesDeviceIdThroughToTheSink()
+    {
+        var sink = new FakeSink();
+        var service = new AudioRoutingService(sink);
+        const string micId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{11111111-2222-3333-4444-555555555555}";
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f },
+                new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1.0f, DeviceId = micId },
+            } },
+        });
+
+        using var routing = service.Wire(plan);
+
+        Assert.Equal(2, sink.CreatedSources.Count);
+        Assert.Null(sink.CreatedSources[0].DeviceId);
+        Assert.Equal(micId, sink.CreatedSources[1].DeviceId);
+    }
+
     [Fact]
     public void TheService_CreatesOneEncoderPerTrackBoundToThatMixerAndAssignedToThatSlot()
     {
@@ -161,9 +187,9 @@ public sealed class AudioRoutingServiceTests
 
         internal List<(FakeEncoder Encoder, int OutputSlot)> Assigned { get; } = [];
 
-        public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name)
+        public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId)
         {
-            var source = new FakeSource(name);
+            var source = new FakeSource(name, deviceId);
             CreatedSources.Add(source);
             return source;
         }
@@ -189,9 +215,11 @@ public sealed class AudioRoutingServiceTests
             Assigned.Add(((FakeEncoder)encoder, outputSlot));
     }
 
-    private sealed class FakeSource(string name) : IAudioRoutedSource
+    private sealed class FakeSource(string name, string? deviceId) : IAudioRoutedSource
     {
         internal string Name { get; } = name;
+
+        internal string? DeviceId { get; } = deviceId;
     }
 
     private sealed class FakeEncoder(string name) : IAudioTrackEncoder

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.Detection;
@@ -224,6 +225,13 @@ internal sealed class AppHost : IDisposable
         resolved.OutputPath = BuildOutputPath(settings);
 
         EnsureRecorderBuilt(resolved);
+
+        // Point the session's game-capture source at the detected game before the recording
+        // starts, so the recording shows the game rather than the colour background. The alpha
+        // detector matches by process name, so the executable key is that name with the platform
+        // extension; win-capture keeps retrying the hook while the source is shown, so a game
+        // that appears mid-recording is still picked up.
+        RetargetGameCapture(effectiveGameId);
 
         if (!_recorder!.Start(resolved))
             return false;
@@ -575,12 +583,41 @@ internal sealed class AppHost : IDisposable
         }, Wire.Options));
     }
 
+    // The machine's active audio endpoints (WASAPI), inputs first then outputs, as the settings
+    // model's device list — the specific microphones, capture devices, speakers and headsets the
+    // audio page can route into a track. Each entry carries its direction (Input/Output) so the
+    // frontend can label it and the routing can pick the matching capture type: an input endpoint
+    // becomes a wasapi_input_capture, an output endpoint a wasapi_output_capture on that device.
+    // A failure to enumerate — no endpoints, or a COM error — yields an empty list rather than
+    // failing the push; the frontend then falls back to the built-in sources.
+    private static IReadOnlyList<AudioDeviceSetting> EnumerateAudioDevices()
+    {
+        try
+        {
+            return WasapiDeviceEnumerator.EnumerateInputDevices()
+                .Concat(WasapiDeviceEnumerator.EnumerateOutputDevices())
+                .ToList();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
     private readonly HashSet<string> _detectorGameNames = [];
 
     internal void PushSettings()
     {
         var settings = _settingsStore.Load();
-        var settingsElement = JsonSerializer.SerializeToElement(settings, SettingsSerialization.Options);
+        var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
+        // The audio device list is a fact about this machine, not a persisted setting — like the
+        // encoder list it is settled per push, so a device unplugged after a save is not stuck in
+        // the settings file. It is injected into the serialized element only; the live model (which
+        // Save() would persist) is never touched.
+        if (settingsNode?["audio"] is JsonObject audioNode)
+            audioNode["devices"] = JsonSerializer.SerializeToNode(EnumerateAudioDevices(), SettingsSerialization.Options);
+        var settingsElement = JsonSerializer.Deserialize<JsonElement>(
+            settingsNode?.ToJsonString() ?? "{}", SettingsSerialization.Options);
         _ipc.Broadcast("settings", JsonSerializer.SerializeToElement(new
         {
             settings = settingsElement,
@@ -1284,9 +1321,30 @@ internal sealed class AppHost : IDisposable
         if (_runtime is null)
             throw new InvalidOperationException("The real recorder needs a libobs runtime; none was started.");
 
-        _colourSource = ObsSource.CreatePrivate("color_source", "app colour");
+        // The colour source is the recording's background behind the game capture. The plugin's
+        // default colour is white (0xFFFFFFFF) — without an explicit colour the recordings would
+        // render as a white canvas until a game is hooked.
+        using (var colourSettings = new ObsSettings())
+        {
+            colourSettings.SetInt("color", unchecked((int)0xFF000000));
+            _colourSource = ObsSource.CreatePrivate("color_source", "app colour", colourSettings);
+        }
         _recorderSession = new ObsRecorderSession(_runtime, _colourSource);
         _recorder = new RecorderStateMachine(_recorderSession, settings);
+    }
+
+    // Re-points the session's game-capture source at the game being recorded. The alpha detector
+    // (ProcessNameGameDetector) matches by process name, so the executable key is that name with
+    // the platform extension; a game id that is not a process name falls back to the same value.
+    // The session no-ops when the platform has no game capture (Linux) or the session is the fake.
+    private void RetargetGameCapture(string gameId)
+    {
+        if (_recorderSession is not ObsRecorderSession session)
+            return;
+
+        var gameName = GameList.FirstOrDefault(g => g.Id == gameId)?.Name ?? gameId;
+        var executable = OperatingSystem.IsWindows() ? $"{gameName}.exe" : gameName;
+        session.RetargetGame(new ObsGameCaptureTarget(null, null, executable));
     }
 
     // The output path for a recording. Sessions are flat under <effectiveRoot>/sessions/ — the

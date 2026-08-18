@@ -113,6 +113,13 @@ export interface AudioTrack {
 export interface AudioDeviceSetting {
   id: string;
   name: string;
+  /**
+   * The endpoint's data flow: 'Input' for capture endpoints (mics and other capture devices),
+   * 'Output' for render endpoints (speakers/headsets). The routing maps Input to
+   * wasapi_input_capture and Output to wasapi_output_capture, so the direction decides which
+   * capture type a device selection becomes. Absent from an older backend — default 'Input'.
+   */
+  direction?: AudioSourceKind;
   [key: string]: unknown;
 }
 

@@ -85,6 +85,22 @@ publish-windows:
 	$(MAKE) assemble-windows
 
 # ---- windows assembly ----
+# The OBS runtime is curated here to match exactly what the app's SafeModules allowlist loads
+# (src/Tript.App/Program.cs). The allowlist is the safety net: a module that is not shipped can
+# never be loaded, so slimming the bundle cannot change runtime behaviour. Every vendor's encoder
+# probe ships, so the bundle is not AMD- or NVIDIA-specific — each machine's probe binary resolves
+# next to the app process exe (os_get_executable_path_ptr) and registers only the encoders whose
+# hardware is actually present.
+
+# The allowlist, mirrored here (single source of truth is Program.cs; keep them in step).
+OBS_MODULES := obs-x264 obs-ffmpeg obs-nvenc obs-qsv11 win-capture image-source win-wasapi
+
+# bin/64bit's libobs + graphics module + the media dlls obs-ffmpeg.dll imports. Qt, the OBS
+# frontend (obs64.exe, obs-frontend-api.dll, obs-scripting.dll, lua51.dll) and every PDB are
+# dropped; av*/sw* are wildcarded so an OBS bump that renames them still copies.
+OBS_BIN_CORE := obs.dll libobs-d3d11.dll libobs-winrt.dll libobs-opengl.dll \
+	libx264-164.dll datachannel.dll libcurl.dll librist.dll srt.dll w32-pthreads.dll zlib.dll
+
 assemble-windows: obs-fetch
 	# Copy the built frontend as ./dist (the app host serves it from next to the binary).
 	mkdir -p $(WIN_PUBLISH_DIR)/dist
@@ -92,20 +108,39 @@ assemble-windows: obs-fetch
 	# Copy the detection models (auto-record + bookmarks need them next to the binary).
 	mkdir -p $(WIN_PUBLISH_DIR)/data/models
 	cp -r data/models/* $(WIN_PUBLISH_DIR)/data/models/ 2>/dev/null || true
-	# Bundle the OBS runtime, mirroring the portable zip layout at the publish root so the app's
-	# Windows locator finds it: bin/64bit (obs.dll + obs-ffmpeg-mux.exe), obs-plugins/64bit,
-	# data/obs-plugins, data/obs-studio.
+
+	# Curated libobs runtime, mirroring the portable zip layout (bin/64bit + obs-plugins/64bit +
+	# data/...) so the app's ObsRuntimeLocator finds it unchanged.
 	mkdir -p $(WIN_PUBLISH_DIR)/bin/64bit
-	cp -r $(OBS_EXTRACTED)/bin/64bit/. $(WIN_PUBLISH_DIR)/bin/64bit/
+	for dll in $(OBS_BIN_CORE); do \
+		cp $(OBS_EXTRACTED)/bin/64bit/$$dll $(WIN_PUBLISH_DIR)/bin/64bit/; done
+	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/av*.dll) $(WIN_PUBLISH_DIR)/bin/64bit/
+	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/sw*.dll) $(WIN_PUBLISH_DIR)/bin/64bit/
+
+	# The allowlisted module binaries only — browser/CEF, Qt plugins, filters, outputs, vst,
+	# decklink/aja and the like never load and are not shipped.
 	mkdir -p $(WIN_PUBLISH_DIR)/obs-plugins/64bit
-	cp -r $(OBS_EXTRACTED)/obs-plugins/64bit/. $(WIN_PUBLISH_DIR)/obs-plugins/64bit/
+	for module in $(OBS_MODULES); do \
+		cp $(OBS_EXTRACTED)/obs-plugins/64bit/$$module.dll $(WIN_PUBLISH_DIR)/obs-plugins/64bit/; done
+
+	# Module data: only the shipped modules' dirs. win-capture's carries the graphics hooks
+	# (graphics-hook*.dll, inject-helper*.exe) game capture needs, so it ships whole; the others
+	# are locale/schema and are fine to keep or drop. data/libobs (effects) and data/obs-studio
+	# are search roots the locator registers unevaluated, so both ship.
 	mkdir -p $(WIN_PUBLISH_DIR)/data
-	cp -r $(OBS_EXTRACTED)/data/obs-plugins $(WIN_PUBLISH_DIR)/data/
+	cp -r $(OBS_EXTRACTED)/data/libobs $(WIN_PUBLISH_DIR)/data/
 	cp -r $(OBS_EXTRACTED)/data/obs-studio $(WIN_PUBLISH_DIR)/data/
-	# The ffmpeg_muxer plugin spawns obs-ffmpeg-mux.exe next to the app process binary
-	# (os_get_executable_path_ptr → /proc/self/exe on Windows, the process exe path). It is copied
-	# to the publish root alongside Tript.App.exe.
+	mkdir -p $(WIN_PUBLISH_DIR)/data/obs-plugins
+	for module in $(OBS_MODULES); do \
+		cp -r $(OBS_EXTRACTED)/data/obs-plugins/$$module $(WIN_PUBLISH_DIR)/data/obs-plugins/ \
+			2>/dev/null || true; done
+
+	# The subprocess helpers the plugins spawn, resolved from the app process exe path: the muxer
+	# (obs-ffmpeg) and the encoder capability probes (obs-amf-test, obs-nvenc-test, obs-qsv-test).
+	# Without a probe binary the corresponding hardware encoder ids never register — a missing
+	# obs-nvenc-test.exe silently leaves an NVIDIA machine with software-only encoding.
 	cp $(OBS_EXTRACTED)/bin/64bit/obs-ffmpeg-mux.exe $(WIN_PUBLISH_DIR)/ 2>/dev/null || true
+	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/obs-*-test.exe) $(WIN_PUBLISH_DIR)/ 2>/dev/null || true
 
 # ---- shell (desktop window) ----
 # Publish the desktop shell (Photino webview) next to the app host. The shell reuses the app host's

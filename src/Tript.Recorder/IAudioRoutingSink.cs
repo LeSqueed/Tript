@@ -27,10 +27,10 @@ public interface IAudioTrackEncoder
 public interface IAudioRoutingSink
 {
     // Creates the capture source for one routed source. How a source kind maps to a concrete
-    // source type — and which device, when enumeration exists — is the sink's business; for the
-    // alpha, mapping AudioSourceKind to the platform's audio capture types is enough
-    // (spec/recorder.md, "Multi-track audio").
-    IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name);
+    // source type — and how a deviceId picks a device — is the sink's business. A null or empty
+    // deviceId means the platform's default device, which is what the wasapi/pulseaudio capture
+    // types attach to when their device setting is unset (spec/recorder.md, "Multi-track audio").
+    IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId);
 
     // Routes a source's audio to the mixer that feeds the given track: obs_source_set_audio_mixers
     // with the track's bit. Two sources on the same track must receive the same mixer index.

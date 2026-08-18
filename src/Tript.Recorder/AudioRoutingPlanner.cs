@@ -40,7 +40,8 @@ public static class AudioRoutingPlanner
                 {
                     Name = source.Name,
                     Kind = source.Kind,
-                    Volume = source.Volume
+                    Volume = source.Volume,
+                    DeviceId = source.DeviceId
                 })]
             });
         }

@@ -114,6 +114,29 @@ public sealed class AudioRoutingPlannerTests
         Assert.Equal(0.75f, track.Sources[1].Volume);
     }
 
+    // The device selection is part of the settings→binding mapping: a source's DeviceId must land
+    // on the plan so the routing can hand it to the sink. A source without a selection carries null
+    // (the platform default device).
+    [Fact]
+    public void PerSourceDeviceId_IsCarriedThroughThePlan()
+    {
+        const string micId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}";
+        var tracks = new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f },
+                new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1.0f, DeviceId = micId },
+            } },
+        };
+
+        var plan = AudioRoutingPlanner.Plan(tracks);
+
+        var track = Assert.Single(plan.Tracks);
+        Assert.Null(track.Sources[0].DeviceId);
+        Assert.Equal(micId, track.Sources[1].DeviceId);
+    }
+
     [Fact]
     public void ZeroTracks_ProducesAnEmptyPlan()
     {

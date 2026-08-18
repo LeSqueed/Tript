@@ -71,7 +71,7 @@ internal static class Program
         ObsRuntime? runtime = null;
         if (!options.FakeRecorder)
         {
-            runtime = StartObsRuntime(store.Load().Recording);
+            runtime = StartRuntimeOnHostThread(store);
 
             // The detection host resolves the live frame source through the registry.
             // ObsRuntime.Start installs the resolver; this is where the alpha verifies the
@@ -85,6 +85,41 @@ internal static class Program
         var tracker = new RecordingSessionTracker().Register();
 
         return new AppHost(options, store, runtime, tracker, primaryDisplay);
+    }
+
+    // The libobs context runs on a thread with the apartment libobs expects. On Windows libobs's
+    // obs_startup calls CoInitializeEx(COINIT_APARTMENTTHREADED) and treats a refusal as failure —
+    // but the .NET main thread is already MTA (the runtime initialises it), so on Windows the
+    // startup is moved onto a dedicated STA thread. Linux has no COM and no constraint; the
+    // current thread is fine there.
+    private static ObsRuntime StartRuntimeOnHostThread(SettingsStore store)
+    {
+        var recording = store.Load().Recording;
+
+        if (!OperatingSystem.IsWindows())
+            return StartObsRuntime(recording);
+
+        ObsRuntime? runtime = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                runtime = StartObsRuntime(recording);
+            }
+            catch (Exception exception)
+            {
+                error = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (error is not null)
+            throw error;
+
+        return runtime!;
     }
 
     // The fresh-install resolution default: the primary display's own size, so a first launch
@@ -163,16 +198,64 @@ internal static class Program
 
         var runtime = ObsRuntime.Start(startup);
 
-        if (runtime.ResetVideo(BuildVideoSettings(recording)) != ObsVideoResetResult.Success)
-            throw new InvalidOperationException("obs_reset_video refused the settings.");
+        // Diagnostic for the Windows bring-up: the libobs context is started on a dedicated STA
+        // thread (see StartRuntimeOnHostThread), so libobs's own CoInitializeEx(COINIT_
+        // APARTMENTTHREADED) at obs_startup can succeed. Log the apartment we actually landed on.
+        if (OperatingSystem.IsWindows())
+            Console.Error.WriteLine($"Tript.App: libobs startup on {Thread.CurrentThread.GetApartmentState()} thread");
+
+        // On Windows, libobs resolves the graphics module name by loading it straight off the
+        // process DLL search path — obs_reset_video -> obs_init_graphics -> gs_create ->
+        // os_dlopen, which is LoadLibraryExW with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS. The module
+        // paths registered via obs_add_module_path are never consulted for it, so the bundled
+        // bin/64bit directory (where libobs-d3d11.dll sits next to obs.dll) has to be on that
+        // search path before the first reset, or the module is "not found" and the video reset is
+        // refused. SetDllDirectory adds exactly that one directory to the search.
+        if (OperatingSystem.IsWindows() && locations.RuntimeDirectory is not null)
+            SetDllDirectoryW(locations.RuntimeDirectory);
+
+        // The paths go before the video and audio resets, matching the ordering ObsRuntime
+        // documents (startup, then paths, then video and audio reset, then module load). The data
+        // path has to be in place first: the first video reset loads libobs's effects through
+        // obs_find_data_file, which only knows the paths registered so far.
+        //
+        // The core data dir (effects, locale, licenses) is optional — some installs strip it — but
+        // when present it makes libobs's own effects findable, same as the integration tests.
+        // On Windows the portable layout splits it: the effects live in data/libobs and the rest
+        // in data/obs-studio, so both are registered as search roots.
+        if (locations.CoreDataDir is not null)
+            runtime.AddDataPath(locations.CoreDataDir);
+        if (locations.LibobsDataDir is not null)
+            runtime.AddDataPath(locations.LibobsDataDir);
+
+        // The data path is a search root: libobs substitutes %module% and looks for the module's
+        // data under it. The portable OBS layout nests it under a "data" subdir; distro installs
+        // put it directly under the module dir. Both are probed because libobs searches each in
+        // order, so the pattern carries both forms. Registered up here with the data path so the
+        // whole path set is in place before anything is loaded.
+        //
+        // Windows uses the flat binary form, matching OBS's own registration: a %module% in the
+        // binary pattern makes libobs glob for *subdirectories* and load <dir>/<name>/<name>.dll
+        // (obs-module.c find_modules_in_path), but the portable layout keeps the plugin DLLs flat
+        // in obs-plugins/64bit. A plain directory has libobs glob <dir>/*.dll itself. Forward
+        // slashes: the finder's glob logic keys on '/' and a backslash suffix matches nothing.
+        var binaryPattern = OperatingSystem.IsWindows()
+            ? locations.ModuleBinaryDir!.Replace('\\', '/')
+            : Path.Combine(locations.ModuleBinaryDir!, "%module%.so");
+        var moduleDataRoot = locations.ModuleDataDir ?? locations.ModuleBinaryDir!;
+        var dataPattern = Path.Combine(moduleDataRoot, "%module%").Replace('\\', '/');
+        runtime.AddModulePath(binaryPattern, dataPattern);
+
+        var result = runtime.ResetVideo(BuildVideoSettings(recording));
+        if (result != ObsVideoResetResult.Success)
+        {
+            if (OperatingSystem.IsWindows())
+                DumpGraphicsInitError(locations.RuntimeDirectory!);
+            throw new InvalidOperationException($"obs_reset_video refused the settings ({result}).");
+        }
 
         if (!runtime.ResetAudio(new ObsAudioSettings()))
             throw new InvalidOperationException("obs_reset_audio refused the default settings.");
-
-        // The core data dir (effects, locale, licenses) is optional — some installs strip it — but
-        // when present it makes libobs's own effects findable, same as the integration tests.
-        if (locations.CoreDataDir is not null)
-            runtime.AddDataPath(locations.CoreDataDir);
 
         // The allowlist keeps the module load to what the recorder actually uses, and it is
         // platform-specific: the capture source differs (linux-capture vs win-capture), and
@@ -181,16 +264,14 @@ internal static class Program
         foreach (var module in SafeModules(OperatingSystem.IsWindows()))
             runtime.AddSafeModule(module);
 
-        // The data path is a search root: libobs substitutes %module% and looks for the module's
-        // data under it. The portable OBS layout nests it under a "data" subdir; distro installs
-        // put it directly under the module dir. Both are probed because libobs searches each in
-        // order, so the pattern carries both forms.
-        var binaryPattern = Path.Combine(locations.ModuleBinaryDir!, "%module%" + (OperatingSystem.IsWindows() ? ".dll" : ".so"));
-        var moduleDataRoot = locations.ModuleDataDir ?? locations.ModuleBinaryDir!;
-        var dataPattern = Path.Combine(moduleDataRoot, "%module%");
-        runtime.AddModulePath(binaryPattern, dataPattern);
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
+
+        if (OperatingSystem.IsWindows())
+        {
+            var types = runtime.EnumerateInputTypes();
+            Console.Error.WriteLine($"Tript.App: registered input types: {string.Join(", ", types)}");
+        }
 
         if (!report.AllLoaded)
             throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
@@ -199,6 +280,87 @@ internal static class Program
             throw new InvalidOperationException("The runtime has no video or audio mix after reset.");
 
         return runtime;
+    }
+
+    // Temporary Windows bring-up diagnostic: obs_init_graphics fails silently (effect compile
+    // errors are swallowed because the error string is never requested). Reproduce the graphics
+    // init directly and capture the effect compile error libobs would otherwise drop.
+    private static void DumpGraphicsInitError(string runtimeDirectory)
+    {
+        try
+        {
+            var loaded = System.Diagnostics.Process.GetCurrentProcess().Modules
+                .Cast<System.Diagnostics.ProcessModule>()
+                .Where(m => m.ModuleName.IndexOf("obs", StringComparison.OrdinalIgnoreCase) >= 0
+                    && m.ModuleName.IndexOf(".dll", StringComparison.OrdinalIgnoreCase) >= 0)
+                .Select(m => $"{m.ModuleName} @0x{m.BaseAddress:X}")
+                .ToArray();
+            Console.Error.WriteLine($"Tript.App: loaded obs modules: {string.Join(", ", loaded)}");
+
+            var obs = System.Diagnostics.Process.GetCurrentProcess().Modules
+                .Cast<System.Diagnostics.ProcessModule>()
+                .FirstOrDefault(m => m.ModuleName.Equals("obs64.dll", StringComparison.OrdinalIgnoreCase)
+                    || m.ModuleName.Equals("obs.dll", StringComparison.OrdinalIgnoreCase))
+                ?.BaseAddress ?? nint.Zero;
+            if (obs == nint.Zero)
+            {
+                Console.Error.WriteLine("Tript.App: graphics diagnostic failed: obs module not found");
+                return;
+            }
+            unsafe
+            {
+                var gsCreate = (delegate* unmanaged[Cdecl]<nint*, byte*, uint, int>)
+                    NativeLibrary.GetExport(obs, "gs_create");
+                var gsEnter = (delegate* unmanaged[Cdecl]<nint, void>)
+                    NativeLibrary.GetExport(obs, "gs_enter_context");
+                var gsLeave = (delegate* unmanaged[Cdecl]<void>)
+                    NativeLibrary.GetExport(obs, "gs_leave_context");
+                var effectCreate = (delegate* unmanaged[Cdecl]<byte*, nint*, nint>)
+                    NativeLibrary.GetExport(obs, "gs_effect_create_from_file");
+                var bfree = (delegate* unmanaged[Cdecl]<nint, void>)
+                    NativeLibrary.GetExport(obs, "bfree");
+
+                nint graphics = 0;
+                var module = "libobs-d3d11\0";
+                var modulePtr = Marshal.StringToCoTaskMemAnsi(module);
+                var code = gsCreate(&graphics, (byte*)modulePtr, 0);
+                Marshal.FreeCoTaskMem(modulePtr);
+                Console.Error.WriteLine($"Tript.App: gs_create -> {code}, graphics=0x{graphics:X}");
+
+                if (graphics != 0)
+                {
+                    var findDataFile = (delegate* unmanaged[Cdecl]<byte*, nint>)
+                        NativeLibrary.GetExport(obs, "obs_find_data_file");
+                    var bfree2 = (delegate* unmanaged[Cdecl]<nint, void>)
+                        NativeLibrary.GetExport(obs, "bfree");
+
+                    gsEnter(graphics);
+                    foreach (var effectName in new[] { "default.effect", "opaque.effect", "solid.effect", "format_conversion.effect", "premultiplied_alpha.effect" })
+                    {
+                        var name = effectName + "\0";
+                        var namePtr = Marshal.StringToCoTaskMemAnsi(name);
+                        var found = findDataFile((byte*)namePtr);
+                        Marshal.FreeCoTaskMem(namePtr);
+                        var foundPath = found != 0 ? Marshal.PtrToStringAnsi(found) ?? "(null)" : "(none)";
+                        Console.Error.WriteLine($"Tript.App: {effectName} found at: {foundPath} exists={found != 0 && File.Exists(foundPath)}");
+
+                        nint error = 0;
+                        var pathPtr = Marshal.StringToCoTaskMemAnsi(foundPath + "\0");
+                        var effect = effectCreate((byte*)pathPtr, &error);
+                        Marshal.FreeCoTaskMem(pathPtr);
+                        var errorText = error != 0 ? Marshal.PtrToStringAnsi(error) ?? "(null)" : "(none)";
+                        Console.Error.WriteLine($"Tript.App:   {effectName} -> 0x{effect:X}, error: {errorText}");
+                        if (error != 0)
+                            bfree2(error);
+                    }
+                    gsLeave();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Tript.App: graphics diagnostic failed: {exception.Message}");
+        }
     }
 
     // The video mix the runtime is reset with: the canvas the compositor renders at, and the frame
@@ -242,17 +404,19 @@ internal static class Program
         };
     }
 
-    // The module allowlist. Kept small: the recorder needs the x264/ffmpeg encoders, the capture
-    // source, the image source (for the colour/blank), and the platform audio source.
+    // The module allowlist. Kept small: the recorder needs the x264 and hardware encoders, the
+    // capture source, the image source (for the colour/blank), and the platform audio source.
     //
     // The names are module binary names — the %module% libobs substitutes into the module path
     // pattern (win-wasapi.dll on Windows, linux-pulseaudio.so on Linux). Every Windows entry was
     // checked against the bundled runtime (third_party/obs-studio-32.2.2-x64/obs-plugins/64bit):
-    // obs-x264, obs-ffmpeg, win-capture, image-source and win-wasapi all ship there. That check
-    // matters because a name with no matching module file is invisible at startup: AddSafeModule is
-    // a filter, and LoadAllModules only reports modules it opened and could not initialise, so a
-    // misspelt or absent module is silently never loaded and the failure only surfaces later, when
-    // creating a source of a type that module would have registered.
+    // obs-x264, obs-ffmpeg, obs-nvenc, obs-qsv11, win-capture, image-source and win-wasapi all ship
+    // there (obs-amf does not in OBS 32). That check matters because a name with no matching module
+    // file is invisible at startup: AddSafeModule is a filter, and LoadAllModules only reports
+    // modules it opened and could not initialise, so a misspelt or absent module is silently never
+    // loaded and the failure only surfaces later, when creating a source of a type that module would
+    // have registered. A hardware encoder plugin whose GPU is absent loads fine but registers no ids,
+    // so listing it is safe on any machine.
     //
     // The platform is a parameter rather than an OperatingSystem.IsWindows() call inside the switch
     // so both branches stay assertable from a test process running on either OS.
@@ -260,7 +424,10 @@ internal static class Program
         isWindows
             // win-wasapi registers wasapi_input_capture / wasapi_output_capture, the ids
             // ObsAudioRoutingSink asks for on Windows. Without it there is no audio at all.
-            ? new[] { "obs-x264", "obs-ffmpeg", "win-capture", "image-source", "win-wasapi" }
+            // obs-nvenc registers jim_nvenc / obs_nvenc_h264(_tex) and obs-qsv11 h264_qsv; both
+            // register their H.264 ids only when their hardware is present, and EnumerateUsableEncoderIds
+            // filters to exactly the ids that did register.
+            ? new[] { "obs-x264", "obs-ffmpeg", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
             : new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" };
 
     [DllImport("libX11.so.6", CharSet = CharSet.Ansi)]
@@ -268,4 +435,10 @@ internal static class Program
 
     [DllImport("libX11.so.6")]
     private static extern int XInitThreads();
+
+    // kernel32 SetDllDirectoryW: puts one directory on the process's DLL search path so libobs's
+    // os_dlopen can find the bundled graphics module and plugin dependencies. Windows-only; the
+    // import is inert elsewhere because it is never invoked off Windows.
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool SetDllDirectoryW(string? directory);
 }

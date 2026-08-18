@@ -45,7 +45,8 @@ public sealed class PlannedAudioTrack
 }
 
 // One source routed into a track, with the volume it is recorded at. Volume is per-source, not
-// per-track: two merged sources keep their own gains.
+// per-track: two merged sources keep their own gains. DeviceId is the WASAPI endpoint id the
+// source captures, or null for the platform default device.
 public sealed class PlannedAudioSource
 {
     public required string Name { get; init; }
@@ -53,4 +54,6 @@ public sealed class PlannedAudioSource
     public AudioSourceKind Kind { get; init; }
 
     public float Volume { get; init; }
+
+    public string? DeviceId { get; init; }
 }

@@ -6,15 +6,22 @@ using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// The concrete recorder session over the OBS binding: an existing runtime plus a source the app
-// owns. Building a session output is exactly the Layer 5 wiring — an ffmpeg_muxer output, a video
-// encoder scaled to the resolved resolution, an audio encoder on mixer zero, both bound to the
-// session's mixes. The output is the recorder's to own; the source is borrowed.
+// The concrete recorder session over the OBS binding: an existing runtime plus the sources the app
+// provides. What goes on the recording channel is a private scene the session composes — the
+// colour source as a canvas-sized background and, when a game-capture source can be created, that
+// source composited above it — rather than the raw colour source, whose own size is the plugin's
+// default block. Building a session output is exactly the Layer 5 wiring — an ffmpeg_muxer output,
+// a video encoder scaled to the resolved resolution, an audio encoder on mixer zero, both bound to
+// the session's mixes. The output is the recorder's to own; the sources are borrowed.
 public sealed class ObsRecorderSession : IRecorderSession
 {
 
     private const string FfmpegMuxerId = "ffmpeg_muxer";
     private const string X264Id = "obs_x264";
+
+    // The source type id the platform's game-capture plugin registers. The settings keys are
+    // discovered, not this literal; the id is the one ObsCaptureSource probes for.
+    private const string GameCaptureId = "game_capture";
 
     // The settings model's encoder default ("x264", SettingPages.cs). It is a placeholder meaning
     // "the backend decides" — the real software id is obs_x264 — so it is never treated as an
@@ -32,14 +39,42 @@ public sealed class ObsRecorderSession : IRecorderSession
     private const int KeyframeIntervalSeconds = 1;
 
     private readonly ObsSource _source;
+    private readonly ObsScene _scene;
+    private readonly ObsSource? _gameCaptureSource;
 
-    public ObsRecorderSession(ObsRuntime runtime, ObsSource source)
+    // The scene is the session's own composition: the colour source is its background and, when a
+    // game-capture source was created, that source is above it. A game-capture target may be passed
+    // up front (a game already detected at session construction) and retargeted later without
+    // restarting the source via RetargetGame.
+    public ObsRecorderSession(ObsRuntime runtime, ObsSource source, ObsGameCaptureTarget? gameCaptureTarget = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(source);
 
         Runtime = runtime;
         _source = source.AddReference();
+
+        // The scene's items each take their own reference to the source they place (obs_scene_add),
+        // so the items keep both sources alive for as long as the scene is.
+        _scene = ObsScene.CreatePrivate("recorder scene");
+        try
+        {
+            if (_scene.AddSource(_source) is null)
+                throw new ObsException("The recorder scene refused the colour source.");
+
+            // The game-capture source is created whenever the platform has one, even with no
+            // initial target: RetargetGame re-points it at the detected game without restarting it,
+            // so a game detected after session construction still lands in the recording.
+            if (CreateGameCaptureSource(gameCaptureTarget, _scene) is { } capture)
+                _gameCaptureSource = capture;
+        }
+        catch
+        {
+            // Nothing was handed out: the scene and the session's reference are still both ours.
+            _scene.Dispose();
+            _source.Dispose();
+            throw;
+        }
     }
 
     public ObsRuntime Runtime { get; }
@@ -56,6 +91,10 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         if (!Runtime.TryGetAudioHandle(out var audio))
             throw new ObsException("The runtime has no audio mix; obs_reset_audio must succeed before recording.");
+
+        // The colour source is the background; it must fill the canvas rather than render as the
+        // plugin's default block. Sizing happens here, where the resolved canvas is known.
+        SizeColourSourceToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
 
         var videoEncoderId = ResolveVideoEncoderId(settings.Encoder);
         if (videoEncoderId is null)
@@ -80,6 +119,7 @@ public sealed class ObsRecorderSession : IRecorderSession
         // wrapper, which is the object whose lifetime the recorder actually controls.
         ObsEncoder? videoEncoder = null;
         ObsEncoder? audioEncoder = null;
+        AudioRouting? audioRouting = null;
 
         try
         {
@@ -122,17 +162,29 @@ public sealed class ObsRecorderSession : IRecorderSession
                 output.SetVideoEncoder(videoEncoder);
             }
 
-            // A single audio encoder on mixer zero (the programme mix) in output slot zero, exactly the
-            // Layer 5 shape that proved the audio track lands in the file.
-            using (var audioSettings = new ObsSettings())
+            // The recording's audio comes from the resolved track plan when any track is
+            // configured: each track's sources become wasapi capture sources (carrying the selected
+            // device id) routed into that track's mixer, with a per-track encoder bound to that
+            // mixer and assigned to the matching output slot. An empty track list keeps the single
+            // programme-mix encoder on slot 0 — the Layer 5 shape — so a recording with no tracks
+            // configured still carries audio.
+            if (settings.AudioTracks.Count > 0)
             {
-                audioSettings.SetInt("bitrate", 160);
-                audioEncoder = ObsEncoder.CreateAudio(FfmpegAacId, "recorder audio", audioSettings, mixerIndex: 0);
-                audioEncoder.BindToAudio(audio);
-                output.SetAudioEncoder(audioEncoder, 0);
+                var sink = new ObsAudioRoutingSink(output, audio, audioEncoderId: FfmpegAacId, scene: _scene);
+                audioRouting = new AudioRoutingService(sink).Wire(AudioRoutingPlanner.Plan(settings.AudioTracks));
+            }
+            else
+            {
+                using (var audioSettings = new ObsSettings())
+                {
+                    audioSettings.SetInt("bitrate", 160);
+                    audioEncoder = ObsEncoder.CreateAudio(FfmpegAacId, "recorder audio", audioSettings, mixerIndex: 0);
+                    audioEncoder.BindToAudio(audio);
+                    output.SetAudioEncoder(audioEncoder, 0);
+                }
             }
 
-            return new MuxerOutput(output, videoEncoder, audioEncoder);
+            return new MuxerOutput(output, videoEncoder, audioEncoder, audioRouting);
         }
         catch
         {
@@ -142,15 +194,122 @@ public sealed class ObsRecorderSession : IRecorderSession
             output.Dispose();
             videoEncoder?.Dispose();
             audioEncoder?.Dispose();
+            audioRouting?.Dispose();
             throw;
         }
     }
 
-    public void PlaceSourceOnChannel() => Runtime.SetOutputSource(VideoChannel, _source);
+    // The scene is what the recording renders, placed on the channel like any source (a scene *is*
+    // a source); the channel takes a reference of its own.
+    public void PlaceSourceOnChannel() => Runtime.SetOutputSource(VideoChannel, _scene);
 
     public void ClearSourceFromChannel() => Runtime.SetOutputSource(VideoChannel, (ObsSource?)null);
 
-    public void Dispose() => _source.Dispose();
+    // The seam AppHost calls when a game is detected at start time: re-points the live game-capture
+    // source at the new target without restarting it (obs_source_update merges, so the capture_mode
+    // the source was created with survives). False when there is no game-capture source — the
+    // initial target was null, or the platform has no game capture at all.
+    public bool RetargetGame(ObsGameCaptureTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return _gameCaptureSource is not null && ObsCaptureSource.Retarget(_gameCaptureSource, target);
+    }
+
+    // The scene goes first: releasing it destroys its items, and each item releases the reference
+    // it took from its source. Only then do the session's own references drop the colour and
+    // game-capture sources for good. All three Disposes are idempotent — each handle short-circuits
+    // once closed — so a second Dispose here is harmless.
+    public void Dispose()
+    {
+        _scene.Dispose();
+        _source.Dispose();
+        _gameCaptureSource?.Dispose();
+    }
+
+    // ---- scene composition ----
+
+    // Creates and places the game-capture source for the initial target)Skip. Null when the
+    // platform has no game-capture source (Linux), which the caller treats as "background only" —
+    // exactly the scene shape before this work. A null target still creates the source (with the
+    // capture_mode forced to window so an exe-only target is meaningful later) so RetargetGame has
+    // something to re-point.
+    private static ObsSource? CreateGameCaptureSource(ObsGameCaptureTarget? target, ObsScene scene)
+    {
+        if (ObsSourceProperties.EnumerateTypeProperties(GameCaptureId).Count == 0)
+            return null;
+
+        using var settings = target is not null
+            ? ObsCaptureSource.BuildGameCaptureSettings(target) ?? new ObsSettings()
+            : new ObsSettings();
+
+        ApplyWindowCaptureMode(settings);
+
+        var source = ObsSource.CreatePrivate(GameCaptureId, "app capture", settings);
+        try
+        {
+            if (scene.AddSource(source) is null)
+                throw new ObsException("The recorder scene refused the game-capture source.");
+        }
+        catch
+        {
+            source.Dispose();
+            throw;
+        }
+
+        return source;
+    }
+
+    // The win-capture plugin's default capture_mode is "any_fullscreen": it hooks whichever
+    // fullscreen window is in the foreground and ignores the exe key entirely (game-capture.c,
+    // CAPTURE_MODE_ANY -> get_fullscreen_window). An exe-only target is only meaningful in the
+    // window mode, where the window is matched by title/class/exe (game-capture.c,
+    // get_selected_window -> ms_find_window; the default priority is WINDOW_PRIORITY_EXE). The mode
+    // is a plugin-side value, so it is found through the source's own properties like the keys
+    // ObsCaptureSource discovers — the mode list is the one whose items include the "any" mode, and
+    // the window mode is the item that makes the exe key meaningful. Nothing here is hardcoded.
+    private static void ApplyWindowCaptureMode(ObsSettings settings)
+    {
+        foreach (var property in ObsSourceProperties.EnumerateTypeProperties(GameCaptureId))
+        {
+            if (property.Type != ObsPropertyType.List)
+                continue;
+
+            if (!property.Items.Any(item =>
+                    item.Format == ObsComboFormat.String &&
+                    item.Value is string itemValue &&
+                    itemValue.Contains("any", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var windowMode = property.Items.FirstOrDefault(item =>
+                item.Format == ObsComboFormat.String &&
+                item.Value is string itemValue &&
+                itemValue.Contains("window", StringComparison.OrdinalIgnoreCase));
+
+            if (windowMode.Value is string modeValue)
+                settings.SetString(property.Name, modeValue);
+
+            return;
+        }
+    }
+
+    // The colour source is the recording's background. Placed straight on a channel it renders at
+    // its own configured size — with no width/height setting, that is the plugin's default block,
+    // which is what the "black screen with a white block" recordings this fixes showed. Sizing it
+    // to the canvas once, through Update (the colour source's reconfiguration seam — GetSettings
+    // hands back the source's live settings object), makes it fill the recording whatever
+    // composites above it; game capture never changes the background's size.
+    private void SizeColourSourceToCanvas(int width, int height)
+    {
+        using var settings = _source.GetSettings();
+        if (settings.GetInt("width") >= width && settings.GetInt("height") >= height)
+            return;
+
+        settings.SetInt("width", width);
+        settings.SetInt("height", height);
+        _source.Update(settings);
+    }
 
     // Which H.264 video encoder the runtime actually registered. The ids differ by machine and
     // runtime — obs_x264 on a software-only install, ffmpeg_vaapi on this machine, the texture-NVENC
@@ -494,13 +653,15 @@ public sealed class ObsRecorderSession : IRecorderSession
     {
         private readonly ObsOutput _output;
         private readonly ObsEncoder _videoEncoder;
-        private readonly ObsEncoder _audioEncoder;
+        private readonly ObsEncoder? _audioEncoder;
+        private readonly AudioRouting? _audioRouting;
 
-        internal MuxerOutput(ObsOutput output, ObsEncoder videoEncoder, ObsEncoder audioEncoder)
+        internal MuxerOutput(ObsOutput output, ObsEncoder videoEncoder, ObsEncoder? audioEncoder, AudioRouting? audioRouting)
         {
             _output = output;
             _videoEncoder = videoEncoder;
             _audioEncoder = audioEncoder;
+            _audioRouting = audioRouting;
         }
 
         public bool IsActive => _output.IsActive;
@@ -519,14 +680,17 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         // The output is released first: obs_output_release drops the output while it still holds valid
         // encoder pointers, and only then do the encoders lose their references. The reverse order
-        // would leave a live output pointing at released encoders. All three Dispose calls are
-        // idempotent — ObsOutput short-circuits on a closed handle and SafeHandle.Dispose is a no-op
-        // once run — so a second Dispose here does nothing.
+        // would leave a live output pointing at released encoders. The audio routing goes last: its
+        // dispose deactivates the capture sources (balancing their MarkActive) and releases the
+        // track encoders, all after the output has stopped reading the mixes. All these Dispose
+        // calls are idempotent — ObsOutput short-circuits on a closed handle and SafeHandle.Dispose
+        // is a no-op once run — so a second Dispose here does nothing.
         public void Dispose()
         {
             _output.Dispose();
             _videoEncoder.Dispose();
-            _audioEncoder.Dispose();
+            _audioEncoder?.Dispose();
+            _audioRouting?.Dispose();
         }
     }
 }

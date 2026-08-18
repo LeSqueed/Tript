@@ -137,4 +137,10 @@ public sealed class AudioSource
     public AudioSourceKind Kind { get; set; }
 
     public float Volume { get; set; } = 1.0f;
+
+    // The WASAPI device id this source captures, or null for the platform default device. The
+    // selection is persisted by id (serialized as deviceId) so it survives a settings round trip
+    // and stays selected even while the device is absent; the recorder's sink turns the id into
+    // the win-wasapi capture source's "device_id" setting.
+    public string? DeviceId { get; set; }
 }

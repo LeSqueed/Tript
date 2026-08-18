@@ -63,7 +63,10 @@ export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[
       options.push({
         id: device.id,
         label: device.name,
-        kind: 'Input',
+        // A device's direction decides the capture type it routes to: an output endpoint is a
+        // render device (speaker/headset) captured by wasapi_output_capture on that device, not
+        // an input capture. Absent direction (an older backend) stays an Input.
+        kind: device.direction === 'Output' ? 'Output' : 'Input',
         deviceId: device.id,
       });
     }

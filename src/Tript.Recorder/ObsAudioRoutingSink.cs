@@ -21,6 +21,18 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
 
     private readonly string _audioEncoderId;
 
+    // The scene the capture sources are placed in, or null. libobs mixes a source's audio only
+    // when the source is part of a channel's active scene tree (obs-audio.c audio_callback: the
+    // channel source is a root node and gets mixed; sources outside the tree are rendered but
+    // never mixed). Audio-only sources are invisible in the scene but their audio is mixed —
+    // exactly how OBS carries its mic and desktop-audio sources.
+    private readonly ObsScene? _scene;
+
+    // The win-wasapi capture types' device-selection property (its default is "default", the
+    // system default endpoint). Plugin-private, but stable — the property the settings UI lists
+    // devices under is the same string the source's create path reads.
+    private const string DeviceIdKey = "device_id";
+
     // The output the routing wires encoders into, and the audio mix the track encoders bind to. The
     // sink holds both because a routing is always for a particular output — the recorder creates the
     // sink with the output it owns, and the encoders must be bound to the mix libobs is actually
@@ -31,17 +43,38 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
         ObsOutput output,
         nint audioHandle,
         Func<AudioSourceKind, string>? sourceTypeResolver = null,
-        string audioEncoderId = "ffmpeg_aac")
+        string audioEncoderId = "ffmpeg_aac",
+        ObsScene? scene = null)
     {
         ArgumentNullException.ThrowIfNull(output);
         _output = output;
         _audioHandle = audioHandle;
         _sourceTypeResolver = sourceTypeResolver ?? DefaultSourceTypeId;
         _audioEncoderId = audioEncoderId;
+        _scene = scene;
     }
 
-    public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name) =>
-        new RoutedSource(ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}"));
+    public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId)
+    {
+        ObsSource source;
+        if (string.IsNullOrEmpty(deviceId))
+        {
+            source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}");
+        }
+        else
+        {
+            // A device id is the win-wasapi plugin's device selection: its "device_id" property, whose
+            // default is "default" (the system default endpoint). Writing a real endpoint id — the one
+            // WasapiDeviceEnumerator returns — makes the source attach to that device instead.
+            using var settings = new ObsSettings();
+            settings.SetString(DeviceIdKey, deviceId);
+            source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}", settings);
+        }
+
+        if (_scene is not null)
+            _scene.AddSource(source);
+        return new RoutedSource(source);
+    }
 
     public void RouteSourceToMixer(IAudioRoutedSource source, int mixerIndex) =>
         ((RoutedSource)source).Source.AudioMixers = 1u << mixerIndex;
@@ -73,9 +106,10 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
     // null for an unknown type, so the wrong id fails at record time, when the routing is wired and
     // the recording would otherwise have started. Hence the split rather than one shared id.
     //
-    // Device enumeration is deliberately a seam for the alpha (spec/recorder.md, "Multi-track
-    // audio"): the settings model selects a source by name, and mapping that name to a device id is
-    // future work — both platforms' types capture the system default device until then.
+    // Device selection flows in through CreateCaptureSource's deviceId: null captures the platform
+    // default device, and a real id — one WasapiDeviceEnumerator enumerated on Windows — is written
+    // to the capture type's device property ("device_id" on win-wasapi). Which key names a device
+    // on the platform's type is the same plugin-private literal each id's properties expose.
     //
     // This is only the default resolver: the constructor's sourceTypeResolver argument replaces it,
     // which is how tests and the harness point the sink at other types.

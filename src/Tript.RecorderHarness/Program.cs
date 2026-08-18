@@ -101,6 +101,8 @@ internal static class Program
 
         if (locations.CoreDataDir is not null)
             runtime.AddDataPath(locations.CoreDataDir);
+        if (locations.LibobsDataDir is not null)
+            runtime.AddDataPath(locations.LibobsDataDir);
     }
 
     // The recorder-driven path: a real runtime, a colour source the app owns, and the T3 recorder

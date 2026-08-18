@@ -10,11 +10,6 @@ namespace Tript.Media;
 // streams stderr as clip progress and waits for as long as the encode takes; RunBounded caps the
 // run with a timeout and reports the outcome instead of throwing (see its comment for why the clip
 // runner cannot serve a request thread).
-//
-// The argument list is passed via ProcessStartInfo.ArgumentList, which handles per-argument quoting
-// for the platform — a single Arguments string would be split by the shell or, with UseShellExecute
-// false, passed to execve with literal quote characters (measured: ffmpeg received the quotes and
-// failed with exit code 234).
 public static class FfmpegRunner
 {
     public static void Run(string ffmpegPath, IReadOnlyList<string> args, ClipRequest request, string stage)
@@ -74,16 +69,7 @@ public static class FfmpegRunner
 
     // A time-bounded run that reports its outcome instead of throwing. Run (above) is the clip
     // path's runner: it streams progress and waits as long as the encode takes, which is correct
-    // there — a ten-minute source legitimately encodes for minutes. The thumbnail path cannot use
-    // it. It runs on an HttpListener worker while a browser request is open, so an ffmpeg that
-    // never exits (a truncated file it keeps waiting on, a wedged hardware decoder) would hold the
-    // request and eventually the pool, and an exception thrown there would surface as a 500 rather
-    // than as "no thumbnail". Both runners live in this class so there stays one place ffmpeg is
-    // spawned and one set of ProcessStartInfo conventions (ArgumentList, no shell, no window).
-    //
-    // Callers must not trust ExitCode alone: ffmpeg exits 0 with an empty stderr when a seek lands
-    // past the end of a file, producing no output at all. Verify the output file exists and is
-    // non-empty.
+    // there — a ten-minute source legitimately encodes for minutes.
     public static FfmpegOutcome RunBounded(string ffmpegPath, IReadOnlyList<string> args, TimeSpan timeout)
     {
         using var process = new Process

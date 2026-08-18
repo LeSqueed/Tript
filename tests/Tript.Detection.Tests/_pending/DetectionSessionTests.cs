@@ -15,13 +15,7 @@ namespace Tript.Detection.Tests;
 // GameIntegrationService used to hold the detector, its cooldown tracker and its event definitions
 // in three separate mutable statics. The DetectionsAvailable callback snapshotted _eventDefinitions
 // but read _cooldownTracker straight off the static on every detection — from the detector's own
-// inference thread. Start() and Shutdown() null those fields from the caller's thread, so a teardown
-// landing inside a cycle already in flight threw a NullReferenceException that the detection loop's
-// catch-all logged as a Log.Warning and swallowed: bookmarks quietly stopped being created.
-//
-// The three are now one immutable DetectionSession, captured by the callback and swapped as a unit.
-// These tests pin the property that makes the class of bug unwritable: a cycle in flight keeps
-// working against the session it was wired to, whatever teardown does to the statics.
+// inference thread.
 [Collection(RecordingStateCollection.Name)]
 public class DetectionSessionTests
 {

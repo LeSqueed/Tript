@@ -7,8 +7,7 @@ namespace Tript.Obs.IntegrationTests;
 
 // One started OBS context, torn down at the end of the test that made it. There is deliberately no
 // shared runtime fixture: with a single global context, a fixture spanning tests makes every test
-// depend on what ran before it, and the lifecycle tests need to own startup themselves. Paying a
-// fresh startup per test buys total independence, and startup is around a tenth of a second.
+// depend on what ran before it, and the lifecycle tests need to own startup themselves.
 internal sealed class ObsSession : IDisposable
 {
     private readonly ConcurrentQueue<(ObsLogLevel Level, string Message)> _messages = new();

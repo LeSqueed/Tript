@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-// The on-file metadata contract for a recording (spec/config-and-storage.md): what makes an
+// The on-file metadata contract for a recording: what makes an
 // existing recording readable — bookmark records, the audio track layout, the content type and
 // the associated game. Compression is recorded in metadata rather than as a filename suffix;
 // compression itself is out of scope, so the flag is load-only for alpha, nothing produces it.
@@ -32,9 +32,7 @@ public sealed class RecordingMetadata
 
     // The recording's playing length in seconds, as the container reports it. Null on a record
     // written before the length was known; the library then shows no length for that item until it
-    // is filled in. It is stored rather than measured on demand because the library lists every
-    // recording on every content push, and reading a duration otherwise means an ffprobe per item
-    // per push.
+    // is filled in.
     public double? DurationSeconds { get; set; }
 
     // The audio track layout: which track holds which device. The layout is part of the
@@ -49,8 +47,7 @@ public sealed class RecordingMetadata
 }
 
 // A single track's place in the output file. Sources is not a list of devices: a track is a
-// destination that carries one or more sources, each with its own volume — the multi-track model
-// from spec/recorder.md.
+// destination that carries one or more sources, each with its own volume.
 public sealed class AudioTrackLayout
 {
     public int Index { get; set; }

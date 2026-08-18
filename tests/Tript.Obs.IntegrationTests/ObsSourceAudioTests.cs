@@ -5,16 +5,10 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The per-source audio controls behind the multi-track routing (spec/obs-binding.md, "Audio routing
-// and tracks"): the mixer bitmask, the per-source volume, and the active pair. These are what the
-// routing service drives through its sink — a source's mixers say which tracks it feeds, its volume
-// is a per-source gain, and a source only produces audio while marked active.
-//
-// The mixer bitmask is stored on sources that carry audio; a source without the OBS_SOURCE_AUDIO
-// flag (a colour source) reports zero and discards the set value — measured — so these tests use a
-// real audio device capture source (pulse_input_capture) rather than the colour source. Creating one
-// needs no PulseAudio server to be reachable; the source exists regardless and just captures
-// silence, which is why the round-trip works headless.
+// The per-source audio controls behind the multi-track routing: the mixer bitmask, the per-source
+// volume, and the active pair. These are what the routing service drives through its sink — a
+// source's mixers say which tracks it feeds, its volume is a per-source gain, and a source only
+// produces audio while marked active.
 public sealed class ObsSourceAudioTests
 {
     private const string PulseInputCaptureId = "pulse_input_capture";

@@ -10,8 +10,7 @@ namespace Tript.App.Tests;
 
 // The content server (http://localhost:2222/) serves the recorded files with range-request support
 // and refuses any path that escapes the content root. These tests hit the running app host over
-// HTTP, the same way the frontend does (spec/local-ipc.md: "that is a path-traversal guard, not an
-// implementation detail").
+// HTTP, the same way the frontend does.
 [Collection(AppHostCollection.Name)]
 public sealed class ContentServerTests : IDisposable
 {

@@ -57,15 +57,7 @@ public static class ObsRuntimeLocator
 
         // Trailing separator so obs_find_data_file concatenates the root with the relative path.
         // The Windows portable layout splits libobs's own data across two sibling dirs under data/:
-        // the effects live in data/libobs and the rest (locale, themes) in data/obs-studio. Both
-        // are search roots, so both are returned; a distro install (Linux) has one obs-studio dir.
-        //
-        // Forward slashes, not the platform separator: libobs's effect preprocessor resolves a
-        // #include by prepending the including file's directory to the include name, and it splits
-        // on '/' specifically (cf-lexer.c insert_path). A data root that uses backslashes defeats
-        // that split, the include resolves against the process CWD instead and the effect fails to
-        // load — a Windows-only failure. Windows file APIs accept '/' paths, so both forms work
-        // everywhere else.
+        // the effects live in data/libobs and the rest (locale, themes) in data/obs-studio.
         var libobsDataDir = Path.GetFullPath(Path.Combine(baseDir, "data", "libobs"))
             .Replace('\\', '/') + "/";
         var coreDataDir = Path.GetFullPath(Path.Combine(baseDir, "data", "obs-studio"))
@@ -141,9 +133,8 @@ public static class ObsRuntimeLocator
     }
 
     // The core data dir: libobs's own effects, locale and licenses. Arch puts it at
-    // /usr/share/obs/obs-studio; Debian keeps the obs-plugins data under /usr/share/obs/obs-plugins.
-    // The trailing slash matters: obs_find_data_file concatenates the search root with the
-    // relative path, so a root without a trailing separator joins onto the filename.
+    // /usr/share/obs/obs-studio; Debian keeps the obs-plugins data under /usr/share/obs/obs-
+    // plugins.
     private static string? FindLinuxCoreDataDir()
     {
         foreach (var candidate in new[]

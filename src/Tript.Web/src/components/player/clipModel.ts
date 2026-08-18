@@ -3,7 +3,7 @@
 // The clipping domain model — pure functions behind the clip dialog (T9).
 //
 // A region is a start + an end on the session timeline, in seconds, independent of bookmarks
-// (spec/recorder.md — "Clipping from a session — the region model"). The dialog collects the
+//. The dialog collects the
 // user's marked regions and turns them into the `segments` list a `CreateClip` carries. The two
 // modes differ only in how the regions are grouped into payloads:
 //
@@ -43,24 +43,16 @@ export type ClipMode = 'combine' | 'separate';
 export const DEFAULT_REGION_SECONDS = 10;
 
 /**
- * The shortest region a mark, a drag or a typed edit may produce, seconds.
- *
- * Every editing path funnels through the helpers below, so this is the single place that decides a
- * region can never collapse: dragging an edge past the opposite one, or typing an end before the
- * start, stops here instead of producing a zero-length (or inverted) span the backend would have to
- * reject. It is deliberately small — the user is trimming frames, not shapes.
+ * The shortest region a mark, a drag or a typed edit may produce, seconds. Every editing path
+ * funnels through the helpers below, so this is the single place that decides a region can never
+ * collapse: dragging an edge past the opposite one, or typing an end before the start, stops here
+ * instead of producing a zero-length (or inverted) span the backend would have to reject.
  */
 export const MIN_REGION_SECONDS = 0.25;
 
 /**
- * The clippable length of the media and where that number came from.
- *
- * `known` is true only when the media itself reported the duration. It is not a UI nicety: a bound
- * nobody measured is not a bound. When it is false, `seconds` is at best a *declared* length (the
- * content record's) and at worst 0 — good enough to lay out a timeline, never good enough to place a
- * segment inside. `markableDuration` below is the only sanctioned way to turn these two fields into
- * a bound, because reading `seconds` on its own is exactly the mistake that produced the bug it
- * documents.
+ * The clippable length of the media and where that number came from. `known` is true only when the
+ * media itself reported the duration.
  */
 export interface ClipBounds {
   /** The end of the clippable range, seconds. 0 when nothing authoritative is known yet. */
@@ -70,20 +62,8 @@ export interface ClipBounds {
 }
 
 /**
- * Decide which duration segments are clamped against.
- *
- * The media's own duration wins whenever it is available. Metadata (`ContentItem.endTime`) is
- * written by a different code path than the file — a recording cut short by a crash, a record
- * imported from elsewhere, a re-encode — so the two can disagree; the file is the thing ffmpeg will
- * actually cut, so the file is authoritative and metadata is only a stand-in until it loads.
- *
- * When neither is available the answer is 0, deliberately: the player's fallback session length is a
- * placeholder constant, and clamping against it is what let out-of-bounds segments exist in the first
- * place. Refusing to mark for the moment it takes the media to load is the honest alternative.
- *
- * Note what "stand-in" does and does not license. The metadata length is a stand-in for *drawing* —
- * a timeline has to be laid out against something — and never for bounding a segment; `known: false`
- * is how this function says so. See `markableDuration`.
+ * Decide which duration segments are clamped against. The media's own duration wins whenever it is
+ * available.
  */
 export function resolveClipBounds(
   mediaDuration: number | undefined,
@@ -100,34 +80,18 @@ export function resolveClipBounds(
 
 /**
  * The bound a segment may actually be created against: the measured length, or 0 (nothing markable)
- * when nothing has been measured.
- *
- * MEASURED BUG (this function is the fix, and its whole reason to exist). A session whose content
- * record declared 100s pointed at a file that was really 9.13s long. With the <video> element not yet
- * having reported its metadata, `resolveClipBounds` answered `{ seconds: 100, known: false }` — the
- * declared length, flagged as a guess — and every caller then read `.seconds` and clamped against it:
- * `Mark 10s` at 0:95 produced a segment ending at 1:40, some 91 seconds past the last frame that
- * exists. `known` had been there from the start and said the number was unmeasured; nothing anywhere
- * read it. A later reconciliation pass truncated the segment once the media loaded, but the mark was
- * wrong the moment it was made, and "a later pass will clean it up" is not a bound.
- *
- * The declared length cannot be repaired into a bound, only replaced by one: it can overstate the
- * media (a record written by a different code path than the file, a recording a crash cut short, an
- * imported or re-encoded record), and there is no second measurement to take the minimum against.
- * So the conversion from `ClipBounds` to a number lives here, in one place, and refuses an unmeasured
- * one — the alternative is every call site remembering to check a flag, which is what failed.
+ * when nothing has been measured. MEASURED BUG (this function is the fix, and its whole reason to
+ * exist).
  */
 export function markableDuration(bounds: ClipBounds): number {
   return bounds.known ? bounds.seconds : 0;
 }
 
 /**
- * The duration as a usable clamping bound, or null when there is none.
- *
- * A duration that is not a finite number, or is too short to hold the shortest allowed region, cannot
- * bound anything: NaN comparisons are all false (so `time > d` would not stop anything) and Infinity
- * bounds nothing at all. Both used to reach the clamps — `useClipDialog` passed
- * `session.endTime ?? Infinity`, i.e. "unbounded" for any recording without a metadata record.
+ * The duration as a usable clamping bound, or null when there is none. A duration that is not a
+ * finite number, or is too short to hold the shortest allowed region, cannot bound anything: NaN
+ * comparisons are all false (so `time > d` would not stop anything) and Infinity bounds nothing at
+ * all.
  */
 function clippableDuration(duration: number): number | null {
   return Number.isFinite(duration) && duration >= MIN_REGION_SECONDS ? duration : null;
@@ -164,10 +128,9 @@ export function reconcileRegion(region: TimelineRegion, duration: number): Timel
 }
 
 /**
- * Reconcile a whole region list against the duration, dropping what cannot fit.
- *
- * Returns the input array by identity when every region already fits, so it is safe to call from an
- * effect keyed on the duration without looping.
+ * Reconcile a whole region list against the duration, dropping what cannot fit. Returns the input
+ * array by identity when every region already fits, so it is safe to call from an effect keyed on
+ * the duration without looping.
  */
 export function reconcileRegions(regions: TimelineRegion[], duration: number): TimelineRegion[] {
   const next: TimelineRegion[] = [];
@@ -188,13 +151,8 @@ export function reconcileRegions(regions: TimelineRegion[], duration: number): T
 
 /**
  * How the default region is positioned: centred on the playbar cursor, keeping the full fixed
- * length. At the session edges the region is shifted inward (never shrunk, never negative) —
- * the user gets a full-length proposal they can then move/extend/shrink freely. On media shorter
- * than the fixed length the proposal shrinks to the whole media instead.
- *
- * With no usable duration (nothing measured yet) the result is the empty region at 0: callers commit
- * it through `markRegion`/`normalizeRegionBounds`, which refuse a span below MIN_REGION_SECONDS, so
- * "no duration" produces no segment rather than a fabricated one.
+ * length. At the session edges the region is shifted inward (never shrunk, never negative) — the
+ * user gets a full-length proposal they can then move/extend/shrink freely.
  */
 export function buildDefaultRegion(
   cursorTime: number,
@@ -227,11 +185,9 @@ export function newClipId(prefix = 'clip'): string {
 }
 
 /**
- * Clamp a session time into [0, duration].
- *
- * Non-finite inputs collapse to 0 rather than propagating: a NaN duration used to make every
- * comparison downstream false (NaN is neither greater nor smaller than anything), which turns a clamp
- * into a pass-through, and an infinite duration bounds nothing.
+ * Clamp a session time into [0, duration]. Non-finite inputs collapse to 0 rather than propagating:
+ * a NaN duration used to make every comparison downstream false (NaN is neither greater nor smaller
+ * than anything), which turns a clamp into a pass-through, and an infinite duration bounds nothing.
  */
 export function clampTime(time: number, duration: number): number {
   const d = Number.isFinite(duration) ? Math.max(0, duration) : 0;
@@ -281,16 +237,10 @@ export function addRegion(
 }
 
 /**
- * Order + clamp raw bounds into a usable span, or null when they cannot make a region.
- *
- * This is the gate every *edit* goes through (the numeric fields in the dialog, the set-from-playhead
- * buttons, the timeline drag, and defensively the controller itself), so a typed edit and a dragged
- * edge can never disagree about what the resulting region is. Bounds are ordered (an end typed
- * before the start is simply the other way round), clamped into the session, and a span shorter than
- * MIN_REGION_SECONDS is refused rather than silently rounded up — the caller keeps the old region.
- *
- * With no usable duration to clamp against, every edit is refused: there is no honest bound to place
- * the region inside, and inventing one is exactly the bug this module is guarding against.
+ * Order + clamp raw bounds into a usable span, or null when they cannot make a region. This is the
+ * gate every *edit* goes through (the numeric fields in the dialog, the set-from-playhead buttons,
+ * the timeline drag, and defensively the controller itself), so a typed edit and a dragged edge can
+ * never disagree about what the resulting region is.
  */
 export function normalizeRegionBounds(
   start: number,
@@ -310,16 +260,10 @@ export function normalizeRegionBounds(
 }
 
 /**
- * Move a whole region by a signed delta, preserving its length.
- *
- * Dragging a region's body at the session edges clamps the *whole* region rather than squashing it:
- * the length the user marked survives the gesture, which is what makes body-dragging feel like
- * sliding a card instead of resizing one.
- *
- * The length that survives is the *reconciled* length: a region longer than the media (one marked
- * against a longer provisional duration) is truncated first, otherwise preserving its length would
- * mean sliding an oversized region around inside a shorter media and reporting an end past its last
- * frame.
+ * Move a whole region by a signed delta, preserving its length. Dragging a region's body at the
+ * session edges clamps the *whole* region rather than squashing it: the length the user marked
+ * survives the gesture, which is what makes body-dragging feel like sliding a card instead of
+ * resizing one.
  */
 export function moveRegionBy(
   region: TimelineRegion,
@@ -337,16 +281,10 @@ export function moveRegionBy(
 }
 
 /**
- * Set a region's start (its left edge / in point) to a session time.
- *
- * Clamped into the session and stopped MIN_REGION_SECONDS short of the end, so dragging the left
- * edge to the right never crosses the right edge (it parks against it instead — the standard NLE
- * feel, and it keeps the region reversible: drag back and the span reopens).
- *
- * The *other* edge is clamped too, via `reconcileRegion`. That is not belt-and-braces: the ceiling is
- * derived from `region.end`, so a region carried over from a longer, provisional duration (end past
- * the real end of the media) used to have its start clamped correctly while its oversized end was
- * copied straight through — the one input that made this function emit `end > duration`.
+ * Set a region's start (its left edge / in point) to a session time. Clamped into the session and
+ * stopped MIN_REGION_SECONDS short of the end, so dragging the left edge to the right never crosses
+ * the right edge (it parks against it instead — the standard NLE feel, and it keeps the region
+ * reversible: drag back and the span reopens).
  */
 export function resizeRegionStart(
   region: TimelineRegion,
@@ -368,14 +306,7 @@ export function resizeRegionStart(
 /**
  * Set a region's end (its right edge / out point) to a session time. The mirror of
  * `resizeRegionStart`: clamped into the session, and never nearer than MIN_REGION_SECONDS to the
- * start. A region whose start sits within MIN_REGION_SECONDS of the session end cannot be resized
- * at all (there is no room), so it is returned untouched.
- *
- * The `Math.max(..., floor)` below re-raises the end *after* the clamp, so it is only safe because
- * `floor > d` returns early: `floor` can exceed the duration when the start sits within
- * MIN_REGION_SECONDS of the end. `reconcileRegion` closes the other way in — a start that is itself
- * at or beyond the duration (a stale region from a longer provisional duration) can no longer reach
- * that arithmetic at all.
+ * start.
  */
 export function resizeRegionEnd(
   region: TimelineRegion,
@@ -404,15 +335,7 @@ export function removeRegion(regions: TimelineRegion[], id: string): TimelineReg
   return regions.filter((region) => region.id !== id);
 }
 
-/**
- * The marked spans in seconds order — the raw combine segments.
- *
- * The last gate before the wire. Regions arrive here having been clamped by whichever edit produced
- * them, but "clamped" is only as true as the duration in force at the time, and regions outlive the
- * moment they were marked in (closing the clip dialog deliberately keeps them). So the duration is
- * applied once more here, and a segment that cannot be made to fit is dropped rather than sent: the
- * backend receives no segment outside [0, duration], whatever happened upstream.
- */
+/** The marked spans in seconds order — the raw combine segments. The last gate before the wire. */
 export function regionsToSegments(regions: TimelineRegion[], duration: number): ClipSegment[] {
   return regions
     .map((region) => reconcileRegion(region, duration))
@@ -427,13 +350,9 @@ export function isInsideRegion(region: TimelineRegion, time: number): boolean {
 }
 
 /**
- * The clip payload for one marked region — a one-segment clip (the "separate" unit).
- * The payload is shaped exactly like `CreateClipParameters`, so a sent payload is
- * the whole contract, not a partial.
- *
- * `duration` is the media length the segment is validated against (see `regionsToSegments`). A region
- * that does not fit inside it leaves no clip to make, and the answer is null — no payload — rather
- * than a payload carrying bounds the file cannot honour.
+ * The clip payload for one marked region — a one-segment clip (the "separate" unit). The payload is
+ * shaped exactly like `CreateClipParameters`, so a sent payload is the whole contract, not a
+ * partial.
  */
 export function buildRegionClipPayload(params: {
   region: TimelineRegion;
@@ -469,11 +388,8 @@ export function buildRegionClipPayload(params: {
 }
 
 /**
- * The clip payload for combine mode — every marked region becomes one segment of a single clip.
- * The payload is shaped exactly like `CreateClipParameters`.
- *
- * Regions that do not fit inside `duration` are dropped (see `regionsToSegments`); when none survive
- * there is nothing to concatenate and the answer is null rather than a segment-less CreateClip.
+ * The clip payload for combine mode — every marked region becomes one segment of a single clip. The
+ * payload is shaped exactly like `CreateClipParameters`.
  */
 export function buildCombineClipPayload(params: {
   regions: TimelineRegion[];

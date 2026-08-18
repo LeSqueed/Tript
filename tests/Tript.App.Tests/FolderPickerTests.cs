@@ -10,12 +10,7 @@ namespace Tript.App.Tests;
 // dialog itself: it exposes a FolderPicker delegate that the desktop shell installs once the
 // Photino window exists, and RequestVideoLocation runs the picker (when one is installed), then
 // applies the picked directory through the ordinary UpdateSettings path — saving the settings file
-// and pushing the new value to every client, exactly as if the user had typed the path. The
-// headless host (no window) has no picker, so the command is a documented no-op there.
-//
-// These tests build the host in-process (never started, so no ports are bound) and inject a
-// picker delegate directly, which is the shell's contract surface — the child-process driver
-// cannot install a picker because there is no window inside the host process.
+// and pushing the new value to every client, exactly as if the user had typed the path.
 public sealed class FolderPickerTests : IDisposable
 {
     private readonly string _contentRoot;

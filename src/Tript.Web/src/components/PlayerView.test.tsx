@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The player + dual synced timeline tests.
-//
-// The sync model is single-source: both timeline levels render `currentTime`, and the video is the
-// driver. These tests drive the timelines directly (simulating pointer and wheel events) and the
-// video element (through its handlers), and assert the other level — and the transport readout —
-// follow. Playhead sync is the #1 correctness requirement, so every interaction is asserted from
-// at least two surfaces.
-//
-// jsdom has no layout: `getBoundingClientRect` returns zeros and `setPointerCapture` is missing,
-// so the helpers stub them. The test geometry is fixed: a full-session bar and a zoomed track
-// both 100px wide starting at x=0, so a pointer clientX maps one-to-one to a time in a 100-second
-// session (and the zoomed track maps window-relative clientX to a window time).
+// The player + dual synced timeline tests. The sync model is single-source: both timeline levels
+// render `currentTime`, and the video is the driver.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';

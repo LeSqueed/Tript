@@ -5,15 +5,8 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Every settings key the specification names, driven through a real obs_data on the real runtime.
-//
-// This is the condition the settings layer exists to satisfy. A key that does not survive the trip
-// intact — a mangled string, a narrowed integer, a case-folded value — fails no encoder and raises
-// no exception: the plugin looks for the key it expects, does not find it, and quietly uses its
-// default. The recording that comes out is a valid file at the wrong settings, which is the one
-// failure mode that no later test can see.
-//
-// None of these tests starts an OBS context, because obs_data does not need one.
+// Every settings key in the table, driven through a real obs_data on the real runtime.
+// This is the condition the settings layer exists to satisfy.
 public sealed class EncoderSettingsKeyTests
 {
     [Theory]
@@ -80,8 +73,7 @@ public sealed class EncoderSettingsKeyTests
 
     // The accepted value strings, unchanged down to their case. NVENC compares "CQP" and "lossless"
     // case-sensitively while treating everything else in the same key case-insensitively, AMF's
-    // preset list contains "highQuality", and QSV's target usages are "TU1" through "TU7". A
-    // marshalling layer that normalised any of that would leave the plugin silently on its default.
+    // preset list contains "highQuality", and QSV's target usages are "TU1" through "TU7".
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void EveryAcceptedValue_SurvivesUnchangedIncludingItsCase(string family)
@@ -209,7 +201,7 @@ public sealed class EncoderSettingsKeyTests
 
     // ---- the transcribed table itself ----
     //
-    // Guards on the cross-family traps the specification calls out by name. They protect the table
+    // Guards on the known cross-family traps. They protect the table
     // from being tidied into consistency, which is exactly the mistake each one describes.
 
     [Fact]

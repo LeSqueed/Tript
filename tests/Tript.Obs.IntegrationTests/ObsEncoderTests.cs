@@ -6,11 +6,10 @@ using Xunit;
 namespace Tript.Obs.IntegrationTests;
 
 // Creating, configuring and identifying encoders against the real library, and the availability
-// probes that decide what a recorder can offer on a given machine.
-//
-// The machine this suite runs on has x264 and the VAAPI family; it has no NVIDIA or Intel hardware,
-// so the NVENC and QSV ids are exactly the "available on other machines" case that is being proven
-// here to report as unavailable.
+// probes that decide what a recorder can offer on a given machine. The machine this suite runs on
+// has x264 and the VAAPI family; it has no NVIDIA or Intel hardware, so the NVENC and QSV ids are
+// exactly the "available on other machines" case that is being proven here to report as
+// unavailable.
 public sealed class ObsEncoderTests
 {
     private const string X264Id = "obs_x264";

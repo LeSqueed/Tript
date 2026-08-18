@@ -881,13 +881,12 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A record is rewritten by a rename over the target rather than in place, because the host reads
-    // and writes these records from two threads: a finished clip pushes content from its own thread
-    // while the IPC thread may be listing, and a list both reads records and writes durations into
-    // them. Measured on the plain File.WriteAllText this replaced: 115041 of 506391 concurrent reads
-    // (22.7%) threw JsonException, most often "The input does not contain any JSON tokens" — the
-    // window where the file has been truncated and not yet rewritten. Every one of those used to be
-    // a good record reported as unreadable.
+    // A record is rewritten by a rename over the target rather than in place, because the host
+    // reads and writes these records from two threads: a finished clip pushes content from its own
+    // thread while the IPC thread may be listing, and a list both reads records and writes
+    // durations into them. Measured on the plain File.WriteAllText this replaced: 115041 of 506391
+    // concurrent reads (22.7%) threw JsonException, most often "The input does not contain any JSON
+    // tokens" — the window where the file has been truncated and not yet rewritten.
     [Fact]
     public void MetadataStore_ARecordBeingRewritten_IsNeverReadHalfWritten()
     {

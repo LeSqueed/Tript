@@ -13,8 +13,7 @@ export interface SessionSource {
   getBookmarks(item: ContentItem): BookmarkItem[];
   /**
    * Optional push seam. The IPC-backed source is driven by the `content` push and calls `onChange`
-   * to make consumers re-read. Returns an unsubscribe. A static source (the stub) has no external
-   * updates.
+   * to make consumers re-read.
    */
   observeSessions?(onChange: () => void): () => void;
   /**
@@ -28,11 +27,8 @@ export interface SessionSource {
   /**
    * The WHOLE content list in the backend's own order, sessions and clips interleaved. The library
    * grid needs this: it renders one list over both types, and `getSessions()` concatenated with
-   * `getClips()` is not the same list — the concatenation loses the backend's ordering across the two
-   * types, which is the order the default "newest first" sort starts from.
-   *
-   * Optional so a static source (the stub, a test's injected source) stays valid without it; the
-   * reactive read falls back to the concatenation for those. The IPC-backed source implements it.
+   * `getClips()` is not the same list — the concatenation loses the backend's ordering across the
+   * two types, which is the order the default "newest first" sort starts from.
    */
   getItems?: () => ContentItem[];
 }
@@ -40,11 +36,7 @@ export interface SessionSource {
 /** Fallback session length before video metadata arrives (placeholder data has no media files). */
 export const DEFAULT_SESSION_SECONDS = 120;
 
-/**
- * PLACEHOLDER — the alpha session source. Data is fabricated; only the shape is meaningful.
- * Tests that inject their own source through the player's `source` prop use the same shape.
- * The real source is IPC-backed (player/ipcSessionSource.ts).
- */
+/** PLACEHOLDER — the alpha session source. Data is fabricated; only the shape is meaningful. */
 export const stubSessionSource: SessionSource = {
   getSessions(): ContentItem[] {
     return [

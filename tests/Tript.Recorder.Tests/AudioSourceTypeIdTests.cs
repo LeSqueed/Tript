@@ -9,9 +9,6 @@ namespace Tript.Recorder.Tests;
 // The sink's default source-type resolver. The ids are registered by the platform audio module
 // (linux-pulseaudio, win-wasapi), so a wrong id is not a compile or startup problem: it surfaces as
 // obs_source_create returning null when the routing is wired at record time, on that platform only.
-// The per-platform maps are therefore asserted directly — both of them, from either OS — and the
-// resolver is only asserted to pick the map matching the OS the test process is running on, so
-// nothing here passes on Linux and fails on Windows.
 public sealed class AudioSourceTypeIdTests
 {
     [Fact]

@@ -101,7 +101,7 @@ internal sealed class AppOptions
     }
 
     // The game list pushed on every NewConnection and broadcast when it changes. The alpha has no
-    // remote catalogue feed (spec/games-catalogue.md), so the catalogue is whatever is in the
+    // remote catalogue feed, so the catalogue is whatever is in the
     // settings' game list plus an optional test override.
     internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, string? overrideJson)
     {

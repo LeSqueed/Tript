@@ -4,10 +4,9 @@
 namespace Tript.Obs;
 
 // There is one video pipeline in the process, and consumers of it are created deep inside features
-// that have no path to pass a source down. The resolver is indirect rather than a settable
-// instance so the host can hand out whichever source is live at the moment of the call — the
-// pipeline is torn down and rebuilt across a settings change, and a captured instance would go
-// stale silently.
+// that have no path to pass a source down. The resolver is indirect rather than a settable instance
+// so the host can hand out whichever source is live at the moment of the call — the pipeline is
+// torn down and rebuilt across a settings change, and a captured instance would go stale silently.
 public static class FrameSourceRegistry
 {
     private static Func<IFrameSource?>? _resolver;

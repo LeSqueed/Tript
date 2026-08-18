@@ -8,13 +8,10 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// FillInputTensor divides four pixels at a time through Vector128 and falls back to a scalar
-// loop for the tail and for hardware without vector acceleration. The optimisation is only
-// legitimate if it is bit-identical to the scalar loop, so every test here compares raw float
-// bits rather than values.
-//
-// The vector path MUST divide by Vector128.Create(255f). Multiplying by 1f/255f is the obvious
-// rewrite and is wrong: the rounded reciprocal differs in the last ulp for many byte values.
+// FillInputTensor divides four pixels at a time through Vector128 and falls back to a scalar loop
+// for the tail and for hardware without vector acceleration. The optimisation is only legitimate if
+// it is bit-identical to the scalar loop, so every test here compares raw float bits rather than
+// values.
 public class InputTensorVectorTests
 {
     private static void AssertBitIdentical(float[] expected, float[] actual, string context)

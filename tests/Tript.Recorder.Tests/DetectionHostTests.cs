@@ -14,9 +14,6 @@ namespace Tript.Recorder.Tests;
 // the right definition matched to the result, coalesced inside a definition's lifetime and never
 // from a definition without a BookmarkType. The fake detector records its Start/Stop calls so a
 // game switch is observable.
-//
-// The active recording is process-wide state (RecordingSessionRegistry), so tests that install one
-// run in [Collection(RecorderRecordingCollection.Name)] to stay one at a time.
 [Collection(RecorderRecordingCollection.Name)]
 public sealed class DetectionHostTests
 {
@@ -128,7 +125,7 @@ public sealed class DetectionHostTests
     }
 
     // A detection whose definition has no BookmarkType is detected but never bookmarked — that is
-    // the design (spec/training.md: exclusions suppress, they do not bookmark), not a bug.
+    // the design, not a bug.
     [Fact]
     public void Detections_WithNoBookmarkType_ProduceNoBookmark()
     {

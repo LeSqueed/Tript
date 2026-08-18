@@ -9,10 +9,9 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// The bookmark vocabulary is a compatibility surface: five members in a fixed order, with only
-// Kill and Goal marked for inclusion in automatic highlights. The on-file contract is the member
-// name, and the converter tolerates unknown values by falling back to Manual. These tests pin
-// that surface — including the deliberate non-obvious distinction that Death is not highlighted.
+// The bookmark vocabulary is a compatibility surface: five members in a fixed order, with only Kill
+// and Goal marked for inclusion in automatic highlights. The on-file contract is the member name,
+// and the converter tolerates unknown values by falling back to Manual.
 public class BookmarkMetadataTests
 {
     [Fact]
@@ -35,9 +34,8 @@ public class BookmarkMetadataTests
         Assert.False(BookmarkType.Death.IsIncludedInHighlights());
     }
 
-    // Recording metadata serializes the bookmark vocabulary as member names, and the content
-    // type via its own tolerant converter. This is the on-file contract from
-    // spec/config-and-storage.md.
+    // Recording metadata serializes the bookmark vocabulary as member names, and the content type
+    // via its own tolerant converter. This is the on-file contract.
     [Fact]
     public void RecordingMetadata_RoundTripsThroughJson()
     {
@@ -119,9 +117,7 @@ public class BookmarkMetadataTests
     // ---- how much a record may be off and still load ----
 
     // The form the app itself writes: StartTime comes from DateTime.Now, which serializes with the
-    // local offset ("2026-08-17T15:20:46.7558115+02:00"). It reads back as the same instant. This is
-    // pinned because it was suspected of being the cause of a lost record — it is not, and a "fix"
-    // that changed the field's type or its written form would silently move the on-disk contract.
+    // local offset ("2026-08-17T15:20:46.7558115+02:00"). It reads back as the same instant.
     [Fact]
     public void RecordingMetadata_StartTimeWithAnOffset_RoundTripsAsTheSameInstant()
     {

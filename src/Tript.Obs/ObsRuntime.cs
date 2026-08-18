@@ -24,10 +24,6 @@ public sealed record ObsStartupOptions
 // libobs is a process-global singleton with no re-entrancy: one context, one video mix, one audio
 // mix, one set of loaded modules. This type is the enforcement of that rather than a wrapper around
 // it — Start refuses a second context instead of letting two owners each believe they have one.
-//
-// Ordering, which the headers imply but never state: startup, then paths, then video and audio
-// reset, then module load, then PostLoadModules. Video reset needs the graphics module nameable,
-// and modules register source types that expect a video mix to exist.
 public sealed class ObsRuntime : IDisposable
 {
     private static readonly Lock Gate = new();
@@ -388,8 +384,7 @@ public sealed class ObsRuntime : IDisposable
 
     // Whether the mix with the given handle is the one that is current. A raw-frame subscription
     // that connected to a handle which a later obs_reset_video tore down must not disconnect from
-    // it — that pointer is freed. This is the cheap and safe test, and the callers hold the
-    // control plane, so no reset can land between the check and the disconnect they make.
+    // it — that pointer is freed.
     internal bool IsCurrentVideoHandle(nint video) =>
         TryGetVideoHandle(out var current) && current == video;
 
@@ -562,8 +557,7 @@ public sealed class ObsRuntime : IDisposable
 
     // obs_reset_video keeps the obs_video_info struct it is handed, pointer and all — it does not
     // copy the graphics module name. Measured: free that buffer and obs_get_video_info hands the
-    // freed pointer straight back, and libobs compares against it on the next reset. So the buffer
-    // belongs to the context, not to the call, and is released only once the context is gone.
+    // freed pointer straight back, and libobs compares against it on the next reset.
     private nint InternUtf8(string value)
     {
         lock (_internedStrings)

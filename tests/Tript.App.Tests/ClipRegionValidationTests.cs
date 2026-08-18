@@ -8,13 +8,10 @@ using Xunit.Sdk;
 
 namespace Tript.App.Tests;
 
-// The backend's gate on clip region bounds, at the seam it actually defends: the control socket. The
-// frontend clamps the timeline selection to the media duration, but that is a UX affordance — it keeps
-// the handles inside the scrubber — and the socket is a trust boundary regardless of being local.
-// Anything that can open it can send CreateClip: a stale frontend build, a future one, a replayed
-// message. The frontend shipped exactly the bug this defends against (a recording with no endTime in
-// its metadata fell back to a 120 s placeholder duration, and one path was unbounded outright), so
-// these are the shapes the surface has already produced, not hypotheticals.
+// The backend's gate on clip region bounds, at the seam it actually defends: the control socket.
+// The frontend clamps the timeline selection to the media duration, but that is a UX affordance —
+// it keeps the handles inside the scrubber — and the socket is a trust boundary regardless of being
+// local.
 public sealed class ClipRegionParsingTests
 {
     private readonly string _root;

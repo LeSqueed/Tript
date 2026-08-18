@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Message dispatch — the receiving half of the IPC client.
-//
-// The frontend narrows on `method`. Handlers are registered per method name (a plain map, so the
-// backend's casing is free to evolve without a type churn — a handler for the canonical lowercase
-// name plus aliases where the backend still sends the old form). Unknown methods are ignored,
-// never an error: the frontend must not fall over when the backend sends something new.
-//
-// The wire never carries an explicit `parameters` field on backend → frontend messages, but the
-// content field is optional too — handlers must tolerate an absent `content` (and an absent
-// `parameters` in the reverse direction).
+// Message dispatch — the receiving half of the IPC client. The frontend narrows on `method`.
 
 export type MessageHandler = (content: unknown) => void;
 
@@ -24,8 +15,7 @@ export interface Dispatcher {
 
 /**
  * Create a dispatcher. `knownMethods` is the canonical set this build understands — available to
- * callers for diagnostics (e.g. logging an unknown method without failing). The dispatcher itself
- * routes on whatever string arrives.
+ * callers for diagnostics (e.g. logging an unknown method without failing).
  */
 export function createDispatcher(_knownMethods: readonly string[] = []): Dispatcher {
   const handlers = new Map<string, Set<MessageHandler>>();

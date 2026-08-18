@@ -16,11 +16,6 @@ namespace Tript.Detection.Tests;
 // one. Every path that declines — no game name, no model on disk, integration toggled off — left
 // the previous game's detector subscribed to OBS raw video, running its inference thread, and
 // appending bookmarks to AppState.Instance.Recording, which by then belonged to a different game.
-//
-// The teardown now sits above all of those branches. That placement is the whole fix, and nothing
-// else in the suite exercises it: the other lifecycle tests only cover Stop()/Dispose() on a
-// detector that was never started, and DetectionSessionTests calls Shutdown() as a precondition
-// without asserting anything about the previous detector. These tests pin the decline path.
 [Collection(RecordingStateCollection.Name)]
 public class DetectorTeardownOnGameSwitchTests
 {

@@ -6,32 +6,13 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The per-family rate-control mapping CreateOutput writes into the video encoder's settings. This is
-// the one encoder-settings mistake that is not survivable.
-//
-// Every other plugin-private key fails silently: a key the plugin does not read leaves it on its own
-// default, and the recording still produces a plausible file at the wrong quality. rate_control on a
-// hardware encoder does not fail silently. obs-ffmpeg's VAAPI encoder looks the string up in a
-// NULL-terminated table of {CBR, CQP, VBR, QVBR} and, finding no match, walks onto the terminator and
-// calls strcmp(NULL, "CBR") — SEGV_MAPERR, inside obs_output_initialize_encoders, from
-// obs_output_start. The process dies; the user loses the session. That is the crash this mapping
-// prevents, and it is why a wrong mode string here is a correctness bug rather than a quality bug.
-//
-// The mapping is asserted by id because that is the only thing the caller knows. Ids, not runtime
-// versions: from OBS 31 several families' key sets are live at once, so "which id did we create" is
-// the only answerable question. The expected values come from
-// tests/Tript.Obs.IntegrationTests/EncoderSettingsKeyTable.cs, which transcribes each family's
-// accepted rate_control values and its quantiser key from the specification.
-//
-// The quality number itself is family-independent — H.264 CRF and H.264 QP/CQP share the 0..51 scale
-// — so only the mode string and the key name are in question here.
+// The per-family rate-control mapping CreateOutput writes into the video encoder's settings. This
+// is the one encoder-settings mistake that is not survivable.
 public sealed class RateControlKeyTests
 {
     // Every non-x264 id the mapping can plausibly be handed. The Windows hardware ids are the ones
     // that decide whether the shipped Windows build records or crashes, since ResolveVideoEncoderId
-    // prefers a hardware encoder over obs_x264 whenever one is registered. The trailing entries are
-    // deliberately not in any table: an id from a plugin nobody here has seen must still resolve to a
-    // mode that no known H.264 family rejects, because the alternative is the segfault above.
+    // prefers a hardware encoder over obs_x264 whenever one is registered.
     public static TheoryData<string> NonX264EncoderIds =>
     [
         // NVENC texture encoders (OBS 31+ ids).
@@ -70,11 +51,9 @@ public sealed class RateControlKeyTests
     public void TheWindowsHardwareEncoders_GetCqpAndTheCqpKey(string encoderId) =>
         Assert.Equal(("CQP", "cqp"), ObsRecorderSession.ResolveRateControlKeys(encoderId));
 
-    // VAAPI is the exception among the hardware families, and the reason the exception was missed: it
-    // accepts "CQP" like the others but names the quantiser "qp", not "cqp". The specification's key
-    // table has no VAAPI row at all, so nothing there would have caught it. Both the copy-path id and
-    // the texture-path id are covered, since the implementation matches on the substring and the
-    // texture variants share the family's keys.
+    // VAAPI is the exception among the hardware families, and the reason the exception was missed:
+    // it accepts "CQP" like the others but names the quantiser "qp", not "cqp". The specification's
+    // key table has no VAAPI row at all, so nothing there would have caught it.
     [Theory]
     [InlineData("ffmpeg_vaapi")]
     [InlineData("ffmpeg_vaapi_tex")]
@@ -95,8 +74,7 @@ public sealed class RateControlKeyTests
     // The crash condition, asserted as a property over the whole id space rather than one id at a
     // time. No H.264 family other than x264 lists "CRF" among its accepted rate_control values, so
     // handing that string to any other encoder is the fault — for VAAPI a segfault, for the rest a
-    // recording at the plugin's default quality. Stated this way, a future branch that resolves a new
-    // id to x264's key set fails here even though nobody thought to add an InlineData row for it.
+    // recording at the plugin's default quality.
     [Theory]
     [MemberData(nameof(NonX264EncoderIds))]
     public void TheModeIsNeverCrf_ForAnyNonX264Id(string encoderId)

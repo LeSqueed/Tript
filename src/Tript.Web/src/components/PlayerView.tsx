@@ -1,41 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The player + dual synced timeline.
-//
-// The dual timeline is the heart of the session-review experience: a thin full-session bar with
-// bookmark ticks and a zoomed-in precision timeline, both driven by the same playhead. Progress is
-// synced by construction — both timelines render `currentTime` from `usePlayback`, which the video
-// element drives; a click on either timeline seeks directly. The zoom window is kept centred on
-// the playhead (the zoom model in player/timelineModel.ts).
-//
-// Bookmarks are icons at their timestamps: ticks on the full-session bar, detail icons with a
-// hover bubble on the zoomed timeline; a click jumps to the bookmark's time.
-//
-// Navigation (previous/next) moves between sessions in the current context, wrapping at both ends.
-//
-// Data comes from the player session source seam (player/sessionSource.ts). The default source is
-// IPC-backed (player/ipcSessionSource.ts) and re-renders on the control socket's `content` push;
-// tests inject their own static source through the `source` prop.
-//
-// Segments (clip regions) are marked here, from the transport: I sets the in point at the playhead,
-// O closes the segment at the playhead, M marks a whole default-length segment around it — the
-// conventional NLE idiom, offered both as labelled buttons (with the shortcut in the label) and as
-// keys. Marking lives in the player rather than in the clip dialog because the dialog is a modal
-// panel over the video: with it open the playhead cannot be moved, so an in/out point could never be
-// placed. Marks are held by the clip-dialog controller (`attachSession` + `markRegion`) and survive
-// opening and closing the dialog, so the loop is: mark on the timeline → review/adjust in the dialog
-// → create. The dialog seeds its default 10s proposal only when nothing has been marked.
-//
-// This view is the seam owner for the clip dialog (T9): it renders the dialog in the player,
-// feeds it the session's regions, and wires the `importProgress` message (the clip result arrives
-// asynchronously — the backend never returns from CreateClip synchronously) and the `state` message
-// (per-track audio layout). The segment-looping affordance lives here too: clicking a segment moves
-// the playhead to its start and loops it — while the playhead is inside the selected segment and
-// crosses its end, playback seeks back to the segment's start; leave it and normal playback resumes
-// (spec/frontend.md — "segment looping"). The loop tracks the segment as the user keeps shaping it:
-// the end takes effect immediately, and pushing the start past the playhead brings the playhead with
-// it. Two effects below drive that from the two different triggers (a playhead sample, a bounds
-// change); player/clipLoop.ts holds both rule sets as pure functions.
+// The player + dual synced timeline. The dual timeline is the heart of the session-review
+// experience: a thin full-session bar with bookmark ticks and a zoomed-in precision timeline, both
+// driven by the same playhead.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -77,9 +44,8 @@ export interface PlayerViewProps {
    */
   item?: ContentItem;
   /**
-   * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns
-   * the region list; a caller can alternatively supply regions for a read-only region view.
-   * Defaults to the dialog's own regions (none before the dialog is opened).
+   * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns the
+   * region list; a caller can alternatively supply regions for a read-only region view.
    */
   regions?: TimelineRegion[];
   selectedRegionId?: string | null;
@@ -95,11 +61,7 @@ export function PlayerView({
   onRegionSelect: externalOnRegionSelect,
 }: PlayerViewProps) {
   // No injected source → own an IPC-backed one for this view's lifetime. It sends ListContent on
-  // creation and re-reads the `content` push, so the list is live. Tests that inject their own
-  // source opt out of the IPC source entirely (`enabled = false` — no stray ListContent). A null
-  // injected source is the shell's shared source that has not been created in its effect yet — the
-  // player waits for it rather than creating a second IPC source (which would double-ask the
-  // backend for the list).
+  // creation and re-reads the `content` push, so the list is live.
   const ipcSource = useIpcSessionSource(client, injectedSource === undefined);
   const source = injectedSource ?? ipcSource;
   const { sessions } = useSessionSource(source);
@@ -144,29 +106,13 @@ export function PlayerView({
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
 
   // The bound every marked segment lives inside — the media's own duration, and nothing else.
-  //
   // MEASURED BUG (this is the hole this resolution closes): `duration` above starts at
-  // `fallbackDuration`, so on a session with no `endTime` the player believed the video was 120s long
-  // until metadata arrived. Every clamp in the clip model was correct and every one of them was
-  // clamping against 120 — a segment could be marked, dragged or typed out to 0:45 on a file that was
-  // really 8s long, and because marks deliberately survive closing the dialog, that segment was still
-  // there at Create time. Segments are therefore bounded by `clipDuration`, never by the placeholder,
-  // and the controller re-checks its regions against it whenever it changes.
-  //
-  // MEASURED AGAIN, and why `markableDuration` and not `clipBounds.seconds`: the same hole was still
-  // open one step further in, for the *declared* length. `resolveClipBounds` falls back to the content
-  // record's `endTime` and flags it `known: false`, and nothing read that flag — the guess was clamped
-  // against as if it were measured. On a record declaring 100s in front of a 9.13s file, `Mark 10s` at
-  // 0:95 marked a segment ending at 1:40, ~91s past the last frame. A declared length can overstate
-  // the media (a record written by another code path, a recording a crash cut short, a re-encode), so
-  // it is not a bound at all: until the media reports its own length there is nothing to mark inside.
+  // `fallbackDuration`, so on a session with no `endTime` the player believed the video was 120s
+  // long until metadata arrived.
   const clipBounds = resolveClipBounds(durationKnown ? duration : undefined, declaredDuration);
   const clipDuration = markableDuration(clipBounds);
   // Nothing can be marked inside a media whose length nobody has measured, or one too short to hold
-  // the shortest allowed segment. The mark controls say so rather than silently doing nothing. The
-  // wait is the media's `durationchange`, which the element fires as soon as it has read the file's
-  // header — the same load that has to finish before the first frame can be shown, i.e. before there
-  // is anything to mark against by eye either.
+  // the shortest allowed segment. The mark controls say so rather than silently doing nothing.
   const canMark = clipDuration >= MIN_REGION_SECONDS;
 
   // NOTE: the state variable is `viewWindow`, never `window` — `window` is the DOM global and
@@ -220,8 +166,7 @@ export function PlayerView({
   // The dialog wires itself into the IPC surface. The owner of the connection does the sending:
   // `addImportHandler` fires for every CreateClip payload the dialog builds, and `create()` is
   // asynchronous — the backend result arrives later as an `importProgress` message, which is fed
-  // back through `applyImportProgress`. The `state` message carries the session's audio-track
-  // layout, so the dialog can offer per-track volume/mute when the recording had tracks.
+  // back through `applyImportProgress`.
   useEffect(() => {
     return dialog.addImportHandler((content) => {
       client.send('CreateClip', content as Parameters<IpcClient['send']>[1] & { id: string });
@@ -313,13 +258,8 @@ export function PlayerView({
   );
 
   // Keyboard: space toggles play/pause, arrows seek (per the navigation spec), I/O mark a segment's
-  // in/out points at the playhead and M marks a default-length one around it.
-  //
-  // Two levels of suppression. Typing always wins: while focus is in a text field, a select or a
-  // slider (the clip title field is one click away) no shortcut fires. Beyond that, Space and the
-  // arrows keep their existing behaviour of standing down for a focused button — the browser already
-  // maps them onto buttons — while the mark keys deliberately still fire there, because clicking
-  // "Mark in" leaves that button focused and pressing O next has to work.
+  // in/out points at the playhead and M marks a default-length one around it. Two levels of
+  // suppression.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -416,16 +356,7 @@ export function PlayerView({
     loopBoundsRef.current = selectedRegion;
     // Bounds also change without anyone editing them. When the media reports its real length, the
     // clip controller reconciles every region against it (clipModel's `reconcileRegions` — truncate
-    // what straddles the real end, drop what lies beyond it). That is the machine correcting itself,
-    // not the user shaping a segment, and it must not drag the playhead around.
-    //
-    // Two things follow. The trigger to watch is `clipDuration` (the bound the reconciliation clamps
-    // against), not the seekable `duration` — they move together when metadata lands, but only the
-    // former is what the controller keys on. And the corrected bounds do not arrive in the commit that
-    // changed it: the reconciliation is a `setRegions` from an effect, so they land in the next one.
-    // The guard therefore spans both commits — a change to the bound arms a one-commit grace, and the
-    // following run spends it whatever it sees. A bound change always produces a following render, so
-    // the grace can never linger and swallow a real edit later on.
+    // what straddles the real end, drop what lies beyond it).
     const spendingGrace = reconcilingRef.current;
     if (loopDurationRef.current !== clipDuration) {
       loopDurationRef.current = clipDuration;

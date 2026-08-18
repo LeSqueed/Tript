@@ -6,11 +6,9 @@ using Xunit;
 namespace Tript.Obs.IntegrationTests;
 
 // Who holds a reference to what, and what survives which teardown order. Everything here is
-// asserted through two instruments libobs provides rather than through inspection: a weak reference,
-// which expires exactly when its source is destroyed, and the live bmem allocation count.
-//
-// Release only schedules a destroy, so every assertion about destruction drains the destroy queue
-// first.
+// asserted through two instruments libobs provides rather than through inspection: a weak
+// reference, which expires exactly when its source is destroyed, and the live bmem allocation
+// count.
 public sealed class ObsSourceLifetimeTests
 {
     private const string ColourSourceId = "color_source";
@@ -52,10 +50,9 @@ public sealed class ObsSourceLifetimeTests
     }
 
     // The rule that matters for a recorder: attaching a source to a scene hands the scene a
-    // reference of its own, so the caller may let go of its handle immediately.
-    //
-    // The holder is the scene *item*, not the scene, which is the part a signature cannot show:
-    // detaching the item is not enough while a handle to that item is still open.
+    // reference of its own, so the caller may let go of its handle immediately. The holder is the
+    // scene *item*, not the scene, which is the part a signature cannot show: detaching the item is
+    // not enough while a handle to that item is still open.
     [Fact]
     public void AttachingASourceToAScene_GivesTheSceneAReferenceOfItsOwn()
     {
@@ -287,8 +284,7 @@ public sealed class ObsSourceLifetimeTests
 
     // Measured on 32.2.1 and documented nowhere: obs_shutdown crashes — a segmentation fault inside
     // libobs, not a leak — when a scene the caller still references still has items attached. This
-    // test leaks exactly that arrangement on purpose. If the runtime stops taking its live scenes
-    // apart first, this does not fail, it takes the test process down with it.
+    // test leaks exactly that arrangement on purpose.
     [Fact]
     public void ASceneStillHoldingItemsAtShutdown_DoesNotTakeTheProcessDown()
     {

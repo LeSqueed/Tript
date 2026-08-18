@@ -7,14 +7,11 @@ using Tript.Settings;
 
 namespace Tript.App;
 
-// The seam-level recorder session: no libobs anywhere, so the IPC and protocol layers run without
-// a display server, the OBS modules, or the muxer helper. It mirrors the fakes in
+// The seam-level recorder session: no libobs anywhere, so the IPC and protocol layers run without a
+// display server, the OBS modules, or the muxer helper. It mirrors the fakes in
 // Tript.Recorder.Tests: CreateOutput returns a fake output whose start always succeeds, the wiring
-// calls are no-ops, and the stop signal is raised synchronously by Stop so the recorder's
-// Idle -> Recording -> Stopping -> Idle round-trip completes without a muxer.
-//
-// The --fake-recorder smoke tests assert on this session's output path, so the recorded file the
-// content server serves is created by the test itself (a pre-made mp4), not by libobs.
+// calls are no-ops, and the stop signal is raised synchronously by Stop so the recorder's Idle ->
+// Recording -> Stopping -> Idle round-trip completes without a muxer.
 internal sealed class FakeRecorderSession : IRecorderSession
 {
     private readonly FakeOutput _output = new();

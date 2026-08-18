@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Segment looping tests. Both decisions are pure.
-//
-// The sample path: while playing inside the selected marked segment, crossing its end as a small step
-// loops back to its start; leaving the segment (or inside none) runs normally.
-//
-// The edit path: while a segment loops, the user keeps shaping it. The end takes effect immediately
-// (dragged behind the playhead, the loop closes there and then), a start pushed past the playhead
-// brings the playhead with it, and a start pulled back leaves the playhead where the user is watching.
 
 import { describe, expect, it } from 'vitest';
 import type { TimelineRegion } from './clipSeam';

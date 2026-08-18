@@ -11,15 +11,7 @@ namespace Tript.App.Tests;
 // The clip source path. The wire's filePath is relative to the effective recording root by design:
 // AppHost.ListContent builds ContentItem.FilePath with Path.GetRelativePath against EffectiveRoot
 // and '/' separators, because that is the form the content server's URLs take, and the frontend
-// echoes that string straight back in CreateClip. So every consumer that touches the file system
-// has to resolve it against the root — the clip output path always did (BuildClipOutputPath joins
-// EffectiveRoot), the source path did not, and ffmpeg/MediaProbe then resolved it against the
-// process CWD.
-//
-// The suite never caught that because the source only has to exist for the engine to get past
-// MediaProbe, and the existing CreateClip smoke test accepts "done or error" — a source resolved
-// against the wrong directory produced an error that read as an ffmpeg problem. These tests pin the
-// resolution itself, with a root that is deliberately not the CWD.
+// echoes that string straight back in CreateClip.
 public sealed class ClipPathResolutionTests : IDisposable
 {
     private readonly string _root;

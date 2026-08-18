@@ -53,14 +53,8 @@ public sealed class ObsSource : IDisposable
     // ---- creation ----
 
     // Creates a source of a registered type. The settings object, if given, is *retained* rather
-    // than copied: the source and the caller end up sharing it, and disposing the caller's reference
-    // afterwards is safe only because libobs takes one of its own. Pass a settings object the caller
-    // then leaves alone, or accept that later edits reach the source without an Update call.
-    //
-    // An unregistered id is rejected here rather than passed on. libobs answers it with a placeholder
-    // source instead of null — it exists so a scene collection referencing a missing plugin survives
-    // a round trip — and that placeholder renders nothing, reports zero size and would otherwise be
-    // discovered as a blank recording.
+    // than copied: the source and the caller end up sharing it, and disposing the caller's
+    // reference afterwards is safe only because libobs takes one of its own.
     public static ObsSource Create(string id, string name, ObsSettings? settings = null) =>
         Create(id, name, settings, findableByName: true);
 
@@ -165,9 +159,8 @@ public sealed class ObsSource : IDisposable
     // The properties this *instance* declares, read through obs_source_properties rather than the
     // type-level obs_get_source_properties. For most source types the two agree; for capture
     // sources the instance route is the reliable one, because the instance already holds the
-    // connection the property builder needs — measured on linux-capture 32.2.1, where the
-    // type-level probe for xshm_input crashes on an Xwayland server while this succeeds. See
-    // ObsSourceProperties for the discovery surface.
+    // connection the property builder needs — measured on linux-capture 32.2.1, where the type-
+    // level probe for xshm_input crashes on an Xwayland server while this succeeds.
     public IReadOnlyList<ObsSourceProperty> EnumerateProperties() =>
         ObsSourceProperties.EnumerateProperties(ObsNative.obs_source_properties(Pointer));
 
@@ -214,10 +207,9 @@ public sealed class ObsSource : IDisposable
     // ---- audio ----
 
     // Which of libobs's audio mixers this source feeds, as a bitmask — bit n means mixer n, and
-    // MAX_AUDIO_MIXES is 6 (spec/obs-binding.md, "Audio routing and tracks"). The multi-track
+    // MAX_AUDIO_MIXES is 6. The multi-track
     // routing gives every source on a track the same single bit, so a track carries every source
-    // sharing its mixer. The bitmask is what a recorder sets before starting the output; the getter
-    // reads it back.
+    // sharing its mixer.
     public uint AudioMixers
     {
         get => ObsNative.obs_source_get_audio_mixers(Pointer);
@@ -225,7 +217,7 @@ public sealed class ObsSource : IDisposable
     }
 
     // The per-source gain, a linear multiplier. Volume is per-source, not per-track: two sources
-    // merged into one track keep their own volumes (spec/recorder.md, "Multi-track audio"). The
+    // merged into one track keep their own volumes. The
     // getter reads back what the setter stored.
     public float Volume
     {

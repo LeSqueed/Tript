@@ -2,9 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 // The file side of settings persistence. The store works in text: read the file (or the default
-// empty object if it is absent or blank), write the serialized model back. Keeping the document
-// mechanics out of the store keeps the unknown-key round-trip honest — nothing here inspects or
-// rewrites the JSON, it just carries it.
+// empty object if it is absent or blank), write the serialized model back.
 namespace Tript.Settings;
 
 public sealed class SettingsFileProvider

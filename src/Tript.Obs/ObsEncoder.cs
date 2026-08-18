@@ -57,15 +57,7 @@ public sealed class ObsEncoder : IDisposable
 
     // Creates an encoder of a registered type. The settings object, if given, is *retained* rather
     // than copied: the encoder and the caller end up sharing it, and disposing the caller's
-    // reference afterwards is safe only because libobs takes one of its own. Pass a settings object
-    // the caller then leaves alone, or accept that later edits reach the encoder without an Update
-    // call.
-    //
-    // An unregistered id is rejected here rather than passed on. Both create functions answer an
-    // unknown id with a placeholder — a context with a null codec that encodes nothing — which is
-    // how a scene collection referencing a missing plugin survives a round trip. Availability is
-    // structural: a plugin that detects its hardware is absent never registers its ids at all, so
-    // the probe to run first is IsTypeRegistered.
+    // reference afterwards is safe only because libobs takes one of its own.
     public static ObsEncoder CreateVideo(string id, string name, ObsSettings? settings = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
@@ -147,9 +139,7 @@ public sealed class ObsEncoder : IDisposable
     }
 
     // The settings object a plugin falls back on for a type, so a caller builds its own settings by
-    // starting here. Null when the id is not registered. A registered type always yields an object;
-    // obs_x264's is populated with 11 defaults — measured — while ffmpeg_aac's carries just the
-    // bitrate.
+    // starting here. Null when the id is not registered.
     public static ObsSettings? GetTypeDefaults(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);

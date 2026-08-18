@@ -14,9 +14,7 @@ namespace Tript.App.Tests;
 
 // The thumbnail cache, without ffmpeg. The property that matters most here is that a cache hit does
 // not run the extractor: the library is a grid of cards, so a render asks for every visible
-// thumbnail at once and a cache that missed would spawn one decoder per card per render. A counting
-// fake extractor is the only way to assert that directly — an mtime comparison can only show that a
-// file was not rewritten, not that no process ran.
+// thumbnail at once and a cache that missed would spawn one decoder per card per render.
 public sealed class ThumbnailCacheTests : IDisposable
 {
     private readonly string _root;

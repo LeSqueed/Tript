@@ -7,9 +7,7 @@ using Xunit;
 namespace Tript.Media.Tests;
 
 // The clip engine against real files. Every fixture is generated with ffmpeg into a per-run temp
-// directory, so the suite is self-contained and exercises the full shell-out path. These are the
-// brief's verification items: a playable real clip, an exact-time cut, combine vs separate file
-// counts, per-track audio volume/mute, HDR handling, and failure reporting.
+// directory, so the suite is self-contained and exercises the full shell-out path.
 public class ClipEngineTests
 {
     private readonly (string Ffmpeg, string Ffprobe) _b = MediaTestFixture.Binaries;
@@ -69,14 +67,7 @@ public class ClipEngineTests
         var output = Assert.Single(paths);
 
         // The source has keyframes at 0, 1, 2, 3s. The region starts at 2.233s, between the
-        // keyframes at 2.0 and 3.0. If the clip were keyframe-aligned its first frame would be the
-        // frame at 2.0s; exact cutting means it is the frame at 2.233s.
-        //
-        // The clip is re-encoded lossily, so its first frame cannot be hash-equal to the source
-        // frame at the cut time. But a re-encode of the same frame stays visually identical (~44 dB
-        // PSNR, measured), while a different frame — the keyframe at 2.0s — is ~20 dB apart from
-        // the cut-time frame. Asserting the clip's first frame is far closer to the cut-time frame
-        // than to the keyframe frame is therefore the exactness proof.
+        // keyframes at 2.0 and 3.0.
         var ffmpeg = MediaTestFixture.Binaries.Ffmpeg;
         var psnrToCut = MediaTestFixture.FirstFramePsnrDb(ffmpeg, output, "2.233", source, "exact-cut");
         var psnrToKeyframe = MediaTestFixture.FirstFramePsnrDb(ffmpeg, output, "2.0", source, "exact-key");
@@ -199,7 +190,7 @@ public class ClipEngineTests
             Mode = ClipMode.Separate,
             OutputPath = outputDir,
             // A uniform HDR source preserves by default (libx265 carries 10-bit). To exercise the
-            // spec's tone-map fallback, select a codec that cannot carry 10-bit — the same input
+            // tone-map fallback, select a codec that cannot carry 10-bit — the same input
             // that flips the decision in production when a non-HEVC encoder is used.
             EncoderFamily = "libx264",
         });
@@ -212,10 +203,10 @@ public class ClipEngineTests
         Assert.Equal("bt709", Probe("v:0", "color_primaries", output));
         Assert.Equal("bt709", Probe("v:0", "color_space", output));
 
-        // The tone-map chain's stage order is the spec's "most likely to be lost" part. Assert the
+        // The tone-map chain's stage order is the part a rewrite is most likely to lose. Assert the
         // output's pixels match a reference produced by the canonical five-stage chain, written here
-        // as an independent constant — if the engine's chain order is ever changed, this reference
-        // still encodes the spec's order and the PSNR comparison fails.
+        // as an independent constant: if the engine's chain order is ever changed, this reference
+        // still encodes the correct order and the PSNR comparison fails.
         var reference = Path.Combine(MediaTestFixture.ScratchRoot, "hdr-tm-reference.mp4");
         MediaTestFixture.Run(MediaTestFixture.Binaries.Ffmpeg,
         [
@@ -236,10 +227,8 @@ public class ClipEngineTests
             $"tone-mapped output should match the canonical chain, got {psnrToReference} dB vs reference");
     }
 
-    // The spec's preserve path needs a 10-bit-carrying codec. The engine's default software path is
-    // libx265 (carries 10-bit) — the only one this Linux box can exercise. Preserve is therefore the
-    // decision for an HDR source with a uniform transfer, and the output must be 10-bit, tagged
-    // bt2020nc/bt2020 with the source transfer carried through, and main10 profile.
+    // The preserve path needs a 10-bit-carrying codec. The engine's default software path is
+    // libx265 (carries 10-bit) — the only one this Linux box can exercise.
     [Fact]
     public void CreateClips_HdrSource_Preserves10BitWithTags()
     {

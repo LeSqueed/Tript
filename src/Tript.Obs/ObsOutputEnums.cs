@@ -5,8 +5,7 @@ namespace Tript.Obs;
 
 // enum obs_output_flags — the capability bits an output *type* declares, from obs_output_info.flags
 // [obs-output.h:24-34]. Read per instance with obs_output_get_flags and per type with
-// obs_get_output_flags. Describes what the output consumes and what it requires: an encoded output
-// takes encoder packets rather than raw media, and a SERVICE output demands an obs_service_t.
+// obs_get_output_flags.
 [Flags]
 public enum ObsOutputFlags : uint
 {
@@ -23,9 +22,8 @@ public enum ObsOutputFlags : uint
 }
 
 // The complete failure vocabulary of an output, delivered as the code field of the stop signal and
-// as the argument to obs_output_signal_stop [obs-defs.h:37-46]. SUCCESS is not an error; every other
-// member is a reason the recording or stream ended. The pairing matters: the code says which failure,
-// obs_output_get_last_error says what the plugin had to say about it.
+// as the argument to obs_output_signal_stop [obs-defs.h:37-46]. SUCCESS is not an error; every
+// other member is a reason the recording or stream ended.
 public enum ObsOutputStopCode
 {
     Success = 0,

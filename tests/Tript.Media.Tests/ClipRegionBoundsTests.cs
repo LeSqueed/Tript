@@ -6,17 +6,10 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// The backend's own gate on clip region bounds. These tests need neither ffmpeg nor the IPC surface:
-// the whole point of putting the clamping in ClipRegionBounds is that the rules are checkable without
-// either, because the rules are what stand between a hostile or stale CreateClip and an ffmpeg
-// invocation that reports success on an empty file.
-//
-// The frontend clamps the timeline selection too, but that is a UX affordance — it keeps the handles
-// inside the scrubber — and the control socket is a trust boundary regardless: a stale build, a
-// future build, a replayed message or anything else that can open the local WebSocket reaches this
-// code. The frontend shipped a bug where a recording with no endTime in its metadata fell back to a
-// 120 s placeholder duration (and one path was unbounded outright), which is exactly how regions past
-// the real end of a file arrive here.
+// The backend's own gate on clip region bounds. These tests need neither ffmpeg nor the IPC
+// surface: the whole point of putting the clamping in ClipRegionBounds is that the rules are
+// checkable without either, because the rules are what stand between a hostile or stale CreateClip
+// and an ffmpeg invocation that reports success on an empty file.
 public class ClipRegionBoundsTests
 {
     // ---- TryFromSeconds: the double -> TimeSpan boundary ----

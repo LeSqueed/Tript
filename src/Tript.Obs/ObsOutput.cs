@@ -60,14 +60,8 @@ public sealed class ObsOutput : IDisposable
     // ---- creation ----
 
     // Creates an output of a registered type. The settings object, if given, is *retained* rather
-    // than copied: the output and the caller end up sharing it, and disposing the caller's reference
-    // afterwards is safe only because libobs takes one of its own. Pass a settings object the caller
-    // then leaves alone, or accept that later edits reach the output without an Update call.
-    //
-    // An unregistered id is rejected here rather than passed on. Both create functions answer an
-    // unknown id with a non-null placeholder — measured on 32.2.1 — which is how a scene collection
-    // referencing a missing plugin survives a round trip. Availability is structural: a plugin that
-    // is not loaded never registers its ids at all, so the probe to run first is IsTypeRegistered.
+    // than copied: the output and the caller end up sharing it, and disposing the caller's
+    // reference afterwards is safe only because libobs takes one of its own.
     public static ObsOutput Create(string id, string name, ObsSettings? settings = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
@@ -136,9 +130,7 @@ public sealed class ObsOutput : IDisposable
     }
 
     // The settings object a plugin falls back on for a type, so a caller builds its own settings by
-    // starting here. Null when the id is not registered. A registered type does not always yield a
-    // populated object: ffmpeg_muxer's defaults are empty on 32.2.1 — measured — because its one
-    // property, path, carries its default as a property default rather than in the defaults object.
+    // starting here. Null when the id is not registered.
     public static ObsSettings? GetTypeDefaults(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
@@ -146,10 +138,9 @@ public sealed class ObsOutput : IDisposable
     }
 
     // The properties a type exposes, free of the settings layer's round-trip assumptions: the keys
-    // a plugin reads are the keys it declares here, so this is the authoritative account of what can
-    // be configured. For ffmpeg_muxer on 32.2.1 that is exactly one property, path — measured — and
-    // it is the whole key surface the plugin reads. Empty when the type is registered but declares no
-    // properties.
+    // a plugin reads are the keys it declares here, so this is the authoritative account of what
+    // can be configured. For ffmpeg_muxer on 32.2.1 that is exactly one property, path — measured —
+    // and it is the whole key surface the plugin reads.
     public static IReadOnlyList<ObsOutputProperty> EnumerateTypeProperties(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
@@ -169,8 +160,7 @@ public sealed class ObsOutput : IDisposable
 
     // The output's live settings object, with its reference incremented — the caller disposes it.
     // Editing it does not by itself reconfigure the output; Update is what tells the plugin to read
-    // its settings again. For an output that has already started, Update is only honoured for the
-    // settings the plugin supports changing while running.
+    // its settings again.
     public ObsSettings GetSettings() => ObsSettings.FromOwnedPointer(ObsNative.obs_output_get_settings(Pointer));
 
     // Applies the given keys over the output's existing settings.
@@ -201,7 +191,6 @@ public sealed class ObsOutput : IDisposable
     // Assigns the encoder to audio track slot idx — the third joint of the audio routing. The first
     // two are the source's mixer bitmask and the mixer index the encoder was created with; this is
     // the encoder-to-output-slot joint, and track n in the resulting file corresponds to slot n.
-    // The index is ignored by outputs that do not declare OBS_OUTPUT_MULTI_TRACK.
     public void SetAudioEncoder(ObsEncoder encoder, nuint index)
     {
         ArgumentNullException.ThrowIfNull(encoder);
@@ -248,8 +237,7 @@ public sealed class ObsOutput : IDisposable
 
     // Starts the output. The synchronous failure channel: false means the output refused to start,
     // and LastError carries the plugin's reason if it set one — measured: a bad recording path sets
-    // one, a missing encoder does not. Success means the output has begun, not that the first bytes
-    // are on disk; the stop signal is what says how it ended.
+    // one, a missing encoder does not.
     public bool Start() => ObsNative.obs_output_start(Pointer);
 
     // Asks the output to stop and waits for the muxed file to be finalised. The asynchronous stop
@@ -288,21 +276,12 @@ public sealed class ObsOutput : IDisposable
     // ---- failure surface ----
 
     // The plugin's own failure report, borrowed and possibly null. This is the companion to the
-    // synchronous Start return: a false Start with a non-null LastError names the reason. Do not
-    // read it after the stop signal arrives — by then the output may have reset the value, which is
-    // why the stop event carries the last_error from the calldata instead.
+    // synchronous Start return: a false Start with a non-null LastError names the reason.
     public string? LastError => Utf8Marshal.ReadBorrowed(ObsNative.obs_output_get_last_error(Pointer));
 
     // The stop signal, exposed as an event. This is the asynchronous failure channel and the only
     // way to learn that a recording ended at all, whether cleanly (ObsOutputStopCode.Success) or
-    // with a failure. The code is never swallowed: every stop is reported, and the code decides how
-    // to read it. The last_error field is taken from the signal's calldata, not from
-    // obs_output_get_last_error, because by the time the handler runs the output may have reset the
-    // value. The signal arrives on a libobs thread, so the handler is marshalled onto the thread
-    // that subscribed, the same way ObsScene.EnumerateItems marshals its callback.
-    //
-    // Subscribing installs a native callback on the output's signal handler; disposing the output
-    // removes it first, so no callback can fire against a released handle.
+    // with a failure.
     public event EventHandler<ObsOutputStopEvent>? Stopped
     {
         add
@@ -385,9 +364,7 @@ public sealed class ObsOutput : IDisposable
     }
 
     // The native stop-signal callback. The signature is libobs's signal_callback_t: (param,
-    // calldata). The param is the pinned GCHandle to the event object, passed as the parameter to
-    // signal_handler_connect; the calldata carries the stop code and last_error. Internal, not
-    // private: the stop-subscription class takes its address for the signal handler.
+    // calldata).
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     internal static void OnStop(nint parameter, nint calldata)
     {
@@ -413,10 +390,9 @@ public readonly record struct ObsOutputProperty(string Name, ObsPropertyType Typ
 // ends well.
 public sealed record ObsOutputStopEvent(ObsOutputStopCode Code, string? LastError);
 
-// The native-side bookkeeping for the stop event. Holds the unmanaged function pointer, the GCHandle
-// that keeps the managed side alive across the callback, the SynchronizationContext to marshal onto,
-// and the managed subscribers. Disconnect is what removes the native callback; the caller must not
-// release the output while a handler is still connected.
+// The native-side bookkeeping for the stop event. Holds the unmanaged function pointer, the
+// GCHandle that keeps the managed side alive across the callback, the SynchronizationContext to
+// marshal onto, and the managed subscribers.
 internal sealed class ObsOutputStopSubscription
 {
     private readonly ObsOutput _output;

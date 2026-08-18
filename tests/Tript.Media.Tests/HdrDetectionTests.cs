@@ -9,7 +9,7 @@ namespace Tript.Media.Tests;
 // HDR detection is by transfer characteristic: smpte2084 (PQ) or arib-std-b67 (HLG) is HDR,
 // anything else is SDR. The parser is the unit under test; the probe's job is to feed it the file's
 // actual transfer, and a missing transfer field must read as "unspecified" — the exact absence the
-// spec's probe normalises.
+// probe normalises.
 public class HdrDetectionTests
 {
     [Fact]

@@ -9,7 +9,7 @@ namespace Tript.Recorder.Tests;
 // The settings→binding mapping, tested without a live libobs context: given the resolved audio
 // tracks the recorder hands over, the plan says which mixer bit each source gets, which mixer each
 // track's encoder draws from, and which output slot it lands in. A track = a mixer = an output
-// slot (spec/obs-binding.md, "Audio routing and tracks"); two sources on one track must share the
+// slot; two sources on one track must share the
 // mixer bit; volume is per-source.
 public sealed class AudioRoutingPlannerTests
 {

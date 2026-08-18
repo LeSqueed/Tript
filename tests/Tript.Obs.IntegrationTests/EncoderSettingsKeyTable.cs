@@ -3,20 +3,8 @@
 
 namespace Tript.Obs.IntegrationTests;
 
-// The encoder settings keys the specification names, transcribed so the binding can be driven from
-// them rather than from whatever a test author remembered.
-//
-// None of these keys is in libobs. They are plugin-private string literals, which is precisely why
-// they need a table: a mistyped key is not an error, it is a settings object that quietly carries a
-// key nothing reads, so the encoder runs on its default and produces a plausible file at the wrong
-// bitrate, the wrong quality or the wrong keyframe interval.
-//
-// The families are addressed by encoder id, not by runtime version. From OBS 31 both NVENC key sets
-// are live at the same time serving different ids, so "which version is this" is the wrong question
-// and "which id did we create" is the right one.
-//
-// Public, unlike the rest of the test support here, only because xunit refuses to source theory data
-// from a member it cannot see.
+// The encoder settings keys each plugin reads, transcribed so the binding can be driven from them
+// rather than from whatever a test author remembered. None of these keys is in libobs.
 public sealed record EncoderSettingKey
 {
     public required string Family { get; init; }
@@ -29,7 +17,7 @@ public sealed record EncoderSettingKey
     // object that happens to be pre-populated.
     public required object Sample { get; init; }
 
-    // The value the plugin falls back on, where the specification records one.
+    // The value the plugin falls back on, where one is known.
     public object? SpecifiedDefault { get; init; }
 
     // For keys the plugin validates against a fixed list. Every one of these has to survive
@@ -258,7 +246,7 @@ public static class EncoderSettingsKeyTable
     public static IReadOnlyList<EncoderSettingKey> For(string family) =>
         All.Where(key => key.Family == family).ToArray();
 
-    // Writes the sample with the type the specification assigns the key.
+    // Writes the sample with the type the key expects.
     public static void Write(ObsSettings settings, EncoderSettingKey key, object value)
     {
         switch (key.Type)

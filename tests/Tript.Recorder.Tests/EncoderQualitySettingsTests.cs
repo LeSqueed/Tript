@@ -9,24 +9,10 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// What the recorder writes into a video encoder's settings for a given quality profile and
-// rate-control choice: the quality-to-quantiser mapping, which modes each encoder family accepts, and
-// which keys each mode is written with.
-//
-// Two separate failure modes are pinned here, and they are not equally survivable.
-//
-// The first is quality. Every quantiser key is plugin-private and none of them errors: a value in the
-// wrong part of the scale produces a perfectly valid file that looks bad, and nothing anywhere
-// reports it. The mapping shipped as `23 + (20 - quality)`, which placed the four presets the
-// settings UI offers at CRF 40 / 38 / 33 / 25 — the smeared end of a scale whose useful band for
-// H.264 game footage is roughly 16 to 28. The preset assertions below are therefore about product
-// behaviour rather than arithmetic: "High" has to actually look good.
-//
-// The second is the rate-control mode string, which is the one encoder-settings mistake that is not
-// survivable at all — obs-ffmpeg's VAAPI encoder walks a NULL-terminated table of accepted values and
-// segfaults on a miss, inside obs_output_start. The coercion tests are the ones that matter for that:
-// a settings file carrying x264's CRF onto an NVIDIA machine must not write "CRF" to NVENC. The
-// accepted values come from tests/Tript.Obs.IntegrationTests/EncoderSettingsKeyTable.cs.
+// What the recorder writes into a video encoder's settings for a given quality profile and rate-
+// control choice: the quality-to-quantiser mapping, which modes each encoder family accepts, and
+// which keys each mode is written with. Two separate failure modes are pinned here, and they are
+// not equally survivable.
 public sealed class EncoderQualitySettingsTests
 {
     // One representative id per family, plus two nothing describes. The Windows hardware ids decide
@@ -153,7 +139,7 @@ public sealed class EncoderQualitySettingsTests
         Assert.DoesNotContain(RateControlMode.Cqp, modes);
     }
 
-    // The families whose tables in the specification list CQP, CBR and VBR together.
+    // The families documented to accept CQP, CBR and VBR together.
     [Theory]
     [InlineData("obs_nvenc_h264_tex")]
     [InlineData("jim_nvenc")]
@@ -165,7 +151,7 @@ public sealed class EncoderQualitySettingsTests
             new[] { RateControlMode.Cqp, RateControlMode.Cbr, RateControlMode.Vbr },
             ObsRecorderSession.SupportedRateControlModes(encoderId));
 
-    // VAAPI has no table in the specification at all, so it is held to the two modes actually
+    // VAAPI is held to the two modes actually
     // evidenced: CQP (what the recorder has always written) and CBR. VBR is withheld deliberately —
     // its ceiling key is unknown to us and a mistyped ceiling key fails silently.
     [Theory]

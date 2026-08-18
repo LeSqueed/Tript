@@ -5,10 +5,8 @@ using System;
 
 namespace Tript.Detection.Tests;
 
-// Frozen copies of the preprocessing algorithms as they stood before any optimisation
-// work, kept so optimised versions can be diffed against them byte-for-byte.
-// NEVER optimise this file. The only deviation from the originals is that ArrayPool
-// rentals are plain allocations, so the reference carries no pooling semantics.
+// Frozen copies of the preprocessing algorithms as they stood before any optimisation work, kept so
+// optimised versions can be diffed against them byte-for-byte. NEVER optimise this file.
 public static class ReferenceImplementations
 {
     public static byte[] BgraToGray(byte[] bgra, int w, int h)

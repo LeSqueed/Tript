@@ -11,10 +11,8 @@ using Xunit;
 namespace Tript.Detection.Tests;
 
 // The class count used to come from events.json's entry count, while ParseYoloOutput strides the
-// output tensor by 4 + numClasses. Adding or removing a single events.json entry without
-// retraining therefore shifted every read and decoded every box to garbage — no exception, no log.
-// These tests pin the replacement: the count comes from the exported graph's output shape, and
-// events.json is checked against the model's own class map at load.
+// output tensor by 4 + numClasses. Adding or removing a single events.json entry without retraining
+// therefore shifted every read and decoded every box to garbage — no exception, no log.
 public class ModelClassCountTests
 {
     private const string GameId = "Overwatch";
@@ -143,9 +141,8 @@ public class ModelClassCountTests
 
     // Fail loudly rather than skip, matching InputTensorReuseTests: this is the assertion that ties
     // the pure helpers above to the model and events.json that actually ship, and a guard that
-    // quietly disables itself where the model is absent is worse than no guard at all.
-    //
-    // Loads its own session rather than ModelService's cached one: test classes run in parallel and
+    // quietly disables itself where the model is absent is worse than no guard at all. Loads its
+    // own session rather than ModelService's cached one: test classes run in parallel and
     // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
     [Fact]
     public void ShippedModel_DeclaresSevenClasses_AndAgreesWithEventsJson()

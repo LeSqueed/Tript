@@ -119,9 +119,7 @@ public class ParseYoloOutputDecodeTests
     }
 
     // The offset that matters most, written out as a literal so it shares no arithmetic at all with
-    // the code under test. One class, two anchors, laid out row by row. The height row is 800 —
-    // reading the class row one early, which is what (3 + c) * numDetections does, would report a
-    // confidence of 800 for anchor 0 and 900 for anchor 1 instead of dropping anchor 0 outright.
+    // the code under test. One class, two anchors, laid out row by row.
     [Fact]
     public void ReadsConfidencesFromRowFour_NotFromTheHeightRow()
     {
@@ -189,9 +187,8 @@ public class ParseYoloOutputDecodeTests
 
     // Boxes come out of the detect head as a centre plus a size in input pixels, and everything
     // downstream — MapDetectionsToFullFrame, CooldownTracker's overlap match — reads them as
-    // normalized top-left corners. Half the width is subtracted, not the whole width and not none of
-    // it, and the same input size divides both terms. A box centred at the origin proves the sign:
-    // the corner has to go negative rather than clamp.
+    // normalized top-left corners. Half the width is subtracted, not the whole width and not none
+    // of it, and the same input size divides both terms.
     [Fact]
     public void ConvertsCentreBoxesToNormalizedTopLeftCorners()
     {
@@ -209,16 +206,11 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(-0.15625, results[1].Y, 6);
     }
 
-    // numDetections is derived as output.Length / (4 + numClasses) rather than passed in, so the two
-    // arguments are not independent: the same buffer decoded with a different class count is read at
-    // a different stride, which slides every row against the data. This is the failure
+    // numDetections is derived as output.Length / (4 + numClasses) rather than passed in, so the
+    // two arguments are not independent: the same buffer decoded with a different class count is
+    // read at a different stride, which slides every row against the data. This is the failure
     // ModelClassCountTests exists to prevent, shown end to end — an events.json entry added without
     // retraining does not throw, it silently relocates everything.
-    //
-    // The anchor count is chosen so the stride genuinely moves: 6 anchors x (4 + 3 classes) is 42
-    // floats, so the correct decode walks 42/7 = 6 anchors while a 2-class decode walks 42/6 = 7.
-    // Most sizes do not do this — 3 anchors x 3 classes is 21 floats and 21/7 == 21/6 == 3, where
-    // the rows stay put and the only visible effect is anchors dropping off the end.
     [Fact]
     public void AWrongClassCount_SilentlyDecodesTheSameBufferToRelocatedBoxes()
     {

@@ -18,18 +18,13 @@ public interface IAudioTrackEncoder
 {
 }
 
-// The seam between the routing service and the binding's audio plumbing (spec/obs-binding.md,
-// "Audio routing and tracks"). The service decides the wiring — which source goes to which mixer,
-// which mixer each track's encoder draws from, which output slot it lands in — and asks the sink to
-// make it so. Splitting the two lets the wiring be unit-tested against a fake sink with no live
-// libobs context, while the real implementation (ObsAudioRoutingSink) stays a thin wrapper over
-// the binding.
+// The seam between the routing service and the binding's audio plumbing. The service decides the
+// wiring — which source goes to which mixer, which mixer each track's encoder draws from, which
+// output slot it lands in — and asks the sink to make it so.
 public interface IAudioRoutingSink
 {
-    // Creates the capture source for one routed source. How a source kind maps to a concrete
-    // source type — and how a deviceId picks a device — is the sink's business. A null or empty
-    // deviceId means the platform's default device, which is what the wasapi/pulseaudio capture
-    // types attach to when their device setting is unset (spec/recorder.md, "Multi-track audio").
+    // Creates the capture source for one routed source. How a source kind maps to a concrete source
+    // type — and how a deviceId picks a device — is the sink's business.
     IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId);
 
     // Routes a source's audio to the mixer that feeds the given track: obs_source_set_audio_mixers

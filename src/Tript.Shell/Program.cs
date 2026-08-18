@@ -191,8 +191,7 @@ internal static class Program
     // Runs the native "select a folder" dialog and returns the chosen directory, or null when the
     // user cancels. SetVideoLocation arrives on the host's IPC receive thread, so the dialog must
     // be marshalled onto the window's UI thread: Invoke dispatches the workItem to the GTK main
-    // thread (gdk_threads_add_idle) and blocks until it returns. ShowOpenFolder's nested GTK loop
-    // keeps the window responsive while the dialog is up.
+    // thread (gdk_threads_add_idle) and blocks until it returns.
     private static string? PickRecordingFolder(PhotinoWindow window, AppHost host)
     {
         // Start the dialog at the current setting so the user sees where recordings go today;

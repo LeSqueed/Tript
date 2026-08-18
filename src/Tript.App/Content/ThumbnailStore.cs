@@ -30,10 +30,9 @@ namespace Tript.App.Content;
 // "drop the whole cache" a single directory delete.
 internal sealed class ThumbnailStore
 {
-    // A first render of a full page of cards arrives as a burst of concurrent requests, each a cache
-    // miss. Unbounded, that is one ffmpeg per card at once, which on a recording machine competes
-    // with the encoder for the same cores. Three at a time keeps the first card on screen quickly
-    // without turning a scroll into a load spike.
+    // A first render of a full page of cards arrives as a burst of concurrent requests, each a
+    // cache miss. Unbounded, that is one ffmpeg per card at once, which on a recording machine
+    // competes with the encoder for the same cores.
     private const int MaxConcurrentExtractions = 3;
 
     // How long a request waits for its turn before giving up. Longer than the extraction timeout
@@ -46,8 +45,6 @@ internal sealed class ThumbnailStore
 
     // One lock object per video file name, so two concurrent requests for the same card do not both
     // run ffmpeg (and do not both write the same file). Requests for different cards never contend.
-    // The dictionary grows to one entry per video the library has ever shown, which is the same
-    // order as the library itself.
     private readonly Dictionary<string, object> _perFileLocks = new(StringComparer.Ordinal);
 
     // Guards _thumbnailRoot alone. Always taken innermost (a per-file gate may be held while it is
@@ -87,10 +84,9 @@ internal sealed class ThumbnailStore
         }
     }
 
-    // The cached thumbnail for a video, generating it if there is not a usable one yet. Returns null
-    // when no image can be produced — a missing or corrupt source, no ffmpeg on the machine, an
-    // extraction that failed or overran, an unwritable cache directory. Null is a normal answer: the
-    // caller serves 204 and the grid draws a placeholder card. Nothing here throws.
+    // The cached thumbnail for a video, generating it if there is not a usable one yet. Returns
+    // null when no image can be produced — a missing or corrupt source, no ffmpeg on the machine,
+    // an extraction that failed or overran, an unwritable cache directory.
     internal string? Ensure(string videoPath)
     {
         var fileName = Path.GetFileName(videoPath);

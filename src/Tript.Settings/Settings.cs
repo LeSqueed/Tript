@@ -2,11 +2,10 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 // The settings model and its persistence, structured around the five logical pages the settings
-// UI is split into (spec/frontend.md): recording, buffer/replay, audio, capture and game.
-// spec/config-and-storage.md describes a much larger surface (79 top-level properties plus
-// nested types); Tript builds the core the alpha needs and keeps the shape — a typed object with
-// typed page sub-objects, unknown keys preserved on round-trip — so the rest slots into the page
-// it belongs to rather than growing a parallel structure.
+// UI is split into: recording, buffer/replay, audio, capture and game.
+// The shape — a typed object with typed page sub-objects, unknown keys preserved on round-trip —
+// is what lets a new property slot into the page it belongs to rather than growing a parallel
+// structure.
 
 // The file contract: JSON, versioned, at the platform config directory under the product name
 // (Tript, not ReferenceProduct — the directories rename with the project and need a migration path; see

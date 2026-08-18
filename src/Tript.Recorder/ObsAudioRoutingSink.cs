@@ -9,8 +9,6 @@ namespace Tript.Recorder;
 // The real IAudioRoutingSink: a thin wrapper over the binding's audio plumbing. Each call is the
 // corresponding binding surface — obs_source_set_audio_mixers, obs_source_set_volume, the active
 // pair, obs_audio_encoder_create with the mixer index, obs_output_set_audio_encoder with the slot.
-// The wrapper types (RoutedSource, TrackEncoder) keep the binding objects alive while the routing
-// is wired, and dispose their references when the routing is disposed.
 public sealed class ObsAudioRoutingSink : IAudioRoutingSink
 {
     private readonly ObsOutput _output;
@@ -34,11 +32,10 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
     private const string DeviceIdKey = "device_id";
 
     // The output the routing wires encoders into, and the audio mix the track encoders bind to. The
-    // sink holds both because a routing is always for a particular output — the recorder creates the
-    // sink with the output it owns, and the encoders must be bound to the mix libobs is actually
-    // running or they encode nothing (libobs never binds them itself; obs_encoder_set_audio is the
-    // caller's job — the existing harness does exactly this). The audio handle can be zero when no
-    // real mix exists, which the unit tests' fake sink never needs.
+    // sink holds both because a routing is always for a particular output — the recorder creates
+    // the sink with the output it owns, and the encoders must be bound to the mix libobs is
+    // actually running or they encode nothing (libobs never binds them itself;
+    // obs_encoder_set_audio is the caller's job — the existing harness does exactly this).
     public ObsAudioRoutingSink(
         ObsOutput output,
         nint audioHandle,
@@ -98,21 +95,13 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
         _output.SetAudioEncoder(((TrackEncoder)encoder).Encoder, (nuint)outputSlot);
 
     // How a source kind maps to a concrete capture source type, and it is platform-specific because
-    // the ids are not libobs's own: each one is registered by the platform's audio module, which the
-    // app host has to have on its module allowlist for the id to exist at all.
-    //   linux-pulseaudio → pulse_input_capture  / pulse_output_capture
-    //   win-wasapi       → wasapi_input_capture / wasapi_output_capture
-    // An id the loaded modules never registered is not a startup failure: obs_source_create returns
-    // null for an unknown type, so the wrong id fails at record time, when the routing is wired and
-    // the recording would otherwise have started. Hence the split rather than one shared id.
-    //
-    // Device selection flows in through CreateCaptureSource's deviceId: null captures the platform
-    // default device, and a real id — one WasapiDeviceEnumerator enumerated on Windows — is written
-    // to the capture type's device property ("device_id" on win-wasapi). Which key names a device
-    // on the platform's type is the same plugin-private literal each id's properties expose.
-    //
-    // This is only the default resolver: the constructor's sourceTypeResolver argument replaces it,
-    // which is how tests and the harness point the sink at other types.
+    // the ids are not libobs's own: each one is registered by the platform's audio module, which
+    // the app host has to have on its module allowlist for the id to exist at all.   linux-
+    // pulseaudio → pulse_input_capture  / pulse_output_capture   win-wasapi       →
+    // wasapi_input_capture / wasapi_output_capture An id the loaded modules never registered is not
+    // a startup failure: obs_source_create returns null for an unknown type, so the wrong id fails
+    // at record time, when the routing is wired and the recording would otherwise have started.
+    // Hence the split rather than one shared id.
     internal static string DefaultSourceTypeId(AudioSourceKind kind) =>
         OperatingSystem.IsWindows() ? WasapiSourceTypeId(kind) : PulseAudioSourceTypeId(kind);
 

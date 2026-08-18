@@ -55,11 +55,9 @@ public readonly ref struct VideoFrame
     public int PlaneCount { get; }
 
     // Bytes per row, which is not width * bytesPerPixel: the compositor may pad each row out to an
-    // alignment boundary.
-    //
-    // A plane index the format does not use is not an error: the source reports a null pointer for
-    // it (libobs leaves unused data[] entries null) and the honest stride is zero. This is the
-    // format question, not a missing-data question — BGRA has no plane 1, so its stride is zero.
+    // alignment boundary. A plane index the format does not use is not an error: the source reports
+    // a null pointer for it (libobs leaves unused data[] entries null) and the honest stride is
+    // zero.
     public uint GetLinesize(int plane)
     {
         if (plane < 0)
@@ -79,15 +77,6 @@ public readonly ref struct VideoFrame
     // chroma plane is shorter than the frame. Rows beyond the frame's height are refused rather
     // than handed out as a span reaching past the plane — reading them is undefined behaviour that
     // would surface as a crash somewhere else entirely.
-    //
-    // A plane index the frame's format does not use is the one case that is not an error: the
-    // source reports a null pointer for it (libobs leaves unused data[] entries null), and the
-    // honest answer to "does this frame have plane 3?" is an empty view — a two-plane format
-    // genuinely has no plane 2, and asking for it is a format question, not a missing-data
-    // question. libobs never communicates a plane length, so the length exposed here is
-    // linesize × rows, computed from the format and the requested row count exactly as the
-    // allocator (video_frame_init) computed it; a null pointer is the only case where a plane can
-    // be absent, and an empty view is what a null pointer means.
     public unsafe ReadOnlySpan<byte> GetPlane(int plane, uint rows)
     {
         if (plane < 0)
@@ -101,8 +90,7 @@ public readonly ref struct VideoFrame
         // A plane index the format does not use answers as an empty view, not an exception: the
         // source reports a null pointer for it (libobs leaves unused data[] entries null), and
         // "does this frame have plane 3?" is a legitimate question about a two-plane format. An
-        // empty view is what a null pointer means. The same answer covers a plane the format
-        // defines but this frame did not fill.
+        // empty view is what a null pointer means.
         if ((uint)plane >= (uint)_planes.Length)
             return ReadOnlySpan<byte>.Empty;
 
@@ -119,9 +107,7 @@ public readonly ref struct VideoFrame
     }
 
     // The number of planes each format defines. Only BGRA exists in the seam today; the other
-    // branches stay so the format vocabulary can grow without this method silently answering
-    // wrong. The count is what libobs's format table assigns: one plane for a packed format, two
-    // for a 4:2:0 with packed chroma, three for a planar 4:2:0 or 4:2:2.
+    // branches stay so the format vocabulary can grow without this method silently answering wrong.
     private static int FormatPlaneCount(FramePixelFormat format) => format switch
     {
         FramePixelFormat.Bgra => 1,

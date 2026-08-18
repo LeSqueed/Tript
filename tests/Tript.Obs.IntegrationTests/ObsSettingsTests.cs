@@ -8,11 +8,9 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The settings object against the real runtime: what it stores, what it converts, what it refuses to
-// convert, and how long it lives.
-//
-// Most of these tests start no OBS context, and that is a finding rather than a shortcut — obs_data
-// turns out to be independent of it in both directions.
+// The settings object against the real runtime: what it stores, what it converts, what it refuses
+// to convert, and how long it lives. Most of these tests start no OBS context, and that is a
+// finding rather than a shortcut — obs_data turns out to be independent of it in both directions.
 public sealed class ObsSettingsTests
 {
     // ---- lifetime ----
@@ -102,11 +100,8 @@ public sealed class ObsSettingsTests
     // The question the previous layer was caught out by: obs_reset_video keeps the caller's
     // graphics-module pointer without copying it, so that string has to outlive the call. obs_data
     // does the opposite — it copies both the key and the value — which is why nothing here is
-    // interned and why passing a marshalled temporary is safe.
-    //
-    // Proved by handing libobs a buffer we own, then destroying it before reading back. Reached
-    // through the loaded handle rather than a second declaration so the test cannot bind a
-    // different copy of libobs than the binding uses.
+    // interned and why passing a marshalled temporary is safe. Proved by handing libobs a buffer we
+    // own, then destroying it before reading back.
     [Fact]
     public unsafe void ASettingsObject_CopiesBothTheKeyAndTheValueItIsGiven()
     {
@@ -334,8 +329,7 @@ public sealed class ObsSettingsTests
 
     // The trap worth knowing about before writing any encoder configuration. An entry holds one
     // type, so writing a user value of a different type over a default does not shadow it — it
-    // destroys it. The key still reports a default, both default accessors return nothing, and
-    // unsetting the user value does not bring the old value back.
+    // destroys it.
     [Fact]
     public void WritingAUserValueOfADifferentType_DestroysTheDefaultRatherThanShadowingIt()
     {
@@ -381,7 +375,7 @@ public sealed class ObsSettingsTests
     }
 
     // The defaults come back as a separate object in which they are user values, which is what
-    // makes them serialisable and diffable — the shape the specification recommends for dumping an
+    // makes them serialisable and diffable — the shape recommended for dumping an
     // encoder's declared key set.
     [Fact]
     public void GetDefaults_ReturnsTheDefaultsAsAnObjectOfUserValues()

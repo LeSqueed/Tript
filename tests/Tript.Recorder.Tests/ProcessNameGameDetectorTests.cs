@@ -7,10 +7,9 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The minimal process watcher. These tests are careful not to depend on the real process list
-// (they would be flaky), so the watcher is exercised through a process they control: this test
-// process's own name, which is definitely running. The start-event for a game that is already
-// running is the interesting first-poll behaviour.
+// The minimal process watcher. These tests are careful not to depend on the real process list (they
+// would be flaky), so the watcher is exercised through a process they control: this test process's
+// own name, which is definitely running.
 public class ProcessNameGameDetectorTests
 {
     [Fact]

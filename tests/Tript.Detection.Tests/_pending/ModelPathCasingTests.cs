@@ -12,9 +12,7 @@ namespace Tript.Detection.Tests;
 // with File.Exists, trusting whatever casing the caller passed. The shipped folder is
 // data/training/Overwatch while GameIntegrationService.SanitizeGameId lowercases display names, so
 // on a case-sensitive filesystem — ext4, the Flatpak runtime — the lookup missed and the entire ML
-// feature no-opped with nothing logged. It only ever worked by accident of Windows' case-insensitive
-// filesystem. These tests pin that a model id resolves to the directory on disk no matter how it is
-// spelled, and that an id with no directory still falls back to a literal creatable path.
+// feature no-opped with nothing logged.
 public class ModelPathCasingTests
 {
     [Fact]

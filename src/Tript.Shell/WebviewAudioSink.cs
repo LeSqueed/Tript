@@ -9,29 +9,8 @@ namespace Tript.Shell;
 // fact: WebKitGTK builds a GStreamer media pipeline for its render process at startup, and when
 // GStreamer cannot supply an audio sink that pipeline cannot be completed and the render process
 // aborts. Verified on this machine — WebKitWebProcess takes SIGABRT with every frame inside
-// libwebkit2gtk-4.1.so and not one frame in our code, preceded on stdout by:
-//
-//     GStreamer element autoaudiosink not found. Please install it
-//     (WebKitWebProcess:NNNN): GLib-GObject-CRITICAL **: g_signal_connect_data:
-//         assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed
-//
-// autoaudiosink lives in GStreamer's "good" plugin set (Arch/CachyOS gst-plugins-good,
-// Debian/Ubuntu gstreamer1.0-plugins-good), which is not a hard dependency of webkit2gtk-4.1, so a
-// machine can be missing it with everything else the shell needs installed. Nothing in the Tript UI
-// plays audio, but WebKitGTK constructs the pipeline regardless, so this hits *every* user without
-// that package — see the Linux system dependencies in README.md.
-//
-// What makes it worth a preflight is the symptom: the window opens and appears frozen while the
-// .NET host is perfectly healthy — still serving the UI over HTTP on 2882, still holding its three
-// ports, libobs fine — so nothing on screen points at a missing GStreamer plugin. That is exactly
-// the failure Program's WaitForUi check exists to rule out ("a hang is the one failure the shell
-// must never have"), so the shell answers the question before opening the window and reports the
-// package to install instead.
-//
-// The check is deliberately lopsided. A false "missing" would refuse to start on a working install,
-// which is worse than the freeze it prevents, so absence is only ever reported when something
-// positively said the element is not there; every unknown (an unfamiliar plugin layout, no
-// gst-inspect-1.0 on PATH, a timeout, any error at all) counts as present and startup continues.
+// libwebkit2gtk-4.1.so and not one frame in our code, preceded on stdout by:     GStreamer element
+// autoaudiosink not found.
 internal static class WebviewAudioSink
 {
     // The element WebKitGTK asks GStreamer for, and the plugin that registers it. The plugin is
@@ -153,11 +132,10 @@ internal static class WebviewAudioSink
 
     // Asks gst-inspect-1.0 about an element: exit 0 means it exists, a non-zero exit means it does
     // not ("No such element or plugin"), and anything else — the program is not installed, it
-    // outstays the timeout, the launch fails — is null, "could not tell".
-    //
-    // The child is killed when it outstays the timeout, so this can never be the thing that hangs
-    // startup, and its output is redirected and drained (BeginOutputReadLine) so a chatty element
-    // dump neither reaches the user's terminal nor fills a pipe buffer and deadlocks the wait.
+    // outstays the timeout, the launch fails — is null, "could not tell". The child is killed when
+    // it outstays the timeout, so this can never be the thing that hangs startup, and its output is
+    // redirected and drained (BeginOutputReadLine) so a chatty element dump neither reaches the
+    // user's terminal nor fills a pipe buffer and deadlocks the wait.
     internal static bool? Inspect(string program, string element, TimeSpan timeout)
     {
         try

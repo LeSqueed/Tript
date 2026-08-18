@@ -18,11 +18,6 @@ internal readonly record struct DisplaySize(int Width, int Height)
 
 // Where the primary display's resolution comes from. Two things need it: the resolution a fresh
 // install defaults to, and the "(display)" option the resolution selector offers.
-//
-// **Detection never throws and never propagates a platform failure.** A machine we cannot read a
-// display from is a machine that records at the fallback resolution, which is a working recording;
-// a wrong answer here becomes the OBS canvas, and a canvas of the wrong size is a broken recording
-// on every machine it happens to. So every path returns null on doubt and the caller falls back.
 internal static class PrimaryDisplay
 {
     // 1080p: the resolution to record at when the machine will not say what it has. It is the
@@ -60,21 +55,8 @@ internal static class PrimaryDisplay
     // ---- Windows ----
 
     // GDI's DESKTOPHORZRES/DESKTOPVERTRES on the screen DC, which is the primary monitor's DC on a
-    // multi-monitor desktop.
-    //
-    // Deliberately not GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) as the first choice: those are
-    // DPI-virtualized. A process that has not declared per-monitor DPI awareness is told the
-    // *logical* size — a 3840x2160 display at 150% scaling reports 2560x1440 — and that number
-    // would become the canvas, so the recording would be a scaled 2560x1440 of a 4K screen without
-    // anything saying so. DESKTOPHORZRES/DESKTOPVERTRES report the real mode regardless of the
-    // process's awareness, which is the documented way to get physical pixels without changing
-    // process-wide DPI state (the shell owns that, and changing it here would move its window).
-    //
-    // SM_CXSCREEN stays as the second choice: it is wrong by the DPI scale factor at worst, which
-    // still beats no answer at all.
-    //
-    // Unverified on Windows hardware — the Windows tier of the test strategy is human-run
-    // (CLAUDE.md "Testing"). Both routes fail soft, so the worst case here is the 1080p fallback.
+    // multi-monitor desktop. Deliberately not GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN) as the
+    // first choice: those are DPI-virtualized.
     private static DisplaySize? DetectWindows()
     {
         var hdc = GetDC(nint.Zero);
@@ -120,26 +102,9 @@ internal static class PrimaryDisplay
 
     // ---- Linux / X11 ----
 
-    // RandR's monitor list, not the X screen.
-    //
-    // **The measured distinction that makes RandR necessary.** DisplayWidth/DisplayHeight (and
-    // therefore anything that reads "the screen") give the bounding box of every monitor joined
-    // together. On the development machine — DP-1 1920x1080 at +0+0, DP-2 2560x1440 at +1920+0,
-    // HDMI-A-1 1920x1080 at +4480+0 — the X screen is 6400x1440. Handing that to obs_reset_video
-    // would allocate a canvas nearly three and a half times the intended area and record a picture
-    // no display has. The monitor we want is DP-2's 2560x1440.
-    //
-    // XRRGetMonitors (RandR 1.5) is the whole answer in one call: it reports each active monitor's
-    // geometry *and* which one is primary, so there is no walk over outputs and CRTCs to get the
-    // same facts.
-    //
-    // **Also measured: the primary flag is frequently not set at all.** On this machine (Xwayland,
-    // three monitors) XRRGetOutputPrimary returns None and every monitor comes back with
-    // primary = 0 — `xrandr` prints no "primary" marker either. So an implementation that only
-    // honours the flag detects nothing on a very ordinary desktop. When no monitor claims to be
-    // primary, the largest by pixel area is chosen: it is the display worth recording at, and it is
-    // stable across runs (unlike "the first one" or "the one at the origin", which follow the
-    // monitor ordering and the layout rather than anything the user cares about).
+    // RandR's monitor list, not the X screen. **The measured distinction that makes RandR
+    // necessary.** DisplayWidth/DisplayHeight (and therefore anything that reads "the screen") give
+    // the bounding box of every monitor joined together.
     private static DisplaySize? DetectX11()
     {
         // Xlib's rule is that XInitThreads comes before any other Xlib call in the process. The app

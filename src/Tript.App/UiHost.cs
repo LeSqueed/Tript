@@ -5,10 +5,8 @@ using System.Net;
 
 namespace Tript.App;
 
-// The UI host (http://localhost:2882/, spec/local-ipc.md). Serves the built frontend from the
-// dist directory. The alpha ships no embedded manifest (release builds embed the UI; the dev-mode
-// file server is an accepted alpha stand-in), so this is a plain static file server: an index
-// fallback for the SPA routes, cache headers off, and a 404 for anything outside the web root.
+// The UI host. Serves the built frontend from the dist
+// directory.
 internal sealed class UiHost : IDisposable
 {
     private const int Port = 2882;

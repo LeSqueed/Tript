@@ -5,13 +5,8 @@ namespace Tript.Recorder;
 
 // The auto-start seam. The recorder starts when a supported game is detected running and stops when
 // it is no longer detected — it is the consumer of detection, not the detector: a real process
-// watcher (WMI watchers and foreground hook on Windows, /proc polling on Linux, per the
-// games-catalogue spec) publishes here, and the recorder reacts. The event is raised from whatever
-// thread noticed the change; the recorder marshals it onto its own thread.
-//
-// The detection vocabulary is deliberately the two things that matter: a game appeared, and a game
-// is gone. Which process matched, and whether it was an explicit per-game setting or the catalogue,
-// is the watcher's answer to report, not the recorder's to guess.
+// watcher (WMI watchers and foreground hook on Windows, /proc polling on Linux, per the games-
+// catalogue spec) publishes here, and the recorder reacts.
 public interface IGameDetector : IDisposable
 {
     // Fires when a supported game starts running. The name is the session's game name — the

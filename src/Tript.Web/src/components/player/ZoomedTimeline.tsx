@@ -1,22 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The zoomed timeline — the precision level of the dual timeline. Shows a window of the session
-// with bookmark/event icons in detail, region marks (the T9 seam) and a time ruler. Drag pans the
-// window, the wheel zooms in/out around the cursor, and clicking jumps the playhead. Bookmarks
-// show an info bubble on hover; clicking a bookmark (or a region) jumps to it.
-//
-// Regions are also *manipulated* here — the direct affordance for adjusting a marked segment:
-// dragging a region's body slides it (its length is preserved), dragging either edge trims that end.
-// The gesture never collides with the track's pan/seek pointer logic because of a seam that was
-// already in place: `onPointerDown` on the track bails out on any `[data-jump]` target, and every
-// region is one. The region's own handlers capture the pointer, so pan/seek simply never sees the
-// gesture (and the region's move/up handlers ignore pointers the region did not capture).
-//
-// The gesture is thin on purpose: pixels become a time (or a delta) with the same `positionToTime` /
-// `window.seconds / rect.width` mapping panning uses, and the resulting bounds come from the pure
-// clamping helpers in clipModel (moveRegionBy / resizeRegionStart / resizeRegionEnd). Every frame of
-// the drag commits through `onRegionChange` — the same seam the dialog's numeric fields use — so the
-// region list updates live and a dragged region and a typed region are bound-for-bound identical.
+// with bookmark/event icons in detail, region marks (the T9 seam) and a time ruler.
 
 import { useRef, useState } from 'react';
 import type { BookmarkItem } from '../../ipc/protocol';

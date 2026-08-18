@@ -6,16 +6,10 @@ using System.Diagnostics;
 namespace Tript.Obs.IntegrationTests;
 
 // The ffmpeg_muxer plugin records by spawning the external obs-ffmpeg-mux helper, which it locates
-// with os_get_executable_path_ptr — resolved to the *actual binary* of the current process,
-// not the current directory (measured on this box with a standalone probe: a copy and a symlink of
-// the probe both resolved). The recording harness (Tript.RecorderHarness) is the process that starts
-// the output, so the helper must sit next to the harness binary in the output directory. A dev box
-// running OBS has it at /usr/bin, which is nowhere on that path, so this places a copy there before
-// a recording starts.
-//
-// Both the copy and the file-layout discovery are kept *out* of the fixtures' happy path: a build
-// layout that already satisfies the plugin (or a machine where the copy cannot be made) is not an
-// error, and the whole machinery is what a recording pipeline would replace with a real install.
+// with os_get_executable_path_ptr — resolved to the *actual binary* of the current process, not the
+// current directory (measured on this box with a standalone probe: a copy and a symlink of the
+// probe both resolved). The recording harness (Tript.RecorderHarness) is the process that starts
+// the output, so the helper must sit next to the harness binary in the output directory.
 internal static class ObsMuxerHelper
 {
     // The name the plugin spawns. It is the helper's file name, not a library name, so no

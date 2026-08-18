@@ -63,10 +63,8 @@ public class NearBlackTests
         Assert.False(VisualEventDetector.IsNearBlack(bgra, W, H));
     }
 
-    // Documents a deliberate limitation, not a bug. The 16px stride probes 1/256 of the
-    // frame, so a lit pixel landing between probes is invisible to the check. Shrinking
-    // BlackCheckStride is the fix if that ever matters; this test failing is the correct
-    // signal to update it.
+    // Documents a deliberate limitation, not a bug. The 16px stride probes 1/256 of the frame, so a
+    // lit pixel landing between probes is invisible to the check.
     [Fact]
     public void IsNearBlack_SinglePixelBetweenSamplePoints_IsMissedByDesign()
     {

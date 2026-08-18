@@ -12,7 +12,7 @@ namespace Tript.Recorder;
 // and Stop calls (which may come from the IPC surface or from the app host wiring the game
 // detector).
 //
-// The contract the spec cares about is what this type gets right:
+// The contract this type gets right:
 //
 //   * It consumes an already-resolved ResolvedRecorderSettings, never the settings schema. The
 //     settings layer computes the effective value; this type reads the flat config and nothing else.
@@ -229,10 +229,7 @@ public sealed class Recorder : IDisposable
     }
 
     // The output's stop signal. The binding (ObsOutput) already marshals the stop event onto the
-    // thread that subscribed, so this handler runs on the recorder thread. But that thread may be a
-    // libobs callback thread: the stop signal fires from inside obs_output_stop, and destroying the
-    // output there — under the very locks the stop is signalling with — deadlocks. So the transition
-    // back to Idle happens here, but the output's disposal is deferred off the callback.
+    // thread that subscribed, so this handler runs on the recorder thread.
     private void OnStopped(object? sender, ObsOutputStopEvent stop) => RecordStop(stop);
 
     private void RecordStop(ObsOutputStopEvent stop)
@@ -254,10 +251,7 @@ public sealed class Recorder : IDisposable
             _state = RecorderState.Idle;
 
             // The stop code is never swallowed. The only clean end is the one this recorder asked
-            // for; a code on a recording that expected to keep going is a failure to surface. The
-            // caller who asked for the end picks the reason for a clean stop: the user-requested
-            // path (Stop) leaves it unset and the stop signal resolves it to UserRequested; the
-            // GameStopped stop (StopForGameEnd) set GameStopped already, and that reason survives.
+            // for; a code on a recording that expected to keep going is a failure to surface.
             _lastStopCode = stop.Code;
             _lastError = stop.LastError;
             _lastStopReason = stop.Code == ObsOutputStopCode.Success

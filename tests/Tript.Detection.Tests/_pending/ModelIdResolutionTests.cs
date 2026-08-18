@@ -9,10 +9,9 @@ using Xunit;
 namespace Tript.Detection.Tests;
 
 // ML detection used to key its model lookup off SanitizeGameId(gameName) alone, so a null,
-// localized or renamed display name ("Overwatch 2" -> "overwatch2") resolved to an id with no
-// model behind it and detection silently never started — even when the IGDB id had matched.
-// The enable/disable toggle was computed from a second, hardcoded name test, so the two could
-// disagree. These tests pin the id-first resolution and the toggle sharing that resolution.
+// localized or renamed display name ("Overwatch 2" -> "overwatch2") resolved to an id with no model
+// behind it and detection silently never started — even when the IGDB id had matched. The
+// enable/disable toggle was computed from a second, hardcoded name test, so the two could disagree.
 public class ModelIdResolutionTests
 {
     private const int OverwatchIgdbId = 125174;

@@ -2,7 +2,7 @@
 //
 // The clip dialog controller — the state behind the in-player clip dialog (T9).
 //
-// The dialog is created in the player (spec/frontend.md — "Clipping — created in the player").
+// The dialog is created in the player.
 // Opening it proposes a default region centred on the playbar cursor; the user moves, extends or
 // shrinks it and marks further regions on the timeline. The two modes differ only in how the
 // marked regions are grouped when `CreateClip` is sent:
@@ -11,10 +11,9 @@
 //   - separate — one CreateClip per region, each carrying a single `segments` entry.
 //
 // `CreateClip` is asynchronous: the backend never returns synchronously, it reports progress as an
-// unrelated `importProgress` message (spec/local-ipc.md — "No request/response correlation", so the
-// UI tracks in-flight operations by convention). The seam owner (the player) wires the IPC surface
-// in: it registers a handler via `addImportHandler` to actually send the payloads `create()` builds,
-// and it feeds `importProgress` frames in via `applyImportProgress`.
+// unrelated `importProgress` message. The seam owner (the player) wires the IPC surface in: it
+// registers a handler via `addImportHandler` to actually send the payloads `create()` builds, and
+// it feeds `importProgress` frames in via `applyImportProgress`.
 //
 // Regions are in seconds (TimelineRegion.start/end), as are CreateClip's startTime/endTime and
 // segments.
@@ -66,7 +65,7 @@ import {
 } from './clipModel';
 import type { ClipMode } from './clipModel';
 
-/** The `importProgress` message content on the wire (spec/local-ipc.md). */
+/** The `importProgress` message content on the wire. */
 export interface ImportProgressContent {
   status: 'importing' | 'done' | 'error';
   content?: ContentItem;
@@ -120,8 +119,7 @@ export interface ClipDialogController {
   addRegion(start: number, end: number, id?: string): void;
   /**
    * Mark a segment from the player (the in/out points). Bounds are ordered and clamped to the
-   * session; a span shorter than MIN_REGION_SECONDS is ignored. The untouched default proposal (if
-   * one is showing) is replaced by the first mark, and the new mark becomes the loop selection.
+   * session; a span shorter than MIN_REGION_SECONDS is ignored.
    */
   markRegion(start: number, end: number): void;
   /**
@@ -410,7 +408,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       return;
     }
     setProgress((current) => {
-      // The message carries no clip id (spec/local-ipc.md — "No request/response correlation"),
+      // The message carries no clip id,
       // so the result is correlated by convention: the most recent in-flight clip. A done/error
       // with nothing in flight is dropped rather than misattributed.
       const inFlightId = Object.keys(current).find((id) => current[id]?.status === 'importing');
@@ -453,9 +451,8 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
   // Reconcile the marks whenever the clippable duration changes — the regression guard for the
   // provisional-duration hole. A mark made while the player was still going on a placeholder or
   // metadata length must not survive as an out-of-bounds region once the media reports how long it
-  // really is: a region straddling the real end is truncated to it, and one lying entirely beyond it
-  // is dropped (see clipModel's `reconcileRegions`). No-op when everything already fits, so this does
-  // not fight the user mid-edit.
+  // really is: a region straddling the real end is truncated to it, and one lying entirely beyond
+  // it is dropped (see clipModel's `reconcileRegions`).
   useEffect(() => {
     setRegions((current) => reconcileRegions(current, duration));
   }, [duration]);

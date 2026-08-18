@@ -7,11 +7,9 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The effective-settings consumption contract. The resolver produces the flat ResolvedRecorderSettings
-// the recorder consumes; the recorder must never depend on the settings schema. This test pins the
-// boundary from the recorder's side: it references the resolver and the resolved shape, and it would
-// fail to compile if the recorder reached into Settings directly (the recorder project does not
-// reference a schema-shaped dependency, and its Start method takes only the resolved config).
+// The effective-settings consumption contract. The resolver produces the flat
+// ResolvedRecorderSettings the recorder consumes; the recorder must never depend on the settings
+// schema.
 public class RecorderSettingsContractTests
 {
     [Fact]

@@ -9,7 +9,7 @@ using Xunit;
 namespace Tript.Settings.Tests;
 
 // The settings UI is split into logical pages — recording, buffer/replay, audio, capture, game
-// (spec/frontend.md, design decision 2026-08-15) — and each page is addressed and saved
+// — and each page is addressed and saved
 // independently. These tests pin that the five pages exist, that each persists its own fields,
 // and that editing one page does not disturb another.
 public class LogicalPagesTests : IDisposable

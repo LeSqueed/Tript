@@ -9,11 +9,6 @@ namespace Tript.Media;
 // recording: probe the source, decide how colour is handled, cut each region at its exact time
 // (never keyframe-aligned) and re-encode so no broken first frame survives the cut, then write the
 // file(s) with ffmpeg.
-//
-// The exact-time rule overrides stream-copy. The spec's stream-copy-when-frame-rate-matches is a
-// separate optimisation for preserving source quality when no re-encode is needed; a clip cut at an
-// exact marked time is re-encoded by definition, because stream-copying a non-keyframe boundary
-// leaves a frame that depends on a keyframe the clip does not contain.
 public sealed class ClipEngine : IClipEngine
 {
     private readonly string _ffmpegPath;
@@ -41,14 +36,6 @@ public sealed class ClipEngine : IClipEngine
     // Checks the request and fits its regions to the source's real length. The probe result is the
     // authoritative bound and it is already needed for the colour decision, so the duration costs
     // nothing extra here (MediaProbe caches per file in any case).
-    //
-    // Regions are clamped rather than refused. The bounds a client sends are a selection, and a
-    // selection that runs past the end of the file still names a real piece of it — ffmpeg truncates
-    // such a cut correctly by itself (measured; see ClipRegionBounds), so refusing the whole request
-    // over one long region turned a clip the user could have had into an error. What cannot be
-    // clamped into something cuttable is dropped, and a request with nothing left is refused: every
-    // out-of-bounds region ffmpeg is actually handed comes back as exit code 0 with an empty or
-    // wrong-length file, so a silent pass-through is indistinguishable from success.
     private (MediaInfo SourceInfo, IReadOnlyList<ClipRegion> Regions) Validate(ClipRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.SourcePath))
@@ -185,13 +172,8 @@ public sealed class ClipEngine : IClipEngine
         return [outputPath];
     }
 
-    // Builds the -filter_complex graph for Combine.
-    //
-    // Per region r and track t:
-    //   [r:a:t]volume=...  or  [r:a:t]anull   -> [ar{r}t{t}]
-    // Video inputs flow through ([0:v], [1:v], ...).
-    // Then concat: [0:v][1:v]...[audio in region/track order]concat=n=R:v=1:a=R*T[vcat][c0..c{T-1}]
-    // Then the colour chain on [vcat] -> [vout].
+    // Builds the -filter_complex graph for Combine. Per region r and track t:   [r:a:t]volume=...
+    // or  [r:a:t]anull   -> [ar{r}t{t}] Video inputs flow through ([0:v], [1:v], ...).
     private static string BuildCombineFilter(ClipRequest request, int regionCount,
         int audioTrackCount, ColorPlan colorPlan)
     {

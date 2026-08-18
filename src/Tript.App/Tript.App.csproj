@@ -16,6 +16,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Explicit rather than inherited through Tript.Detection: the host configures the sink, so it
+         depends on Serilog directly. -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Tript.Core/Tript.Core.csproj" />
     <ProjectReference Include="../Tript.Detection/Tript.Detection.csproj" />
     <ProjectReference Include="../Tript.Obs/Tript.Obs.csproj" />

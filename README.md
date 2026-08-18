@@ -24,10 +24,33 @@ There are two ways to run Tript — same app host, different front end:
   `g_signal_connect_data` NULL-instance assertion.
   - Arch / CachyOS: `sudo pacman -S gst-plugins-good`
   - Debian / Ubuntu: `sudo apt install gstreamer1.0-plugins-good`
-- **`obs-studio` + `obs-ffmpeg-mux`** — required for real recording. Discovered at runtime; on Windows OBS is bundled instead.
+- **`obs-studio` 30.1 or newer**, plus `obs-ffmpeg-mux` — required for real recording. Discovered at
+  runtime; on Windows OBS is bundled instead (pinned to the version in the Makefile's `OBS_VERSION`).
   - Arch / CachyOS: `sudo pacman -S obs-studio`
   - Debian / Ubuntu: `sudo apt install obs-studio obs-ffmpeg-mux` (or your distro's equivalent)
+
+  **The 30.1 floor is real, not a preference.** The binding P/Invokes entry points that do not exist
+  in earlier builds — `obs_sceneitem_set_info2`, `obs_sceneitem_set_bounds_crop`,
+  `obs_encoder_add_roi` and the encoder colour-space setters among them — and a missing entry point
+  surfaces as an `EntryPointNotFoundException` at the moment it is first called, not at startup.
+  Ubuntu 24.04 ships OBS **30.0.2**, which is below the floor; the obsproject PPA has a current build.
+- **`libobs-dev`** — only needed to run the OBS integration test suite. libobs `dlopen`s its graphics
+  module by unversioned name (`libobs-opengl.so`), and the runtime package ships only the versioned
+  `.so.N` symlinks, so without the dev package every `obs_reset_video` reports
+  `GraphicsModuleNotFound`.
 - **A display server** (X11, or Wayland with XWayland) for real recording.
+
+## Build toolchain
+
+- **.NET 10 SDK** — every project targets `net10.0`.
+- **Git LFS** — the detection models (`data/models/**/*.onnx`) are stored through LFS. Install it
+  *before* cloning (`git lfs install`), or run `git lfs pull` afterwards. Without it the working tree
+  gets ~130-byte pointer files where the models should be, and the detection layer reports no model
+  for every game — auto-record and bookmarks then do nothing, with no other symptom.
+- **Node.js 20.19+** (22 LTS recommended) with its bundled npm, for the frontend. `make web` runs
+  `npm ci` and `make test` runs `npx vitest`; the Vite 8 / Vitest 4 toolchain uses `node:util`'s
+  `styleText`, so an older Node fails at startup with a bare `SyntaxError` rather than a version
+  message. An npm older than 7 cannot read the lockfile format either.
 
 ## Build
 

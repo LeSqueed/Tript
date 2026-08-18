@@ -14,11 +14,13 @@ internal static class ObsTestEnvironment
 {
     private static readonly Lazy<ObsRuntimeLocations> Loc = new(ObsRuntimeLocator.Discover);
 
-    // The module binary dir and data dir from discovery. Throws if no OBS runtime is found — the
-    // integration tests require a real install to run.
+    // The module binary dir and data dir from discovery. A machine with no OBS install cannot run
+    // any of this, which is a fact about the machine rather than a defect: it skips. xunit 2.x only
+    // honours that through Xunit.SkippableFact, so every test that can reach here carries
+    // [SkippableFact] / [SkippableTheory].
     internal static string PluginBinaryPath =>
         Loc.Value.ModuleBinaryDir
-        ?? throw new InvalidOperationException("No OBS runtime found; the integration tests need a system obs-studio install.");
+        ?? throw new Xunit.SkipException("No OBS runtime found; the integration tests need a system obs-studio install.");
 
     // The module data root with the %module% fragment, matching how AddModulePath substitutes it.
     // The portable layout nests data under a "data" subdir; distro installs put it directly under
@@ -78,7 +80,7 @@ internal static class ObsTestEnvironment
 
                 _display = XOpenDisplay(null);
                 if (_display == nint.Zero)
-                    throw new InvalidOperationException(
+                    throw new Xunit.SkipException(
                         "XOpenDisplay returned null. These tests reset real video through libobs-opengl, " +
                         "which needs a reachable X server (DISPLAY, or XWayland under a Wayland session).");
 

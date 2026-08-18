@@ -18,7 +18,7 @@ public sealed class ObsRecorderSceneCompositionTests
     private const int CanvasWidth = 1280;
     private const int CanvasHeight = 720;
 
-    [Fact]
+    [SkippableFact]
     public void TheRecordingScene_LayersTheDisplayCaptureOverTheColourBackground()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -35,7 +35,7 @@ public sealed class ObsRecorderSceneCompositionTests
 
     // Every layer is fitted to the mix's base canvas rather than drawn at its own size. The bounds
     // are applied when the output is built, because that is where the canvas size is known.
-    [Fact]
+    [SkippableFact]
     public void EveryLayer_IsFittedToTheCanvasOnceTheOutputIsBuilt()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -67,7 +67,7 @@ public sealed class ObsRecorderSceneCompositionTests
 
     // Linux has no game_capture, so the hook probe has nothing to report — the state a recorder
     // reads to decide whether it is recording the game or the desktop.
-    [Fact]
+    [SkippableFact]
     public void WithoutAGameCaptureSource_TheHookStateIsFalseRatherThanUnknown()
     {
         using var session = ObsSession.StartWithSourceTypes();

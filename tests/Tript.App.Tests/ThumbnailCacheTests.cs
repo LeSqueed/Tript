@@ -210,7 +210,7 @@ public sealed class ThumbnailRouteTests : IDisposable
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        using var first = await GetAsync("sessions/source.mp4");
+        using var first = await GetAsync(host, "sessions/source.mp4");
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal("image/jpeg", first.Content.Headers.ContentType?.MediaType);
         Assert.Contains("max-age", string.Join(' ', first.Headers.GetValues("Cache-Control")));
@@ -228,7 +228,7 @@ public sealed class ThumbnailRouteTests : IDisposable
 
         // A second request is served from the cache: ffmpeg does not run again, so the cached file is
         // not rewritten and the bytes are identical.
-        using var second = await GetAsync("sessions/source.mp4");
+        using var second = await GetAsync(host, "sessions/source.mp4");
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal(bytes, await second.Content.ReadAsByteArrayAsync());
         Assert.Equal(written, File.GetLastWriteTimeUtc(cached));
@@ -248,15 +248,15 @@ public sealed class ThumbnailRouteTests : IDisposable
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        using (var response = await GetAsync("sessions/corrupt.mp4"))
+        using (var response = await GetAsync(host, "sessions/corrupt.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         // A source that is not there at all is the same answer: the grid draws a placeholder.
-        using (var missing = await GetAsync("sessions/nope.mp4"))
+        using (var missing = await GetAsync(host, "sessions/nope.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, missing.StatusCode);
 
         // The host is still serving after both.
-        using (var again = await GetAsync("sessions/corrupt.mp4"))
+        using (var again = await GetAsync(host, "sessions/corrupt.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
 
         await host.ShutdownAsync();
@@ -274,13 +274,13 @@ public sealed class ThumbnailRouteTests : IDisposable
 
         // Raw sockets: HttpClient normalizes ".." before the request leaves, which would never reach
         // the guard.
-        using (var raw = await SendRawAsync("/api/thumbnail/../sentinel/secret.mp4"))
+        using (var raw = await SendRawAsync(host, "/api/thumbnail/../sentinel/secret.mp4"))
             Assert.Equal(HttpStatusCode.Forbidden, raw.StatusCode);
 
-        using (var encoded = await SendRawAsync("/api/thumbnail/%2e%2e/sentinel/secret.mp4"))
+        using (var encoded = await SendRawAsync(host, "/api/thumbnail/%2e%2e/sentinel/secret.mp4"))
             Assert.Equal(HttpStatusCode.Forbidden, encoded.StatusCode);
 
-        using (var mid = await SendRawAsync("/api/thumbnail/sessions/../../../sentinel/secret.mp4"))
+        using (var mid = await SendRawAsync(host, "/api/thumbnail/sessions/../../../sentinel/secret.mp4"))
             Assert.Equal(HttpStatusCode.Forbidden, mid.StatusCode);
 
         // The guard itself, at its choke point: the thumbnail route resolves through the same
@@ -311,7 +311,7 @@ public sealed class ThumbnailRouteTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        using (var response = await GetAsync("sessions/source.mp4"))
+        using (var response = await GetAsync(host, "sessions/source.mp4"))
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var cached = Path.Combine(_contentRoot, "metadata", "thumbnails", "source.mp4.jpg");
@@ -328,8 +328,9 @@ public sealed class ThumbnailRouteTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    private static Task<HttpResponseMessage> GetAsync(string path)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Get, $"{Base}/api/thumbnail/{path}"));
+    // With the launch's session token; the content server serves no thumbnail without it.
+    private static Task<HttpResponseMessage> GetAsync(AppHostDriver host, string path)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, host.WithToken($"{Base}/api/thumbnail/{path}")));
 
     private static async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
     {
@@ -339,8 +340,9 @@ public sealed class ThumbnailRouteTests : IDisposable
 
     // Sends a raw HTTP/1.1 GET with the literal request path, bypassing HttpClient's URI
     // normalization, so the path-traversal guard is actually exercised.
-    private static async Task<HttpResponseMessage> SendRawAsync(string rawPath)
+    private static async Task<HttpResponseMessage> SendRawAsync(AppHostDriver host, string rawPath)
     {
+        rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
         await client.ConnectAsync("localhost", 2222);
         await using var stream = client.GetStream();

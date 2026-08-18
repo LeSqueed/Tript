@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createIpcClient } from './websocketClient';
 import { MockWebSocket, createMockSocketFactory } from './test/mockWebSocket';
+import { captureSessionToken } from './sessionToken';
 
 describe('createIpcClient', () => {
   beforeEach(() => {
@@ -159,5 +160,34 @@ describe('createIpcClient', () => {
     // A late frame from the first socket must be ignored.
     first.serverMessage('{"method":"state","content":{"recording":false}}');
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  // The handshake is the one request the browser will not let us put a header on, so the per-launch
+  // token has to be on the URL the client opens — including every reconnect.
+  it('connects to a URL carrying the session token, and keeps it across a reconnect', () => {
+    captureSessionToken('?k=deadbeef');
+    try {
+      const { factory } = createMockSocketFactory();
+      const client = createIpcClient({ createSocket: factory, reconnectBaseDelayMs: 50 });
+      client.connect();
+
+      expect(MockWebSocket.instances[0].url).toBe('ws://localhost:44030/?k=deadbeef');
+
+      MockWebSocket.instances[0].serverOpen();
+      MockWebSocket.instances[0].serverClose();
+      vi.advanceTimersByTime(50);
+
+      expect(MockWebSocket.instances[1].url).toBe('ws://localhost:44030/?k=deadbeef');
+    } finally {
+      captureSessionToken('');
+    }
+  });
+
+  it('connects without a token parameter when the page carried none', () => {
+    const { factory } = createMockSocketFactory();
+    const client = createIpcClient({ createSocket: factory });
+    client.connect();
+
+    expect(MockWebSocket.instances[0].url).toBe('ws://localhost:44030/');
   });
 });

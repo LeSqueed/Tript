@@ -18,7 +18,7 @@ public sealed class ObsOutputTests
 
     // ---- availability ----
 
-    [Fact]
+    [SkippableFact]
     public void TheOutputTypesThisMachineHas_AreRegistered()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -38,7 +38,7 @@ public sealed class ObsOutputTests
         Assert.NotNull(ObsOutput.GetTypeDisplayName(FfmpegMuxerId));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheAvailabilityProbe_IsThatTheDisplayNameIsNotNull()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -53,7 +53,7 @@ public sealed class ObsOutputTests
         Assert.False(ObsOutput.IsTypeRegistered("rtmp_output"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheUnavailableIds_AreMissingFromTheEnumeration()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -67,7 +67,7 @@ public sealed class ObsOutputTests
 
     // ---- creation ----
 
-    [Fact]
+    [SkippableFact]
     public void CreatedWithTheRegisteredId_TheOutputReportsItBack()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -78,7 +78,7 @@ public sealed class ObsOutputTests
         Assert.Equal("an output", output.Name);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnUnregisteredOutputId_IsRefusedRatherThanGivenAPlaceholder()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -90,7 +90,7 @@ public sealed class ObsOutputTests
 
     // The instance reports the same flags its type declared, so the type probe is what a recorder
     // leans on before it has an instance.
-    [Fact]
+    [SkippableFact]
     public void TheInstanceFlags_MatchTheTypeFlags()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -104,7 +104,7 @@ public sealed class ObsOutputTests
 
     // The recorded muxer is a file output: it takes encoded packets and does not need a service.
     // The flags are the measured 0x37 — video, audio and encoded, plus multi-track for both.
-    [Fact]
+    [SkippableFact]
     public void TheFileMuxer_IsAnEncodedAvOutputThatDoesNotNeedAService()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -121,7 +121,7 @@ public sealed class ObsOutputTests
     // The other muxers on this machine are the shape of an output that does need a service: the
     // mpegts and HLS muxers report OBS_OUTPUT_SERVICE alongside ENCODED (measured flags 0x1f).
     // The generic ffmpeg_output does not — it is a *non-encoded* file output (measured 0x33).
-    [Fact]
+    [SkippableFact]
     public void TheStreamingMuxers_AreTheServiceShapedOutputs()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -146,7 +146,7 @@ public sealed class ObsOutputTests
     // The path property is the whole key surface the muxer reads. Measured: it is a plain TEXT
     // property on 32.2.1 (type 4), not a PATH picker — the plugin takes the path as a string and
     // only the frontend's own recording UI offers the browse button.
-    [Fact]
+    [SkippableFact]
     public void TheFileMuxer_DeclaresOnlyThePathProperty()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -161,7 +161,7 @@ public sealed class ObsOutputTests
     // The defaults object is empty — measured — even though the path property exists. The plugin
     // carries the path's default in the property itself, not in the defaults object, so a recorder
     // that starts from GetTypeDefaults gets a blank object.
-    [Fact]
+    [SkippableFact]
     public void TheFileMuxer_DefaultsAreEmpty()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -174,7 +174,7 @@ public sealed class ObsOutputTests
 
     // ---- wiring ----
 
-    [Fact]
+    [SkippableFact]
     public void AnAudioEncoder_AssignedToASlot_ComesBackFromThatSlot()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -193,7 +193,7 @@ public sealed class ObsOutputTests
         Assert.Null(output.GetAudioEncoder(1));
     }
 
-    [Fact]
+    [SkippableFact]
     public void AWrittenSettingsKey_IsReadBackThroughTheOutput()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -208,7 +208,7 @@ public sealed class ObsOutputTests
 
     // ---- state ----
 
-    [Fact]
+    [SkippableFact]
     public void ANewOutput_IsNotActiveAndNotPaused()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -222,7 +222,7 @@ public sealed class ObsOutputTests
     // a streamer. The connect-time field reports -1 (not 0) on a fresh, never-started output —
     // measured — so it is -1 that means "no connection has ever been attempted", and the test pins
     // that rather than assuming 0.
-    [Fact]
+    [SkippableFact]
     public void AFileOutput_ReportsNoNetworkVocabulary()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -239,7 +239,7 @@ public sealed class ObsOutputTests
     // path makes start refuse and names the reason. Measured: last_error is only set once encoders
     // are wired — without them the refusal says "no media" and names nothing, so this is the shape
     // that proves the reason is surfaced at all.
-    [Fact]
+    [SkippableFact]
     public void ABadPath_MakesStartRefuseAndNameTheReason()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -253,7 +253,7 @@ public sealed class ObsOutputTests
 
     // The missing-encoder variant: start refuses without ever naming a reason, which is the second
     // measured shape of the synchronous channel — the "no media" refusal names nothing.
-    [Fact]
+    [SkippableFact]
     public void StartingWithoutEncoders_MakesStartRefuse()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -266,7 +266,7 @@ public sealed class ObsOutputTests
 
     // The asynchronous channel, provoked: with a valid path but no encoders, start still refuses,
     // and the refusal is synchronous — the stop signal must not fire, because nothing started.
-    [Fact]
+    [SkippableFact]
     public void AFailedStart_DoesNotEmitAStopSignal()
     {
         using var session = ObsSession.StartWithSourceTypes();

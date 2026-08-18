@@ -18,11 +18,36 @@ import { itemLabel } from '../components/library/libraryModel';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
+import { hasSessionToken } from '../ipc/sessionToken';
 import './app.css';
 
 export type Route = 'library' | 'trash' | 'settings';
 
 export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
+  // Without the launch token every listener refuses this page: the socket, the videos, the
+  // thumbnails. Rendering the shell anyway would be an empty library over a socket reconnecting
+  // forever, which reads as a broken backend. Say what is wrong and open nothing.
+  if (!hasSessionToken()) {
+    return <MissingKeyNotice />;
+  }
+  return <AppShell ipcOptions={ipcOptions} />;
+}
+
+function MissingKeyNotice() {
+  return (
+    <div className="missing-key" data-testid="missing-key-notice">
+      <div className="panel">
+        <h2>This window is missing its launch key</h2>
+        <p className="muted">
+          Tript issues a new key each time it starts and only answers requests that carry it. Open the
+          address Tript printed when it started, or start Tript again to get a fresh one.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const { client, connectionState } = useIpcClient(ipcOptions);
   const [route, setRoute] = useState<Route>('library');
   // The item the player overlay is showing, or null when the overlay is down.

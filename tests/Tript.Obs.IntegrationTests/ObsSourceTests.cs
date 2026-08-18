@@ -13,7 +13,7 @@ public sealed class ObsSourceTests
     private const string ColourSourceId = "color_source";
     private const string ScreenCaptureId = "xshm_input";
 
-    [Fact]
+    [SkippableFact]
     public void ACreatedSource_ReportsTheTypeIdAndNameItWasGiven()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -30,7 +30,7 @@ public sealed class ObsSourceTests
     // nothing here is interned. The generated marshaller frees its UTF-8 buffer the moment the call
     // returns, so a retained pointer would be reading freed memory by the time this reads the name
     // back — and the name is built at run time so no literal can be sitting at that address.
-    [Fact]
+    [SkippableFact]
     public void SourceCreation_CopiesTheNameRatherThanKeepingTheCallersBuffer()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -47,7 +47,7 @@ public sealed class ObsSourceTests
         Assert.Equal(ColourSourceId, source.Id);
     }
 
-    [Fact]
+    [SkippableFact]
     public void EverySource_GetsADistinctUuid()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -59,7 +59,7 @@ public sealed class ObsSourceTests
     }
 
     // A name is not an identity: libobs accepts the duplicate and a lookup answers with the first.
-    [Fact]
+    [SkippableFact]
     public void TwoSourcesMayShareAName_AndTheLookupFindsTheOlder()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -72,7 +72,7 @@ public sealed class ObsSourceTests
         Assert.Equal(first.Uuid, found.Uuid);
     }
 
-    [Fact]
+    [SkippableFact]
     public void APrivateSource_IsNotFindableByName()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -81,7 +81,7 @@ public sealed class ObsSourceTests
         Assert.Null(ObsSource.FindByName("kept private"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void AFindableSource_IsFoundByName()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -96,7 +96,7 @@ public sealed class ObsSourceTests
     // The one that would otherwise be discovered as a blank recording: libobs answers an
     // unregistered id with a placeholder source rather than with null, so null-checking the result
     // proves nothing.
-    [Fact]
+    [SkippableFact]
     public void AnUnregisteredSourceId_IsRefusedRatherThanGivenAPlaceholder()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -107,7 +107,7 @@ public sealed class ObsSourceTests
         Assert.Null(ObsSource.FindByName("ghost"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ATypeDisplayName_IsPresentForRegisteredTypesAndAbsentForUnknownOnes()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -117,7 +117,7 @@ public sealed class ObsSourceTests
         Assert.Null(ObsSource.GetTypeDisplayName("tript_no_such_source"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ScreenCapture_DeclaresItselfAVideoSourceThatDoesNotDuplicate()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -130,7 +130,7 @@ public sealed class ObsSourceTests
 
     // The settings object is shared with the source rather than copied into it — measured, and the
     // reason a caller must not treat its own reference as private after creation.
-    [Fact]
+    [SkippableFact]
     public void SettingsGivenAtCreation_RemainTheSourcesOwnSettingsObject()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -150,7 +150,7 @@ public sealed class ObsSourceTests
         Assert.Equal(640, readBack.GetInt("width"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void UpdatingASource_ChangesTheSizeItReports()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -172,7 +172,7 @@ public sealed class ObsSourceTests
         Assert.Equal(123u, source.BaseHeight);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASourcesName_CanBeChangedAfterCreation()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -186,7 +186,7 @@ public sealed class ObsSourceTests
         Assert.NotNull(found);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ANewSource_IsEnabledAndNeitherActiveNorShowing()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -204,7 +204,7 @@ public sealed class ObsSourceTests
     // Marking a source removed destroys nothing and unlists nothing: it raises a flag and signals
     // whoever holds a reference to let go. The source is still there, and still findable, until they
     // do.
-    [Fact]
+    [SkippableFact]
     public void MarkingASourceRemoved_RaisesAFlagWithoutDestroyingOrUnlistingIt()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -218,7 +218,7 @@ public sealed class ObsSourceTests
         Assert.NotNull(stillFound);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnEmptyOrNullTypeId_IsRejectedBeforeItReachesLibobs()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -231,7 +231,7 @@ public sealed class ObsSourceTests
         Assert.Throws<ArgumentException>(() => ObsSource.Create(ColourSourceId, string.Empty));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ADisposedSource_RefusesFurtherUse()
     {
         using var session = ObsSession.StartWithSourceTypes();

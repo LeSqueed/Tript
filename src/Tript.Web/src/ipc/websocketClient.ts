@@ -15,7 +15,7 @@
 
 import { serializeCommand, parseMessage as parseIncoming } from './serialize';
 import { createDispatcher, type Dispatcher } from './dispatch';
-import { CONTROL_SOCKET_URL, PROTOCOL_VERSION } from './endpoints';
+import { controlSocketUrl, PROTOCOL_VERSION } from './endpoints';
 import type { CommandName, CommandParameters } from './protocol';
 
 /**
@@ -61,7 +61,7 @@ export interface IpcClientOptions {
   /** Backoff between reconnection attempts, in ms. Default 500, doubling to a 30s cap. */
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
-  /** The socket URL to connect to. Defaults to the control socket. */
+  /** The socket URL to connect to. Defaults to the control socket, token included. */
   url?: string;
 }
 
@@ -73,7 +73,7 @@ export function createIpcClient(options: IpcClientOptions = {}): IpcClient {
     createSocket = (url) => new WebSocket(url),
     reconnectBaseDelayMs = DEFAULT_RECONNECT_BASE_MS,
     reconnectMaxDelayMs = DEFAULT_RECONNECT_MAX_MS,
-    url = CONTROL_SOCKET_URL,
+    url = controlSocketUrl(),
   } = options;
 
   const dispatcher: Dispatcher = createDispatcher();

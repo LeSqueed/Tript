@@ -60,3 +60,16 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* The token-less screen (see App.tsx). Not part of the shell grid — there is no shell. */
+
+.missing-key {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--space-4);
+}
+
+.missing-key .panel {
+  max-width: 42ch;
+}

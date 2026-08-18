@@ -63,7 +63,7 @@ public sealed class GrowingFileStreamingTests
 
         try
         {
-            var (declared, received) = await ReadWholeResponseAsync("/api/content/sessions/live.mp4");
+            var (declared, received) = await ReadWholeResponseAsync(host, "/api/content/sessions/live.mp4");
 
             Assert.True(declared > 0, "the response must declare a length");
             Assert.Equal(declared, received);
@@ -79,8 +79,9 @@ public sealed class GrowingFileStreamingTests
 
     // Sends one keep-alive GET and reads until the declared body has arrived, then keeps listening
     // briefly for anything the server writes past it — which is the whole point of the check.
-    private static async Task<(long Declared, long Received)> ReadWholeResponseAsync(string path)
+    private static async Task<(long Declared, long Received)> ReadWholeResponseAsync(AppHostDriver host, string path)
     {
+        path = host.WithToken(path);
         using var client = new TcpClient();
         await client.ConnectAsync("localhost", LocalPorts.Content);
         await using var stream = client.GetStream();

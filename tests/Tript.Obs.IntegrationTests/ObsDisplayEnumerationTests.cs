@@ -19,7 +19,7 @@ public sealed class ObsDisplayEnumerationTests
 
     public ObsDisplayEnumerationTests(ITestOutputHelper output) => _output = output;
 
-    [Fact]
+    [SkippableFact]
     public void TheDisplayCaptureSource_DescribesItsMonitors()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -80,7 +80,7 @@ public sealed class ObsDisplayEnumerationTests
 
     // The policy table against the real library: the display layer exists only when the method asks
     // for it. Game capture is Windows-only, so the game layer is not what this asserts.
-    [Fact]
+    [SkippableFact]
     public void TheCaptureMethod_DecidesWhetherTheSceneHasADisplayLayer()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -102,7 +102,7 @@ public sealed class ObsDisplayEnumerationTests
     // The Game method's whole risk: nothing under the game capture, so a capture that never attaches
     // is a black file with working audio. The session must report that once, so the host can end the
     // recording. (linux-capture registers no game capture at all, which is the never-hooks case.)
-    [Fact]
+    [SkippableFact]
     public void UnderTheGameMethod_AnUnhookedCaptureIsReportedOnce()
     {
         using var session = ObsSession.StartWithSourceTypes();

@@ -19,11 +19,19 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     private const string ColourSourceId = "color_source";
     private readonly FrameDeliveryFixture _fixture;
 
-    public ObsFrameSourceDeliveryTests(FrameDeliveryFixture fixture) => _fixture = fixture;
+    public ObsFrameSourceDeliveryTests(FrameDeliveryFixture fixture)
+    {
+        _fixture = fixture;
+
+        // A fixture that threw is reported by the class runner, above the test case, where
+        // SkippableFact's message bus never sees it — so the fixture stores its failure and this
+        // constructor is where it surfaces.
+        fixture.RequireStarted();
+    }
 
     // ---- geometry and delivery ----
 
-    [Fact]
+    [SkippableFact]
     public void AFrame_ArrivesAtTheRequestedSizeInBgra()
     {
         using var probe = new FrameGeometryProbe();
@@ -45,7 +53,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // ---- content ----
 
-    [Fact]
+    [SkippableFact]
     public void PlaneContents_MatchTheColourSourceThatDrewThem()
     {
         // White is chroma-neutral: it survives the compositor's internal YUV conversion with every
@@ -79,7 +87,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void PlaneChannels_MapTheColourSourceWithoutSwapping()
     {
         // The direct-channel shape (no scene): the colour source draws its default-size rectangle,
@@ -104,7 +112,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // A plane index the format does not use is not an error. libobs leaves the data[] entry null
     // and the honest answer is an empty view, not an exception.
-    [Fact]
+    [SkippableFact]
     public void APlaneTheFormatDoesNotUse_IsAnEmptyViewNotAnException()
     {
         using var probe = new EmptyPlaneProbe();
@@ -119,7 +127,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     // caller's row count through to the length computation (linesize × rows) exactly as the
     // allocator did, because a subsampled chroma plane is shorter than the frame — a future planar
     // format's chroma plane has half the rows.
-    [Fact]
+    [SkippableFact]
     public void GetPlane_RowCountBoundsThePlaneNotTheFrameHeight()
     {
         using var probe = new RowCountProbe();
@@ -135,7 +143,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // ---- frame-rate divisor ----
 
-    [Fact]
+    [SkippableFact]
     public void TheFrameRateDivisor_DeliversEveryNthFrame()
     {
         // Two subscriptions over the same window: one at divisor 1, which sees every frame the mix
@@ -160,7 +168,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // ---- teardown ----
 
-    [Fact]
+    [SkippableFact]
     public void DisposingASubscription_WhileFramesAreArriving_DoesNotRace()
     {
         // Loop subscribe/run/dispose so a dispose that raced an in-flight callback would land
@@ -180,7 +188,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // ---- duplicate refusal ----
 
-    [Fact]
+    [SkippableFact]
     public void TwoSubscriptionsWithTheSameDelegate_AreNotDuplicates()
     {
         // libobs's identity for an input is the (callback, param) pair, not the callback alone, and
@@ -202,7 +210,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     // ---- the retained-pointer trap ----
 
-    [Fact]
+    [SkippableFact]
     public void RetainingAConvertedFramePointer_ReadsADifferentImageLater()
     {
         // Documents the trap rather than guarding against it: a converted frame's plane pointer
@@ -389,7 +397,7 @@ public sealed class ObsFrameSourceTests
 {
     private const string ColourSourceId = "color_source";
 
-    [Fact]
+    [SkippableFact]
     public void DisposingAfterAVideoReset_DoesNotDisconnectFromTheFreedHandle()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -410,7 +418,7 @@ public sealed class ObsFrameSourceTests
         subscription.Dispose();
     }
 
-    [Fact]
+    [SkippableFact]
     public void AZeroFrameRateDivisor_IsRefusedByTheSubscribeCall()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -424,7 +432,7 @@ public sealed class ObsFrameSourceTests
                 FramePixelFormat.Bgra, 320, 180, Noop.OnFrame, frameRateDivisor: 0));
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetVideoTiming_ReportsTheConfiguredFraction()
     {
         using var session = ObsSession.Start();
@@ -441,7 +449,7 @@ public sealed class ObsFrameSourceTests
         Assert.Equal(1001u, timing.Value.FpsDenominator);
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetVideoTiming_IsNullBeforeThePipelineExists()
     {
         using var session = ObsSession.Start();
@@ -451,7 +459,7 @@ public sealed class ObsFrameSourceTests
         Assert.Null(FrameSourceRegistry.Current.GetVideoTiming());
     }
 
-    [Fact]
+    [SkippableFact]
     public void SubscribingBeforeThePipelineExists_IsRefused()
     {
         using var session = ObsSession.Start();
@@ -474,20 +482,36 @@ public sealed class ObsFrameSourceTests
 // content tests' format), one long-lived ffmpeg_output.
 public sealed class FrameDeliveryFixture : IDisposable
 {
+    private readonly Exception? _startupFailure;
     private int _disposed;
 
-    internal ObsSession Session { get; }
-    internal ActiveOutput Driver { get; }
+    internal ObsSession Session { get; } = null!;
+    internal ActiveOutput Driver { get; } = null!;
 
     public FrameDeliveryFixture()
     {
-        Session = ObsSession.StartWithSourceTypes();
-        Session.ResetVideoOrThrow(new ObsVideoSettings
+        try
         {
-            BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720,
-            OutputFormat = ObsVideoFormat.Bgra
-        });
-        Driver = ActiveOutput.Start(Session);
+            Session = ObsSession.StartWithSourceTypes();
+            Session.ResetVideoOrThrow(new ObsVideoSettings
+            {
+                BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720,
+                OutputFormat = ObsVideoFormat.Bgra
+            });
+            Driver = ActiveOutput.Start(Session);
+        }
+        catch (Exception exception)
+        {
+            _startupFailure = exception;
+        }
+    }
+
+    // Rethrown from the test class constructor rather than here, so a missing prerequisite reaches
+    // the test case as a skip and a real startup fault still reaches it as that fault.
+    internal void RequireStarted()
+    {
+        if (_startupFailure is not null)
+            throw _startupFailure;
     }
 
     // Puts a colour source on channel 0, stretched to the canvas via a scene. The returned
@@ -547,8 +571,8 @@ public sealed class FrameDeliveryFixture : IDisposable
         // compositor is live would destroy the source under the render thread (the same race the
         // tests avoid by removing before disposing), and obs_shutdown frees whatever the channel
         // still references.
-        Driver.Dispose();
-        Session.Dispose();
+        Driver?.Dispose();
+        Session?.Dispose();
     }
 
     private sealed class ChannelScope : IDisposable

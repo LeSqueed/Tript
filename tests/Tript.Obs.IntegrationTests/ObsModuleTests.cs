@@ -7,7 +7,7 @@ namespace Tript.Obs.IntegrationTests;
 
 public sealed class ObsModuleTests
 {
-    [Fact]
+    [SkippableFact]
     public void LoadedModules_RegisterTheirSourceTypes()
     {
         using var session = ObsSession.Start();
@@ -29,7 +29,7 @@ public sealed class ObsModuleTests
         Assert.Contains("color_source", inputTypes);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BeforeModulesLoad_OnlyCoreInputTypesExist()
     {
         using var session = ObsSession.Start();
@@ -45,7 +45,7 @@ public sealed class ObsModuleTests
     // The safe list is an allowlist. Without it libobs loads everything it finds, which on a machine
     // with a full OBS install includes plugins that call into a frontend that is not there and abort
     // the process. The tests depend on it working, so it is asserted rather than assumed.
-    [Fact]
+    [SkippableFact]
     public void TheSafeList_KeepsUnlistedModulesOut()
     {
         using var session = ObsSession.Start();
@@ -57,7 +57,7 @@ public sealed class ObsModuleTests
         Assert.DoesNotContain("text_ft2_source_v2", inputTypes);
     }
 
-    [Fact]
+    [SkippableFact]
     public void OpeningAModuleDirectly_RegistersItsTypes()
     {
         using var session = ObsSession.Start();
@@ -80,7 +80,7 @@ public sealed class ObsModuleTests
 
     // The module return codes, mapped rather than collapsed to a bool. "Not there" and "there but
     // built against a different libobs" need different messages to a user.
-    [Fact]
+    [SkippableFact]
     public void AMissingModule_IsReportedAsFailedToOpen()
     {
         using var session = ObsSession.Start();
@@ -94,7 +94,7 @@ public sealed class ObsModuleTests
         Assert.False(module.IsValid);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ALibraryThatIsNotAModule_IsReportedRatherThanLoaded()
     {
         using var session = ObsSession.Start();

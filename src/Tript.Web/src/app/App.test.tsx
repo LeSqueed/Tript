@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
 import { App } from './App';
 import { MockWebSocket } from '../ipc/test/mockWebSocket';
+import { captureSessionToken } from '../ipc/sessionToken';
+
+/** Stands in for the 256-bit token the host mints per launch. */
+const TOKEN = 'f00dcafe1234567890';
 
 /** The active socket — under StrictMode the effect runs twice, so the app's live socket is last. */
 function activeSocket(): MockWebSocket {
@@ -75,11 +79,15 @@ describe('App shell', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.reset();
+    // The real page is served only to a request carrying the launch token, so the shell always
+    // starts with one; a token-less start is its own describe block below.
+    captureSessionToken(`?k=${TOKEN}`);
   });
 
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    captureSessionToken('');
   });
 
   function renderApp() {
@@ -305,5 +313,74 @@ describe('App shell', () => {
     const bar = within(screen.getByRole('banner'));
     expect(bar.getByText('Recording')).toBeTruthy();
     expect(bar.getByText('Counter-Strike 2')).toBeTruthy();
+  });
+});
+
+// The host refuses every listener without the token, so a token-less page can do nothing at all.
+// Silently reconnecting behind an empty library would look like a broken backend; say what is wrong
+// instead. In practice this is what a bare `vite dev` on :2882 hits.
+describe('App without a session token', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.reset();
+    captureSessionToken('');
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  function renderApp() {
+    return render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
+  }
+
+  it('explains itself instead of rendering the shell', () => {
+    renderApp();
+
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
+    expect(screen.queryByTestId('connection-state')).toBeNull();
+    expect(screen.getByTestId('missing-key-notice')).toBeTruthy();
+  });
+
+  it('opens no socket, rather than reconnecting forever against a listener that refuses it', () => {
+    renderApp();
+    vi.advanceTimersByTime(60_000);
+
+    expect(MockWebSocket.instances).toHaveLength(0);
+  });
+});
+
+describe('the session token in the rendered page', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.reset();
+    captureSessionToken(`?k=${TOKEN}`);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    captureSessionToken('');
+  });
+
+  // It necessarily rides on the media URLs (a <video> has no other way to authenticate), but it must
+  // never be shown to the user or written to the console, where it outlives the page in a log.
+  it('is never rendered as text and never logged', () => {
+    const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
+    const spies = methods.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+
+    render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
+    act(() => {
+      MockWebSocket.instances[MockWebSocket.instances.length - 1].serverOpen();
+    });
+
+    expect(document.body.textContent ?? '').not.toContain(TOKEN);
+    for (const spy of spies) {
+      for (const call of spy.mock.calls) {
+        expect(call.map(String).join(' ')).not.toContain(TOKEN);
+      }
+      spy.mockRestore();
+    }
   });
 });

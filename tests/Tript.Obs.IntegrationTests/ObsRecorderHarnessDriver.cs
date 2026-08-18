@@ -14,6 +14,7 @@ internal sealed class ObsRecorderHarnessDriver
 {
     private const string HarnessFileName = "Tript.RecorderHarness";
     private const string HelperFileName = ObsMuxerHelper.HelperFileName;
+    private const int HarnessNoDisplayExitCode = 5;
 
     private static readonly string HarnessDirectory =
         Path.GetDirectoryName(typeof(ObsRecorderHarnessDriver).Assembly.Location)
@@ -44,6 +45,19 @@ internal sealed class ObsRecorderHarnessDriver
         throw new Xunit.SkipException(
             $"No {HelperFileName} to record with. OBS ships it as a private plugin helper; none was "
             + $"found beside this machine's obs-ffmpeg plugin, and none could be placed in {HarnessDirectory}.");
+    }
+
+    // The harness's own exit code for "no X server reachable" — the same missing prerequisite as
+    // ObsTestEnvironment.XDisplay, only measured in the child process. It bails out before printing
+    // a verdict, so a test that starts the harness itself has to ask as well. Every other exit code
+    // is a result the test still has to judge.
+    internal static void RequireHarnessFoundADisplay(int exitCode, string stderr = "")
+    {
+        if (exitCode != HarnessNoDisplayExitCode)
+            return;
+
+        throw new Xunit.SkipException(
+            $"The recorder harness found no reachable X server. {stderr.Trim()}".TrimEnd());
     }
 
     internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds) =>
@@ -95,6 +109,8 @@ internal sealed class ObsRecorderHarnessDriver
 
         if (!process.WaitForExit(TimeSpan.FromSeconds(60)))
             throw new TimeoutException("The recorder harness did not exit in time.");
+
+        RequireHarnessFoundADisplay(process.ExitCode, stderr.Result);
 
         // The harness prints a RESULT line for every outcome it recognises, so a missing one means
         // it bailed out earlier — and its own reason on stderr is the only useful thing to report.

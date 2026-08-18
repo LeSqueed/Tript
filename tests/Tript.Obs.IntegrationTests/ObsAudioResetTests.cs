@@ -7,7 +7,7 @@ namespace Tript.Obs.IntegrationTests;
 
 public sealed class ObsAudioResetTests
 {
-    [Theory]
+    [SkippableTheory]
     [InlineData(48_000u, ObsSpeakerLayout.Stereo)]
     [InlineData(44_100u, ObsSpeakerLayout.Stereo)]
     [InlineData(48_000u, ObsSpeakerLayout.Mono)]
@@ -32,7 +32,7 @@ public sealed class ObsAudioResetTests
 
     // Confirms the enum's hole: 7.1 is 8, not 7. A contiguous enum would send 7 here and read back
     // something else, which is why this asserts on the value rather than only on the member.
-    [Fact]
+    [SkippableFact]
     public void SevenPointOne_IsSpeakerLayoutEightNotSeven()
     {
         Assert.Equal(8, (int)ObsSpeakerLayout.SevenPointOne);
@@ -43,7 +43,7 @@ public sealed class ObsAudioResetTests
         Assert.Equal(8, (int)readBack!.Speakers);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BeforeTheFirstReset_NoAudioMixExists()
     {
         using var session = ObsSession.Start();
@@ -52,7 +52,7 @@ public sealed class ObsAudioResetTests
         Assert.False(session.Runtime.TryGetAudioInfo(out _));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASecondAudioReset_ReplacesTheFirst()
     {
         using var session = ObsSession.Start();

@@ -68,7 +68,7 @@ public sealed class RealRecorderSmokeTests : IDisposable
 
         // The content server serves it: a range request returns 206 with the first byte.
         var relative = Path.GetRelativePath(_contentRoot, recorded).Replace(Path.DirectorySeparatorChar, '/');
-        var range = await RawRangeAsync(relative, "bytes=0-0");
+        var range = await RawRangeAsync(host, relative, "bytes=0-0");
         Assert.Equal(HttpStatusCode.PartialContent, range.StatusCode);
         Assert.StartsWith("bytes 0-0/", range.ContentRange);
 
@@ -131,12 +131,13 @@ public sealed class RealRecorderSmokeTests : IDisposable
         throw new InvalidOperationException("The host never pushed 'state'.");
     }
 
-    private static async Task<(HttpStatusCode StatusCode, string ContentRange)> RawRangeAsync(string path, string range)
+    private static async Task<(HttpStatusCode StatusCode, string ContentRange)> RawRangeAsync(
+        AppHostDriver host, string path, string range)
     {
         using var client = new TcpClient();
         await client.ConnectAsync("localhost", 2222);
         await using var stream = client.GetStream();
-        var request = $"GET /api/content/{path} HTTP/1.1\r\nHost: localhost:2222\r\nRange: {range}\r\nConnection: close\r\n\r\n";
+        var request = $"GET {host.WithToken($"/api/content/{path}")} HTTP/1.1\r\nHost: localhost:2222\r\nRange: {range}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
 
         using var ms = new MemoryStream();

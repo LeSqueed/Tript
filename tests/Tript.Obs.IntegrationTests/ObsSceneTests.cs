@@ -12,7 +12,7 @@ public sealed class ObsSceneTests
     private const string ColourSourceId = "color_source";
     private const string ScreenCaptureId = "xshm_input";
 
-    [Fact]
+    [SkippableFact]
     public void AScene_IsASourceOfSceneType()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -26,7 +26,7 @@ public sealed class ObsSceneTests
         Assert.Equal("a scene", scene.Name);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASceneAndItsSource_ConvertBackAndForth()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -39,7 +39,7 @@ public sealed class ObsSceneTests
         Assert.Equal("round trip", again.Name);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASourceThatIsNotAScene_ConvertsToNothing()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -48,7 +48,7 @@ public sealed class ObsSceneTests
         Assert.Null(ObsScene.FromSource(source));
     }
 
-    [Fact]
+    [SkippableFact]
     public void AddingASource_ReturnsAnItemBoundToThatSource()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -66,7 +66,7 @@ public sealed class ObsSceneTests
         Assert.Equal(source.Uuid, itemSource.Uuid);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnItem_IsFoundByItsSourceNameAndByItsId()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -87,7 +87,7 @@ public sealed class ObsSceneTests
     }
 
     // The same source in two places at once is legitimate and gives two independent items.
-    [Fact]
+    [SkippableFact]
     public void AddingOneSourceTwice_MakesTwoItemsWithDistinctIds()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -105,7 +105,7 @@ public sealed class ObsSceneTests
 
     // libobs refuses the cycle rather than recursing into it. The null is the whole report, so a
     // binding that treated it as impossible would turn a refusal into a NullReferenceException.
-    [Fact]
+    [SkippableFact]
     public void ASceneCannotContainItself()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -115,7 +115,7 @@ public sealed class ObsSceneTests
         Assert.Null(scene.AddSource(itsSource));
     }
 
-    [Fact]
+    [SkippableFact]
     public void EnumeratingAnEmptyScene_ReturnsNothing()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -124,7 +124,7 @@ public sealed class ObsSceneTests
         Assert.Empty(scene.EnumerateItems());
     }
 
-    [Fact]
+    [SkippableFact]
     public void EnumerationReturnsEveryItem_AndEachIsAReferenceOfItsOwn()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -149,7 +149,7 @@ public sealed class ObsSceneTests
     }
 
     // The composition root: a scene on an output channel is what recording and preview both read.
-    [Fact]
+    [SkippableFact]
     public void ASceneOnAnOutputChannel_IsReadBackAsThatScene()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -169,7 +169,7 @@ public sealed class ObsSceneTests
     }
 
     // The channel takes a reference of its own, which is what makes "set it and forget it" safe.
-    [Fact]
+    [SkippableFact]
     public void AnOutputChannel_HoldsItsSourceEvenAfterTheCallerLetsGo()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -188,7 +188,7 @@ public sealed class ObsSceneTests
         Assert.True(weak.IsExpired);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AChannelBeyondTheLast_IsRefused()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -201,7 +201,7 @@ public sealed class ObsSceneTests
 
     // The Linux capture source, which is what stands in here for the game capture this surface
     // exists to carry. It reports a real screen size, which a source that failed to open would not.
-    [Fact]
+    [SkippableFact]
     public void ScreenCapture_AttachesToASceneAndReportsTheScreenSize()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -231,7 +231,7 @@ public sealed class ObsSceneTests
         Assert.Empty(scene.EnumerateItems());
     }
 
-    [Fact]
+    [SkippableFact]
     public void ADisposedScene_RefusesFurtherUse()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -245,7 +245,7 @@ public sealed class ObsSceneTests
         scene.Dispose();
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnEmptySceneName_IsRejected()
     {
         using var session = ObsSession.StartWithSourceTypes();

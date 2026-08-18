@@ -25,7 +25,7 @@ public sealed class ObsEncoderTests
 
     // ---- availability ----
 
-    [Fact]
+    [SkippableFact]
     public void TheEncodersThisMachineExposes_AreRegistered()
     {
         using var session = StartSession();
@@ -42,7 +42,7 @@ public sealed class ObsEncoderTests
         Assert.Equal("aac", ObsEncoder.GetTypeCodec(AacId));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheAvailabilityProbe_IsThatTheCodecIsNotNull()
     {
         using var session = StartSession();
@@ -58,7 +58,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(ObsEncoderType.Audio, ObsEncoder.GetType("tript_no_such_encoder"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheUnavailableIds_AreMissingFromTheEnumeration()
     {
         using var session = StartSession();
@@ -69,7 +69,7 @@ public sealed class ObsEncoderTests
         Assert.DoesNotContain("obs_qsv11_v2", ids);
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheUnavailablePath_ReportsNoDefaultsAndNoProperties()
     {
         using var session = StartSession();
@@ -80,7 +80,7 @@ public sealed class ObsEncoderTests
         Assert.Empty(ObsEncoder.EnumerateTypeProperties("obs_qsv11_v2"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void CreatingAnUnregisteredEncoder_IsRefusedRatherThanGivenAPlaceholder()
     {
         using var session = StartSession();
@@ -96,7 +96,7 @@ public sealed class ObsEncoderTests
 
     // ---- creation and identity ----
 
-    [Fact]
+    [SkippableFact]
     public void ACreatedVideoEncoder_ReportsTheTypeIdNameCodecAndType()
     {
         using var session = StartSession();
@@ -109,7 +109,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(ObsEncoderCaps.DynBitrate | ObsEncoderCaps.Roi, encoder.Caps);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ACreatedAudioEncoder_ReportsTheTypeIdNameCodecAndType()
     {
         using var session = StartSession();
@@ -122,7 +122,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(2u, encoder.MixerIndex);
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheCapabilityProbes_AgreeForTheRegisteredIds()
     {
         using var session = StartSession();
@@ -131,7 +131,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(ObsEncoderCaps.Internal, ObsEncoder.GetTypeCaps(VaapiId));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheTypeLevelAndInstanceLevelCaps_Agree()
     {
         using var session = StartSession();
@@ -140,7 +140,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(ObsEncoder.GetTypeCaps(X264Id), encoder.Caps);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnEncodersName_CanBeChangedAfterCreation()
     {
         using var session = StartSession();
@@ -151,7 +151,7 @@ public sealed class ObsEncoderTests
         Assert.Equal("second name", encoder.Name);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ANewEncoder_IsNeitherActiveNorFailed()
     {
         using var session = StartSession();
@@ -162,7 +162,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(0u, encoder.EncodedFrames);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnEmptyOrNullTypeId_IsRejectedBeforeItReachesLibobs()
     {
         using var session = StartSession();
@@ -181,7 +181,7 @@ public sealed class ObsEncoderTests
     // the reason a caller must not treat its own reference as private after creation. This is the
     // assertion that makes the round-trip tests meaningful: a settings value that never reached the
     // encoder would still read back through the caller's own object.
-    [Fact]
+    [SkippableFact]
     public void SettingsGivenAtCreation_RemainTheEncodersOwnSettingsObject()
     {
         using var session = StartSession();
@@ -203,7 +203,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(30, again.GetInt("crf"));
     }
 
-    [Fact]
+    [SkippableFact]
     public void UpdatingAnEncoder_ChangesWhatItsSettingsReadBack()
     {
         using var session = StartSession();
@@ -229,7 +229,7 @@ public sealed class ObsEncoderTests
     // The type defaults are what a plugin falls back on when a key has no user value — measured,
     // and they are exactly the property list with the specified defaults: CBR, 6000 Kbps,
     // veryfast, an empty profile and tune, and the 11 keys the property list names.
-    [Fact]
+    [SkippableFact]
     public void TheX264TypeDefaults_MatchTheSpecifiedDefaults()
     {
         using var session = StartSession();
@@ -253,7 +253,7 @@ public sealed class ObsEncoderTests
     }
 
     // The audio encoder's defaults object exists and carries the AAC bitrate default.
-    [Fact]
+    [SkippableFact]
     public void TheAacTypeDefaults_CarryTheBitrateDefault()
     {
         using var session = StartSession();
@@ -268,7 +268,7 @@ public sealed class ObsEncoderTests
     // that outranks a settings-bag round-trip: x264's property list is its whole key surface, and a
     // key the plugin reads but this binding never lets a caller write would show up here as a
     // property with no path to be set.
-    [Fact]
+    [SkippableFact]
     public void TheX264PropertyList_NamesExactlyTheKeysThePluginReads()
     {
         using var session = StartSession();
@@ -281,7 +281,7 @@ public sealed class ObsEncoderTests
             names);
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheX264RateControlChoices_AreCbrAbrVbrCrf()
     {
         using var session = StartSession();
@@ -296,7 +296,7 @@ public sealed class ObsEncoderTests
         Assert.All(rateControl.Items, item => Assert.Equal(ObsComboFormat.String, item.Format));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheVaapiFamily_OffersMaxrateAndQpRatherThanMaxBitrateAndCqp()
     {
         using var session = StartSession();
@@ -319,7 +319,7 @@ public sealed class ObsEncoderTests
 
     // ---- binding and video geometry ----
 
-    [Fact]
+    [SkippableFact]
     public void AVideoEncoderBeforeBinding_ReportsZeroDimensions()
     {
         using var session = StartSession();
@@ -330,7 +330,7 @@ public sealed class ObsEncoderTests
         Assert.False(encoder.ScalingEnabled);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BindingToVideo_MakesTheDimensionsReportTheMixSize()
     {
         using var session = StartSession();
@@ -344,7 +344,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(720u, encoder.Height);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ScaledSize_ReadsBackAfterBinding()
     {
         using var session = StartSession();
@@ -366,7 +366,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(720u, encoder.Height);
     }
 
-    [Fact]
+    [SkippableFact]
     public void GpuScaleType_ReadsBackWhatWasSet()
     {
         using var session = StartSession();
@@ -381,7 +381,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(ObsScaleType.Bicubic, encoder.GpuScaleType);
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheFrameRateDivisor_RoundTripsBeforeAndAfterBinding()
     {
         using var session = StartSession();
@@ -399,7 +399,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(3u, encoder.FrameRateDivisor);
     }
 
-    [Fact]
+    [SkippableFact]
     public void PreferredVideoFormatAndColourSpace_RoundTrip()
     {
         using var session = StartSession();
@@ -422,7 +422,7 @@ public sealed class ObsEncoderTests
 
     // ---- audio readbacks ----
 
-    [Fact]
+    [SkippableFact]
     public void AnAudioEncoder_BeforeBindingReportsNoSampleRate()
     {
         using var session = StartSession();
@@ -431,7 +431,7 @@ public sealed class ObsEncoderTests
         Assert.Equal(0u, encoder.SampleRate);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BindingToAudio_MakesTheSampleRateReportTheMixRate()
     {
         using var session = StartSession();
@@ -446,7 +446,7 @@ public sealed class ObsEncoderTests
 
     // ---- region of interest ----
 
-    [Fact]
+    [SkippableFact]
     public void RoiIsRefusedOnAnEncoderWithoutTheCapability()
     {
         using var session = StartSession();
@@ -458,7 +458,7 @@ public sealed class ObsEncoderTests
         Assert.False(vaapi.HasRoi);
     }
 
-    [Fact]
+    [SkippableFact]
     public void RoiIsAcceptedOnAnEncoderWithTheCapability()
     {
         using var session = StartSession();

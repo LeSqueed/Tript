@@ -13,7 +13,7 @@ public sealed class ObsSourceAudioTests
 {
     private const string PulseInputCaptureId = "pulse_input_capture";
 
-    [Fact]
+    [SkippableFact]
     public void AudioMixers_RoundTripTheBitmaskOnAnAudioSource()
     {
         using var session = ObsSession.StartWithAudioSources();
@@ -33,7 +33,7 @@ public sealed class ObsSourceAudioTests
         Assert.Equal(0b101u, source.AudioMixers);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Volume_RoundTripsThePerSourceGain()
     {
         using var session = ObsSession.StartWithAudioSources();
@@ -49,7 +49,7 @@ public sealed class ObsSourceAudioTests
         Assert.Equal(1.0f, source.Volume);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ActiveIncrement_MarksTheSourceActiveUntilBalanced()
     {
         using var session = ObsSession.StartWithAudioSources();
@@ -70,7 +70,7 @@ public sealed class ObsSourceAudioTests
     // The active counter is balanced — two marks need two deactivations, and a single deactivation
     // after two marks leaves the source active. This is the shape a recorder hits when the same
     // source is routed into two tracks: each routing marks it once.
-    [Fact]
+    [SkippableFact]
     public void ActiveCounter_NeedsABalancingDeactivationForEachMark()
     {
         using var session = ObsSession.StartWithAudioSources();

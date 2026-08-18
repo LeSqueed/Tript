@@ -64,6 +64,17 @@ internal sealed class AppHost : IDisposable
     // Files whose duration could not be read, so a broken file is probed at most once per process.
     private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
 
+    // Every transition of the recorder's own state runs under this. Three threads reach these
+    // methods — the IPC dispatch pool, the game detector's timer, and the hook probe's timer — and
+    // StartRecording is a check-then-act with EnsureRecorderBuilt (which disposes and nulls
+    // _recorder) in the middle. Without the gate the losing thread drives a DISPOSED session into
+    // libobs, or two starts cross their metadata sidecars over one file.
+    //
+    // A stop can hold this for up to its 10s settle, and a start that waits behind it is correct:
+    // there is one recorder.
+    private readonly object _recorderGate = new();
+    private bool _shuttingDown;
+
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
     private ObsSource? _colourSource;
@@ -193,12 +204,26 @@ internal sealed class AppHost : IDisposable
             return;
         _disposed = true;
 
+        // Refuse new starts before anything is torn down. The detector's Dispose deliberately does
+        // not block behind an in-flight handler, so a GameStarted can still arrive after it returns.
+        lock (_recorderGate)
+            _shuttingDown = true;
+
         _trashPurgeTimer?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
-        _recorder?.Dispose();
-        _recorderSession?.Dispose();
-        _colourSource?.Dispose();
+
+        // A recording still running holds its bookmarks in the session and its metadata record
+        // unwritten; quitting mid-recording used to drop both on the floor.
+        StopRecording();
+
+        lock (_recorderGate)
+        {
+            _recorder?.Dispose();
+            _recorderSession?.Dispose();
+            _colourSource?.Dispose();
+        }
+
         _ipc.Dispose();
         _content.Dispose();
         _ui.Dispose();
@@ -209,7 +234,18 @@ internal sealed class AppHost : IDisposable
 
     internal bool StartRecording(string? gameId)
     {
+        lock (_recorderGate)
+            return StartRecordingLocked(gameId);
+    }
+
+    private bool StartRecordingLocked(string? gameId)
+    {
         var effectiveGameId = gameId ?? StartupGameId;
+
+        // The detector's handlers can still fire once after teardown began: its Dispose no longer
+        // blocks behind an in-flight callback, deliberately.
+        if (_shuttingDown)
+            return false;
 
         if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
             return false;
@@ -253,6 +289,12 @@ internal sealed class AppHost : IDisposable
     }
 
     internal bool StopRecording()
+    {
+        lock (_recorderGate)
+            return StopRecordingLocked();
+    }
+
+    private bool StopRecordingLocked()
     {
         if (_recorder is null || _recorder.Snapshot.State == RecorderState.Idle)
             return false;
@@ -688,6 +730,11 @@ internal sealed class AppHost : IDisposable
 
     // Surfaces a failure to the user, so a bookmark, title or delete that did not go through does
     // not silently vanish.
+    // An offset a TimeSpan can actually hold. TimeSpan.FromSeconds throws ArgumentException on NaN
+    // and OverflowException well below double's range, so both ends are checked before conversion.
+    private static bool IsUsableOffsetSeconds(double seconds) =>
+        double.IsFinite(seconds) && seconds >= 0 && seconds < TimeSpan.MaxValue.TotalSeconds;
+
     private void PushError(string message)
     {
         _ipc.Broadcast("error", JsonSerializer.SerializeToElement(new
@@ -1124,13 +1171,20 @@ internal sealed class AppHost : IDisposable
                 continue;
             }
 
-            if (!result.Renamed)
-                continue;
+            if (result.Renamed)
+            {
+                // The name changed, so the metadata record's own link back to the video has to change
+                // with it — and the user has to be told which name to look for.
+                RelinkRestoredMetadata(result.RestoredAs!);
+                PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+            }
 
-            // The name changed, so the metadata record's own link back to the video has to change
-            // with it — and the user has to be told which name to look for.
-            RelinkRestoredMetadata(result.RestoredAs!);
-            PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+            if (result.KeptInTrash > 0)
+            {
+                PushError(
+                    $"'{result.FileName}' was restored, but {result.KeptInTrash} of its saved records " +
+                    "could not be put back and are still in the trash.");
+            }
         }
 
         PushContent();
@@ -1156,9 +1210,15 @@ internal sealed class AppHost : IDisposable
 
     internal void PurgeTrash(PurgeTrashParameters? parameters)
     {
+        // Null is a frame whose parameters could not be parsed, never "no parameters" — the dispatch
+        // substitutes an explicit object for that. Refusing it matters more here than anywhere else:
+        // this is the one command whose empty case is destructive.
+        if (parameters is null)
+            return;
+
         // No entryIds at all means the whole bin; an explicit (possibly empty) list means exactly
         // those entries.
-        var entryIds = parameters?.EntryIds ?? _trash.List().Select(entry => entry.Id).ToList();
+        var entryIds = parameters.EntryIds ?? _trash.List().Select(entry => entry.Id).ToList();
 
         foreach (var entryId in entryIds)
         {
@@ -1260,6 +1320,15 @@ internal sealed class AppHost : IDisposable
     {
         if (parameters is null || string.IsNullOrEmpty(parameters.FilePath))
             return;
+
+        // TimeSpan.FromSeconds throws on NaN and overflows past ~9.22e11 — 1e18 is an unremarkable
+        // JSON number — and the throw would land in IpcServer.Dispatch, so the user would see the
+        // bookmark simply not appear. Refuse it here, where there is something to say about it.
+        if (!IsUsableOffsetSeconds(parameters.Time))
+        {
+            PushError("That bookmark's time is not a real time, so it was not saved.");
+            return;
+        }
 
         var session = _sessionTracker.Active;
         if (session is not null)

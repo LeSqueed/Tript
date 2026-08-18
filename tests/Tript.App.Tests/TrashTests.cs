@@ -340,6 +340,83 @@ public sealed class TrashTests : IDisposable
 
     // ---- helpers ----
 
+    // A restore that cannot put every file back used to delete the entry anyway, destroying exactly
+    // the files it had just logged as keeping. The record carries the recording's title and bookmarks;
+    // a duration probe re-creating a record under the same key is enough to trigger it, because the
+    // metadata store keys by bare file name.
+    [Fact]
+    public void Restore_WhenARecordCannotBePutBack_KeepsTheEntryInsteadOfDestroyingIt()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "The clutch");
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+        var entry = Assert.Single(_host.TrashEntries());
+
+        // Something re-creates a record under the same key while the video sits in the trash.
+        Directory.CreateDirectory(Path.Combine(_contentRoot, "metadata"));
+        File.WriteAllText(MetadataPath("session-1.mp4"), "{}");
+
+        _host.RestoreTrash(new RestoreTrashParameters { EntryIds = [entry.Id] });
+
+        // The video came back...
+        Assert.True(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
+
+        // ...but the record that could not be put back is still in the trash, not deleted.
+        Assert.True(Directory.Exists(EntryDirectory(entry.Id)),
+            "the entry must survive when it still holds files that could not be restored");
+        Assert.True(
+            File.Exists(Path.Combine(EntryDirectory(entry.Id), "files", "metadata", "session-1.mp4.metadata.json")),
+            "the trapped record must still be on disk, not destroyed with the entry");
+        Assert.Single(_host.TrashEntries());
+    }
+
+    // Null here means "the frame carried parameters this host could not parse", never "no parameters":
+    // the dispatch substitutes an explicit object for the parameterless whole-bin case. Treating the
+    // two alike let a malformed frame empty the entire trash.
+    [Fact]
+    public void PurgeTrash_WithUnparseableParameters_LeavesTheBinAlone()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "The clutch");
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+        Assert.Single(_host.TrashEntries());
+
+        _host.PurgeTrash(null);
+
+        Assert.Single(_host.TrashEntries());
+    }
+
+    // The same thing over the dispatch table, which is where the absent/unparseable distinction is
+    // actually made.
+    [Theory]
+    [InlineData("{\"entryIds\":\"not-a-list\"}")]
+    [InlineData("\"not-an-object\"")]
+    [InlineData("123")]
+    public void PurgeTrash_OverTheDispatch_WithAMalformedFrame_LeavesTheBinAlone(string parametersJson)
+    {
+        WriteSession("session-1.mp4", "Overwatch", "The clutch");
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+        Assert.Single(_host.TrashEntries());
+
+        var controller = new AppController(_host);
+        var parameters = JsonSerializer.Deserialize<JsonElement>(parametersJson);
+        controller.Handle("PurgeTrash", parameters, new ClientHandle((_, _) => { }));
+
+        Assert.Single(_host.TrashEntries());
+    }
+
+    // And the parameterless frame still means the whole bin.
+    [Fact]
+    public void PurgeTrash_OverTheDispatch_WithNoParameters_EmptiesTheBin()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "The clutch");
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+        Assert.Single(_host.TrashEntries());
+
+        var controller = new AppController(_host);
+        controller.Handle("PurgeTrash", null, new ClientHandle((_, _) => { }));
+
+        Assert.Empty(_host.TrashEntries());
+    }
+
     private void WriteSession(string fileName, string? game, string? title)
     {
         var sessions = Path.Combine(_contentRoot, "sessions");

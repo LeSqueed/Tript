@@ -312,4 +312,74 @@ public class SettingsRoundTripTests : IDisposable
         using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
         Assert.Equal(Settings.CurrentVersion, doc.RootElement.GetProperty("version").GetInt32());
     }
+    // The settings file holds the recording directory, the game list and the audio routing. A plain
+    // File.WriteAllText truncates before it writes, and a crash in that window leaves a blank file —
+    // which loads as "no settings", i.e. every setting silently back to its default.
+    [Fact]
+    public void Save_NeverLeavesTheSettingsFileBlank()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tript-settings-atomic", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        try
+        {
+            var store = new SettingsStore(new SettingsFileProvider(path));
+            var settings = store.Load();
+            settings.Recording.OutputDirectory = "/tmp/recordings";
+            store.Save();
+
+            // A reader racing the writer must never observe a truncated file. The rename is what
+            // makes that true; assert the observable consequence rather than the mechanism.
+            var stop = new ManualResetEventSlim();
+            var blank = 0;
+            var reader = new Thread(() =>
+            {
+                while (!stop.IsSet)
+                {
+                    var text = File.Exists(path) ? File.ReadAllText(path) : "{}";
+                    if (string.IsNullOrWhiteSpace(text))
+                        Interlocked.Increment(ref blank);
+                }
+            });
+            reader.Start();
+
+            for (var i = 0; i < 200; i++)
+            {
+                settings.Recording.OutputDirectory = $"/tmp/recordings-{i}";
+                store.Save();
+            }
+
+            stop.Set();
+            reader.Join();
+
+            Assert.Equal(0, Volatile.Read(ref blank));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    // A fixed "<path>.tmp" is shared by every concurrent writer of the same file, so two interleaved
+    // write/rename pairs rename one writer's bytes over the other's.
+    [Fact]
+    public void AtomicFile_UsesATemporaryNameThatIsNotSharedBetweenWriters()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "tript-atomic-temp", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "record.json");
+        try
+        {
+            AtomicFile.WriteAllText(path, "{\"a\":1}");
+
+            Assert.Equal("{\"a\":1}", File.ReadAllText(path));
+            Assert.False(File.Exists(path + ".tmp"), "the fixed temporary name must not be used");
+            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
+    }
+
 }

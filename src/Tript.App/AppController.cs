@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Text;
 using System.Text.Json;
 using Tript.App.Content;
 using Tript.App.Ipc;
@@ -43,9 +44,12 @@ internal sealed class AppController
             ["ListTrash"] = (_, _) => _host.PushTrash(),
             ["RestoreTrash"] = (parameters, _) => _host.RestoreTrash(parameters.Deserialize<RestoreTrashParameters>()),
             // Parameterless PurgeTrash empties the whole bin, so the absent-parameters case has to
-            // reach the host rather than being dropped as a malformed command.
-            ["PurgeTrash"] = (parameters, _) => _host.PurgeTrash(parameters.Deserialize<PurgeTrashParameters>()
-                ?? new PurgeTrashParameters()),
+            // reach the host rather than being dropped as a malformed command. It is substituted
+            // HERE, where "absent" is still distinguishable: Deserialize answers null for a frame it
+            // could not parse as well as for one that carried nothing, and conflating those would let
+            // a malformed frame empty the entire bin.
+            ["PurgeTrash"] = (parameters, _) => _host.PurgeTrash(
+                parameters is null ? new PurgeTrashParameters() : parameters.Deserialize<PurgeTrashParameters>()),
             ["ImportFile"] = (_, _) => { /* No import surface in the alpha. */ },
             ["AddBookmark"] = (parameters, _) => _host.AddBookmark(parameters.Deserialize<AddBookmarkParameters>()),
             ["DeleteBookmark"] = (parameters, _) => _host.DeleteBookmark(parameters.Deserialize<DeleteBookmarkParameters>()),
@@ -206,9 +210,35 @@ internal sealed class AppController
         }
 
         var sourceBaseName = Path.GetFileNameWithoutExtension(parameters.FilePath);
-        var id = parameters.Id.Length > 0 ? parameters.Id : Guid.NewGuid().ToString("N");
-        return Path.Combine(outputDirectory, $"{sourceBaseName}-{id}.mp4");
+        return Path.Combine(outputDirectory, $"{sourceBaseName}-{SafeClipId(parameters.Id)}.mp4");
     }
+
+    // The wire's clip id, reduced to something that can only ever be one path segment. It arrives
+    // straight off the socket and is concatenated into a file name, so without this an id of
+    // "x/../../../../tmp/pwn" would have the engine create directories and write a file anywhere the
+    // user can write — the source path is resolved through the traversal guard, but the output path
+    // is composed here and never was.
+    internal static string SafeClipId(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+            return Guid.NewGuid().ToString("N");
+
+        var safe = new StringBuilder(id.Length);
+        foreach (var character in id)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+                safe.Append(character);
+
+            if (safe.Length == MaxClipIdLength)
+                break;
+        }
+
+        // An id made entirely of characters that cannot appear in a name still has to produce a
+        // distinct file, so it gets a generated one rather than colliding on the empty string.
+        return safe.Length > 0 ? safe.ToString() : Guid.NewGuid().ToString("N");
+    }
+
+    private const int MaxClipIdLength = 64;
 }
 
 // The per-client handle the controller needs: a way to push messages to one client (the recovery

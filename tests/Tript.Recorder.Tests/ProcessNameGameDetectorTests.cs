@@ -58,12 +58,14 @@ public class ProcessNameGameDetectorTests
         var ownName = Path.GetFileNameWithoutExtension(Environment.ProcessPath!);
         using var handlerEntered = new ManualResetEventSlim();
         using var releaseHandler = new ManualResetEventSlim();
+        using var handlerExited = new ManualResetEventSlim();
 
         var detector = new ProcessNameGameDetector(new[] { ownName }, pollInterval: TimeSpan.FromMilliseconds(10));
         detector.GameStarted += _ =>
         {
             handlerEntered.Set();
             releaseHandler.Wait(TimeSpan.FromSeconds(10));
+            handlerExited.Set();
         };
 
         try
@@ -80,6 +82,12 @@ public class ProcessNameGameDetectorTests
         finally
         {
             releaseHandler.Set();
+
+            // Dispose deliberately does not wait for an in-flight handler, so the handler can still
+            // be inside these events after this method's `using` scope would dispose them. Waiting
+            // it out is the difference between a green test and an ObjectDisposedException thrown
+            // on a timer thread — which took the whole test host with it on CI.
+            Assert.True(handlerExited.Wait(TimeSpan.FromSeconds(5)), "the handler never finished");
         }
     }
 

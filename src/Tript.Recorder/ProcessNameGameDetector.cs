@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Diagnostics;
+using Serilog;
 
 namespace Tript.Recorder;
 
@@ -71,6 +72,11 @@ public sealed class ProcessNameGameDetector : IGameDetector
         {
             Poll();
         }
+        catch (Exception exception)
+        {
+            // Same reason as Raise: nothing may escape a timer callback.
+            Log.Warning(exception, "ProcessNameGameDetector: a poll failed; the watch continues.");
+        }
         finally
         {
             Volatile.Write(ref _ticking, 0);
@@ -127,10 +133,25 @@ public sealed class ProcessNameGameDetector : IGameDetector
         }
 
         foreach (var game in started)
-            GameStarted?.Invoke(game);
+            Raise(() => GameStarted?.Invoke(game));
 
         for (var i = 0; i < stopped; i++)
-            GameStopped?.Invoke();
+            Raise(() => GameStopped?.Invoke());
+    }
+
+    // A subscriber that throws must not take the process with it. These run on a timer callback,
+    // where an escaping exception is unhandled and terminates the process — and the app's own
+    // subscribers are StartRecording and StopRecording, which reach libobs and the file system.
+    private static void Raise(Action raise)
+    {
+        try
+        {
+            raise();
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "ProcessNameGameDetector: a subscriber threw; the watch continues.");
+        }
     }
 
     // The executable-name vocabulary the catalogue carries uses extensions; the process list does

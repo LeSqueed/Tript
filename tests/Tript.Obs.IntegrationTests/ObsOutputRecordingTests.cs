@@ -15,11 +15,10 @@ public sealed class ObsOutputRecordingTests
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
 
-    [Fact]
+    [SkippableFact]
     public void ARecording_ProducesARealFileOnDisk()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
@@ -40,11 +39,10 @@ public sealed class ObsOutputRecordingTests
     // would write: the file is a playable MP4 with H.264 video and one AAC track. A wrong settings
     // key, a lost audio encoder or a muxer that never wrote its header would each break one of
     // these assertions while the file still exists.
-    [Fact]
+    [SkippableFact]
     public void TheRecording_IsAProbeableMp4WithH264VideoAndAacAudio()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
@@ -73,11 +71,10 @@ public sealed class ObsOutputRecordingTests
     // output is wired to carry it. A recording with no audio stream at all is the silent failure a
     // "valid MP4" assertion would miss, which is exactly why the audio track count is asserted
     // separately from the file being playable.
-    [Fact]
+    [SkippableFact]
     public void TheRecording_HasAnAudioTrackEvenThoughTheSourceIsSilent()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
@@ -102,11 +99,10 @@ public sealed class ObsOutputRecordingTests
     // assertion is that the fields exist and are non-"unspecified" — the exact values (bt709 etc.)
     // are libobs's defaults, and the differential comparison is what pins the values, not a
     // hard-coded expectation here.
-    [Fact]
+    [SkippableFact]
     public void TheRecording_CarriesItsColourDescription()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
@@ -149,11 +145,10 @@ public sealed class ObsOutputRecordingTests
     // recording. The plugin cannot finalise the file: the stop signal fires, and what is on disk is
     // not a playable MP4 (no moov atom — measured; ffprobe reports no codec, no audio track and no
     // format).
-    [Fact]
+    [SkippableFact]
     public async Task AKilledMuxerHelper_DoesNotLookLikeASuccessfulRecording()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "killed.mp4");

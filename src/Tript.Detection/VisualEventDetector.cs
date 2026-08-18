@@ -30,6 +30,9 @@ public class VisualEventDetector : IDisposable
     // Past this, the loop is assumed to still be inside session.Run.
     private const int StopJoinTimeoutSeconds = 3;
 
+    // Past this, a frame callback is assumed never to finish, and teardown stops waiting for it.
+    private const int FrameCallbackQuiesceTimeoutMs = 1000;
+
     // A YOLO detect head emits 4 box rows (cx, cy, w, h) before the per-class score rows.
     private const int YoloBoxChannels = 4;
 
@@ -165,6 +168,12 @@ public class VisualEventDetector : IDisposable
         var sub = Interlocked.Exchange(ref _subscription, null);
         sub?.Dispose();
 
+        // Disposing the subscription stops new callbacks; it does not wait for one already in
+        // flight, which will still finish its copy and queue the buffer it rented. Draining before
+        // that write leaves ~8 MB of pooled buffer sitting in a channel nothing reads again until
+        // the next Start.
+        WaitForFrameCallbackToFinish();
+
         // A never-started detector has no loop to wait for, so it is trivially "out of Run".
         var loopExited = true;
         if (_detectionThread != null)
@@ -190,8 +199,13 @@ public class VisualEventDetector : IDisposable
                 ModelService.UnloadModel(_gameId);
             }
             _runOptions?.Dispose();
+
+            // Same condition as the run options, for the same reason: the loop waits on
+            // _cts.Token.WaitHandle, and disposing the source under it throws on that thread.
+            _cts?.Dispose();
         }
 
+        _cts = null;
         _runOptions = null;
         _inputContainer = null;
         _inputTensor = null;
@@ -202,6 +216,26 @@ public class VisualEventDetector : IDisposable
         _gameId = null;
 
         Log.Information("VisualEventDetector: Stopped");
+    }
+
+    // OnFrame holds _isProcessing for its whole copy-and-queue, so zero here means no callback is
+    // holding a rented buffer. Bounded: a callback that never clears the flag must not hold
+    // teardown open for good.
+    private void WaitForFrameCallbackToFinish()
+    {
+        var deadline = Environment.TickCount64 + FrameCallbackQuiesceTimeoutMs;
+
+        while (Volatile.Read(ref _isProcessing) != 0)
+        {
+            if (Environment.TickCount64 >= deadline)
+            {
+                Log.Warning("VisualEventDetector: a frame callback was still running {TimeoutMs}ms after the subscription was dropped; its frame buffer may stay queued until the next Start",
+                    FrameCallbackQuiesceTimeoutMs);
+                return;
+            }
+
+            Thread.Sleep(1);
+        }
     }
 
     // ParseYoloOutput strides the tensor by (4 + numClasses), so a count disagreeing with the

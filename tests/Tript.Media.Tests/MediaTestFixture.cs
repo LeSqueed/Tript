@@ -55,6 +55,28 @@ internal static class MediaTestFixture
         return stderr;
     }
 
+    // A stand-in for the ffmpeg binary that exits 0 and writes either nothing or an empty file at
+    // `writesEmptyFileAt`. Real ffmpeg reaches the same states (an out-of-range seek, a refused
+    // overwrite) but only through argument shapes the engine's own validation rejects first, so the
+    // stub is the only way to drive the exit-0-without-output path from a test.
+    internal static string CreateStubFfmpeg(string name, string? writesEmptyFileAt = null)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(ScratchRoot, name + ".cmd");
+            var touch = writesEmptyFileAt is null ? string.Empty : $"type nul > \"{writesEmptyFileAt}\"\r\n";
+            File.WriteAllText(cmd, "@echo off\r\n" + touch + "exit /b 0\r\n");
+            return cmd;
+        }
+
+        var script = Path.Combine(ScratchRoot, name + ".sh");
+        var write = writesEmptyFileAt is null ? string.Empty : $": > '{writesEmptyFileAt}'\n";
+        File.WriteAllText(script, "#!/bin/sh\n" + write + "exit 0\n");
+        File.SetUnixFileMode(script,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return script;
+    }
+
     // Quotes a single argument for the old string-based Arguments path. Kept for the fixture
     // builders that join args into one string; the probe helpers below use ArgumentList instead.
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";

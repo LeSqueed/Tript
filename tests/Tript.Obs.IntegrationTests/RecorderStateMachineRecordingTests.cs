@@ -10,11 +10,10 @@ namespace Tript.Obs.IntegrationTests;
 // Stop, the stop signal completing the transition back to Idle, and a real, probeable file.
 public sealed class RecorderStateMachineRecordingTests
 {
-    [Fact]
+    [SkippableFact]
     public void TheRecorder_ProducesARealFileOnDisk()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
@@ -32,11 +31,10 @@ public sealed class RecorderStateMachineRecordingTests
     // The state machine's stop is what the harness reports: a success verdict means the recorder
     // returned to Idle with a UserRequested stop reason and the muxer reported Success. The file is
     // the other half — the output actually wrote video and audio, not just a header.
-    [Fact]
+    [SkippableFact]
     public void TheRecorder_StopsWithTheCleanReasonAndTheFileIsProbeable()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");

@@ -33,6 +33,19 @@ internal sealed class ObsRecorderHarnessDriver
     // already satisfy the plugin — see ObsMuxerHelper.
     internal static bool EnsureHelperPresent() => ObsMuxerHelper.TryDeploy(HarnessDirectory);
 
+    // The prerequisite every recording test shares, as a skip rather than an assertion. A machine
+    // with no OBS ffmpeg plugin installed cannot record at all, and reporting that as a failed test
+    // is how a broken muxer lookup passed for a working machine's problem for weeks.
+    internal static void RequireHelper()
+    {
+        if (EnsureHelperPresent())
+            return;
+
+        throw new Xunit.SkipException(
+            $"No {HelperFileName} to record with. OBS ships it as a private plugin helper; none was "
+            + $"found beside this machine's obs-ffmpeg plugin, and none could be placed in {HarnessDirectory}.");
+    }
+
     internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds) =>
         RunCore(outputPath, durationSeconds, multiTrackCount: null, useRecorder: false);
 

@@ -7,6 +7,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Prerequisites this suite cannot supply itself (the obs-ffmpeg-mux helper, a machine on the
+         pinned OBS line, a monitor to enumerate) report as skips, not failures. xunit 2.x does NOT
+         honour a dynamic skip on its own: Xunit.Sdk.SkipException compiles and throws the
+         $XunitDynamicSkip$ token, but nothing in v2 translates it, so the test is reported as a
+         FAILURE — measured here. SkippableFact is what translates the token; the tests carry
+         [SkippableFact] / [SkippableTheory] and throw Xunit.SkipException. Assert.Skip is xunit v3
+         and is not available here. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
   </ItemGroup>
   <ItemGroup>
     <!-- The production muxer lookup, compiled in rather than restated. MuxerHelper is internal to

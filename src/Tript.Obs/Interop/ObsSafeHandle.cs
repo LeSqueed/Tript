@@ -20,6 +20,15 @@ namespace Tript.Obs.Interop;
 // SafeHandle rather than a raw pointer plus try/finally because the failure it prevents is
 // invisible: a leaked libobs object keeps a device, a thread or a file open, and nothing reports
 // it. The finalizer is the backstop for the paths that forget.
+//
+// What that backstop does NOT buy: every wrapper reads its handle through DangerousGetHandle, and
+// once the raw nint is in a register the wrapper is dead to the JIT. A wrapper that nothing else
+// references could in principle be finalized while the P/Invoke that raw pointer was read for is
+// still running. Holding it open properly is GC.KeepAlive (or DangerousAddRef/DangerousRelease) at
+// every one of the binding's ~300 call sites. It is not done here because no such site exists
+// today: every wrapper in the app is a field, a `using` local, or referenced by a later statement,
+// all of which keep it live across the call. A call site that ends on a wrapper's own property is
+// the shape that would break it.
 internal abstract class ObsSafeHandle : SafeHandle
 {
     protected ObsSafeHandle(nint handle, bool ownsHandle) : base(nint.Zero, ownsHandle) => SetHandle(handle);

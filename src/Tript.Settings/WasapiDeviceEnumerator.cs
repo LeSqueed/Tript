@@ -59,9 +59,27 @@ public static class WasapiDeviceEnumerator
 
                 // The data flow comes from the device itself rather than the enumerator's request,
                 // so a device that reports the wrong flow is skipped rather than mislabelled.
-                var endpoint = (IMMEndpoint)device;
-                comObjects.Add(endpoint);
-                endpoint.GetDataFlow(out var endpointFlow);
+                int endpointFlow;
+                try
+                {
+                    var endpoint = (IMMEndpoint)device;
+
+                    // The cast is a QueryInterface, but the RCW it comes back as is this device's
+                    // own — one managed object carrying every interface. Adding it to the release
+                    // list again would release the same RCW twice.
+                    if (!ReferenceEquals(endpoint, device))
+                        comObjects.Add(endpoint);
+
+                    endpoint.GetDataFlow(out endpointFlow);
+                }
+                catch (InvalidCastException)
+                {
+                    // E_NOINTERFACE on the QueryInterface. One device that does not answer as an
+                    // endpoint is one device to skip, not a reason to report no audio hardware at
+                    // all — which is what letting this escape the loop would do.
+                    continue;
+                }
+
                 if (endpointFlow != (int)dataFlow)
                     continue;
 

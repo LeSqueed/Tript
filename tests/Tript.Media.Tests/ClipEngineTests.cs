@@ -480,4 +480,84 @@ public class ClipEngineTests
         }));
     }
 
+    // ---- Verification 7: exit code 0 is not proof of an output file ----
+
+    // ffmpeg exits 0 on more than one path that leaves no usable file behind. Returning the path
+    // anyway hands the app a "clip" it will list, thumbnail and offer to play, all against a file
+    // that is not there.
+    [Fact]
+    public void CreateClips_FfmpegSucceedsButWritesNoFile_Throws()
+    {
+        var source = MediaTestFixture.CreateSdrSource("no-output.mp4");
+        var outputPath = Path.Combine(MediaTestFixture.ScratchRoot, "clips-no-output", "combined.mp4");
+        var engine = new ClipEngine(
+            MediaTestFixture.CreateStubFfmpeg("ffmpeg-silent"),
+            new MediaProbe(MediaTestFixture.Binaries.Ffprobe));
+
+        var ex = Assert.Throws<ClipEncodeException>(() => engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0.5, 2.5)],
+            Mode = ClipMode.Combine,
+            OutputPath = outputPath,
+        }));
+
+        Assert.Contains("wrote no file", ex.Message);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    // The same for a file that exists but is empty: a zero-byte mp4 is not a clip, and every
+    // consumer of the returned path treats existence as enough.
+    [Fact]
+    public void CreateClips_FfmpegSucceedsButWritesAnEmptyFile_Throws()
+    {
+        var source = MediaTestFixture.CreateSdrSource("empty-output.mp4");
+        var outputDirectory = Path.Combine(MediaTestFixture.ScratchRoot, "clips-empty-output");
+        var outputPath = Path.Combine(outputDirectory, "combined.mp4");
+        Directory.CreateDirectory(outputDirectory);
+        var engine = new ClipEngine(
+            MediaTestFixture.CreateStubFfmpeg("ffmpeg-empty", writesEmptyFileAt: outputPath),
+            new MediaProbe(MediaTestFixture.Binaries.Ffprobe));
+
+        var ex = Assert.Throws<ClipEncodeException>(() => engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0.5, 2.5)],
+            Mode = ClipMode.Combine,
+            OutputPath = outputPath,
+        }));
+
+        Assert.Contains("empty file", ex.Message);
+    }
+
+    // ---- Verification 8: two nearly identical regions are two clips ----
+
+    // Separate-mode names carry the region's times, and ffmpeg runs with -y. Times rounded coarsely
+    // enough that two distinct regions print the same put the second clip on top of the first: the
+    // user asked for two files and got one, silently.
+    [Fact]
+    public void CreateClips_RegionsMillisecondsApart_DoNotShareOneOutputName()
+    {
+        var source = MediaTestFixture.CreateSdrSource("near-identical.mp4");
+        var outputDirectory = Path.Combine(MediaTestFixture.ScratchRoot, "clips-near-identical");
+        var engine = NewEngine();
+
+        string Clip(double start, double end) => engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(start, end)],
+            Mode = ClipMode.Separate,
+            OutputPath = outputDirectory,
+        }).Single();
+
+        // 4 ms apart: closer than the two decimals the names used to carry, and a plausible
+        // adjustment to a region the user already clipped once.
+        var first = Clip(1.0, 2.0);
+        var second = Clip(1.004, 2.004);
+
+        Assert.NotEqual(first, second);
+        Assert.True(File.Exists(first), "the first clip must survive the second");
+        Assert.True(File.Exists(second));
+        Assert.Equal(2, Directory.GetFiles(outputDirectory, "*.mp4").Length);
+    }
 }

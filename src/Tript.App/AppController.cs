@@ -25,8 +25,11 @@ internal sealed class AppController
         {
             ["NewConnection"] = (_, client) => OnNewConnection(client),
             ["Shutdown"] = (_, _) => _host.Ipc.RequestShutdown(),
-            ["StartRecording"] = (_, _) => _host.StartRecording(null),
-            ["StopRecording"] = (_, _) => _host.StopRecording(),
+            // The refusal is reported, not discarded: StartRecording returns false before its
+            // state push (recorder busy, a mode it does not record, a start libobs refused), so
+            // without this the user presses record and nothing in the UI changes at all.
+            ["StartRecording"] = (_, _) => _host.StartRecordingOrReport(null),
+            ["StopRecording"] = (_, _) => _host.StopRecordingOrReport(),
             ["ToggleFullscreen"] = (parameters, _) => _host.ToggleFullscreen(
                 parameters.GetPropertyOrDefault("enabled").GetBooleanOr(false)),
             ["CheckForUpdates"] = (_, _) => _host.CheckForUpdates(),

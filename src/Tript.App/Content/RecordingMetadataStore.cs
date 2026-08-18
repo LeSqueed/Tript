@@ -11,7 +11,9 @@ namespace Tript.App.Content;
 // the recording root, keyed by the video file's name.
 internal sealed class RecordingMetadataStore
 {
-    private string _metadataRoot;
+    // See ContentServer._contentRoot: written on the IPC thread, read from the library and clip
+    // threads.
+    private volatile string _metadataRoot;
 
     internal RecordingMetadataStore(string metadataRoot)
     {

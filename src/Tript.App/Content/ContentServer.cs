@@ -4,6 +4,8 @@
 using System.Net;
 using System.Text.RegularExpressions;
 
+using Tript.App;
+
 namespace Tript.App.Content;
 
 // The HTTP content server. Serves two routes: /api/content/<path>  range-request video streaming
@@ -11,7 +13,7 @@ namespace Tript.App.Content;
 // as JPEG (204 when there is none) Anything else is 404.
 internal sealed class ContentServer : IDisposable
 {
-    private const int Port = 2222;
+    private const int Port = LocalPorts.Content;
 
     // The route regexes only ever capture the path after /api/content/ or /api/thumbnail/. They
     // accept the raw path including ".." segments: the resolver below is the guard's single choke
@@ -28,7 +30,9 @@ internal sealed class ContentServer : IDisposable
     private static readonly Regex PathSegment =
         new(@"(^|/)\.\.(/|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private string _contentRoot;
+    // Written on the IPC thread by UpdateRoot, read on every accept-loop worker: volatile so a
+    // worker cannot keep serving from the old root after the recording directory moved.
+    private volatile string _contentRoot;
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
 
@@ -106,11 +110,12 @@ internal sealed class ContentServer : IDisposable
             // path or URL-encoded. HttpListener normalizes raw ".." in AbsolutePath before we see
             // it, so the encoded-marker check against RawUrl is what a direct ".." attempt hits;
             // a path that survives normalization with ".." still in it reaches the resolver below,
-            // which refuses it the same way.
+            // which refuses it the same way. Anchored on a separator, deliberately: a bare
+            // "contains .." also refused every legitimate name with two dots in it — "my..clip.mp4"
+            // was a 403 — and a traversal segment under /api/content/ always follows a separator.
             var rawPath = context.Request.RawUrl ?? string.Empty;
             if (rawPath.Contains("/../", StringComparison.Ordinal)
                 || rawPath.Contains("/..", StringComparison.Ordinal)
-                || rawPath.Contains("..", StringComparison.Ordinal)
                 || rawPath.Contains("%2e", StringComparison.OrdinalIgnoreCase)
                 || rawPath.Contains("%2E", StringComparison.OrdinalIgnoreCase))
             {
@@ -123,22 +128,25 @@ internal sealed class ContentServer : IDisposable
             var match = ContentRoute.Match(path);
             if (match.Success)
             {
-                ServeContent(context, match.Groups[1].Value);
+                ServeContent(context, Decode(match.Groups[1].Value));
                 return;
             }
 
             match = ThumbnailRoute.Match(path);
             if (match.Success)
             {
-                ServeThumbnail(context, match.Groups[1].Value);
+                ServeThumbnail(context, Decode(match.Groups[1].Value));
                 return;
             }
 
             context.Response.StatusCode = 404;
             context.Response.Close();
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            // Every other catch in this file logs; without this a disk error or a bug in ServeContent
+            // leaves no trace anywhere and the video simply fails to play.
+            Console.Error.WriteLine($"Tript.App.Content: request failed: {exception}");
             try
             {
                 context.Response.StatusCode = 500;
@@ -147,6 +155,23 @@ internal sealed class ContentServer : IDisposable
             catch
             {
             }
+        }
+    }
+
+    // AbsolutePath keeps the escapes, so a recording called "my clip.mp4" arrived as "my%20clip.mp4"
+    // and was looked up under that literal name — a 404 for every file with a space, a '#' or a '?'
+    // in it. Decoded HERE and nowhere earlier: the raw-URL guard above refuses "%2e" before this
+    // runs, and decoding first would hand it a traversal it can no longer see.
+    private static string Decode(string routePath)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(routePath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or UriFormatException)
+        {
+            // A malformed escape is not a path; the resolver refuses it the same as any other.
+            return routePath;
         }
     }
 
@@ -243,20 +268,23 @@ internal sealed class ContentServer : IDisposable
             return;
         }
 
-        var info = new FileInfo(resolved);
+        // The length is taken from the open handle, not from a FileInfo snapshot, and every copy
+        // below is bounded by it. A session still being recorded grows between the two, so a
+        // snapshot length meant declaring one Content-Length and then writing more bytes than that
+        // — a protocol violation the client sees as a corrupt or truncated video.
+        using var stream = File.OpenRead(resolved);
+        var length = stream.Length;
+
         context.Response.ContentType = "video/mp4";
         context.Response.Headers.Add("Accept-Ranges", "bytes");
-        context.Response.Headers.Add("Content-Disposition", $"inline; filename=\"{info.Name}\"");
+        context.Response.Headers.Add("Content-Disposition", $"inline; filename=\"{Path.GetFileName(resolved)}\"");
 
-        var length = info.Length;
         var rangeHeader = context.Request.Headers["Range"];
         if (string.IsNullOrEmpty(rangeHeader))
         {
             context.Response.StatusCode = 200;
             context.Response.ContentLength64 = length;
-            using var stream = File.OpenRead(resolved);
-            stream.CopyTo(context.Response.OutputStream);
-            context.Response.Close();
+            WriteExactly(context, stream, length);
             return;
         }
 
@@ -273,19 +301,28 @@ internal sealed class ContentServer : IDisposable
         context.Response.ContentLength64 = count;
         context.Response.Headers.Add("Content-Range", $"bytes {start}-{end}/{length}");
 
-        using (var stream = File.OpenRead(resolved))
+        stream.Seek(start, SeekOrigin.Begin);
+        WriteExactly(context, stream, count);
+    }
+
+    // Copies exactly `count` bytes and closes the response. A file that was truncated underneath us
+    // cannot supply them; the connection is aborted rather than closed, because closing short of the
+    // declared Content-Length leaves the client waiting for bytes that will never arrive.
+    private static void WriteExactly(HttpListenerContext context, Stream stream, long count)
+    {
+        var buffer = new byte[64 * 1024];
+        var remaining = count;
+        while (remaining > 0)
         {
-            stream.Seek(start, SeekOrigin.Begin);
-            var buffer = new byte[64 * 1024];
-            long remaining = count;
-            while (remaining > 0)
+            var read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+            if (read == 0)
             {
-                var read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
-                if (read == 0)
-                    break;
-                context.Response.OutputStream.Write(buffer, 0, read);
-                remaining -= read;
+                context.Response.Abort();
+                return;
             }
+
+            context.Response.OutputStream.Write(buffer, 0, read);
+            remaining -= read;
         }
 
         context.Response.Close();

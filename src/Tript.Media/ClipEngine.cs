@@ -169,6 +169,7 @@ public sealed class ClipEngine : IClipEngine
         args.Add(outputPath);
 
         FfmpegRunner.Run(_ffmpegPath, args, request, "combine");
+        EnsureOutputWritten(outputPath);
         return [outputPath];
     }
 
@@ -272,6 +273,7 @@ public sealed class ClipEngine : IClipEngine
             args.Add(outputPath);
 
             FfmpegRunner.Run(_ffmpegPath, args, request, $"separate region {i + 1}/{regions.Count}");
+            EnsureOutputWritten(outputPath);
             results.Add(outputPath);
         }
 
@@ -358,9 +360,27 @@ public sealed class ClipEngine : IClipEngine
     private static string BuildFileName(string sourcePath, ClipRegion region, int index)
     {
         var baseName = Path.GetFileNameWithoutExtension(sourcePath);
-        var start = region.Start.TotalSeconds.ToString("0.##", CultureInfo.InvariantCulture).Replace('.', '_');
-        var end = region.End.TotalSeconds.ToString("0.##", CultureInfo.InvariantCulture).Replace('.', '_');
+        // Three decimals, not two: at two, regions less than ~10ms apart produced the same name and
+        // the second run replaced the first (ffmpeg is invoked with -y). The 1-based index is what
+        // actually guarantees uniqueness within a request; the times are there to be readable.
+        var start = region.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture).Replace('.', '_');
+        var end = region.End.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture).Replace('.', '_');
         return $"{baseName}-clip-{index + 1}-{start}s-{end}s.mp4";
+    }
+
+    // ffmpeg's exit code is not proof that a file was written. It exits 0 on an out-of-range seek,
+    // and -n on an existing output refuses to write and still exits 0 (measured). Without this the
+    // engine returns a path the app records as a clip while the file is absent, or is the stale
+    // leftover of an earlier attempt. FfmpegThumbnailExtractor already checks the disk; this is the
+    // same check on the clip path.
+    private static void EnsureOutputWritten(string outputPath)
+    {
+        var file = new FileInfo(outputPath);
+        if (!file.Exists)
+            throw new ClipEncodeException($"ffmpeg reported success but wrote no file at '{outputPath}'.", 0);
+
+        if (file.Length == 0)
+            throw new ClipEncodeException($"ffmpeg reported success but wrote an empty file at '{outputPath}'.", 0);
     }
 
     private static string FormatSeconds(double seconds) =>

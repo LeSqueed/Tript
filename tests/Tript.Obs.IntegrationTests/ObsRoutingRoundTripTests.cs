@@ -12,11 +12,10 @@ namespace Tript.Obs.IntegrationTests;
 // carries the expected number of audio tracks.
 public sealed class ObsRoutingRoundTripTests
 {
-    [Fact]
+    [SkippableFact]
     public void ARecordingRoutedThroughTheService_HasOneAudioTrackPerPlannedTrack()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         const int trackCount = 3;
         var directory = CreateRecordingDirectory();
@@ -41,11 +40,10 @@ public sealed class ObsRoutingRoundTripTests
 
     // The number of audio tracks the file carries is bounded by the same bound the planner enforces:
     // six tracks is the maximum, and the file reflects it.
-    [Fact]
+    [SkippableFact]
     public void SixTracks_TheMaximumThePlannerAllows_ProducesSixAudioTracks()
     {
-        Assert.True(ObsRecorderHarnessDriver.EnsureHelperPresent(),
-            "The obs-ffmpeg-mux helper is not next to the harness and could not be deployed.");
+        ObsRecorderHarnessDriver.RequireHelper();
 
         const int trackCount = 6;
         var directory = CreateRecordingDirectory();

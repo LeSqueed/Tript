@@ -7,13 +7,15 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
+using Tript.App;
+
 namespace Tript.App.Ipc;
 
 // The WebSocket control socket. Sits on a single
 // HttpListener and answers WebSocket upgrade requests; every other path/verb gets 404.
 internal sealed class IpcServer : IDisposable
 {
-    private const int Port = 44030;
+    private const int Port = LocalPorts.ControlSocket;
 
     private readonly AppController _controller;
     private readonly HttpListener _listener = new();
@@ -105,8 +107,7 @@ internal sealed class IpcServer : IDisposable
     }
 
     // The UI host's own origin, in both spellings a browser may present for the loopback address.
-    private static readonly string[] AllowedOrigins =
-        ["http://localhost:2882", "http://127.0.0.1:2882"];
+    private static readonly string[] AllowedOrigins = LocalPorts.UiOrigins;
 
     internal static bool IsAllowedOrigin(string? origin) =>
         string.IsNullOrEmpty(origin) ||
@@ -233,15 +234,50 @@ internal sealed class IpcServer : IDisposable
 
     internal sealed class ClientConnection : IDisposable
     {
+        // The largest command this protocol can carry. Commands are small JSON objects; the biggest
+        // real one is a clip request with its segment list. The receive loop accumulated
+        // continuation frames with no ceiling at all and then doubled the peak with ToArray(), so a
+        // single client message of arbitrary length was an unbounded allocation in this process.
+        internal const int MaxInboundMessageBytes = 256 * 1024;
+
+        // How many outgoing frames may queue for a client that has stopped reading. Unbounded meant
+        // one such client made every Broadcast queue forever.
+        private const int OutboundCapacity = 256;
+
         private readonly WebSocket _socket;
         private readonly IpcServer _owner;
-        private readonly Channel<byte[]> _outbound = Channel.CreateUnbounded<byte[]>();
+        private readonly Channel<byte[]> _outbound;
         private CancellationTokenSource _cts = new();
+        private int _dropped;
+
+        // How many outgoing frames this connection has thrown away because it was not being read.
+        internal int DroppedFrames => Volatile.Read(ref _dropped);
 
         internal ClientConnection(WebSocket socket, IpcServer owner)
         {
             _socket = socket;
             _owner = owner;
+
+            // DropOldest, not DropWrite: every push in this app is a FULL push, so the newest frame
+            // supersedes every older one and dropping from the front leaves the client converging on
+            // the current truth. DropWrite would do the opposite — discard the newest and leave a
+            // stale view pinned forever. The cost is that a one-shot frame (an error toast, an
+            // intermediate importProgress tick) can be lost by a client that is this far behind;
+            // that is the right trade against a queue that grows without limit. Waiting is not an
+            // option: Send runs under the broadcast gate, so a blocked write would stall the caller
+            // and every other client with it.
+            _outbound = Channel.CreateBounded<byte[]>(
+                new BoundedChannelOptions(OutboundCapacity)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                },
+                _ =>
+                {
+                    if (Interlocked.Increment(ref _dropped) == 1)
+                        Console.Error.WriteLine(
+                            "Tript.App.Ipc: a client is not reading; its oldest queued frames are being dropped.");
+                });
         }
 
         internal void Start()
@@ -286,11 +322,22 @@ internal sealed class IpcServer : IDisposable
                             return;
                         if (result.MessageType == WebSocketMessageType.Binary)
                             return;
+
+                        if (ms.Length + result.Count > MaxInboundMessageBytes)
+                        {
+                            // Refusing the rest of the message would leave the connection out of step
+                            // with a sender that is still writing it, so the connection goes.
+                            Console.Error.WriteLine(
+                                $"Tript.App.Ipc: a client sent a message over {MaxInboundMessageBytes} bytes; closing it.");
+                            await CloseTooBigAsync();
+                            return;
+                        }
+
                         ms.Write(buffer, 0, result.Count);
                     }
                     while (!result.EndOfMessage);
 
-                    var text = Encoding.UTF8.GetString(ms.ToArray());
+                    var text = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
                     ParseAndDispatch(text);
                 }
             }
@@ -316,15 +363,32 @@ internal sealed class IpcServer : IDisposable
             }
         }
 
+        private async Task CloseTooBigAsync()
+        {
+            try
+            {
+                await _socket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig,
+                    "message too large", CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is WebSocketException or ObjectDisposedException
+                                                 or OperationCanceledException)
+            {
+                // The peer is already gone; the finally below tears the connection down anyway.
+            }
+        }
+
         internal void Send(string frame)
         {
             try
             {
+                // DropOldest, so TryWrite makes room rather than refusing; it only returns false once
+                // the writer has completed, which is the connection already going away.
                 _outbound.Writer.TryWrite(Encoding.UTF8.GetBytes(frame));
             }
             catch (Exception)
             {
-                // The channel is unbounded; TryWrite only fails after the writer has completed.
+                // A frame for a client that is already gone. Broadcast holds the client list gate
+                // while it calls this, so throwing here would take every other client down with it.
             }
         }
 

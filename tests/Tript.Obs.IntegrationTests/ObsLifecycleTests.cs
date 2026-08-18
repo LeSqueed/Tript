@@ -3,7 +3,6 @@
 
 using System.Text;
 using Xunit;
-using Xunit.Sdk;
 
 namespace Tript.Obs.IntegrationTests;
 
@@ -87,7 +86,7 @@ public sealed class ObsLifecycleTests
         Assert.Equal(Encoding.UTF8.GetBytes(locale), Encoding.UTF8.GetBytes(session.Runtime.Locale));
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnAddedDataPath_ResolvesFilesAndUnknownNamesReturnNull()
     {
         using var session = ObsSession.Start();
@@ -95,13 +94,21 @@ public sealed class ObsLifecycleTests
         // The core data dir is discovered with the runtime; a stripped install may not have it.
         var coreData = ObsTestEnvironment.CoreDataPath;
         if (coreData is null)
-            throw SkipException.ForSkip("No OBS core data dir found; nothing to resolve data files from.");
+            throw new Xunit.SkipException("No OBS core data dir found; nothing to resolve data files from.");
+
+        // The probe file is only a probe. Whether this install ships it is the machine's business,
+        // and asking libobs to find a file that is not there proves nothing about the lookup — so
+        // the disk is checked first, and a lookup that then comes back empty is still a failure.
+        const string probeFile = "license/gplv2.txt";
+        if (!File.Exists(Path.Combine(coreData, probeFile)))
+            throw new Xunit.SkipException(
+                $"This machine's OBS core data dir ({coreData}) does not ship {probeFile}; there is no file to resolve.");
 
         session.Runtime.AddDataPath(coreData);
 
         try
         {
-            var found = session.Runtime.FindDataFile("license/gplv2.txt");
+            var found = session.Runtime.FindDataFile(probeFile);
 
             Assert.NotNull(found);
             Assert.True(File.Exists(found));

@@ -83,7 +83,11 @@ internal sealed class AppHost : IDisposable
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
 
-    private readonly List<GameInfo> _catalogueGames = [];
+    // Replaced wholesale under _gameListGate, never mutated in place: GameList is read from the
+    // IPC pool, the detector's timer and the hook probe, and a reader holding the old list must
+    // be able to finish enumerating it.
+    private readonly object _gameListGate = new();
+    private List<GameInfo> _catalogueGames = [];
     private IClipEngine? _clipEngine;
 
     // The bin is swept at startup and once an hour after it, so a host that stays up for days still
@@ -141,6 +145,72 @@ internal sealed class AppHost : IDisposable
     // content server's traversal guard all resolve against it. A configured Recording.OutputDirectory
     // wins; empty falls back to the content root, and a settings change updates it in place.
     internal string EffectiveRoot { get; private set; }
+
+    // Why a recording directory is refused, or null when it is fine.
+    //
+    // The content server serves everything under this root, and it deliberately checks no Origin —
+    // a media element sends none, so requiring one would break the app's own player. That is only
+    // safe while the root is a folder of recordings. Pointing it at "/" or at the home directory
+    // turns http://localhost:2222/api/content/<path> into a reader for the whole machine, for any
+    // page open in the user's browser.
+    //
+    // The rule is deliberately narrow: refuse a root that CONTAINS somewhere sensitive, rather than
+    // trying to enumerate what is safe. A directory the user made for recordings passes.
+    internal static string? UnsafeRecordingRoot(string candidate)
+    {
+        if (!Path.IsPathRooted(candidate))
+            return "it is not an absolute path";
+
+        string full;
+        try
+        {
+            full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException
+                                             or PathTooLongException)
+        {
+            return "it is not a usable path";
+        }
+
+        if (Path.GetPathRoot(full) is { } root &&
+            string.Equals(Path.TrimEndingDirectorySeparator(root), full, StringComparison.Ordinal))
+        {
+            return "a filesystem root would expose the whole machine over the content server";
+        }
+
+        foreach (var folder in new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            SettingsFilePaths.ConfigDirectory,
+        })
+        {
+            if (string.IsNullOrEmpty(folder))
+                continue;
+
+            var sensitive = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+            if (IsAtOrAbove(full, sensitive))
+                return $"it contains '{sensitive}', which would expose it over the content server";
+        }
+
+        return null;
+    }
+
+    // True when `candidate` IS `sensitive` or is one of its ancestors.
+    private static bool IsAtOrAbove(string candidate, string sensitive)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(candidate, sensitive, comparison))
+            return true;
+
+        return sensitive.StartsWith(candidate.EndsWith(Path.DirectorySeparatorChar)
+            ? candidate
+            : candidate + Path.DirectorySeparatorChar, comparison);
+    }
 
     private static string ResolveEffectiveRoot(AppOptions options, SettingsStore settingsStore)
     {
@@ -231,6 +301,20 @@ internal sealed class AppHost : IDisposable
     }
 
     // ---- recorder wiring ----
+
+    // The dispatch entry points. StartRecording/StopRecording answer bool and every refusal returns
+    // before the state push, so a caller that drops the bool leaves the UI showing nothing happened.
+    internal void StartRecordingOrReport(string? gameId)
+    {
+        if (!StartRecording(gameId))
+            PushError("Recording did not start. Either one is already running, or this machine refused it.");
+    }
+
+    internal void StopRecordingOrReport()
+    {
+        if (!StopRecording())
+            PushError("There was no recording to stop.");
+    }
 
     internal bool StartRecording(string? gameId)
     {
@@ -475,6 +559,7 @@ internal sealed class AppHost : IDisposable
             return false;
 
         var settings = _settingsStore.Load();
+        var previousOutputDirectory = settings.Recording.OutputDirectory;
         try
         {
             ApplyPatch(settings, patch.Value);
@@ -486,11 +571,29 @@ internal sealed class AppHost : IDisposable
 
         _settingsStore.Save();
 
+        // The catalogue is built from these settings, so this is the one moment it can change.
+        ReloadGameList();
+
         // A changed OutputDirectory takes effect without a restart: the effective root, the content
         // server's guard root and the metadata store are all rebuilt.
         var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, _settingsStore));
         if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))
         {
+            if (UnsafeRecordingRoot(effectiveRoot) is { } refusal)
+            {
+                // The previous root stays; adopting this one half-way would leave the stores and the
+                // content server disagreeing about where content lives. The setting goes back with
+                // it: a refused directory left in the file would be shown as the recording folder by
+                // the push below, and adopted unguarded by the next launch.
+                settings.Recording.OutputDirectory = previousOutputDirectory;
+                _settingsStore.Save();
+
+                Console.Error.WriteLine($"Tript.App: refused recording directory '{effectiveRoot}': {refusal}");
+                PushError($"That folder was not used as the recording directory: {refusal}");
+                PushSettings();
+                return true;
+            }
+
             EffectiveRoot = effectiveRoot;
             _content.UpdateRoot(effectiveRoot);
             _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
@@ -569,18 +672,22 @@ internal sealed class AppHost : IDisposable
 
     internal void ReloadGameList()
     {
-        _catalogueGames.Clear();
-        var settings = _settingsStore.Load();
-        _catalogueGames.AddRange(AppOptions.LoadCatalogue(settings, _options.GameListJson));
+        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _options.GameListJson);
+        lock (_gameListGate)
+            _catalogueGames = games;
     }
 
+    // A plain read. The getter used to reload whenever the catalogue was empty, which made a user who
+    // deleted every game entry re-read the settings file on every access — from every thread, while
+    // clearing and refilling the one list the other threads were enumerating. The catalogue is loaded
+    // at startup and reloaded when the settings that define it change, which is the only time it can
+    // differ.
     internal List<GameInfo> GameList
     {
         get
         {
-            if (_catalogueGames.Count == 0)
-                ReloadGameList();
-            return _catalogueGames;
+            lock (_gameListGate)
+                return _catalogueGames;
         }
     }
 
@@ -1274,10 +1381,22 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
+        var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
+        var fileName = Path.GetFileName(target);
+
+        // Which store the title lands in is decided by the path, not by the wire's contentType.
+        // ListContent classifies the same way and reads a clip's title from ClipTitleStore, so a
+        // clip renamed into a RecordingMetadata record would write something nothing ever reads —
+        // and the wire's contentType defaults to "recording" whether or not the caller meant it.
+        if (TopLevelDirectory(relative).Equals("clips", StringComparison.Ordinal))
+        {
+            RenameClip(fileName, parameters.Title);
+            return;
+        }
+
         // The title is stored on the video's metadata record; a video with no record yet gets one.
         // A record that exists but could not be READ is not a record to replace — writing a fresh
         // one would trade the recording's game and bookmarks for a title.
-        var fileName = Path.GetFileName(target);
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
         {
@@ -1291,7 +1410,7 @@ internal sealed class AppHost : IDisposable
 
         var metadata = existing.Record ?? new RecordingMetadata
         {
-            VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
+            VideoPath = relative,
         };
         metadata.Title = parameters.Title;
 
@@ -1302,6 +1421,30 @@ internal sealed class AppHost : IDisposable
             PushError("The recording title could not be saved — check the recording folder is writable.");
             return;
         }
+        PushContent();
+    }
+
+    private void RenameClip(string fileName, string title)
+    {
+        // Same discipline as the recording path: a record that exists and could not be read is left
+        // alone rather than replaced, because the record also carries the clip's measured duration.
+        var existing = _clipTitles.Read(fileName);
+        if (existing.MustNotBeOverwritten)
+        {
+            Console.Error.WriteLine(
+                $"Tript.App: '{fileName}' has a clip record that could not be read " +
+                $"({existing.Failure}); the rename is refused rather than replacing it.");
+            PushError(
+                "The clip title could not be saved — this clip's record could not be read, and overwriting it would lose what else is on it.");
+            return;
+        }
+
+        if (!_clipTitles.Save(fileName, title))
+        {
+            PushError("The clip title could not be saved — check the recording folder is writable.");
+            return;
+        }
+
         PushContent();
     }
 

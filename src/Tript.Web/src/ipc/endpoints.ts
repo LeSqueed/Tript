@@ -13,16 +13,23 @@ export const PROTOCOL_VERSION = 1;
 
 /**
  * Build the URL for a piece of content served by the content server.
- * Paths are constructed by concatenation; the backend resolves every request against a
- * canonical root before serving (path-traversal guard on its side).
+ * The path is relative to the content root and its segments are percent-encoded; the backend
+ * resolves every request against a canonical root before serving (path-traversal guard on its side).
  */
 export function contentUrl(path: string): string {
-  return new URL(`api/content/${stripLeadingSlashes(path)}`, CONTENT_SERVER_URL).toString();
+  return new URL(`api/content/${encodePath(path)}`, CONTENT_SERVER_URL).toString();
 }
 
 /** Build the URL for a thumbnail served by the content server. */
 export function thumbnailUrl(path: string): string {
-  return new URL(`api/thumbnail/${stripLeadingSlashes(path)}`, CONTENT_SERVER_URL).toString();
+  return new URL(`api/thumbnail/${encodePath(path)}`, CONTENT_SERVER_URL).toString();
+}
+
+// Encodes each segment and rejoins on '/'. Encoding the whole path would escape the separators too
+// and address one long file name; leaving it raw lets a '#' in a file name truncate the request at
+// the fragment (the server never sees the rest) and a '?' turn the tail into a query string.
+function encodePath(path: string): string {
+  return stripLeadingSlashes(path).split('/').map(encodeURIComponent).join('/');
 }
 
 function stripLeadingSlashes(path: string): string {

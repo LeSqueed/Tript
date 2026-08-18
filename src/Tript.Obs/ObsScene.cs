@@ -178,6 +178,13 @@ public sealed class ObsScene : IDisposable
     // Runs inside libobs's scene lock, on the calling thread. It records pointers and nothing else:
     // taking a reference here would mean allocating inside the lock, and an exception crossing back
     // into libobs's frame would terminate the process.
+    //
+    // The gap that leaves: EnumerateItems takes its references after the enumeration has returned
+    // and the lock is gone, so an item removed in between would be freed before it is wrapped.
+    // Deliberately left: every caller is on the single-threaded control plane, and closing it means
+    // addref-ing inside the callback and moving the wrapper to owned pointers — a change to the
+    // binding's ownership rules that only a live libobs can prove. Revisit if a scene is ever
+    // mutated off the control plane.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte Collect(nint scene, nint item, nint parameter)
     {

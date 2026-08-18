@@ -110,16 +110,27 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 
     // Receives the next frame, parsed to its root element. The frames are
     // { method, content }; the caller reads method/content from the root.
-    internal async Task<JsonDocument> ReceiveAsync()
+    //
+    // A frame that never arrives is a failure of the host, not a reason to wait forever: without the
+    // deadline a test for "this command answers" hangs the whole run instead of going red.
+    internal async Task<JsonDocument> ReceiveAsync(TimeSpan? timeout = null)
     {
         if (_socket is null)
             throw new InvalidOperationException("Not connected.");
+        using var deadline = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(30));
         var buffer = new byte[64 * 1024];
         using var ms = new MemoryStream();
         WebSocketReceiveResult result;
         do
         {
-            result = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+            try
+            {
+                result = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer), deadline.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException("The host sent no frame within the deadline.");
+            }
             if (result.MessageType == WebSocketMessageType.Close)
                 throw new InvalidOperationException("The socket closed unexpectedly.");
             ms.Write(buffer, 0, result.Count);
@@ -129,9 +140,9 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         return JsonDocument.Parse(Encoding.UTF8.GetString(ms.ToArray()));
     }
 
-    internal async Task<(string Method, JsonElement Content)> ReceiveAsyncParsed()
+    internal async Task<(string Method, JsonElement Content)> ReceiveAsyncParsed(TimeSpan? timeout = null)
     {
-        using var doc = await ReceiveAsync();
+        using var doc = await ReceiveAsync(timeout);
         var root = doc.RootElement;
         var method = root.GetProperty("method").GetString()!;
         var content = root.GetProperty("content").Clone();

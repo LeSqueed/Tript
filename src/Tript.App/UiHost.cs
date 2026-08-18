@@ -9,7 +9,7 @@ namespace Tript.App;
 // directory.
 internal sealed class UiHost : IDisposable
 {
-    private const int Port = 2882;
+    private const int Port = LocalPorts.Ui;
 
     private readonly string _webRoot;
     private readonly HttpListener _listener = new();

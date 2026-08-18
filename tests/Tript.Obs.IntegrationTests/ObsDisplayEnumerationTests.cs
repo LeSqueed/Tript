@@ -47,15 +47,18 @@ public sealed class ObsDisplayEnumerationTests
 
     // The saved preference selects by id, and an id no longer attached falls back rather than
     // failing — the state a user reaches by unplugging a monitor.
-    [Fact]
+    [SkippableFact]
     public void TheSavedMonitor_SelectsById_AndAMissingOneFallsBack()
     {
         using var session = ObsSession.StartWithSourceTypes();
         using var source = ObsSource.CreatePrivate(ObsCaptureSource.FindDisplayCaptureId()!, "monitor choice");
 
+        // Selecting a monitor needs a monitor. Returning early here used to report as a pass, which
+        // is the one answer that is never true — nothing was selected and nothing was checked.
         var displays = ObsCaptureSource.EnumerateDisplays(source);
         if (displays.Count == 0)
-            return;
+            throw new Xunit.SkipException(
+                "This machine's display capture enumerates no monitors; there is nothing to select by id.");
 
         var chosen = displays[^1];
         Assert.Equal(chosen, ObsCaptureSource.ResolveDisplay(displays, chosen.Id).Selected);

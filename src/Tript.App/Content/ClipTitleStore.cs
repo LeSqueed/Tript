@@ -11,7 +11,9 @@ namespace Tript.App.Content;
 // record in the same metadata/ tree, keyed by the clip's file name.
 internal sealed class ClipTitleStore
 {
-    private string _metadataRoot;
+    // See ContentServer._contentRoot: written on the IPC thread, read from the library and clip
+    // threads.
+    private volatile string _metadataRoot;
 
     internal ClipTitleStore(string metadataRoot)
     {

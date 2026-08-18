@@ -57,7 +57,9 @@ export function useTrash(client: IpcClient): TrashController {
 
   const purge = useCallback(
     (entryIds: readonly string[]) => {
-      // An empty list would empty the WHOLE trash on the backend — never send one by accident.
+      // An empty list purges NOTHING on the backend (only an ABSENT `entryIds` means the whole
+      // bin — that is `emptyTrash`). So this guard is not a safety catch: it just spares a
+      // round trip, and the state push the backend answers every PurgeTrash with, on a no-op.
       if (entryIds.length > 0) {
         client.send('PurgeTrash', { entryIds: [...entryIds] });
       }

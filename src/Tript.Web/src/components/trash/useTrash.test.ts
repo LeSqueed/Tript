@@ -2,7 +2,7 @@
 //
 // The trash binding's wire behaviour. The commands here are the half of the contract a component
 // test cannot see: that `RestoreTrash` and `PurgeTrash` carry `entryIds`, that emptying the trash
-// carries NO parameters at all (an empty `entryIds` would mean something else entirely), and that a
+// carries NO parameters at all (an empty `entryIds` would purge nothing instead), and that a
 // reconnect re-asks — the trash, like the content list, is not in the NewConnection push.
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -83,7 +83,8 @@ describe('useTrash', () => {
     ]);
 
     sent.length = 0;
-    // An empty `entryIds` on PurgeTrash would empty the WHOLE trash — never send one by accident.
+    // An empty `entryIds` purges nothing on the backend, so an empty selection is simply not
+    // worth a frame. Emptying the whole bin is the *absent* `entryIds` below.
     act(() => result.current.restore([]));
     act(() => result.current.purge([]));
     expect(sent).toEqual([]);

@@ -108,10 +108,12 @@ internal sealed class AppOptions
         var games = new List<GameInfo>();
         foreach (var game in settings.Game.GameList)
         {
+            var executable = game.EffectiveExecutable;
             games.Add(new GameInfo
             {
                 Id = game.Id,
                 Name = game.Name,
+                Executable = string.IsNullOrWhiteSpace(executable) ? null : executable,
                 Detected = false,
             });
         }

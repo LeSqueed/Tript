@@ -16,6 +16,9 @@ namespace Tript.Detection.Tests;
 // in three separate mutable statics. The DetectionsAvailable callback snapshotted _eventDefinitions
 // but read _cooldownTracker straight off the static on every detection — from the detector's own
 // inference thread.
+//
+// The null-definition guard that was tested here now runs in Tript.Recorder's DetectionHost, and is
+// pinned by DetectionHostTests.Detections_WithNoDefinitionForTheirClass_AreDropped.
 [Collection(RecordingStateCollection.Name)]
 public class DetectionSessionTests
 {
@@ -95,19 +98,6 @@ public class DetectionSessionTests
         var bookmarks = CaptureBookmarks(() =>
             GameIntegrationService.HandleDetections(session,
                 new List<DetectionResult> { Detection(0), Detection(1) }));
-
-        Assert.Empty(bookmarks);
-    }
-
-    // A detection the definitions say nothing about must not reach the tracker at all — the old
-    // lambda's null-definition guard, kept.
-    [Fact]
-    public void HandleDetections_IgnoresClassIdsWithNoDefinition()
-    {
-        var session = NewSession(Trigger(0, BookmarkType.Kill));
-
-        var bookmarks = CaptureBookmarks(() =>
-            GameIntegrationService.HandleDetections(session, new List<DetectionResult> { Detection(7) }));
 
         Assert.Empty(bookmarks);
     }

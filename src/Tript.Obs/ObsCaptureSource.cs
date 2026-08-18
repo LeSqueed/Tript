@@ -3,19 +3,6 @@
 
 namespace Tript.Obs;
 
-// Which picture a capture source should supply. Game capture is a Windows capability: libobs's
-// linux-capture module has no game-capture source, so on Linux the alpha recorder falls back to
-// display capture and the game path is absent.
-public enum ObsCaptureMode
-{
-    // A specific game process, via the platform's game-capture source. Windows only; there is no
-    // Linux equivalent in libobs.
-    Game,
-    // A display or monitor, via the platform's screen-capture source (xshm_input on Linux,
-    // monitor_capture on Windows).
-    Display
-}
-
 // A target for game capture, carried as the capture source's own vocabulary so the caller never
 // touches a plugin key. What a process identity must contain is exactly what the discovered
 // properties accept: on Windows the game-capture plugin matches on a window by title or class and
@@ -184,9 +171,10 @@ public static class ObsCaptureSource
     }
 
     // As BuildDisplayCaptureSettings, for a source created with a known type id but not yet
-    // instantiated. Passing the *created* source is preferred — it takes the reliable instance
-    // route — but this overload exists for the shape "discover what I will create, then create it
-    // with the discovered settings".
+    // instantiated, for the shape "discover what I will create, then create it with the discovered
+    // settings". Pass the *created* source instead wherever there is one: this route reaches
+    // obs_get_source_properties, which segfaults for both of linux-capture's capture types because
+    // their property builders dereference the instance libobs has not made yet.
     public static ObsSettings BuildDisplayCaptureSettings(string typeId, int displayIndex)
     {
         ArgumentException.ThrowIfNullOrEmpty(typeId);

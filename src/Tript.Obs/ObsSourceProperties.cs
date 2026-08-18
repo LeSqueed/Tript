@@ -41,8 +41,12 @@ public static class ObsSourceProperties
     // The properties a type exposes, free of the settings layer's round-trip assumptions: the keys
     // a plugin reads are the keys it declares here, so this is the authoritative account of what
     // can be configured and with which choices. This is the discovery route for the plugin-side
-    // capture keys — game-capture's window/process selection on Windows, xshm_input's display
-    // selection on Linux. Empty when the type is registered but declares no properties.
+    // capture keys — game-capture's window/process selection on Windows. Empty when the type is
+    // registered but declares no properties.
+    //
+    // Not safe for every id: libobs hands the plugin's property builder a NULL instance pointer,
+    // and a builder that dereferences it takes the process down. linux-capture's xshm_input and
+    // xcomposite_input both do; ObsSource.EnumerateProperties is the route for those.
     public static IReadOnlyList<ObsSourceProperty> EnumerateTypeProperties(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);

@@ -16,7 +16,22 @@ public sealed class GameSetting
 
     public string Id { get; set; } = string.Empty;
 
+    // The display name. Shown in the UI and written into a recording's metadata record; it has no
+    // bearing on what is detected or hooked.
     public string Name { get; set; } = string.Empty;
+
+    // The process/executable this game runs as, with or without a `.exe` — auto-detection matches it
+    // against the running process list and game capture hooks it. Optional: absent (the shape every
+    // settings file written before this field has) means the display Name doubles as the executable,
+    // which is exactly how it behaved when Name did both jobs.
+    public string? Executable { get; set; }
+
+    // Never written to the settings file: this is Executable-or-Name, not a stored value. Callers
+    // that need to compare it against a running process name normalize it first
+    // (ProcessNameGameDetector.NormalizeProcessName) — the `.exe` is optional on both sides.
+    [JsonIgnore]
+    public string EffectiveExecutable
+        => string.IsNullOrWhiteSpace(Executable) ? Name : Executable.Trim();
 
     public string? IconId { get; set; }
 

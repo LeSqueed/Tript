@@ -113,7 +113,10 @@ public sealed class ObsSettings : IDisposable
     }
 
     // Stored by reference, not copied: libobs takes its own reference and later edits made through
-    // the caller's object are visible here. Passing null stores a JSON null.
+    // the caller's object are visible here. Passing null stores a JSON null — but only from OBS
+    // 32.1.0, which added the null check obs_data_to_json needs to walk one; below that line the
+    // entry is a landmine that segfaults the process on the next ToJson of the *parent*. Erase or
+    // UnsetUserValue is how to say "not configured" without one.
     public void SetObject(string name, ObsSettings? value)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);

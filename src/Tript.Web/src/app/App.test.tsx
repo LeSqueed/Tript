@@ -318,7 +318,7 @@ describe('App shell', () => {
 
 // The host refuses every listener without the token, so a token-less page can do nothing at all.
 // Silently reconnecting behind an empty library would look like a broken backend; say what is wrong
-// instead. In practice this is what a bare `vite dev` on :2882 hits.
+// instead. In practice this is what a bare `vite dev` (on :2883) hits.
 describe('App without a session token', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -382,5 +382,69 @@ describe('the session token in the rendered page', () => {
       }
       spy.mockRestore();
     }
+  });
+});
+
+// A tab left open across a host restart holds the previous launch key, so the socket, the videos and
+// the thumbnails all 403. That is correct, but on its own it presents as a shell that never fills in
+// — the user has no way to know a reload of the printed address is what they need.
+describe('App against a host that no longer accepts this page\'s key', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.reset();
+    captureSessionToken(`?k=${TOKEN}`);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    captureSessionToken('');
+  });
+
+  /** Answers the UI-host probe; the socket is left to never open, as a refused handshake leaves it. */
+  function hostAnswers(status: number): void {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status })));
+  }
+
+  async function settle(ms: number): Promise<void> {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  it('says the key is stale once the host answers 403', async () => {
+    hostAnswers(403);
+    render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
+
+    // Nothing while the socket is merely retrying.
+    await settle(1_000);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+
+    await settle(5_000);
+    const banner = screen.getByTestId('connection-banner');
+    expect(banner.textContent).toMatch(/restarted/i);
+  });
+
+  it('does not blame the key when the host still accepts it', async () => {
+    hostAnswers(200);
+    render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
+
+    await settle(6_000);
+    expect(screen.getByTestId('connection-banner').textContent).not.toMatch(/key/i);
+  });
+
+  it('takes the banner back down when the socket comes up', async () => {
+    hostAnswers(403);
+    render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
+
+    await settle(6_000);
+    expect(screen.getByTestId('connection-banner')).toBeTruthy();
+
+    act(() => {
+      MockWebSocket.instances[MockWebSocket.instances.length - 1].serverOpen();
+    });
+    await settle(60_000);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
   });
 });

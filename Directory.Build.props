@@ -9,5 +9,10 @@
     <!-- Both target frameworks are carried from the first commit even while only one is exercised:
          retrofitting a second TFM later costs more than carrying an idle one. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Restore writes a packages.lock.json per project and then honours it, so a transitive version
+         cannot drift between machines or over time. The Windows bundle depends on this concretely:
+         publish-shell-win ships Photino.Native's win-x64 payload, and Photino.Native is a TRANSITIVE
+         dependency of Photino.NET that nothing else pins. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

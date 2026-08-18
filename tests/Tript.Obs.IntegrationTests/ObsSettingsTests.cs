@@ -428,15 +428,32 @@ public sealed class ObsSettingsTests
     }
 
     [Fact]
-    public void ANullNestedObject_StoresAJsonNullWhileANullArrayStoresAnEmptyArray()
+    public void ANullNestedArray_StoresAnEmptyArrayRatherThanAJsonNull()
     {
         using var settings = new ObsSettings();
-        settings.SetObject("object", null);
         settings.SetArray("array", null);
+
+        Assert.Contains("\"array\":[]", settings.ToJson(), StringComparison.Ordinal);
+    }
+
+    // Serialising the null half of that asymmetry is a hard crash below OBS 32.1.0: obs_data_to_json
+    // recursed into the null child and dereferenced it, and 32.1.0 added the `if (!data) return
+    // json_null()` that produces the null this asserts. Reproduced in plain C against 30.0.2 with no
+    // binding involved, so it is not ours to fix — and it takes the whole test host with it, which
+    // is why it has to be refused before ToJson rather than left to fail.
+    [SkippableFact]
+    public void ANullNestedObject_StoresAJsonNull()
+    {
+        if (ObsRuntime.Version < new Version(32, 1, 0))
+            throw new Xunit.SkipException(
+                $"This machine's OBS runtime is {ObsRuntime.VersionString}. obs_data_to_json segfaults on a "
+                + "null nested object before 32.1.0, and a segfault aborts the whole run rather than one test.");
+
+        using var settings = new ObsSettings();
+        settings.SetObject("object", null);
 
         Assert.Null(settings.GetObject("object"));
         Assert.Contains("\"object\":null", settings.ToJson(), StringComparison.Ordinal);
-        Assert.Contains("\"array\":[]", settings.ToJson(), StringComparison.Ordinal);
     }
 
     // ---- arrays ----

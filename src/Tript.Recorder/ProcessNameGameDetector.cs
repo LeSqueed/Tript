@@ -29,7 +29,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
     {
         ArgumentNullException.ThrowIfNull(gameNames);
 
-        _gameNames = gameNames.Select(Normalize).Where(name => name.Length > 0).ToArray();
+        _gameNames = gameNames.Select(NormalizeProcessName).Where(name => name.Length > 0).ToArray();
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
     }
 
@@ -95,7 +95,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
                 // Each Process wraps an OS handle on Windows; a poll every few seconds that keeps
                 // them all is a handle leak until the finalizers run.
                 using (process)
-                    names.Add(Normalize(process.ProcessName));
+                    names.Add(NormalizeProcessName(process.ProcessName));
             }
         }
         catch
@@ -156,8 +156,10 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
     // The executable-name vocabulary the catalogue carries uses extensions; the process list does
     // not on Linux. Normalizing here means a catalogue entry and a running process agree on the
-    // comparison regardless of platform.
-    private static string Normalize(string name)
+    // comparison regardless of platform. Public because the names this detector reports back are
+    // normalized too, so anything matching one against a catalogue entry has to spell it the same
+    // way rather than guess whether a `.exe` is on either side.
+    public static string NormalizeProcessName(string name)
     {
         var trimmed = name.Trim();
         return trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)

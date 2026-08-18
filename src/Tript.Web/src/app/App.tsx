@@ -7,6 +7,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useIpcClient } from './useConnection';
 import { RecorderBar } from '../components/RecorderBar';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { ConnectionBanner } from '../components/ConnectionBanner';
 import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
 import { LibraryView } from '../components/LibraryView';
 import { PlayerView } from '../components/PlayerView';
@@ -19,6 +20,7 @@ import { useIpcSessionSource, useSessionSource } from '../components/player/useS
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
+import { useHostReachability } from './useHostReachability';
 import './app.css';
 
 export type Route = 'library' | 'trash' | 'settings';
@@ -49,6 +51,10 @@ function MissingKeyNotice() {
 
 function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const { client, connectionState } = useIpcClient(ipcOptions);
+  // A key is present (App checked) but may no longer be accepted: the host mints a new one per
+  // launch, so a tab left open across a restart 403s on everything and would otherwise just sit
+  // there empty.
+  const reachability = useHostReachability(connectionState);
   const [route, setRoute] = useState<Route>('library');
   // The item the player overlay is showing, or null when the overlay is down.
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
@@ -101,6 +107,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   return (
     <div className={overlayOpen ? 'app-shell player-open' : 'app-shell'}>
       <RecorderBar client={client} connectionState={connectionState} />
+      <ConnectionBanner reachability={reachability} />
       <ErrorBanner client={client} />
       <DisplayFallbackBanner client={client} />
       <nav className="app-nav" aria-label="Primary">

@@ -57,7 +57,13 @@ internal sealed class GameInfo
 {
     public string Id { get; set; } = string.Empty;
 
+    // The display name, and only that. What the game runs as is Executable.
     public string Name { get; set; } = string.Empty;
+
+    // The process/executable name auto-detection matches and game capture hooks, already resolved
+    // from the settings entry (GameSetting.EffectiveExecutable), so it is never the empty string.
+    // Null only for a catalogue entry that carries no executable at all.
+    public string? Executable { get; set; }
 
     public bool Detected { get; set; }
 }

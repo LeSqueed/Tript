@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { GameCaptureMode, GameSetting, RecordingMode } from '../settingsModel';
 import { ActionButton, DangerButton, Field, SelectField, TextField } from '../form';
+import { executablePatch } from '../gameExecutable';
 
 const CAPTURE_MODES: { value: GameCaptureMode; label: string }[] = [
   { value: 'Auto', label: 'Auto — detect and attach to the game automatically' },
@@ -111,9 +112,14 @@ export function GamePage({
 
       <div className="game-list">
         <h3 className="settings-subheading">Known games</h3>
-
-        {gameList.length === 0 && (
+        {gameList.length === 0 ? (
           <p className="muted small">No games yet — add one to set per-game overrides.</p>
+        ) : (
+          <p className="muted small">
+            Executable is the process name the recorder watches for and attaches game capture to. It
+            is often not the display name — Counter-Strike 2 runs as <code>cs2</code>. Leave it blank
+            to watch for the name itself.
+          </p>
         )}
 
         {gameList.map((game, index) => (
@@ -127,6 +133,19 @@ export function GamePage({
             </div>
 
             <div className="game-row-overrides">
+              <label className="settings-inline-field">
+                <span className="muted small">Executable</span>
+                <input
+                  type="text"
+                  className="settings-input"
+                  value={game.executable ?? ''}
+                  // The name itself, so the field shows exactly what blank falls back to.
+                  placeholder={game.name}
+                  aria-label={`Executable for ${game.name}`}
+                  onChange={(event) => patchGame(index, executablePatch(event.target.value))}
+                />
+              </label>
+
               <label className="settings-inline-field">
                 <span className="muted small">Recording mode</span>
                 <select

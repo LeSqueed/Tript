@@ -1,0 +1,4 @@
+# Detection models are large binaries and are versioned through Git LFS rather than as blobs in
+# the pack. Anyone cloning without git-lfs installed gets the pointer files and a detection layer
+# that reports no model, which is the same state as a clone made before the models shipped.
+data/models/**/*.onnx filter=lfs diff=lfs merge=lfs -text

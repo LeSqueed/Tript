@@ -14,7 +14,15 @@ public static class FfmpegRunner
 {
     public static void Run(string ffmpegPath, IReadOnlyList<string> args, ClipRequest request, string stage)
     {
-        request.Progress?.Invoke(ClipProgress.At(stage, string.Join(' ', args)));
+        // -nostdin: never read the terminal, whatever this process inherited. -y: an ffmpeg that
+        // finds its output file already there otherwise stops to ask "Overwrite? [y/N]" and, with
+        // no answer coming, waits forever. A clip's name is derived from its source and its region
+        // (or its request id), so a file already at that name is a previous attempt at this exact
+        // clip — including the partial one a killed encode leaves behind.
+        var arguments = new List<string>(args.Count + 2) { "-nostdin", "-y" };
+        arguments.AddRange(args);
+
+        Report(request, ClipProgress.At(stage, string.Join(' ', arguments)));
 
         using var process = new Process
         {
@@ -22,13 +30,14 @@ public static class FfmpegRunner
             {
                 FileName = ffmpegPath,
                 UseShellExecute = false,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             }
         };
 
-        foreach (var arg in args)
+        foreach (var arg in arguments)
             process.StartInfo.ArgumentList.Add(arg);
 
         try
@@ -41,20 +50,23 @@ public static class FfmpegRunner
             throw new ClipSourceException($"Failed to start ffmpeg at '{ffmpegPath}': {ex.Message}", ex);
         }
 
+        // Belt and braces with -nostdin: close stdin so any read of it sees EOF immediately.
+        try { process.StandardInput.Close(); } catch (IOException) { /* the child exited first */ }
+
         var stderr = new StringBuilder();
         process.ErrorDataReceived += (_, e) =>
         {
             if (string.IsNullOrEmpty(e.Data)) return;
             lock (stderr) stderr.AppendLine(e.Data);
-            request.Progress?.Invoke(ClipProgress.At(stage, e.Data));
+            Report(request, ClipProgress.At(stage, e.Data));
         };
 
         process.BeginErrorReadLine();
 
         // Drain stdout (unused for clips) so the child cannot block on a full pipe.
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stdoutTask = ProcessPipes.BeginRead(process.StandardOutput);
         process.WaitForExit();
-        stdoutTask.Wait();
+        ProcessPipes.Settle(stdoutTask);
 
         if (process.ExitCode != 0)
         {
@@ -106,39 +118,42 @@ public static class FfmpegRunner
 
         // Both pipes are drained concurrently with the wait: a child blocked on a full stderr pipe
         // would never exit and the timeout below would fire for the wrong reason.
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = ProcessPipes.BeginRead(process.StandardOutput);
+        var stderr = ProcessPipes.BeginRead(process.StandardError);
 
         if (!process.WaitForExit((int)timeout.TotalMilliseconds))
         {
-            try
-            {
-                // entireProcessTree: ffmpeg spawns no children today, but a killed parent leaving a
-                // live child holding the output file open is the failure mode that would make the
-                // next attempt fail too.
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(2000);
-            }
-            catch (Exception exception) when (exception is InvalidOperationException
-                                                 or System.ComponentModel.Win32Exception
-                                                 or NotSupportedException)
-            {
-                // Already gone, or the platform refused the kill; either way the caller only needs
-                // to know the run did not complete.
-            }
+            ProcessPipes.KillQuietly(process);
 
+            // The kill closes the pipes, so the reads end here rather than outliving the Process
+            // this using-block is about to dispose.
+            ProcessPipes.Settle(stdout, stderr);
             return FfmpegOutcome.TimedOut(timeout);
         }
 
         // The exit is observed; give the two reads a moment to flush and then take whatever they
         // have. A read that somehow never completes must not turn a finished process into a hang.
-        try { Task.WaitAll([stdout, stderr], TimeSpan.FromSeconds(2)); }
-        catch (AggregateException) { /* a pipe closed early; the text below is then just empty */ }
+        ProcessPipes.Settle(stdout, stderr);
 
         return new FfmpegOutcome(
             Completed: true,
             ExitCode: process.ExitCode,
-            StandardError: stderr.IsCompletedSuccessfully ? stderr.Result : string.Empty);
+            StandardError: ProcessPipes.TextOf(stderr));
+    }
+
+    // The progress sink belongs to the caller and, for the stderr lines, is invoked on a Process
+    // event thread. An exception out of it (a closed websocket, say) would be thrown on that thread
+    // and take the host down with it, so a broken sink is dropped rather than allowed to fail a
+    // clip that is otherwise fine.
+    private static void Report(ClipRequest request, ClipProgress progress)
+    {
+        try
+        {
+            request.Progress?.Invoke(progress);
+        }
+        catch (Exception)
+        {
+        }
     }
 }
 

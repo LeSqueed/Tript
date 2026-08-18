@@ -35,6 +35,8 @@ public sealed class ClipRequest
     public string Title { get; init; } = string.Empty;
 
     // A low-latency "one line of ffmpeg stderr" channel, in the same spirit as the training
-    // surface's progress messages. Invoked on the engine's worker thread as ffmpeg streams output.
+    // surface's progress messages. Invoked on a Process event thread as ffmpeg streams output, not
+    // on the engine's worker thread, so it must be thread-safe; an exception thrown out of it is
+    // swallowed rather than allowed to fail the clip.
     public Action<ClipProgress>? Progress { get; init; }
 }

@@ -188,9 +188,18 @@ public sealed class MediaProbe
         throw new FormatException($"Expected integer '{name}', got '{value}'");
     }
 
-    // Runs a process, capturing stdout and stderr. Both are fully drained so a chatty probe cannot
-    // deadlock the child on a full pipe. ArgumentList handles per-argument quoting for the platform.
-    internal static (string Stdout, string Stderr, int ExitCode) Run(string fileName, IReadOnlyList<string> arguments)
+    // A probe of a local file answers in milliseconds. The cap is generous by three orders of
+    // magnitude because its job is not to be tight: the library listing probes every file on a
+    // request thread, and an ffprobe that never exits must not hold one open forever.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
+
+    // Runs a process, capturing stdout and stderr. Both pipes are drained concurrently with the
+    // wait, so a chatty probe cannot block on a full pipe, and the wait is bounded, so a probe that
+    // never exits is killed instead of parking the caller. A timed-out run reports exit code -1,
+    // which reads to ProbeUncached as a failed probe.
+    // ArgumentList handles per-argument quoting for the platform.
+    internal static (string Stdout, string Stderr, int ExitCode) Run(string fileName,
+        IReadOnlyList<string> arguments, TimeSpan? timeout = null)
     {
         using var process = new Process
         {
@@ -217,10 +226,21 @@ public sealed class MediaProbe
             throw new ClipSourceException($"Failed to start {fileName}: {ex.Message}", ex);
         }
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (stdout, stderr, process.ExitCode);
+        var stdout = ProcessPipes.BeginRead(process.StandardOutput);
+        var stderr = ProcessPipes.BeginRead(process.StandardError);
+
+        var limit = timeout ?? ProbeTimeout;
+        if (!process.WaitForExit((int)limit.TotalMilliseconds))
+        {
+            ProcessPipes.KillQuietly(process);
+            ProcessPipes.Settle(stdout, stderr);
+            return (string.Empty,
+                $"{Path.GetFileName(fileName)} did not exit within {limit.TotalSeconds:0.#}s and was killed.",
+                -1);
+        }
+
+        ProcessPipes.Settle(stdout, stderr);
+        return (ProcessPipes.TextOf(stdout), ProcessPipes.TextOf(stderr), process.ExitCode);
     }
 
     internal static string Quote(string path) => "\"" + path.Replace("\"", "\\\"") + "\"";

@@ -4,8 +4,8 @@
 namespace Tript.Media;
 
 // Builds the ffmpeg filter-graph fragments that handle colour. The chain text lives here, separate
-// from the engine, so the exact five-stage order is one place a rewrite can lose — the spec names
-// it as the part most likely to be lost, because each step looks individually optional.
+// from the engine, because the exact five-stage order is the part a rewrite is most likely to lose:
+// each step looks individually optional.
 internal static class ColorChain
 {
     // The five-stage tone-map chain, in this order, not interchangeable:
@@ -33,8 +33,7 @@ internal static class ColorChain
 
     // Tags SDR output as BT.709. Top-level -color_trc/-color_primaries flags do NOT make libx264
     // write the VUI fields into the bitstream (measured — only the matrix landed); setparams in the
-    // filter graph does, for both libx264 and libx265. Without explicit colour metadata, players
-    // and upload pipelines guess, and guess differently from one another.
+    // filter graph does, for both libx264 and libx265.
     public const string TagBt709 = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709";
 
     // Tags a preserved HDR output with bt2020nc / bt2020 / the source's own transfer (supplied by

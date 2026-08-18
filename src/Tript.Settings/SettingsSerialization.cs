@@ -15,24 +15,8 @@ public static class SettingsSerialization
 
     // A dedicated converter reads the content-type vocabulary; the rest of the enum surface is
     // written by name (JsonStringEnumConverter) so the file stays readable and the names are the
-    // compatibility surface, not the ordinals.
-    //
-    // The read side is deliberately lenient while the write side stays exact. These files are read
-    // back by builds that did not write them and they are hand-edited (a recovered recording gets
-    // its game typed in), so a record that is nearly right must load rather than count as garbage:
-    // a record that fails to parse is a record whose game, title and bookmarks are at risk. Each
-    // flag below was picked against a measured failure of the previous options:
-    //
-    //   PropertyNameCaseInsensitive  A record with PascalCase members ("VideoPath") parsed into an
-    //                                empty record — no exception, silently no videoPath and no game.
-    //   AllowTrailingCommas          {"game":"Overwatch",} threw "The JSON object contains a trailing
-    //                                comma at the end which is not supported in this mode."
-    //   ReadCommentHandling.Skip     A // comment threw "'/' is invalid after a value."
-    //   AllowReadingFromString       "durationSeconds": "9.13" threw "The JSON value could not be
-    //                                converted to System.Nullable`1[System.Double]".
-    //
-    // None of them changes what is written: the serialized form is still camelCase, indented, with
-    // numbers written as numbers.
+    // compatibility surface, not the ordinals. The read side is deliberately lenient while the
+    // write side stays exact.
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions

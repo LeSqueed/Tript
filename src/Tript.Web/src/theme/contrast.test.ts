@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The accent-colour constraint, verified mechanically. The reference theme put dark text on the
-// primary colour and worked only because its accent was light. Under a dark modern theme the rule
-// is: text on the accent must contrast against the accent, and text on the dark ground must
-// contrast against the ground. These numbers are the contract the theme block must keep.
+// primary colour and worked only because its accent was light.
 
 import { describe, expect, it } from 'vitest';
 

@@ -21,12 +21,7 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
     // How far into the file the frame is taken. Frame 0 of a game capture is usually useless: the
     // capture source's first composited frames are commonly black (game capture hooks before the
     // first present, and libobs renders the scene's clear colour until a frame arrives), and titles
-    // fade in over the first moments. A second in is past that on every real capture and is still
-    // inside the shortest recording a user can produce by pressing stop immediately.
-    //
-    // A fraction of the duration was the alternative and was rejected: it needs the duration, which
-    // means an ffprobe per thumbnail — a second process on the request path to place a frame that
-    // one second already places well.
+    // fade in over the first moments.
     private static readonly TimeSpan SeekOffset = TimeSpan.FromSeconds(1);
 
     // The frame's width; the height follows the source's aspect ratio. 480 is a card in the
@@ -49,15 +44,12 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
     public bool TryExtract(string sourcePath, string destinationPath)
     {
         // A recording shorter than the seek offset produces no image, and the retry at frame 0 is
-        // what covers it — a two-second recording is a real thing a user can produce, and a
-        // half-second one is possible if they stop instantly.
-        //
-        // Measured on ffmpeg 8.x (a 0.5s H.264 file, -ss 1): the seek lands past the end, the filter
-        // graph passes no frame on, and the *exit code depends on the argument shape* — 234 for this
-        // command ("Nothing was written into output file, because at least one of its streams
-        // received no packets"), and 0 with an empty stderr if the pixel format is pinned instead.
-        // What never varies is that no output file appears. So the file on disk is the only usable
-        // signal; the exit code is checked but is never sufficient.
+        // what covers it — a two-second recording is a real thing a user can produce, and a half-
+        // second one is possible if they stop instantly. Measured on ffmpeg 8.x (a 0.5s H.264 file,
+        // -ss 1): the seek lands past the end, the filter graph passes no frame on, and the *exit
+        // code depends on the argument shape* — 234 for this command ("Nothing was written into
+        // output file, because at least one of its streams received no packets"), and 0 with an
+        // empty stderr if the pixel format is pinned instead.
         if (TryExtractAt(sourcePath, destinationPath, SeekOffset))
             return true;
 
@@ -103,14 +95,9 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
         ]);
 
         // No -pix_fmt: the mjpeg encoder already converts a limited-range recording to JPEG's full
-        // range on its own. Measured on the same frame of a color_range=tv capture, with and without
-        // an explicit -pix_fmt yuvj420p: byte-identical output, tagged yuvj420p/pc, and the frame's
-        // average luma moved 32.9 -> 19.7, exactly the 16..235 -> 0..255 expansion. Pinning the
-        // format only adds a deprecated-pixel-format warning.
-        //
-        // No tone-map either: a PQ or HLG source yields a flat, washed-out card. Tone-mapping costs a
-        // filter chain the clip engine already carries for the encode path, and it is not worth it
-        // for a 480px still.
+        // range on its own. Measured on the same frame of a color_range=tv capture, with and
+        // without an explicit -pix_fmt yuvj420p: byte-identical output, tagged yuvj420p/pc, and the
+        // frame's average luma moved 32.9 -> 19.7, exactly the 16..235 -> 0..255 expansion.
 
         var outcome = FfmpegRunner.RunBounded(_ffmpegPath, arguments, Timeout);
 

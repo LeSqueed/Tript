@@ -12,9 +12,8 @@ public enum ObsEncoderType
 }
 
 // The capability bits an encoder *type* declares, from obs_encoder_info.caps [obs-encoder.h:35-41].
-// Not to be confused with the per-instance flags: these describe what the type can do and are
-// read-only. A flags enum because the set grew between runtimes and a switch over known values
-// would call an unseen bit a non-capability.
+// Not to be confused with the per-instance flags: these describe what the type can do and are read-
+// only.
 [Flags]
 public enum ObsEncoderCaps : uint
 {

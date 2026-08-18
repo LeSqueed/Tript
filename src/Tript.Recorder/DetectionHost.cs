@@ -9,34 +9,7 @@ namespace Tript.Recorder;
 
 // The detection-to-bookmarking host. Given a game, it starts a visual event detector for that game
 // and turns the detections that detector raises into bookmarks on the active recording via a
-// CooldownTracker. It owns nothing else: the recorder (its caller) decides *when* a game is active
-// and *when* a recording is in progress; this host decides how a game's detections become bookmarks.
-//
-// The lifecycle of one game:
-//
-//   Start(gameId)
-//     ensure a frame source is registered   (fail early with a clear message, not a throw deep
-//                                           inside the detector's thread)
-//     guard on ModelService.HasModelForGame  (a supported game with no model is reported, not crashed)
-//     load the game's EventDefinitions once  (keyed by ClassId, events.json already does this)
-//     start the detector for the game
-//     subscribe to DetectionsAvailable
-//     arm the cooldown cleanup timer
-//   detections -> for each, the definition with a matching ClassId -> CooldownTracker.ProcessDetection
-//     + Cleanup on an interval so a stale instance is retired rather than swallowing the next event
-//   Stop()
-//     stop the detector, unsubscribe, stop the cleanup timer
-//
-// Definitions are keyed by ClassId: events.json already keys them by class (the detection models
-// ship hand-in-hand with events.json, and the detector itself cross-checks the two at Start). The
-// matching is a simple dictionary lookup; the detector has already decided which class a box is.
-//
-// A definition without a BookmarkType is "detected but never bookmarked" by design (spec,
-// training.md): exclusion definitions suppress, they do not bookmark. The CooldownTracker already
-// implements that rule; the host's only job is to hand it the right definition.
-//
-// The host is deliberately not coupled to the recorder's control flow: it exposes Start/Stop and
-// the observation points the recorder needs, and nothing else.
+// CooldownTracker.
 public sealed class DetectionHost : IDisposable
 {
     private readonly IVisualEventDetector _detector;

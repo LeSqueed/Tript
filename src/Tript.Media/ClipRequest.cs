@@ -5,8 +5,7 @@ namespace Tript.Media;
 
 // Everything the engine needs to turn part of a recorded session into one or more clip files. This
 // is the engine-facing surface of the CreateClip payload: the IPC handler maps the wire message
-// onto this and hands it over. Fields are named for what they are, not for their wire casing, which
-// the contract itself admits is inconsistent.
+// onto this and hands it over.
 public sealed class ClipRequest
 {
     // The finished recording being clipped.
@@ -14,11 +13,6 @@ public sealed class ClipRequest
 
     // The marked regions, in timeline order. In Separate mode each becomes its own file; in Combine
     // mode they are concatenated into one.
-    //
-    // These are what the caller asked for, not what is cut: the engine fits them to the source's
-    // probed duration first (ClipRegionBounds), so a region that runs past the end is truncated and
-    // one that cannot be salvaged is dropped. A request whose regions all drop is refused rather than
-    // handed to ffmpeg, which reports every out-of-bounds region as exit code 0.
     public required IReadOnlyList<ClipRegion> Regions { get; init; }
 
     public required ClipMode Mode { get; init; }
@@ -32,9 +26,7 @@ public sealed class ClipRequest
     public IReadOnlyList<AudioTrackAdjustment> AudioTrackAdjustments { get; init; } = [];
 
     // The encoder family to target. Defaults to the generic software path, libx265, which can carry
-    // 10-bit and therefore preserves a uniform HDR source. Selecting a non-10-bit family (for
-    // example "libx264") forces the HDR source through the tone-map fallback, exactly as the spec's
-    // decision rule describes: "can the target codec carry 10-bit".
+    // 10-bit and therefore preserves a uniform HDR source.
     public string EncoderFamily { get; init; } = "libx265";
 
     // The user's clip title from the clip dialog ("The clutch"), carried through so the host can

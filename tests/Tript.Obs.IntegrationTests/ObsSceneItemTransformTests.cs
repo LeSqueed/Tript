@@ -96,10 +96,8 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new Vector2(-1f, 1f), item.Scale);
     }
 
-    // Measured on 32.2.1 and stated in no header: a scene item's position lands on a half-unit grid.
-    // The grid is the same at any canvas size and any scale. Values exactly halfway between two grid
-    // points are not decided consistently, so this asserts the grid and the bound rather than a
-    // particular tie.
+    // Measured on 32.2.1 and stated in no header: a scene item's position lands on a half-unit
+    // grid. The grid is the same at any canvas size and any scale.
     [Theory]
     [InlineData(100.125f, 100.0f)]
     [InlineData(200.375f, 200.5f)]

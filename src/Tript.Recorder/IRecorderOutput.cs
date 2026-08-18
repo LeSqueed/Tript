@@ -9,11 +9,6 @@ namespace Tript.Recorder;
 // wraps an ObsOutput and the encoders that feed it; the state machine sees only this surface, which
 // is what keeps the recorder testable without libobs and what keeps the two-output shape (Buffer,
 // Hybrid) from disturbing the machine — a second output is just a second IRecorderOutput.
-//
-// The failure vocabulary is the binding's, not a re-invention: Start returns false synchronously
-// with LastError as the reason, and the Stopped event carries the stop code and last_error from the
-// output's stop signal. Success on Stopped is a normal end — how the recorder tells a clean stop it
-// asked for from a failure it did not.
 public interface IRecorderOutput : IDisposable
 {
     // True while the output is actively writing. Read from the control plane.

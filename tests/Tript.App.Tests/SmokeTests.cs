@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The alpha smoke test (spec/alpha.md, task T11). Starts the app host as a child process against a
+// The alpha smoke test. Starts the app host as a child process against a
 // temp content root, connects a WebSocket control-socket client, and asserts the six round trips
 // that define the alpha:
 //   1. NewConnection -> full push (state, settings, gameList)

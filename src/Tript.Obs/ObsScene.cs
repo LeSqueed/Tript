@@ -106,9 +106,6 @@ public sealed class ObsScene : IDisposable
     // Puts a source in this scene. The item takes a reference to the source, so the source outlives
     // its caller's handle for as long as the item does — measured, and the reason a source can be
     // disposed immediately after being added without the scene losing it.
-    //
-    // Returns null only when libobs refuses the attachment, which it does for a cycle: a scene
-    // cannot contain itself.
     public ObsSceneItem? AddSource(ObsSource source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -132,10 +129,6 @@ public sealed class ObsScene : IDisposable
     // Every item in the scene, bottom first: index 0 is the item with order position 0, which is
     // drawn behind the rest. Each item in the result is a reference of its own and is disposed by
     // the caller.
-    //
-    // Materialised rather than streamed because libobs holds the scene's lock across the whole
-    // enumeration; doing managed work of unknown duration inside it would block every other thread
-    // that touches the scene, the graphics thread included.
     public IReadOnlyList<ObsSceneItem> EnumerateItems()
     {
         var pointers = new List<nint>();

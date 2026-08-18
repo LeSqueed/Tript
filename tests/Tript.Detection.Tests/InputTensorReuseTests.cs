@@ -12,17 +12,9 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// VisualEventDetector.Start allocates one float[640*640*3], wraps it in a DenseTensor that
-// aliases that memory, and hands the tensor to a single NamedOnnxValue reused for every
-// inference. Each cycle overwrites the buffer in place; nothing rebuilds the tensor or the
-// container. That reuse keeps allocations off the LOH, and is only correct because ORT reads
-// the aliased memory at Run time rather than snapshotting it when the NamedOnnxValue is created.
-//
-// If that contract ever changes — most plausibly via an ORT package upgrade — every inference
-// after the first would score a stale frame. The failure is silent. This test exists to make
-// that loud. It loads the real ONNX model; the contract cannot be verified without the runtime.
-// Shares ModelService's reference-counted session cache with ModelSessionLifetimeTests, whose
-// assertions are about that cache's counts — so the two must not run at the same time.
+// VisualEventDetector.Start allocates one float[640*640*3], wraps it in a DenseTensor that aliases
+// that memory, and hands the tensor to a single NamedOnnxValue reused for every inference. Each
+// cycle overwrites the buffer in place; nothing rebuilds the tensor or the container.
 [Collection(ModelSessionCollection.Name)]
 public class InputTensorReuseTests
 {

@@ -199,9 +199,7 @@ internal static class MediaTestFixture
     // PSNR in dB between the first frame of `pathA` and the first frame the source produces when
     // seeking to `seekSeconds`. Both first frames are extracted as raw yuv420p (single frames,
     // lossless), so the comparison is between decoded pixels — unaffected by how each file is
-    // compressed. A clip whose first frame is the source frame at the cut time shows a high PSNR
-    // (a lossy re-encode still looks like the same frame, ~40+ dB); the frame at a different time
-    // (e.g. the previous keyframe) shows a low PSNR (~20 dB for adjacent frames).
+    // compressed.
     internal static double FirstFramePsnrDb(string ffmpeg, string pathA, string seekSeconds,
         string sourcePath, string scratchFilePrefix, int width = 320, int height = 240)
     {

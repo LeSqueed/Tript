@@ -7,10 +7,8 @@ using System.Text.Json.Serialization;
 namespace Tript.Settings;
 
 // A known/detected game and its per-game configuration. Per-game quality and recording-mode
-// overrides are distinct types (spec/config-and-storage.md): one affects the encoder's quality
-// profile, the other which recording mode runs for this game. The game is addressed by its id in
-// the catalogue (CDN icon ids were the one part of the schema tied to remote infrastructure; the
-// data-feed question is a separate decision, spec/data-feeds.md).
+// overrides are distinct types: one affects the encoder's quality
+// profile, the other which recording mode runs for this game.
 public sealed class GameSetting
 {
     [JsonExtensionData]
@@ -54,8 +52,7 @@ public sealed class GameQualityOverride
     public int? Quality { get; set; }
 }
 
-// Per-game telemetry integration toggles. The full ten-integration surface and its external
-// contracts live in spec/game-telemetry.md; the settings model only records which are enabled.
+// Per-game telemetry integration toggles. The settings model only records which are enabled.
 public sealed class GameIntegrationSettings
 {
     public bool Enabled { get; set; }

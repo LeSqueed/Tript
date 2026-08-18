@@ -1,30 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The player overlay — the player as a full-bleed layer over the library, not a route of its own.
-//
-// WHY IT IS AN OVERLAY AND NOT A PAGE. The library is the single home: a user reviewing a session came
-// from a particular filter, sort and page, and going "back" has to return them to exactly that, scroll
-// position included. A route swap cannot promise this, because leaving the library unmounts it and
-// takes its state with it. An overlay keeps the library mounted underneath and merely covers it, so
-// there is no state to save or restore — closing the overlay reveals the library the user left. (The
-// shell handles the one thing the DOM does not keep by itself: the scroll offset of its content
-// column, which it hides while the overlay is up so the page behind cannot be scrolled away.)
-//
-// This component is chrome only. It renders `children` — the existing `PlayerView`, unchanged and
-// unforked — plus the two things a layer over a page owes the user: a visible way out, and a keyboard
-// that behaves like a modal's.
-//
-// FOCUS. On mount the overlay remembers what was focused (the card that opened it, by construction)
-// and moves focus inside; on unmount it puts focus back. Tab is trapped, so a player over a library
-// cannot leak focus into the cards it is covering — which is what makes the overlay honest about
-// being modal rather than merely looking modal.
-//
-// ESCAPE, AND WHY IT SOMETIMES DOES NOTHING HERE. The player can open the clip dialog, which is itself
-// a modal (`role="dialog" aria-modal="true"`). While something like that is open inside us, Escape
-// belongs to it, not to us: closing the whole player out from under an open dialog would discard the
-// user's marked segments. So the handler stands down when it finds a nested modal, rather than racing
-// it. The listener is on the document in the CAPTURE phase so it sees the key before the player's own
-// window-level shortcut handler does.
+// Navigating away and back would unmount the library and lose the user's place; layering over it
+// keeps it mounted underneath.
 
 import { useEffect, useRef, type ReactNode } from 'react';
 

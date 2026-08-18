@@ -106,11 +106,7 @@ internal struct ObsEncoderRoiNative
 }
 
 // struct video_data [media-io/video-io.h:121-125]. Three fields and nothing else: no width, no
-// height, no format, no frame rate — all four are properties of the subscription, not of the
-// frame. MAX_AV_PLANES is 8; no format uses more than 4 and unused entries are null. The plane
-// pointers are declared as long because a fixed buffer cannot hold a pointer type; on the
-// platforms this binding targets a pointer and a long are the same size, and every use casts
-// back to nint.
+// height, no format, no frame rate — all four are properties of the subscription, not of the frame.
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct VideoDataNative
 {

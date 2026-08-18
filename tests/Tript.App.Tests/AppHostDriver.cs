@@ -12,10 +12,6 @@ namespace Tript.App.Tests;
 // The app host owns the OBS context (when real) and the three local IPC channels; running it as a
 // child is the only way to exercise the real startup path, the READY contract, and the full IPC
 // surface at once.
-//
-// The protocol the driver speaks is the frontend's (spec/local-ipc.md):
-//   out: { method, parameters? }    PascalCase method
-//   in:  { method, content }        lowercase method
 internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 {
     private readonly Process _process;
@@ -83,7 +79,7 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         var driver = new AppHostDriver(process);
 
         // The READY line is the single-line contract: the control socket, content server and UI
-        // host are all reachable once it appears (spec/recorder.md "Host startup").
+        // host are all reachable once it appears.
         if (!driver.WaitForReady(TimeSpan.FromSeconds(30)))
         {
             var stderr = process.StandardError.ReadToEnd();

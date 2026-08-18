@@ -13,12 +13,8 @@ namespace Tript.Detection.Tests;
 // HandleDetections runs one exclusion pass over the whole batch before it processes anything, so a
 // single exclusion detection vetoes every trigger the same cycle produced — a kill cam or a
 // spectated death on screen means the eliminations detected alongside it are not the player's.
-//
 // DetectionSessionTests pins that the rule survived the move out of the callback lambda, with one
-// trigger and one exclusion. These tests pin the parts of the rule that a plausible rewrite would
-// break without failing that one: a per-detection scan that only looked at what it had already
-// walked past would let the triggers ahead of the exclusion through, and folding the scan into the
-// processing loop would let a suppressed trigger open a cooldown instance anyway.
+// trigger and one exclusion.
 [Collection(RecordingStateCollection.Name)]
 public class ExclusionSuppressionTests
 {

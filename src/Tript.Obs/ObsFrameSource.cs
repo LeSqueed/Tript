@@ -90,8 +90,7 @@ internal sealed class ObsFrameSource : IFrameSource
 
     // The seam's format vocabulary is its own, not libobs's. FramePixelFormat.Bgra is member 0 of
     // its enum but VIDEO_FORMAT_BGRA is member 7 of enum video_format, so the value passes across
-    // the P/Invoke boundary through an explicit map rather than a cast. The reverse map lives in
-    // ObsFrameSubscription, which knows the requested format and stamps it on the delivered frames.
+    // the P/Invoke boundary through an explicit map rather than a cast.
     private static int ToNativeFormat(FramePixelFormat format) => format switch
     {
         FramePixelFormat.Bgra => (int)ObsVideoFormat.Bgra,
@@ -102,8 +101,7 @@ internal sealed class ObsFrameSource : IFrameSource
 
 // One native subscription. The native callback is a static method and the subscription is the
 // pinned GCHandle it receives as param, so libobs's identity for the input — (callback, param) —
-// matches a unique subscription. This is also what makes two subscriptions on the same source
-// distinguishable to video_output_connect2, which rejects a duplicate (callback, param) pair.
+// matches a unique subscription.
 internal sealed class ObsFrameSubscription : IFrameSubscription
 {
     private readonly ObsRuntime _runtime;
@@ -159,9 +157,7 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
         // The teardown race: video_output_disconnect returns without waiting for an in-flight
         // callback, and a callback already inside OnFrame holds a strong reference to _target.
         // Swapping _target out first means that callback observes null and returns, while the
-        // target object it captured stays alive until the callback itself is done. Only then is
-        // the native input removed and the pin freed. A callback that starts after this swap
-        // reads the null target and returns without touching the freed GCHandle.
+        // target object it captured stays alive until the callback itself is done.
         Volatile.Write(ref _target, null);
 
         // A subscription whose video mix was torn down by obs_reset_video must not disconnect
@@ -186,10 +182,6 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
     // output's 16-slot cache and converted frames rotate through three per-subscription buffers —
     // so the frame view handed to the consumer carries the same lifetime, enforced at the type
     // level by VideoFrame being a ref struct: it cannot be stored anywhere that outlives the call.
-    //
-    // Internal, not private, so the callback pointer can be taken here and in Dispose. The
-    // GCHandle target is the subscription; the subscription's _target field is the object that
-    // captures the consumer's delegate.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     internal static unsafe void OnFrame(nint parameter, nint framePointer)
     {
@@ -241,10 +233,8 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
 
             // Stack spans over the native video_data, so the view reads the pointers and strides
             // directly from the frame libobs handed us. The fixed-buffer long values are pointers
-            // on every platform this binding targets; the span element type is nint, which is
-            // why they are re-typed rather than passed through as long. Width and height come
-            // from the subscription's conversion request, and the format is the seam's own,
-            // stamped here — struct video_data carries none of the three.
+            // on every platform this binding targets; the span element type is nint, which is why
+            // they are re-typed rather than passed through as long.
             var view = new VideoFrame(
                 _format,
                 _width,

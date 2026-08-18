@@ -6,9 +6,8 @@ using Tript.Settings;
 namespace Tript.Recorder;
 
 // The pure, libobs-free account of what the audio routing must produce. A track in the settings
-// model (spec/recorder.md, "Multi-track audio") is a destination in the output file, not a device;
-// the plan maps each track onto the three joints the binding proved (spec/obs-binding.md, "Audio
-// routing and tracks"):
+// model is a destination in the output file, not a device;
+// the plan maps each track onto the three joints the binding proved:
 //
 //   1. Source to mixer — each source on a track feeds that track's mixer bit.
 //   2. Mixer to audio encoder — one encoder per track, bound to that mixer at creation.

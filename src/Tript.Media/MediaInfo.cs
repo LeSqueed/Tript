@@ -25,9 +25,9 @@ public sealed class MediaInfo
     // The pixel format ffprobe reports. "yuv420p10le" is the 10-bit signal preservation cares about.
     public required string PixelFormat { get; init; }
 
-    // The colour description. Absent from the JSON when the file does not carry them — the spec's
-    // probe normalises that to "unspecified", and so do we. An HDR source is one whose transfer is
-    // smpte2084 (PQ) or arib-std-b67 (HLG); anything else is SDR.
+    // The colour description. Absent from the JSON when the file does not carry it, which is
+    // normalised to "unspecified". An HDR source is one whose transfer is smpte2084 (PQ) or
+    // arib-std-b67 (HLG); anything else is SDR.
     public required string ColorSpace { get; init; }
     public required string ColorTransfer { get; init; }
     public required string ColorPrimaries { get; init; }

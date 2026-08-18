@@ -5,9 +5,7 @@ namespace Tript.Recorder;
 
 // The states of the recorder state machine. Idle is the resting state; Recording is an output that
 // is active and being written; Stopping is the window between the stop request and the output's
-// stop signal. The effective mode (Session only for alpha) is a property of the running recording,
-// not a state of its own — a start in an unsupported mode leaves the recorder in Idle and reports
-// why.
+// stop signal.
 public enum RecorderState
 {
     Idle,

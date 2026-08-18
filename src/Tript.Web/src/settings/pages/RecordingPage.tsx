@@ -3,50 +3,6 @@
 // The recording page: the session recording itself. Mode (session/buffer/hybrid), resolution, frame
 // rate, and the codec-and-quality surface — which encoder, how it is told to spend its bits (rate
 // control), and the quality or bitrate that mode reads.
-//
-// The encoder is a selector whose options are exactly the H.264 encoder ids this machine supports —
-// the backend computes the list (spec/recorder.md) and rides the settings push beside `settings` as
-// `availableEncoders`, so unsupported encoders are hidden rather than listed and refused at record
-// time. When that list is unknown — an older backend, or a host that cannot probe the encoder
-// registry — the selector falls back to the stored `encoder` value plus `obs_x264`, so the page still
-// renders and the stored value is still selectable.
-//
-// The ids are shown under human labels ("NVIDIA (NVENC)", "Software (x264)") while the id itself is
-// what goes on the wire, because the id is the backend's vocabulary and not the user's. The labels are
-// derived from the id rather than being a fixed list of known encoders: a machine registering an id
-// nobody here has seen still offers it, under its raw id. Where one family registers several ids —
-// which is the normal case on an OBS 31+ NVIDIA machine, where the legacy and texture NVENC encoders
-// are both live — the id is appended to the label, since two options reading "NVIDIA (NVENC)" would be
-// unpickable.
-//
-// Rate control is per-encoder, not global. A mode name is written straight into the encoder's own
-// `rate_control` key, and a name a family does not know is not ignored: obs-ffmpeg's VAAPI encoder
-// walks a NULL-terminated table and segfaults on a miss, taking the session with it. So x264 offers
-// CRF (which exists nowhere else) while the hardware families offer CQP, and only the modes the
-// selected encoder accepts are listed. **The table below is a UX convenience, not the safety
-// property**: the backend re-derives the same answer from the encoder id it actually resolved and
-// coerces anything unsupported (`ObsRecorderSession.SupportedRateControlModes`), so a stale frontend
-// or a settings file from another machine cannot write a crashing mode. It is mirrored here only so
-// the page does not offer a choice the backend would silently override.
-//
-// Resolution is a selector over the common 16:9 sizes plus this machine's own primary display, which
-// rides the settings push beside `settings` as `displayResolution` exactly as `availableEncoders`
-// does. It is not a setting — it is what the host measured at startup — so it is never nested inside
-// the settings object. A fresh install already defaults to the display's size (the host applies that
-// when it creates the settings file), so the display option is normally the selected one; it is still
-// listed because a user who changed their mind needs a way back to it.
-//
-// None of the resolution, frame-rate or encoder selectors ever coerces a stored value it does not
-// offer: an out-of-list resolution, frame rate or encoder (a per-game override, or a config written by
-// another build) is appended as "(custom)" so picking something else is a deliberate act, not a side
-// effect of opening the page. The rate-control selector is the one exception, and deliberately so —
-// an unsupported mode there is not a value we can offer, because the backend will not write it; the
-// page shows the mode the recording will actually use and says why.
-//
-// Free-text fields (the two bitrates) hold local drafts so the user's typing is never clobbered by
-// the echo of their own edit. The draft commits on blur or Enter; it re-syncs from the model only when
-// an *external* push arrives (`externalPushCount` changes). Resolution, the frame rate and the quality
-// profile are fixed sets of presets picked directly, so they have no draft.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
@@ -156,14 +112,11 @@ const FAMILY_LABELS: Record<EncoderFamily, string> = {
  * The modes each family accepts, in the order they are offered. Mirrored from
  * `ObsRecorderSession.SupportedRateControlModes`, which is the authority — see the file header for
  * why this copy is a convenience rather than the safety property.
- *
- * **The first entry of every row is that family's constant-quality mode**, because that is what the
- * backend coerces an unsupported request into, and this page shows the same answer.
  */
 const RATE_CONTROL_MODES: Record<EncoderFamily, RateControlMode[]> = {
   // CRF is x264's spelling of constant quality and exists in no other family; x264 has no CQP mode.
   x264: ['Crf', 'Cbr', 'Vbr'],
-  // VAAPI has no table in the specification, so it is held to the two modes actually evidenced. Its
+  // VAAPI is held to the two modes actually evidenced on a real runtime. Its
   // VBR ceiling key is unknown to us, and a mistyped key fails silently at the wrong bitrate.
   vaapi: ['Cqp', 'Cbr'],
   nvenc: ['Cqp', 'Cbr', 'Vbr'],
@@ -188,9 +141,7 @@ const QUANTISER_MODES: RateControlMode[] = ['Crf', 'Cqp'];
 /**
  * Appends the stored value to `options` when it is not already one of them. A `<select>` whose
  * value matches no option renders its *first* option instead, which would show the user a setting
- * they do not have — and the next unrelated edit would then persist that lie. Keeping the value as
- * an explicit "(custom)" option is what makes the resolution, frame-rate and encoder selectors on
- * this page non-destructive.
+ * they do not have — and the next unrelated edit would then persist that lie.
  */
 function withStoredValue(options: SelectOption[], stored: string): SelectOption[] {
   if (!stored || options.some((option) => option.value === stored)) {
@@ -215,16 +166,11 @@ function parseResolution(value: string): { width: number; height: number } | nul
 }
 
 /**
- * The resolution options: the common sizes, plus this machine's primary display when it is not one of
- * them, plus the stored size when it is outside both.
- *
- * The display's own size is marked "(display)" wherever it appears — including when it coincides with
- * a preset, because "which of these is my screen" is the question the label answers and 2560x1440
- * looks no different from 1920x1080 without it. It is sorted into place by pixel count rather than
- * appended, so the list always reads smallest to largest.
- *
- * A non-integer or non-positive stored size is a corrupt setting rather than a custom one, so it is
- * not offered as a choice (the same rule the frame rate applies to a non-finite value).
+ * The resolution options: the common sizes, plus this machine's primary display when it is not one
+ * of them, plus the stored size when it is outside both. The display's own size is marked
+ * "(display)" wherever it appears — including when it coincides with a preset, because "which of
+ * these is my screen" is the question the label answers and 2560x1440 looks no different from
+ * 1920x1080 without it.
  */
 function resolutionOptions(
   storedWidth: number,

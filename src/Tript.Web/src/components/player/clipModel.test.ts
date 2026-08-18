@@ -515,9 +515,7 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
 describe('the bug the invariant was violated by — a duration that was a placeholder', () => {
   it('a stale oversized region is not edited into another oversized one', () => {
     // The region was marked while the player still believed the session was 120s long (the fallback
-    // for a recording with no metadata record). The media turns out to be 100s. Dragging its start
-    // used to clamp the start correctly and copy the 300s end straight through — [50, 300], a brand
-    // new out-of-bounds region produced by a clamping helper.
+    // for a recording with no metadata record). The media turns out to be 100s.
     const stale = region('stale', 200, 300);
     // The region lies entirely beyond the media, so there is nowhere honest to put it: the edit is
     // refused (the caller keeps what it had) rather than the region being relocated into the media.

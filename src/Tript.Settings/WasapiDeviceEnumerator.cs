@@ -6,18 +6,12 @@ using System.Runtime.InteropServices;
 namespace Tript.Settings;
 
 // Enumerates the machine's active WASAPI endpoints into the settings model's AudioDeviceSetting
-// list — the source of audio.devices, and what lets the routing attach a real microphone or
-// speaker to a track. It is pure P/Invoke over the Core Audio COM surface
-// (IMMDeviceEnumerator, IMMDeviceCollection, IMMDevice, IMMEndpoint, IPropertyStore; no external
-// package): CoCreateInstance for CLSID_MMDeviceEnumerator, one data flow per call (eRender for
-// outputs, eCapture for inputs), only STATE_ACTIVE endpoints, the friendly name from
-// PKEY_Device_FriendlyName, and IMMDevice::GetId as the device id. That id string is exactly what
-// the win-wasapi plugin's "device_id" property consumes (ObsAudioRoutingSink), so a saved
-// selection reaches the capture source unchanged.
-//
-// The layer stays testable on a machine with no audio at all: non-Windows returns an empty list,
-// and so does any COM failure — a device list is optional surface and must not take settings
-// down with it.
+// list — the source of audio.devices, and what lets the routing attach a real microphone or speaker
+// to a track. It is pure P/Invoke over the Core Audio COM surface (IMMDeviceEnumerator,
+// IMMDeviceCollection, IMMDevice, IMMEndpoint, IPropertyStore; no external package):
+// CoCreateInstance for CLSID_MMDeviceEnumerator, one data flow per call (eRender for outputs,
+// eCapture for inputs), only STATE_ACTIVE endpoints, the friendly name from
+// PKEY_Device_FriendlyName, and IMMDevice::GetId as the device id.
 public static class WasapiDeviceEnumerator
 {
     // Inputs (mics and other capture devices): the eCapture data flow.

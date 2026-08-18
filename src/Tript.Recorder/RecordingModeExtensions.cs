@@ -8,7 +8,7 @@ namespace Tript.Recorder;
 // The recorder receives an already-resolved mode (a RecordingMode from the settings schema, via
 // ResolvedRecorderSettings) and must decide what it actually runs. For alpha that decision is
 // deliberately narrow — Session only — but it is drawn as a first-class seam so the Buffer and
-// Hybrid outputs slot into it without a refactor (spec/recorder.md, design decision 2026-08-15).
+// Hybrid outputs slot into it without a refactor.
 public static class RecordingModeExtensions
 {
     // Whether this mode asks for a session recording. Session and Hybrid both write a continuous

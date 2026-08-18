@@ -13,11 +13,6 @@ namespace Tript.Detection.Tests;
 // window for the class and every later detection of that class inside the lifetime — wherever it
 // was on screen — was folded into it. Two eliminations a second apart produced one bookmark, and
 // the class could not tell them apart because it never read DetectionResult's box.
-//
-// An instance is now class plus position: a detection extends an existing instance only when it
-// overlaps that instance's last box, and one that does not opens an instance and a bookmark of its
-// own. The instance follows its box across frames, so cooldown stays region-independent — drift is
-// one event, not a bookmark per frame.
 [Collection(RecordingStateCollection.Name)]
 public class CooldownTrackerTests
 {
@@ -76,8 +71,7 @@ public class CooldownTrackerTests
 
     // THE load-bearing case. Nothing runs NMS between the detect head and the tracker, so one
     // elimination icon reaches ProcessDetection as a cluster of near-duplicate boxes in a single
-    // frame. Keying on class plus overlap has to absorb the cluster into one instance; if the merge
-    // is missing or the cutoff is too strict, this frame alone writes six bookmarks for one kill.
+    // frame.
     [Fact]
     public void ProcessDetection_RawDuplicateBoxesForOneObject_CreateOneBookmark()
     {

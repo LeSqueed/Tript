@@ -12,35 +12,15 @@ namespace Tript.RecorderHarness;
 // record a file. It exists because the ffmpeg_muxer plugin spawns its obs-ffmpeg-mux helper next to
 // the *actual binary* of the process (os_get_executable_path_ptr resolves /proc/self/exe) — and the
 // test host that drives the integration tests is dotnet, which cannot have a helper dropped beside
-// it. Running the recording in this harness, whose apphost directory carries the helper, is how the
-// integration tests record a real file from under dotnet test.
-//
-// The harness is deliberately tiny and its contract is a single line of stdout, printed last:
-//
-//   RESULT:SUCCESS                the recording was made and its stop signal reported success
-//   RESULT:ENCODE_ERROR           the stop signal reported ENCODE_ERROR (the muxer helper died)
-//   RESULT:FAIL:<code>            the stop signal reported another failure code
-//
-// plus a non-zero exit status for anything that failed before a stop signal existed. The parent
-// asserts on the result line, the file on disk, and the probe. The parent drives the control-plane;
-// this process exists so the data plane (the muxer) has a real executable to hang a helper next to.
+// it.
 internal static class Program
 {
     private static int Main(string[] args)
     {
-        // Usage: Tript.RecorderHarness <output-path> [duration-seconds] [--multi-track <count>] [--recorder]
-        // Both real arguments the parent passes. The harness records a colour source on channel 0
-        // through x264 and aac, waits duration-seconds (default 1.0), stops, and exits.
-        //
-        // With --multi-track <count>, the audio path is wired through the routing service instead:
-        // count tracks, each routed into its own mixer with one capture source, one encoder per
-        // mixer assigned to the matching output slot. This is how the round-trip verification
-        // records a real multi-track file through the routing (spec/recorder.md).
-        //
-        // With --recorder, the recording is driven through the T3 recorder state machine
-        // (Recorder over ObsRecorderSession) instead of the raw binding: Start, run, Stop, and the
-        // stop signal completes the transition back to Idle. The parent asserts the recorder's
-        // snapshot and the file, which is how the state machine is verified against a real muxer.
+        // Usage: Tript.RecorderHarness <output-path> [duration-seconds] [--multi-track <count>]
+        // [--recorder] Both real arguments the parent passes. The harness records a colour source
+        // on channel 0 through x264 and aac, waits duration-seconds (default 1.0), stops, and
+        // exits.
         if (args.Length < 1)
         {
             Console.Error.WriteLine("usage: Tript.RecorderHarness <output-path> [duration-seconds] [--multi-track <count>] [--recorder]");
@@ -107,8 +87,7 @@ internal static class Program
 
     // The recorder-driven path: a real runtime, a colour source the app owns, and the T3 recorder
     // state machine owning the output. Start (Session mode), run, Stop, and let the stop signal
-    // complete the transition. The parent asserts the state machine's snapshot and the file — the
-    // recorder's Idle -> Recording -> Stopping -> Idle round-trip against a real muxer.
+    // complete the transition.
     private static int RunRecorder(string outputPath, double durationSeconds)
     {
         if (XInitThreads() == 0)
@@ -389,8 +368,7 @@ internal static class Program
     // The multi-track recording path, driven by the routing service: count tracks, each with one
     // capture source, routed into its own mixer, one encoder per mixer assigned to the matching
     // output slot. The routing's sources are pulse captures (silence is fine); the colour source on
-    // channel 0 keeps the recording non-empty, exactly as the single-track path does. Returns the
-    // same RESULT: contract the single-track path does.
+    // channel 0 keeps the recording non-empty, exactly as the single-track path does.
     private static int RunMultiTrack(string outputPath, double durationSeconds, int trackCount)
     {
         if (XInitThreads() == 0)

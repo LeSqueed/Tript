@@ -6,17 +6,9 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The desktop shell's Linux audio-sink preflight. WebKitGTK aborts its render process when GStreamer
-// has no autoaudiosink, and the symptom is a window that appears frozen while the host is healthy,
-// so the shell refuses to open the window and prints the package to install instead.
-//
-// The value of these tests is the *shape* of the decision rather than the answer on any one machine:
-// a false "missing" would refuse to start a working install, which is worse than the freeze the
-// check prevents. So every fact reaches the decision through an injected probe, and the fail-open
-// paths (unknown answers, Windows) are asserted directly instead of being inferred from whatever
-// GStreamer happens to be installed on the machine running the suite.
-//
-// No app host is started here, so this class stays out of the port-binding smoke collection.
+// The desktop shell's Linux audio-sink preflight. WebKitGTK aborts its render process when
+// GStreamer has no autoaudiosink, and the symptom is a window that appears frozen while the host is
+// healthy, so the shell refuses to open the window and prints the package to install instead.
 public sealed class WebviewAudioSinkTests
 {
     // A probe that finds nothing, and an environment with no GStreamer variables set: the starting

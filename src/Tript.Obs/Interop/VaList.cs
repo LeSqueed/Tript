@@ -8,11 +8,7 @@ namespace Tript.Obs.Interop;
 // The System V AMD64 va_list: __va_list_tag, of which va_list is an array of one. Because it is an
 // array type it decays to a pointer when passed as an argument, so a callback receives the address
 // of this struct — which is why the parameter can be declared as a pointer even though the type is
-// not one. Windows x64 has no equivalent: there va_list really is a char* walking the stack.
-//
-// The distinction only becomes visible when the list is copied. Passing the incoming pointer
-// straight back to a printf leaves the caller's list consumed, and reading arguments twice from a
-// consumed list yields whatever was next on the stack.
+// not one.
 [StructLayout(LayoutKind.Sequential)]
 internal struct VaListSystemV
 {
@@ -46,9 +42,7 @@ internal static unsafe class VaListFormatter
         else
         {
             // va_copy, by hand. The System V ABI defines it as a copy of the four fields — the save
-            // areas are shared and only read — so a struct copy is the whole of it. Doing it means
-            // the handler never consumes the list it was given, which keeps chaining to a previous
-            // log handler possible and keeps a second read of the same list correct.
+            // areas are shared and only read — so a struct copy is the whole of it.
             var copy = *(VaListSystemV*)arguments;
             ObsNative.dstr_vprintf(&destination, format, (nint)(&copy));
         }

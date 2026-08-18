@@ -9,13 +9,7 @@ namespace Tript.Recorder;
 // the detector events when a process whose name matches the known-game list appears or disappears.
 // This is deliberately not the full detection ladder from the games-catalogue spec — no executable
 // path patterns, no Steam/Proton resolution, no blacklist — it is the seam made real so the
-// recorder can be exercised end to end. The full ladder replaces this type later without the
-// recorder knowing.
-//
-// The catalogue here is a simple list of executable names (with and without extension); an entry
-// with an `executable` marker is matched case-insensitively. On Windows a process "game.exe" and a
-// catalogue entry "game.exe" match; on Linux the process name is "game", so both spellings are
-// checked.
+// recorder can be exercised end to end.
 public sealed class ProcessNameGameDetector : IGameDetector
 {
     private readonly TimeSpan _pollInterval;

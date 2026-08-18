@@ -7,27 +7,16 @@ namespace Tript.Obs.IntegrationTests;
 
 // Every settings key the ffmpeg_muxer plugin reads, driven through a real obs_data on the real
 // runtime, and pinned against what the *plugin's own* property and defaults surface reports at
-// runtime.
-//
-// The pin is read back live rather than transcribed from a manual: obs_get_output_properties and
-// obs_output_defaults are the plugin's own declaration of what it reads, which is exactly the
-// contract a wrong key violates. The guard is the interesting half of that: when the plugin grows a
-// new key on some future OBS version, the guard fails — not silently, and not by asserting that a
-// key this repo happened to transcribe is still present. It forces whoever meets that OBS to read
-// the new property surface and extend this table with a pinned key and the observations that say
-// why it is pinned.
+// runtime. The pin is read back live rather than transcribed from a manual:
+// obs_get_output_properties and obs_output_defaults are the plugin's own declaration of what it
+// reads, which is exactly the contract a wrong key violates.
 public sealed class OutputSettingsKeyTests
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
 
     // The settings a recorder writes to an ffmpeg_muxer. Keys come from the live property surface
     // of the plugin this suite runs against — measured on OBS 32.2.1, where the surface is exactly
-    // this — and the Pinned observation names the source. Round-tripping is proven per key, and a
-    // typo (e.g. "pth", "file", "dest") fails the round-trip or the presence checks.
-    //
-    // obs_output_defaults returns an empty object for this type — measured — so nothing here comes
-    // from the defaults path. The path key carries its default in the property itself, and a path
-    // typed at runtime would not have one.
+    // this — and the Pinned observation names the source.
     public static readonly IReadOnlyList<OutputSettingsKey> SpecifiedKeys = new[]
     {
         new OutputSettingsKey("path", ObsSettingsValueType.String, Pinned.OutputProperty),

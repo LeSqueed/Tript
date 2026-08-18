@@ -2,8 +2,7 @@
 //
 // A dismissible banner for backend error pushes. The backend sends an `error` message over the
 // control socket when a user action could not be persisted (e.g. a bookmark, title or delete could
-// not be saved because the recording folder is unwritable). The banner surfaces the latest message
-// and keeps it until dismissed, so the user can read it before it disappears.
+// not be saved because the recording folder is unwritable).
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';

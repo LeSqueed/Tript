@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The audio page drives the multi-track model (spec/recorder.md):
+// The audio page drives the multi-track model:
 //
 //   - Tracks are destinations, not devices. The user chooses how many audio tracks a recording
 //     has. A track is a place in the output file, not bound to a single device.

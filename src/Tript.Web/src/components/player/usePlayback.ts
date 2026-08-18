@@ -1,24 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The playback hook — the sync model.
-//
-// `currentTime` is the single source of truth for the playhead: the <video> element, both
-// timelines and the transport all read and write it. The video is the driver — its `timeupdate`
-// event is the only thing that advances `currentTime`; a timeline click or keyboard seek sets it
-// directly and then writes `video.currentTime`. Because both timelines render from the same value,
-// they can never disagree — that is the whole dual-sync contract.
-//
-// The contract only concerns seeking and the playhead position; the video element itself is owned
-// by the PlayerView component (it must be, to render <video controls>), so the hook talks to it
-// through a ref. `duration` starts at the session's fallback length and is replaced by the video's
-// metadata when it arrives; if the video reports NaN (e.g. placeholder data with no media file)
-// the fallback is kept.
-//
-// The fallback is a *guess* and the hook says so: `durationKnown` is false until the media itself
-// reports its length. That distinction is load-bearing rather than cosmetic — the caller's fallback
-// can be a fabricated constant (DEFAULT_SESSION_SECONDS = 120s for a recording with no metadata
-// record), and clip segments clamped against it were allowed to run past the end of an 8s file. Only
-// a duration the media vouched for may be used as a bound; see clipModel's `resolveClipBounds`.
+// The playback hook — the sync model. `currentTime` is the single source of truth for the playhead:
+// the <video> element, both timelines and the transport all read and write it.
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';

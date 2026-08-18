@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The player overlay's modal behaviour, tested on its own (App.test.tsx covers it end to end with the
-// real player inside).
-//
-// Three things are load-bearing and none of them are visible in the markup: Tab does not escape the
-// layer, focus goes back to whatever opened it, and Escape stands down while a nested modal — the
-// player's clip dialog — is open, because closing the player out from under it would throw away the
-// user's marked segments.
+// The player overlay's modal behaviour, tested on its own (App.test.tsx covers it end to end with
+// the real player inside). Three things are load-bearing and none of them are visible in the
+// markup: Tab does not escape the layer, focus goes back to whatever opened it, and Escape stands
+// down while a nested modal — the player's clip dialog — is open, because closing the player out
+// from under it would throw away the user's marked segments.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

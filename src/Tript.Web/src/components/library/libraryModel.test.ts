@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The library derivation model, tested without a DOM.
-//
-// Two things are being pinned down here. First, the ordinary behaviour: the type/game/date/search
-// filters select the right items and the sorts order them the right way round. Second — and this is
-// the half worth the file — the arithmetic that decides whether the grid can be wrongly empty: what
-// happens to an item with no date under an "oldest first" sort or a trailing-window filter, and what
-// happens to a page number that no longer exists after the list under it shrank.
-//
-// Times are epoch SECONDS throughout, and `now` is injected, so nothing here depends on the clock.
+// The library derivation model, tested without a DOM. Two things are being pinned down here.
 
 import { describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';

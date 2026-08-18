@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The game page: the capture-mode behaviour (GameOnly is our own prior work and part of first
-// light) and the list of known games with their per-game overrides. The game-capture timeout is
-// the soft timeout: how long game capture waits for the game's window before falling back. Units
-// on the wire match the backend: `gameCaptureTimeout` is seconds.
-//
-// For alpha the game list is a simple editable list; per-game override editing is minimal but
-// present — recording-mode override, quality overrides (fps, encoder, quality) and the
-// integration toggle.
+// light) and the list of known games with their per-game overrides. The game-capture timeout is the
+// soft timeout: how long game capture waits for the game's window before falling back.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';

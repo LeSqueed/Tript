@@ -3,28 +3,8 @@
 
 // Reads timestamps out of the settings and metadata files without letting one bad timestamp fail
 // the file it sits in — the same graceful-degradation contract as ContentTypeConverter and
-// Tript.Core's BookmarkTypeConverter.
-//
-// What was measured first, because it decides what this converter must and must not do. The app
-// writes StartTime from DateTime.Now, which serializes with the local offset, for example
-// "2026-08-17T18:49:26.3723185+02:00". System.Text.Json reads that back into a DateTime without
-// complaint (Kind=Local, offset applied) — and so are the "…Z" and offset-free forms (Kind=Utc and
-// Kind=Unspecified respectively). An offset in the file is therefore not a parse problem and never
-// was; nothing here needs to special-case it and the field does not need to become a
-// DateTimeOffset.
-//
-// What does fail the whole record on the default converter, measured against RecordingMetadata:
-//   "startTime": 1786972846              -> "The JSON value could not be converted to System.DateTime"
-//   "startTime": ""                      -> the same
-//   "startTime": "17/08/2026 15:20:46"   -> the same
-// A record written by a build that stored epoch seconds, or hand-edited with a local date format,
-// would take its own game, title and bookmarks down with it. A recording's start time is the one
-// field the library can do without: ListContent already falls back to the file's last-write time
-// when a record carries no start time, so degrading an unreadable timestamp to default is a visibly
-// smaller loss than failing the record.
-//
-// Epoch seconds are read rather than dropped: it is an unambiguous encoding of the same instant, so
-// there is no reason to lose it.
+// Tript.Core's BookmarkTypeConverter. What was measured first, because it decides what this
+// converter must and must not do.
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;

@@ -6,11 +6,8 @@ using System.Numerics;
 namespace Tript.Obs;
 
 // struct obs_transform_info: a scene item's whole placement in one value. The individual setters
-// exist too, but each of them recalculates the item's matrices, so setting eight properties one at a
-// time does eight times the work of setting this.
-//
-// The defaults are libobs's own, measured on a freshly attached item rather than assumed: unit
-// scale, no rotation, top-left alignment, no bounds.
+// exist too, but each of them recalculates the item's matrices, so setting eight properties one at
+// a time does eight times the work of setting this.
 public sealed record ObsTransform
 {
     public Vector2 Position { get; init; }

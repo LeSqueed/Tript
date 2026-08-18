@@ -7,11 +7,6 @@ namespace Tript.Media;
 // and an end, anywhere and any length — it needs no bookmark at either bound (bookmarks are
 // navigation aids, not clip instructions), and it is cut at exactly these times, never snapped to a
 // keyframe.
-//
-// Both endpoints are offsets from the start of the session's file. The bounds are fitted to the
-// file's real duration before any extraction runs (ClipRegionBounds), so an out-of-bounds region is
-// either clamped to something cuttable or dropped — never handed to ffmpeg, which reports every
-// out-of-bounds region as success and an empty file.
 public readonly record struct ClipRegion(TimeSpan Start, TimeSpan End)
 {
     // The direct conversion, for regions built from values already known to be real times (the test

@@ -2,11 +2,7 @@
 //
 // The buffer page — a first-class settings surface even though the buffer itself is deferred in
 // alpha (design decision 2026-08-15). Enable/disable and configure the rolling replay buffer
-// independently of the session. Both bounds exist because memory is the real constraint: duration
-// alone at high resolution and bitrate can be unbounded.
-//
-// Units on the wire match the backend: `duration` is seconds, `maxSizeBytes` is bytes. The size
-// field is edited in a human-readable form (MiB) and converted to bytes on send.
+// independently of the session.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';

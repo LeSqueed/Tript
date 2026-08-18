@@ -6,11 +6,9 @@ using Tript.Obs.Interop;
 namespace Tript.Obs;
 
 // libobs's obs_data_array_t: an ordered list of settings objects, and the only container type a
-// settings bag can hold besides a nested object. Its ownership rules match ObsSettings — refcounted,
-// independent of the OBS context, and holding references to its elements rather than copies.
-//
-// Deliberately not an IList<ObsSettings>: every read hands back a fresh owned reference the caller
-// has to dispose, which the collection interfaces give no way to say.
+// settings bag can hold besides a nested object. Its ownership rules match ObsSettings —
+// refcounted, independent of the OBS context, and holding references to its elements rather than
+// copies.
 public sealed class ObsSettingsArray : IDisposable
 {
     private readonly ObsSettingsArrayHandle _handle;

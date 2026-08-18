@@ -8,9 +8,7 @@ namespace Tript.Recorder;
 // The wired audio path the routing service produced: the capture sources it created (routed into
 // mixers, with per-source volume applied and marked active) and the audio encoders bound to each
 // track's mixer and assigned to the output's slots. The recorder holds this for the life of the
-// recording. Disposal deactivates every source — balancing the MarkActive at wire time — and
-// disposes the concrete encoders' wrappers; the underlying libobs objects belong to the OBS
-// context, which is what actually owns them.
+// recording.
 public sealed class AudioRouting : IDisposable
 {
     private readonly IAudioRoutingSink _sink;

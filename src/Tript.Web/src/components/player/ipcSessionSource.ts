@@ -38,8 +38,7 @@ export interface IpcSessionSource extends SessionSource {
 
 /**
  * Create a session source driven by the control socket. Sends `ListContent` immediately, then
- * stores every `content` push and notifies subscribers. The item list stays empty until the
- * backend answers.
+ * stores every `content` push and notifies subscribers.
  */
 export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
   let items: ContentItem[] = [];

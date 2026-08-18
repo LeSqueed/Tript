@@ -5,14 +5,10 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The module allowlist the app host hands libobs. AddSafeModule is a filter, and LoadAllModules only
-// reports modules it opened and failed to initialise, so a module that is missing from this list is
-// silently never loaded: the source types it registers do not exist, and the failure only shows up
-// when a source of one of those types is created at record time. That makes the list worth pinning
-// per platform rather than only on the OS the tests happen to run on — SafeModules takes the platform
-// as an argument for exactly that reason.
-//
-// No app host is started here, so this class stays out of the port-binding smoke collection.
+// The module allowlist the app host hands libobs. AddSafeModule is a filter, and LoadAllModules
+// only reports modules it opened and failed to initialise, so a module that is missing from this
+// list is silently never loaded: the source types it registers do not exist, and the failure only
+// shows up when a source of one of those types is created at record time.
 public sealed class SafeModuleAllowlistTests
 {
     [Fact]

@@ -73,13 +73,9 @@ internal sealed class BMemHandle : ObsSafeHandle
 
 // A refcounted settings object. Deliberately **not** an ObsContextHandle, which is the assumption
 // the shape of obs_data invites and which measurement refutes: on 32.2.1 obs_data_create succeeds
-// before obs_startup, an object created inside a context still reads its values after
-// obs_shutdown, and obs_data_release afterwards neither crashes nor leaks. obs_data lives on bmem
-// and the OBS core holds no registry of these objects, so its lifetime is the caller's alone.
-//
-// The consequence for the generation stamp is the one that matters: an ObsContextHandle would
-// *decline* to release a settings object that outlived a shutdown, which here would be a genuine
-// leak rather than the use-after-free it prevents for sources and encoders.
+// before obs_startup, an object created inside a context still reads its values after obs_shutdown,
+// and obs_data_release afterwards neither crashes nor leaks. obs_data lives on bmem and the OBS
+// core holds no registry of these objects, so its lifetime is the caller's alone.
 internal sealed class ObsSettingsHandle : ObsSafeHandle
 {
     internal ObsSettingsHandle(nint handle) : base(handle, ownsHandle: true)
@@ -107,11 +103,10 @@ internal sealed class ObsSourceHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_source_release(handle);
 }
 
-// A scene, which is a source with one measured difference: obs_scene_create registers the scene with
-// the OBS core, and that registration is a reference of its own. Releasing the caller's reference
-// leaves the scene alive and still findable by name, so a handle for such a scene marks the source
-// removed first — the call that makes the core let go. A private scene has no such registration and
-// is destroyed by the release alone.
+// A scene, which is a source with one measured difference: obs_scene_create registers the scene
+// with the OBS core, and that registration is a reference of its own. Releasing the caller's
+// reference leaves the scene alive and still findable by name, so a handle for such a scene marks
+// the source removed first — the call that makes the core let go.
 internal sealed class ObsSceneHandle : ObsContextHandle
 {
     private readonly bool _registeredWithCore;
@@ -165,10 +160,9 @@ internal sealed class ObsOutputHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_output_release(handle);
 }
 
-// A weak source reference. Deliberately not an ObsContextHandle, for the same reason as obs_data and
-// on the same evidence: the control block is a bmem allocation that survives obs_shutdown, and the
-// count only returns to zero once it is released. Declining to release it after a shutdown would
-// leak it.
+// A weak source reference. Deliberately not an ObsContextHandle, for the same reason as obs_data
+// and on the same evidence: the control block is a bmem allocation that survives obs_shutdown, and
+// the count only returns to zero once it is released.
 internal sealed class ObsWeakSourceHandle : ObsSafeHandle
 {
     internal ObsWeakSourceHandle(nint handle) : base(handle, ownsHandle: true)

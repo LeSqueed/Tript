@@ -9,18 +9,6 @@ namespace Tript.Obs;
 // libobs's obs_sceneitem_t: one source's placement inside one scene. The source can appear in
 // several scenes, and twice in the same scene; each appearance is a separate item with its own
 // transform and its own id.
-//
-// Ownership is the measured part, and it is the trap in this whole surface. Every call that hands
-// out a scene item — obs_scene_add, obs_scene_find_source, the enumerator — returns a *borrowed*
-// pointer. The one reference the item is created with belongs to the scene, and releasing that as if
-// it were the caller's frees the item while the scene still lists it: measurement shows the memory
-// returned to the allocator with the scene's list untouched, which is a dangling pointer rather than
-// an error anyone reports. So every handle here takes a reference of its own first, and Dispose
-// balances exactly that one.
-//
-// Geometry note, likewise measured and stated in no header: position and bounds are snapped to a
-// half-unit grid. Setting 100.125 reads back 100.0 and setting 0.75 reads back 1.0, at any canvas
-// size and any scale. Rotation, scale and crop keep what they are given.
 public sealed class ObsSceneItem : IDisposable
 {
     private readonly ObsSceneItemHandle _handle;
@@ -266,8 +254,7 @@ public sealed class ObsSceneItem : IDisposable
 
     // Detaches the item from its scene and releases the scene's reference to the item. The item's
     // own reference to its source is not given up here — that happens when the item is destroyed —
-    // so a source stays alive while any handle to a detached item remains open. Calling it twice is
-    // harmless.
+    // so a source stays alive while any handle to a detached item remains open.
     public void Remove() => ObsNative.obs_sceneitem_remove(Pointer);
 
     // Batches several transform changes into one recalculation. Reads inside the scope see the new

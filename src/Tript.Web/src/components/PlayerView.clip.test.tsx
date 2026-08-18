@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The in-player clipping UI integration tests. These drive the real PlayerView (video + dual
-// timeline + the clip dialog + segment looping) and assert the clip payloads the dialog sends,
-// the loop decisions that seek the playhead, and the importProgress result surface.
-//
-// jsdom has no layout, so the same geometry stubs as PlayerView.test.tsx apply: every element is
-// a 100px-wide rect at x=0, so a pointer clientX maps one-to-one to a time in a 100-second session.
+// timeline + the clip dialog + segment looping) and assert the clip payloads the dialog sends, the
+// loop decisions that seek the playhead, and the importProgress result surface. jsdom has no
+// layout, so the same geometry stubs as PlayerView.test.tsx apply: every element is a 100px-wide
+// rect at x=0, so a pointer clientX maps one-to-one to a time in a 100-second session.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -97,13 +96,9 @@ function setVideoDuration(container: HTMLElement, seconds: number): void {
 
 /**
  * Render the player and let the media report how long it is — which is what a real <video> element
- * does as soon as it has read the file's header, and what jsdom never does on its own.
- *
- * Every test that marks a segment goes through here, because a segment can only be marked against a
- * *measured* length. The session record's declared `endTime` is not one: it is written by a different
- * code path than the file and has been seen claiming 100s in front of a 9.13s file (see the bounds
- * tests at the bottom of this file). `mediaSeconds` defaults to the 100s these tests' geometry assumes,
- * so the measured and declared lengths agree unless a test deliberately makes them disagree.
+ * does as soon as it has read the file's header, and what jsdom never does on its own. Every test
+ * that marks a segment goes through here, because a segment can only be marked against a *measured*
+ * length.
  */
 function renderPlayer(
   client: IpcClient = mockClient(),
@@ -139,12 +134,9 @@ function regionLabels(container: HTMLElement): string[] {
 }
 
 /**
- * Drag a marked segment on the zoomed timeline.
- *
- * The geometry stub makes every rect 100px wide at x=0, and the zoom window is 60s wide (the default
- * window, clamped to the 100s session) — so one pixel is 0.6s and a clientX maps to
- * `window.start + clientX * 0.6`. `grip` picks the gesture: the body slides the segment, an edge
- * trims it.
+ * Drag a marked segment on the zoomed timeline. The geometry stub makes every rect 100px wide at
+ * x=0, and the zoom window is 60s wide (the default window, clamped to the 100s session) — so one
+ * pixel is 0.6s and a clientX maps to `window.start + clientX * 0.6`.
  */
 function dragRegion(
   container: HTMLElement,
@@ -882,16 +874,10 @@ describe('segments stay inside the real media length', () => {
   });
 
   it('refuses all three marking gestures while only the DECLARED length is known', () => {
-    // MEASURED: the content record declares 100s (see `session`) for a file that is really 9.13s long.
-    // Records are written by a different code path than the file — a recording a crash cut short, a
-    // re-encode, an imported record — so the declared length can overstate the media by any amount,
-    // and this one overstates it by 91 seconds.
-    //
-    // The player used to clamp marks against it as soon as it had it: `resolveClipBounds` returned the
-    // declared length flagged `known: false`, nothing read the flag, and `Mark 10s` at 1:35 produced a
-    // segment ending at 1:40 — 91s past the last frame that exists. The regions were corrected later,
-    // when the media finally reported its own length, but the mark was visibly wrong the moment it was
-    // made, and Create before that point sent the wrong bounds to the backend.
+    // MEASURED: the content record declares 100s (see `session`) for a file that is really 9.13s
+    // long. Records are written by a different code path than the file — a recording a crash cut
+    // short, a re-encode, an imported record — so the declared length can overstate the media by
+    // any amount, and this one overstates it by 91 seconds.
     const realSeconds = 9.13;
     const client = mockClient();
     // No `renderPlayer` here on purpose: nothing has been measured yet, which is the whole case.

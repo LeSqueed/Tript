@@ -14,28 +14,6 @@ namespace Tript.Obs.IntegrationTests;
 // does not race an in-flight callback, and the refusal modes the media-io pair exists to surface
 // are surfaced. The content tests drive a colour source on channel 0, which draws a deterministic
 // constant image — that is what makes a wrong pixel meaningful.
-//
-// The compositor does not tick until an output is active — measured: with the video mix reset but
-// no output started, video_output_get_total_frames stays at 0 and the graphics thread never posts
-// to the video thread. Every test that expects a delivery therefore drives the mix with a
-// ffmpeg_output writing to a scratch file, exactly as a recording would.
-//
-// ffmpeg_output is the one expensive thing in this suite, and it has a measured constraint: it
-// always creates an internal x264 encoder that encodes the mix's frames, and tearing that encode
-// path down across instances segfaults the process — SIGSEGV in avcodec_send_frame racing
-// x264_encoder_close, and heap corruption that surfaces at the next obs_startup (verified via
-// coredumps). The drain in ActiveOutput.Dispose fixes the single-session race, not the
-// cross-instance accumulation. So ALL tests that need a delivery — geometry, content, divisor,
-// teardown, duplicates, retention — share ONE long-lived output through FrameDeliveryFixture,
-// measured stable. Channel content is switched on the live compositor safely (item.Remove before
-// scene dispose; content-polling probes absorb the one-frame switch latency). The tests that need
-// no delivery at all — reset-teardown, refusals, timing — run per-test sessions with NO output,
-// which costs nothing.
-//
-// The callbacks are instance method groups, not lambdas: FrameCallback takes its frame by `in`,
-// and the C# language forbids a lambda with an `in` parameter from capturing variables, so each
-// probe is a small class that records what its callback observed. That matches how the real
-// consumer, VisualEventDetector, passes OnFrame.
 public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFixture>
 {
     private const string ColourSourceId = "color_source";
@@ -84,9 +62,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
             Assert.True(probe.Gate.Wait(TimeSpan.FromSeconds(5)), "No white frame arrived within 5 seconds.");
 
             // White drawn in BGRA is FF FF FF FF. Every pixel of the interior rows must be exactly
-            // that. The scaler's bottom two edge rows read 253 instead (a 2-LSB interpolation edge
-            // effect, measured and constant) — the interior is the honest assertion of what the
-            // source drew, and the edge rows are a property of the resampler, not of this seam.
+            // that.
             var copied = probe.Copied ?? throw new InvalidOperationException("Probe copied no frame.");
             Assert.True(probe.Stride >= probe.Width * 4, $"stride {probe.Stride} < row bytes {probe.Width * 4}");
             for (var y = 0; y < probe.Height - 2; y++)
@@ -108,8 +84,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     {
         // The direct-channel shape (no scene): the colour source draws its default-size rectangle,
         // which measured covers the top rows of the frame and leaves the rest black. The assertion
-        // samples the covered region, exact for the saturated channel and zero for the others. The
-        // 254 in the red slot is the 1-LSB chroma round-trip measured across libobs's pipeline.
+        // samples the covered region, exact for the saturated channel and zero for the others.
         using (var red = _fixture.PlaceOnChannelDirect(0xFF0000FF, "red colour"))
         {
             using var probe = new RedContentProbe();
@@ -128,8 +103,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     }
 
     // A plane index the format does not use is not an error. libobs leaves the data[] entry null
-    // and the honest answer is an empty view, not an exception — the spec's explicit correction
-    // to the seam's original throw.
+    // and the honest answer is an empty view, not an exception.
     [Fact]
     public void APlaneTheFormatDoesNotUse_IsAnEmptyViewNotAnException()
     {
@@ -144,9 +118,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     // The rows argument is what bounds a plane's extent, not the frame height. The seam hands the
     // caller's row count through to the length computation (linesize × rows) exactly as the
     // allocator did, because a subsampled chroma plane is shorter than the frame — a future planar
-    // format's chroma plane has half the rows. For BGRA the two coincide, so this pins the
-    // contract with a deliberate partial read: a view of fewer rows is exactly the first rows,
-    // and a view of more rows than the frame is refused.
+    // format's chroma plane has half the rows.
     [Fact]
     public void GetPlane_RowCountBoundsThePlaneNotTheFrameHeight()
     {
@@ -168,8 +140,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     {
         // Subscribing with divisor 3, then counting deliveries and the composited frames over the
         // same wall window. The mix runs at the reset rate (60fps default); the
-        // delivered/composited ratio must sit near 1/3. Wide bounds absorb compositor scheduling
-        // jitter without accepting a divisor that is ignored (which would be a ratio near 1).
+        // delivered/composited ratio must sit near 1/3.
         using var probe = new DivisorProbe(10);
         using var subscription = FrameSourceRegistry.Current.Subscribe(
             FramePixelFormat.Bgra, 320, 180, probe.OnFrame, frameRateDivisor: 3);
@@ -208,13 +179,11 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     [Fact]
     public void TwoSubscriptionsWithTheSameDelegate_AreNotDuplicates()
     {
-        // libobs's identity for an input is the (callback, param) pair, not the callback alone,
-        // and video_output_connect2 rejects a duplicate pair. The seam allocates a fresh param
-        // (its own GCHandle) per Subscribe, so two calls with the *same delegate* must be two
-        // distinct subscriptions — if the seam ever reused a param, the second would be refused
-        // as a duplicate. Proving both connect and deliver is the meaningful assertion at this
-        // layer; provoking the native duplicate rejection would mean reaching past the seam into
-        // the same (callback, param) twice, which the seam exists to prevent.
+        // libobs's identity for an input is the (callback, param) pair, not the callback alone, and
+        // video_output_connect2 rejects a duplicate pair. The seam allocates a fresh param (its own
+        // GCHandle) per Subscribe, so two calls with the *same delegate* must be two distinct
+        // subscriptions — if the seam ever reused a param, the second would be refused as a
+        // duplicate.
         using var firstProbe = new FirstDeliveryProbe();
         using var secondProbe = new FirstDeliveryProbe();
 
@@ -233,10 +202,8 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     public void RetainingAConvertedFramePointer_ReadsADifferentImageLater()
     {
         // Documents the trap rather than guarding against it: a converted frame's plane pointer
-        // points into one of three per-subscription rotating buffers. Retaining the pointer
-        // across frames silently reads a different image a few frames later. The pointer is
-        // compared, never dereferenced — this proves the rotation happens at all, so a consumer
-        // that retains a pointer is documented as reading garbage, not just as slow.
+        // points into one of three per-subscription rotating buffers. Retaining the pointer across
+        // frames silently reads a different image a few frames later.
         using var probe = new PointerRotationProbe(20);
         using var subscription = FrameSourceRegistry.Current.Subscribe(
             FramePixelFormat.Bgra, 320, 180, probe.OnFrame, frameRateDivisor: 1);
@@ -501,17 +468,7 @@ public sealed class ObsFrameSourceTests
 }
 
 // The shared context for the delivery tests. One ObsRuntime, one video mix reset to BGRA (the
-// content tests' format), one long-lived ffmpeg_output. This is the measured-stable shape: the
-// ffmpeg_output encode path accumulates corruption across instances (SIGSEGV around the seventh
-// to tenth), but a single instance serving every delivery test is stable — verified 3/3 on the
-// exact shapes this suite runs. The fixture owns the session and the driver; each test owns its
-// subscription and (for content tests) its channel source.
-//
-// Channel content is switched safely on the live compositor: the previous test's scene is removed
-// via ObsSceneItem.Remove before its scene is disposed, which is libobs's own detach path and
-// does not race the render thread — measured (the alternative, disposing the item handle while it
-// is still attached, is a SIGSEGV in obs_sceneitem_release). The content probes poll for the
-// expected colour because the compositor takes a frame or two to switch.
+// content tests' format), one long-lived ffmpeg_output.
 public sealed class FrameDeliveryFixture : IDisposable
 {
     private int _disposed;
@@ -658,13 +615,10 @@ internal sealed class ActiveOutput : IDisposable
         videoSettings.SetInt("bitrate", 600);
         var encoder = ObsEncoder.CreateVideo("obs_x264", "diag enc", videoSettings);
 
-        // Deliberately NOT binding the encoder to the video handle. Binding puts the encoder on
-        // the GPU texture-encoder path (obs_encoder_set_video raises gpu_refs), and tearing that
-        // path down across many sessions corrupts the Mesa heap on this host — measured:
-        // "malloc(): unaligned tcache chunk detected" in amdgpu_winsys_create, at roughly the
-        // tenth session. The output still ticks the compositor and the raw subscription still
-        // receives frames (the frame travels the ordinary raw path), so the lighter shape tests
-        // the same seam without gambling on a driver bug.
+        // Deliberately NOT binding the encoder to the video handle. Binding puts the encoder on the
+        // GPU texture-encoder path (obs_encoder_set_video raises gpu_refs), and tearing that path
+        // down across many sessions corrupts the Mesa heap on this host — measured: "malloc():
+        // unaligned tcache chunk detected" in amdgpu_winsys_create, at roughly the tenth session.
         var output = ObsOutput.Create("ffmpeg_output", "diag out", settings);
         output.SetVideoEncoder(encoder);
         Assert.True(output.Start(), "ffmpeg_output refused to start; the mix would not tick.");
@@ -679,13 +633,10 @@ internal sealed class ActiveOutput : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        // The teardown race, measured: the encoder thread is still inside avcodec_send_frame
-        // when the output is stopped and the encoder released, and x264_encoder_close runs
-        // while that thread is mid-frame — SIGSEGV in av_buffer_unref. The subscription feeds
-        // the mix, the encoder encodes real frames, and disposing without draining the output
-        // opens the window. Draining means: ask it to stop, wait for the stop signal (which
-        // the plugin emits once it has finished with the encoder), then give the encode thread
-        // time to fully quiesce before releasing anything.
+        // The teardown race, measured: the encoder thread is still inside avcodec_send_frame when
+        // the output is stopped and the encoder released, and x264_encoder_close runs while that
+        // thread is mid-frame — SIGSEGV in av_buffer_unref. The subscription feeds the mix, the
+        // encoder encodes real frames, and disposing without draining the output opens the window.
         var stopped = new TaskCompletionSource<ObsOutputStopEvent>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         EventHandler<ObsOutputStopEvent> handler = (_, payload) => stopped.TrySetResult(payload);

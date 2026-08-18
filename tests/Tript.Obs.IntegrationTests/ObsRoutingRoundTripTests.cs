@@ -7,15 +7,10 @@ using Xunit;
 namespace Tript.Obs.IntegrationTests;
 
 // The round-trip verification for the audio routing: a real recording made through the routing
-// service (spec/recorder.md, "Multi-track audio"). The harness child process wires the audio path
+// service. The harness child process wires the audio path
 // through AudioRoutingService + ObsAudioRoutingSink — sources routed into mixers, one encoder per
 // mixer assigned to the matching output slot — records, and the probe proves the file actually
-// carries the expected number of audio tracks. This is the join between the settings model (how many
-// tracks were configured) and the binding (how many tracks are on disk).
-//
-// The recording itself runs in the harness child process for the same measured reason as every
-// recording test: the ffmpeg_muxer plugin spawns its obs-ffmpeg-mux helper next to the *actual*
-// binary, and under dotnet test that binary is dotnet. See ObsRecorderHarnessDriver.
+// carries the expected number of audio tracks.
 public sealed class ObsRoutingRoundTripTests
 {
     [Fact]
@@ -77,7 +72,7 @@ public sealed class ObsRoutingRoundTripTests
         return directory;
     }
 
-    // Runs the spec's differential probe against a recording. Returns null when the probe could not
+    // Runs the differential probe against a recording. Returns null when the probe could not
     // be found or produced no parseable output.
     private static JsonDocument? ProbeMedia(string file)
     {

@@ -139,11 +139,9 @@ public class YoloOutputStrideTests
         });
     }
 
-    // The layout itself. Rows 4 and up are per-class confidences, which the detect head sigmoids, so
-    // every value in them sits within [0, 1]; the four rows before them are box geometry in input
-    // pixels, which is why ParseYoloOutput divides them by inputSize. Reading the class rows one row
-    // early — what an over-counted numClasses does — pulls the height row in and breaks that bound,
-    // so the check discriminates rather than holding whatever the offset.
+    // The layout itself. Rows 4 and up are per-class confidences, which the detect head sigmoids,
+    // so every value in them sits within [0, 1]; the four rows before them are box geometry in
+    // input pixels, which is why ParseYoloOutput divides them by inputSize.
     [Fact]
     public void ClassRowsAreConfidences_AndBoxRowsAreInputPixels_AtTheDerivedStride()
     {

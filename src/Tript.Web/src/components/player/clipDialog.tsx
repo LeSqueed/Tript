@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The in-player clip dialog (T9). Created in the player, not in a separate workspace
-// (spec/frontend.md — "Clipping — created in the player").
+//.
 //
 // The dialog owns the region list, the mode selector (combine/separate), the output title, the
 // per-track audio overrides (driven by the session's audio-track layout when the recording had

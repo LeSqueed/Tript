@@ -85,8 +85,8 @@ public sealed class MediaProbe
         var stream = FirstStream(root, "streams");
         var format = FirstObject(root, "format");
 
-        // ffprobe omits the colour fields entirely when the file does not carry them — the exact
-        // absence the spec's probe script normalises to "unspecified". Missing here is the default.
+        // ffprobe omits the colour fields entirely when the file does not carry them; that absence
+        // is normalised to "unspecified".
         var transfer = GetString(stream, "color_transfer") ?? "unspecified";
         var primaries = GetString(stream, "color_primaries") ?? "unspecified";
         var space = GetString(stream, "color_space") ?? "unspecified";

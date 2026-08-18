@@ -145,8 +145,7 @@ public sealed class ObsOutputTests
 
     // The path property is the whole key surface the muxer reads. Measured: it is a plain TEXT
     // property on 32.2.1 (type 4), not a PATH picker — the plugin takes the path as a string and
-    // only the frontend's own recording UI offers the browse button. A binding that asserted Path
-    // here would be asserting what a picker should be, not what the plugin declares.
+    // only the frontend's own recording UI offers the browse button.
     [Fact]
     public void TheFileMuxer_DeclaresOnlyThePathProperty()
     {
@@ -161,8 +160,7 @@ public sealed class ObsOutputTests
 
     // The defaults object is empty — measured — even though the path property exists. The plugin
     // carries the path's default in the property itself, not in the defaults object, so a recorder
-    // that starts from GetTypeDefaults gets a blank object. It is the property list that is the
-    // contract, not the defaults.
+    // that starts from GetTypeDefaults gets a blank object.
     [Fact]
     public void TheFileMuxer_DefaultsAreEmpty()
     {
@@ -240,8 +238,7 @@ public sealed class ObsOutputTests
     // The synchronous channel, provoked with the output shaped the way a recorder shapes it: a bad
     // path makes start refuse and names the reason. Measured: last_error is only set once encoders
     // are wired — without them the refusal says "no media" and names nothing, so this is the shape
-    // that proves the reason is surfaced at all. The bad directory is unique so a stale one from an
-    // earlier run cannot satisfy it.
+    // that proves the reason is surfaced at all.
     [Fact]
     public void ABadPath_MakesStartRefuseAndNameTheReason()
     {

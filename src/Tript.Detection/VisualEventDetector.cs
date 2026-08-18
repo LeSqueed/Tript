@@ -374,10 +374,9 @@ public class VisualEventDetector : IDisposable
                     var fW = frameData.Width;
                     var fH = frameData.Height;
 
-                    // Skip near-black frames (loading screens, transitions) — they can produce NaN in the model.
-                    // Subsampled, so a lit region smaller than the 16px stride can fall entirely between
-                    // probes and be missed — at most a 15x15 blob. Accepted: real HUD elements (killfeed,
-                    // ammo counter, minimap) each cover tens to hundreds of probes.
+                    // Skip near-black frames (loading screens, transitions) — they can produce NaN
+                    // in the model. Subsampled, so a lit region smaller than the 16px stride can
+                    // fall entirely between probes and be missed — at most a 15x15 blob.
                     if (IsNearBlack(frameData.Buffer, fW, fH))
                     {
                         Log.Debug("DetectionLoop: skipping near-black frame");
@@ -609,12 +608,10 @@ public class VisualEventDetector : IDisposable
         }
     }
 
-    // The divisor is relative to OBS's configured recording framerate, not the game's render
-    // rate: OBS composites its canvas at obs_video_info fps_num/fps_den, which Tript sets from
-    // the user's FrameRate setting (OBSService.ResetVideoSettings, called at OBSService.cs:873).
-    // A game rendering at 144fps recorded at 60fps still delivers 60 frames/sec to the callback.
-    // Targeting just above the consumption rate avoids paying for full-frame readbacks that the
-    // detection loop only drops.
+    // The divisor is relative to OBS's configured recording framerate, not the game's render rate:
+    // OBS composites its canvas at obs_video_info fps_num/fps_den, which Tript sets from the user's
+    // FrameRate setting (OBSService.ResetVideoSettings, called at OBSService.cs:873). A game
+    // rendering at 144fps recorded at 60fps still delivers 60 frames/sec to the callback.
     internal static int ComputeFrameRateDivisor(int outputFps)
     {
         if (outputFps <= 0) return FpsDivisor;

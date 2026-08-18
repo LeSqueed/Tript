@@ -2,14 +2,10 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 // The settings service: loads and saves the settings model as JSON at the platform config
-// directory, and hands out page-scoped read/write handles so the settings UI edits one logical
-// page at a time.
-//
-// Round-trip preservation of unknown keys is the forward-compatibility contract: a build that
-// models only part of the settings surface must neither lose fields it does not model when it
-// saves, nor choke on them when it loads. The mechanism is JsonExtensionData on Settings and on
-// each page object — a property this build does not model lands there and is re-emitted on
-// save.
+// directory, and hands out page-scoped read/write handles so the settings UI edits one logical page
+// at a time. Round-trip preservation of unknown keys is the forward-compatibility contract: a build
+// that models only part of the settings surface must neither lose fields it does not model when it
+// saves, nor choke on them when it loads.
 namespace Tript.Settings;
 
 public sealed class SettingsStore

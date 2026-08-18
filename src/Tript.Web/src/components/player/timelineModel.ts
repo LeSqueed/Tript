@@ -23,8 +23,7 @@ export function clamp(x: number, lo: number, hi: number): number {
 
 /**
  * The zoomed window: `seconds` long, centred on `focus`, clamped to the session duration.
- * Deterministic — zooming always keeps the playhead inside the window. This is the whole
- * zoom model: zoom-in/out both reduce to calling it with a smaller/larger `seconds`.
+ * Deterministic — zooming always keeps the playhead inside the window.
  */
 export function zoomWindow(focus: number, seconds: number, duration: number): WindowState {
   const d = Math.max(0, duration);

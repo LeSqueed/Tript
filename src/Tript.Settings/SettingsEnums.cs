@@ -2,16 +2,14 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 // The enumeration surface that appears in persisted settings and in recording metadata. Member
-// names and ordering are a compatibility surface — they were for the settings Tript
-// reimplements, and they are for ours: renaming or reordering a member quietly breaks a file
-// written by an earlier version. The audio-side vocabulary (AudioSourceKind, AudioTrack) is
-// Tript's own design, drawn from the multi-track model in spec/recorder.md; the rest mirror the
-// on-file vocabularies in spec/config-and-storage.md.
+// names and ordering are a compatibility surface — they were for the settings Tript reimplements,
+// and they are for ours: renaming or reordering a member quietly breaks a file written by an
+// earlier version.
 namespace Tript.Settings;
 
 // The three recording modes. Hybrid (both at once) is the default globally and per game, and is
 // designed for but deferred in alpha: the mode is a first-class model from the start so the
-// two-output shape slots in without a refactor (spec/recorder.md).
+// two-output shape slots in without a refactor.
 public enum RecordingMode
 {
     Session,
@@ -20,22 +18,9 @@ public enum RecordingMode
 }
 
 // How the video encoder is told to spend its bits. The four members are the modes the encoder
-// families actually accept (spec/obs-binding.md Part 10): CRF is x264's constant-quality mode and
+// families actually accept: CRF is x264's constant-quality mode and
 // exists nowhere else, CQP is the hardware families' constant-quantiser mode, and CBR/VBR are the
 // rate-targeted modes every documented family accepts.
-//
-// The member set is deliberately per-family rather than an abstract "quality/bitrate" pair, because
-// the mode name is written into the encoder's own `rate_control` key and a name a family does not
-// know is not a soft failure: obs-ffmpeg's VAAPI encoder walks a NULL-terminated table and
-// dereferences the terminator, so an unrecognised mode segfaults the process at output start. Which
-// modes a given encoder accepts, and what a mode the resolved encoder does not accept is coerced
-// into, is the recorder's decision (ObsRecorderSession.SupportedRateControlModes) — nothing here
-// may be written through to an encoder unvalidated.
-//
-// Names, not ordinals, are the persisted form (JsonStringEnumConverter), so a member may be added
-// but never renamed. Cqp is first so that the zero value — what a default-constructed resolved config
-// carries before anything sets it — is constant quality on the families most machines resolve to,
-// which is also what the recorder wrote before this setting existed.
 public enum RateControlMode
 {
     // Constant quantiser, the hardware families' spelling of constant quality.
@@ -98,10 +83,8 @@ public enum AudioOutputMode
     Disable
 }
 
-// How the game-capture source behaves. GameOnly is our own prior work and part of first light —
-// it selects game capture attached to the detected game's process. The soft timeout governs what
-// happens when the game is absent. The full contract is still to be captured in the recorder
-// spec; the settings model records the choice.
+// How the game-capture source behaves. GameOnly is our own prior work and part of first light — it
+// selects game capture attached to the detected game's process.
 public enum GameCaptureMode
 {
     Auto,
@@ -118,7 +101,7 @@ public enum AudioSourceKind
 
 // The audio page's routing surface: how many tracks a recording has, and which sources (each
 // with its own volume) are merged into each. A track is a destination in the output file, not a
-// device; one track may carry several merged sources (spec/recorder.md).
+// device; one track may carry several merged sources.
 public sealed class AudioTrack
 {
     // A stable identifier so a track survives reordering in the UI and stays referable in

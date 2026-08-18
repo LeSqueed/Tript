@@ -50,19 +50,11 @@ public static class ClipRegionBounds
     private const double MaxRepresentableSeconds = 922_337_203_685.0;
 
     // Converts a client's start/end seconds into a region, or reports that they name no interval at
-    // all. This is the double -> TimeSpan boundary, and it is the only place non-finite input can be
-    // caught: TimeSpan.FromSeconds(double.NaN) throws ArgumentException and
-    // TimeSpan.FromSeconds(double.PositiveInfinity) throws OverflowException, so a raw conversion of
-    // wire values throws rather than refusing (measured — and note 1e18, an unremarkable JSON
+    // all. This is the double -> TimeSpan boundary, and it is the only place non-finite input can
+    // be caught: TimeSpan.FromSeconds(double.NaN) throws ArgumentException and
+    // TimeSpan.FromSeconds(double.PositiveInfinity) throws OverflowException, so a raw conversion
+    // of wire values throws rather than refusing (measured — and note 1e18, an unremarkable JSON
     // number, overflows too, which is why the bound is on magnitude and not only on finiteness).
-    //
-    // The endpoints are ordered rather than refused. A swapped pair is unambiguous data: [end,
-    // start] names exactly one interval, and a timeline drag whose anchor ends up after its cursor
-    // produces it for entirely ordinary reasons. Normalising loses nothing and asks nothing of the
-    // user, where refusing would raise an error whose only possible remedy is "draw the same region
-    // the other way round". Non-finite input is different in kind — NaN names no interval, so there
-    // is nothing to normalise — and is refused. A swapped pair that is also degenerate is not
-    // rescued by the swap: it still has to clear MinimumDuration in Clamp.
     public static bool TryFromSeconds(double start, double end, out ClipRegion region)
     {
         region = default;
@@ -81,12 +73,6 @@ public static class ClipRegionBounds
     // Both endpoints are clamped, which is what turns "wholly past the end" into a zero-length
     // region and therefore into a drop: a 5 s - 8 s region on a 2 s file clamps to 2 s - 2 s and
     // fails MinimumDuration.
-    //
-    // A sourceDuration that is not a usable positive length means the file's real length is unknown
-    // — MediaProbe reports DurationSeconds as NaN when the container carries no parseable duration —
-    // and an unknown bound cannot be enforced. The ordering, the non-negativity and the minimum
-    // length still are. Passing an unusable duration through to TimeSpan.FromSeconds instead would
-    // throw ArgumentException from inside the comparison, which is how the old check behaved.
     public static bool TryClamp(ClipRegion region, double sourceDurationSeconds, out ClipRegion clamped)
     {
         var (start, end) = region.Start <= region.End

@@ -11,14 +11,6 @@ namespace Tript.Obs.IntegrationTests;
 // keyframes, stopped — and a real, probeable file on disk. Plus the deliberate failures, which are
 // the other half of the contract: a failure must be reported, never swallowed, and a killed muxer
 // helper must not look like a successful recording.
-//
-// The recording itself runs in the Tript.RecorderHarness child process, for a measured reason: the
-// ffmpeg_muxer plugin spawns its obs-ffmpeg-mux helper next to the *actual binary* of the process
-// (os_get_executable_path_ptr resolves /proc/self/exe), and under `dotnet test` that process is
-// dotnet, which cannot have a helper dropped beside it. The harness is a real executable in the test
-// output directory whose apphost carries a copy of the helper. What is being tested is still the
-// binding — the harness drives the same public surface the integration tests drive, and these tests
-// assert on the file the harness produced and on the harness's reported stop code.
 public sealed class ObsOutputRecordingTests
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
@@ -109,7 +101,7 @@ public sealed class ObsOutputRecordingTests
     // fine can still carry the wrong transfer or primaries, and a *wrong* binding can tag a
     // recorded file with the wrong colour description without any of it looking broken. The
     // assertion is that the fields exist and are non-"unspecified" — the exact values (bt709 etc.)
-    // are libobs's defaults, and the spec's differential comparison is what pins the values, not a
+    // are libobs's defaults, and the differential comparison is what pins the values, not a
     // hard-coded expectation here.
     [Fact]
     public void TheRecording_CarriesItsColourDescription()
@@ -139,10 +131,7 @@ public sealed class ObsOutputRecordingTests
     // ---- the deliberate failures: the failure is reported, never swallowed ----
 
     // The synchronous failure channel, provoked with a bad path. The bad directory is deliberately
-    // unique so a stale directory from an earlier run cannot satisfy it. This needs no helper: the
-    // output refuses synchronously, before the muxer process would be spawned. The encoders are
-    // wired because last_error is only set once the output has media — measured; without them the
-    // refusal says "no media" and names nothing.
+    // unique so a stale directory from an earlier run cannot satisfy it.
     [Fact]
     public void ABadPath_IsRefusedSynchronouslyWithANamedReason()
     {
@@ -157,11 +146,10 @@ public sealed class ObsOutputRecordingTests
         Assert.NotEqual(string.Empty, output.LastError);
     }
 
-    // The stop signal is reported rather than swallowed — provoked by killing the muxer helper
-    // mid-recording. The plugin cannot finalise the file: the stop signal fires, and what is on
-    // disk is not a playable MP4 (no moov atom — measured; ffprobe reports no codec, no audio track
-    // and no format). That the file is unparseable is the reproducible consequence; a binding that
-    // swallowed the stop signal would leave the parent waiting on a recording that never ends.
+    // The stop signal is reported rather than swallowed — provoked by killing the muxer helper mid-
+    // recording. The plugin cannot finalise the file: the stop signal fires, and what is on disk is
+    // not a playable MP4 (no moov atom — measured; ffprobe reports no codec, no audio track and no
+    // format).
     [Fact]
     public async Task AKilledMuxerHelper_DoesNotLookLikeASuccessfulRecording()
     {
@@ -271,7 +259,7 @@ public sealed class ObsOutputRecordingTests
             Thread.Sleep(5);
     }
 
-    // Runs the spec's differential probe against a recording. Returns null when the probe could not
+    // Runs the differential probe against a recording. Returns null when the probe could not
     // be found or produced no parseable output — which is itself the interesting answer for the
     // killed-helper test, where "no parseable output" is the expected shape.
     private static JsonDocument? ProbeMedia(string file)

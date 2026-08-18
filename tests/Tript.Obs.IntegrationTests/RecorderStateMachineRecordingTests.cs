@@ -7,14 +7,8 @@ using Xunit;
 namespace Tript.Obs.IntegrationTests;
 
 // The recorder state machine against a real muxer. The unit tests prove the transitions with a fake
-// output; this proves the state machine actually owns a recording that lands on disk — Start,
-// run, Stop, the stop signal completing the transition back to Idle, and a real, probeable file.
-//
-// The recording runs in the Tript.RecorderHarness child process, for the same reason the raw
-// binding's recording tests do: the ffmpeg_muxer plugin spawns its obs-ffmpeg-mux helper next to
-// the actual binary, and under `dotnet test` that is dotnet. The harness drives the recorder
-// (Recorder over ObsRecorderSession) and reports the verdict; what is being tested is the recorder
-// state machine as the app would run it.
+// output; this proves the state machine actually owns a recording that lands on disk — Start, run,
+// Stop, the stop signal completing the transition back to Idle, and a real, probeable file.
 public sealed class RecorderStateMachineRecordingTests
 {
     [Fact]

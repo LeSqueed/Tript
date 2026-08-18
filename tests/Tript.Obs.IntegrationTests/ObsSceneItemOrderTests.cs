@@ -12,7 +12,7 @@ public sealed class ObsSceneItemOrderTests
 {
     private const string ColourSourceId = "color_source";
 
-    [Fact]
+    [SkippableFact]
     public void EachSourceAdded_LandsOnTopOfTheOnesBeforeIt()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -26,7 +26,7 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(2, top.OrderPosition);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Enumeration_RunsFromTheBottomOfTheSceneUpwards()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -44,7 +44,7 @@ public sealed class ObsSceneItemOrderTests
             item.Dispose();
     }
 
-    [Fact]
+    [SkippableFact]
     public void MovingAnItemToTheTop_GivesItTheHighestPosition()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -60,7 +60,7 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(1, third.OrderPosition);
     }
 
-    [Fact]
+    [SkippableFact]
     public void MovingAnItemUpOrDown_ShiftsItByOne()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -79,7 +79,7 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(1, second.OrderPosition);
     }
 
-    [Fact]
+    [SkippableFact]
     public void SettingAnOrderPosition_PutsTheItemExactlyThere()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -97,7 +97,7 @@ public sealed class ObsSceneItemOrderTests
 
     // The bulk form, which is how a frontend applies a whole reordering at once. The array is bottom
     // first, so index and order position are the same number.
-    [Fact]
+    [SkippableFact]
     public void ReorderingTheWholeScene_AppliesTheGivenOrderBottomFirst()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -119,7 +119,7 @@ public sealed class ObsSceneItemOrderTests
     }
 
     // A partial ordering is refused rather than half-applied.
-    [Fact]
+    [SkippableFact]
     public void ReorderingWithAnIncompleteList_IsRefusedAndChangesNothing()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -134,7 +134,7 @@ public sealed class ObsSceneItemOrderTests
     }
 
     // Removing the item below closes the gap rather than leaving a hole.
-    [Fact]
+    [SkippableFact]
     public void RemovingAnItem_RenumbersTheOnesAboveIt()
     {
         using var session = ObsSession.StartWithSourceTypes();

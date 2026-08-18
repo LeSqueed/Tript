@@ -43,7 +43,7 @@ public sealed class ContentPathEncodingTests
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        var (status, body) = await GetRawAsync($"/api/content/sessions/{escaped}");
+        var (status, body) = await GetRawAsync(host, $"/api/content/sessions/{escaped}");
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(payload, body);
 
@@ -67,7 +67,7 @@ public sealed class ContentPathEncodingTests
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        var (status, body) = await GetRawAsync("/api/thumbnail/sessions/my%20clip.mp4");
+        var (status, body) = await GetRawAsync(host, "/api/thumbnail/sessions/my%20clip.mp4");
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal("JPEGBYTES", body);
 
@@ -85,7 +85,7 @@ public sealed class ContentPathEncodingTests
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        var (status, body) = await GetRawAsync("/api/content/sessions/my..clip.mp4");
+        var (status, body) = await GetRawAsync(host, "/api/content/sessions/my..clip.mp4");
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(payload, body);
 
@@ -112,7 +112,7 @@ public sealed class ContentPathEncodingTests
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        var (status, body) = await GetRawAsync(rawPath);
+        var (status, body) = await GetRawAsync(host, rawPath);
         Assert.Equal(HttpStatusCode.Forbidden, status);
         Assert.DoesNotContain("TOP SECRET", body, StringComparison.Ordinal);
         Assert.Equal("TOP SECRET", await File.ReadAllTextAsync(outside));
@@ -128,7 +128,7 @@ public sealed class ContentPathEncodingTests
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        var (status, _) = await GetRawAsync("/api/content/%252e%252e/sentinel/secret.txt");
+        var (status, _) = await GetRawAsync(host, "/api/content/%252e%252e/sentinel/secret.txt");
         Assert.True(status is HttpStatusCode.Forbidden or HttpStatusCode.NotFound,
             $"a double-encoded traversal must not be served; it answered {status}");
 
@@ -144,8 +144,10 @@ public sealed class ContentPathEncodingTests
 
     // A raw HTTP/1.1 GET with the literal request line. HttpClient normalizes escapes and ".."
     // before the request leaves the process, so it would never put these paths on the wire at all.
-    private static async Task<(HttpStatusCode Status, string Body)> GetRawAsync(string rawPath)
+    private static async Task<(HttpStatusCode Status, string Body)> GetRawAsync(AppHostDriver host, string rawPath)
     {
+        // The session token, on every request: the content server serves nothing without it.
+        rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
         await client.ConnectAsync("localhost", LocalPorts.Content);
         await using var stream = client.GetStream();

@@ -13,7 +13,7 @@ public sealed class ObsSceneItemTransformTests
 {
     private const string ColourSourceId = "color_source";
 
-    [Fact]
+    [SkippableFact]
     public void AFreshlyAttachedItem_HasUnitScaleAndTopLeftAlignmentAndNoBounds()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -39,7 +39,7 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(ObsBlendingType.Normal, item.BlendingMode);
     }
 
-    [Fact]
+    [SkippableFact]
     public void PositionScaleAndRotation_ReadBackAsSet()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -62,7 +62,7 @@ public sealed class ObsSceneItemTransformTests
 
     // Rotation is kept exactly as given: not wrapped into a single turn, not clamped, and not
     // rounded — a value with no exact float representation comes back bit-identical.
-    [Fact]
+    [SkippableFact]
     public void Rotation_IsKeptInDegreesWithoutWrappingOrRounding()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -82,7 +82,7 @@ public sealed class ObsSceneItemTransformTests
     }
 
     // A negative scale is a mirror, not an error.
-    [Fact]
+    [SkippableFact]
     public void ANegativeScale_IsStoredAsGiven()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -98,7 +98,7 @@ public sealed class ObsSceneItemTransformTests
 
     // Measured on 32.2.1 and stated in no header: a scene item's position lands on a half-unit
     // grid. The grid is the same at any canvas size and any scale.
-    [Theory]
+    [SkippableTheory]
     [InlineData(100.125f, 100.0f)]
     [InlineData(200.375f, 200.5f)]
     [InlineData(0.625f, 0.5f)]
@@ -120,7 +120,7 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(0f, actual.X * 2f % 1f);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BoundsTypeAndSize_ReadBackAsSet()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -141,7 +141,7 @@ public sealed class ObsSceneItemTransformTests
     }
 
     // Bounds are snapped exactly as positions are.
-    [Fact]
+    [SkippableFact]
     public void BoundsOffTheHalfUnitGrid_AreSnappedToIt()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -159,7 +159,7 @@ public sealed class ObsSceneItemTransformTests
     // libobs validates neither of these: an undefined bounds type and alignment bits outside the
     // four defined ones both round-trip. A binding that mapped a read back through a switch over
     // known values would be inventing a guarantee.
-    [Fact]
+    [SkippableFact]
     public void AnUndefinedBoundsTypeOrAlignment_IsStoredRatherThanRejected()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -175,7 +175,7 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal((ObsAlignment)0xFFFFFFFF, item.Alignment);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Crop_ReadsBackPerEdge()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -190,7 +190,7 @@ public sealed class ObsSceneItemTransformTests
     }
 
     // Measured: a negative crop is neither refused nor kept. It becomes zero.
-    [Fact]
+    [SkippableFact]
     public void ANegativeCrop_IsStoredAsZero()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -206,7 +206,7 @@ public sealed class ObsSceneItemTransformTests
 
     // The whole transform in one struct, which is the call that has to mirror obs_transform_info's
     // layout exactly: a field written at the wrong offset here lands in the next one.
-    [Fact]
+    [SkippableFact]
     public void TheWholeTransform_RoundTripsThroughOneStruct()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -243,7 +243,7 @@ public sealed class ObsSceneItemTransformTests
         Assert.True(item.CropToBounds);
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheDefaultTransform_MatchesWhatAFreshItemReports()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -257,7 +257,7 @@ public sealed class ObsSceneItemTransformTests
 
     // Reads inside a deferred update see the new values immediately; it is the matrix work that is
     // batched, not the state.
-    [Fact]
+    [SkippableFact]
     public void DeferredUpdates_DoNotHideTheValuesBeingSet()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -277,7 +277,7 @@ public sealed class ObsSceneItemTransformTests
     }
 
     // The return value is libobs reporting whether anything changed, which the header does not say.
-    [Fact]
+    [SkippableFact]
     public void SettingVisibilityOrLock_ReportsWhetherItChangedAnything()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -297,7 +297,7 @@ public sealed class ObsSceneItemTransformTests
         Assert.False(item.SetLocked(true));
     }
 
-    [Fact]
+    [SkippableFact]
     public void ScaleFilterAndBlending_ReadBackAsSet()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -317,7 +317,7 @@ public sealed class ObsSceneItemTransformTests
 
     // Two items over the same source have independent placements — the transform belongs to the
     // item, not to the source.
-    [Fact]
+    [SkippableFact]
     public void TwoItemsOverOneSource_CarryIndependentTransforms()
     {
         using var session = ObsSession.StartWithSourceTypes();

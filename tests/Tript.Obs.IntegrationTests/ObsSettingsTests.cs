@@ -33,7 +33,7 @@ public sealed class ObsSettingsTests
     // wrong: a settings object created inside a context is still readable after obs_shutdown, and
     // still has to be released by us. A handle that declined to release after shutdown would leak
     // every one of them.
-    [Fact]
+    [SkippableFact]
     public void ASettingsObject_OutlivesTheContextItWasCreatedIn()
     {
         ObsSettings survivor;

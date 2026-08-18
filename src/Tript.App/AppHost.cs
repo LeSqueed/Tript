@@ -33,6 +33,10 @@ internal sealed class AppHost : IDisposable
     // on every push; never persisted, because it is a fact about the machine rather than a setting.
     private readonly DisplaySize? _primaryDisplay;
 
+    // Generated once per launch and held only in memory. Every one of the three listeners requires
+    // it; see SessionToken for what that does and does not buy.
+    private readonly SessionToken _token = new();
+
     private readonly AppController _controller;
     private readonly IpcServer _ipc;
     private readonly ContentServer _content;
@@ -111,13 +115,13 @@ internal sealed class AppHost : IDisposable
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
         _controller = new AppController(this);
-        _ipc = new IpcServer(_controller);
+        _ipc = new IpcServer(_controller, _token);
         _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
         _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
         _thumbnails = new ThumbnailStore(ThumbnailRootFor(EffectiveRoot), CreateThumbnailExtractor);
         _trash = new TrashStore(TrashRootFor(EffectiveRoot));
-        _content = new ContentServer(EffectiveRoot, _thumbnails);
-        _ui = new UiHost(options.WebRoot);
+        _content = new ContentServer(EffectiveRoot, _token, _thumbnails);
+        _ui = new UiHost(options.WebRoot, _token);
 
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
@@ -132,6 +136,11 @@ internal sealed class AppHost : IDisposable
     internal IpcServer Ipc => _ipc;
 
     internal ContentServer Content => _content;
+
+    // The UI URL with this launch's token on it: what the desktop shell loads in-process, and what
+    // the READY line prints for a headless user's own terminal. It is never passed on a command
+    // line and never written to the log.
+    internal string UiUrl => _token.UiUrl;
 
     internal bool IsRecording => _recorder is not null && _recorder.Snapshot.State != RecorderState.Idle;
 
@@ -249,8 +258,10 @@ internal sealed class AppHost : IDisposable
 
         WireAutoStart();
 
-        // The single-line contract the smoke test waits for.
-        Console.WriteLine("READY");
+        // The single-line contract the smoke test waits for. It now carries the UI URL, token and
+        // all: that is how a headless user reaches their own app, and the token dies with the
+        // process. Console, not the log — the log is a file that outlives the launch.
+        Console.WriteLine($"READY {UiUrl}");
         Console.Out.Flush();
 
         // No browser is opened — the desktop shell renders the UI in its own window.

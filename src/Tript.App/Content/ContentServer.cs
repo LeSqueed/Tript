@@ -41,12 +41,19 @@ internal sealed class ContentServer : IDisposable
     // handles for a video no frame could be taken from.
     private readonly ThumbnailStore? _thumbnails;
 
+    // The per-launch session token. This listener checks no Origin by design — a <video> element
+    // sends none — so before the token any page that guessed a path could embed and play a
+    // recording. The token has to ride in the query string for the same reason: a media element can
+    // carry nothing but a URL.
+    private readonly SessionToken _token;
+
     private Thread? _serverThread;
     private volatile bool _running;
 
-    internal ContentServer(string contentRoot, ThumbnailStore? thumbnails = null)
+    internal ContentServer(string contentRoot, SessionToken token, ThumbnailStore? thumbnails = null)
     {
         _contentRoot = Path.GetFullPath(contentRoot);
+        _token = token;
         _thumbnails = thumbnails;
     }
 
@@ -118,6 +125,16 @@ internal sealed class ContentServer : IDisposable
                 || rawPath.Contains("/..", StringComparison.Ordinal)
                 || rawPath.Contains("%2e", StringComparison.OrdinalIgnoreCase)
                 || rawPath.Contains("%2E", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Close();
+                return;
+            }
+
+            // After the raw-URL guard, deliberately: the guard reads RawUrl before anything is
+            // decoded, and nothing here may run ahead of it. The token is read from the parsed
+            // query string, which cannot reach the path the guard inspects.
+            if (!_token.Authorises(context.Request))
             {
                 context.Response.StatusCode = 403;
                 context.Response.Close();

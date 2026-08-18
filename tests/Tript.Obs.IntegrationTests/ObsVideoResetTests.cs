@@ -53,7 +53,7 @@ public sealed class ObsVideoResetTests
         return data;
     }
 
-    [Theory]
+    [SkippableTheory]
     [MemberData(nameof(Matrix))]
     public void VideoReset_SucceedsAcrossResolutionsRatesAndFormats(uint baseWidth, uint baseHeight, uint outputWidth,
         uint outputHeight, uint fpsNumerator, uint fpsDenominator, ObsVideoFormat format)
@@ -94,7 +94,7 @@ public sealed class ObsVideoResetTests
     // The binding does not correct this — it is libobs's behaviour and hiding it would make the
     // read-back disagree with the settings for a different reason — but nothing may be surprised
     // by it either.
-    [Theory]
+    [SkippableTheory]
     [InlineData(1366u, 768u, 1364u, 768u)]
     [InlineData(1922u, 1082u, 1920u, 1082u)]
     [InlineData(1921u, 1081u, 1920u, 1080u)]
@@ -120,7 +120,7 @@ public sealed class ObsVideoResetTests
     }
 
     // The base canvas is left exactly as asked, unlike the output size.
-    [Fact]
+    [SkippableFact]
     public void TheBaseCanvas_IsNotRounded()
     {
         using var session = ObsSession.Start();
@@ -135,7 +135,7 @@ public sealed class ObsVideoResetTests
         Assert.Equal(768u, readBack.BaseHeight);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASecondReset_ChangesTheRunningFrameRate()
     {
         using var session = ObsSession.Start();
@@ -155,7 +155,7 @@ public sealed class ObsVideoResetTests
 
     // The return codes, mapped rather than swallowed. Both of these are states a user reaches:
     // a zero dimension from an unconfigured profile, and a renderer that is not on the machine.
-    [Fact]
+    [SkippableFact]
     public void AZeroDimension_IsReportedAsAnInvalidParameter()
     {
         using var session = ObsSession.Start();
@@ -168,7 +168,7 @@ public sealed class ObsVideoResetTests
         Assert.Equal(ObsVideoResetResult.InvalidParameter, result);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AMissingGraphicsModule_IsReportedAsGraphicsModuleNotFound()
     {
         using var session = ObsSession.Start();
@@ -182,7 +182,7 @@ public sealed class ObsVideoResetTests
         Assert.Equal(ObsVideoResetResult.GraphicsModuleNotFound, result);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BeforeTheFirstReset_NoVideoMixExists()
     {
         using var session = ObsSession.Start();
@@ -192,7 +192,7 @@ public sealed class ObsVideoResetTests
         Assert.False(session.Runtime.TryGetVideoInfo(out _));
     }
 
-    [Fact]
+    [SkippableFact]
     public void EverySetting_ReadsBackAsItWasSet()
     {
         using var session = ObsSession.Start();
@@ -221,7 +221,7 @@ public sealed class ObsVideoResetTests
     // libobs keeps the obs_video_info it was handed, including the graphics module pointer, and
     // never copies the string. Reading it back after the reset call has returned is what proves the
     // binding kept that buffer alive rather than freeing it with the call frame.
-    [Fact]
+    [SkippableFact]
     public void TheGraphicsModuleName_OutlivesTheResetCall()
     {
         using var session = ObsSession.Start();
@@ -244,7 +244,7 @@ public sealed class ObsVideoResetTests
         Assert.Equal(ObsVideoSettings.DefaultGraphicsModule, readBack!.GraphicsModule);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AMixWithoutAnOutput_IsPresentButNotActive()
     {
         using var session = ObsSession.Start();

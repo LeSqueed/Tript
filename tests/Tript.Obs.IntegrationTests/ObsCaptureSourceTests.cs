@@ -24,7 +24,7 @@ public sealed class ObsCaptureSourceTests
     // The safe-module set on this machine: linux-capture's xshm_input and linux-pulseaudio's two
     // audio device captures. These are the ids the alpha recorder actually creates display and
     // audio sources with, so the enumeration must report them.
-    [Fact]
+    [SkippableFact]
     public void TheInputTypeEnumeration_ReportsTheSafeModuleCaptureSources()
     {
         using var session = ObsSession.StartWithAudioSources();
@@ -39,7 +39,7 @@ public sealed class ObsCaptureSourceTests
     // obs_enum_input_types answers inputs only. Filters, transitions and scenes are source types
     // but are not inputs, so they never appear — the guard that keeps a capture-surface caller from
     // treating a non-input as a capture source.
-    [Fact]
+    [SkippableFact]
     public void TheInputTypeEnumeration_NeverReportsFilterOrSceneTypes()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -60,7 +60,7 @@ public sealed class ObsCaptureSourceTests
     // GetTypeDefaults yields a settings object for a registered capture type. xshm_input's defaults
     // object is present but empty on 32.2.1 — the screen selection lives in the property list's
     // runtime items, not in a defaults object — which is exactly why the discovery route matters.
-    [Fact]
+    [SkippableFact]
     public void GetTypeDefaults_YieldsASettingsObjectForTheDisplayCaptureType()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -72,7 +72,7 @@ public sealed class ObsCaptureSourceTests
     // The instance-level property enumeration — obs_source_properties on a created source — is the
     // reliable route for capture sources. xshm_input's instance properties must include the
     // display-selection property a recorder needs to choose a monitor.
-    [Fact]
+    [SkippableFact]
     public void TheDisplayCaptureInstanceProperties_IncludeTheScreenSelection()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -87,7 +87,7 @@ public sealed class ObsCaptureSourceTests
 
     // The display choices a capture source accepts, read through the instance discovery route. This
     // is the seam a recorder leans on instead of assuming a display index is valid.
-    [Fact]
+    [SkippableFact]
     public void TheDisplayCaptureChoices_AreEnumerableFromTheInstanceScreenProperty()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -103,7 +103,7 @@ public sealed class ObsCaptureSourceTests
 
     // The type-level property probe works for capture-source types whose property builder is safe —
     // xcomposite_input on this machine. This is the pre-creation discovery route.
-    [Fact]
+    [SkippableFact]
     public void TheTypeLevelPropertyProbe_WorksForACaptureSourceType()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -117,7 +117,7 @@ public sealed class ObsCaptureSourceTests
     // The discovery guard: a filter/transition/scene type id must not crash property discovery.
     // Scenes are registered by libobs itself, so this exercises the obs_get_source_properties path
     // against non-input source types directly.
-    [Fact]
+    [SkippableFact]
     public void PropertyDiscovery_IsSafeForFilterAndTransitionTypeIds()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -136,7 +136,7 @@ public sealed class ObsCaptureSourceTests
     // display size once it has attached — which on this machine is a real monitor (1920x1080),
     // because the source attaches at creation. The assertion is that the pair is sane (both zero, or
     // both the display size), never one-sided garbage.
-    [Fact]
+    [SkippableFact]
     public void CreatingTheDisplayCaptureSource_SucceedsAndReportsSaneDimensions()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -161,7 +161,7 @@ public sealed class ObsCaptureSourceTests
     // The discovered display-selection key round-trips through creation: build settings with the
     // instance-discovered screen property, create the source with them, and the setting survives.
     // This is the exact shape the recorder uses to pick a monitor without hardcoding a key.
-    [Fact]
+    [SkippableFact]
     public void CreatingTheDisplayCaptureSource_WithTheDiscoveredScreenKey_KeepsTheSetting()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -194,7 +194,7 @@ public sealed class ObsCaptureSourceTests
     // capture records the desktop rather than a black frame. Which id that is has to come from the
     // runtime: linux-capture registers xshm_input, win-capture registers monitor_capture, and
     // nothing registers both.
-    [Fact]
+    [SkippableFact]
     public void TheDisplayCaptureId_IsDiscoveredFromTheRegisteredInputTypes()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -207,7 +207,7 @@ public sealed class ObsCaptureSourceTests
 
     // The id the discovery reports must be one obs_source_create actually accepts — the whole point
     // of discovering it instead of assuming a name per platform.
-    [Fact]
+    [SkippableFact]
     public void TheDiscoveredDisplayCaptureId_CreatesARealSource()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -223,7 +223,7 @@ public sealed class ObsCaptureSourceTests
     // The recorder's own composition step: create the discovered source, then write the first
     // display back through the instance-discovered selection key. It has to survive the update,
     // because on Windows the equivalent key's default is a sentinel that matches no monitor at all.
-    [Fact]
+    [SkippableFact]
     public void TheDisplayCaptureFallback_KeepsTheSelectionItWasUpdatedWith()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -250,7 +250,7 @@ public sealed class ObsCaptureSourceTests
     // Linux has no game-capture source in libobs, so the game-capture
     // surface reports the absence and the recorder falls back to display capture. This is a first-
     // class documented state, not an error.
-    [Fact]
+    [SkippableFact]
     public void GameCapture_IsReportedAbsentOnLinux()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -265,7 +265,7 @@ public sealed class ObsCaptureSourceTests
     // The re-targeting seam refuses a display-capture source on Linux, which is the only source
     // type that exists there. The recorder must never get a false "re-targeted" for a source that
     // cannot be attached to a game.
-    [Fact]
+    [SkippableFact]
     public void Retargeting_ADisplaySource_IsRefusedOnLinux()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -276,7 +276,7 @@ public sealed class ObsCaptureSourceTests
 
     // ---- empty and invalid ----
 
-    [Fact]
+    [SkippableFact]
     public void EmptyOrNullCaptureArguments_AreRejectedBeforeReachingLibobs()
     {
         using var session = ObsSession.StartWithSourceTypes();

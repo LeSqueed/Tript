@@ -210,7 +210,9 @@ run:
 	else \
 		echo "No shell binary at $(SHELL_BIN); falling back to headless host."; \
 		cd $(PUBLISH_DIR) && ./Tript.App $$([ "$(FAKE_RECORDER)" = "true" ] && echo --fake-recorder) \
-			& echo "Tript is up — UI served at http://localhost:2882/ (Ctrl-C to stop)"; wait; \
+			& echo "Tript is up — open the URL on the host's own READY line above (Ctrl-C to stop)."; \
+		echo "The bare http://localhost:2882/ is refused: the UI needs the per-launch key on that line."; \
+		wait; \
 	fi
 
 # ---- test ----

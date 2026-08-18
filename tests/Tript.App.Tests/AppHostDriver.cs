@@ -19,6 +19,11 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     private readonly TaskCompletionSource<string?> _ready = new();
     private ClientWebSocket? _socket;
 
+    // The per-launch session token, read off the READY line. Every request the suite makes to any
+    // of the three listeners carries it; a host that never printed one leaves this empty and the
+    // tests fail on the 403 rather than hanging.
+    private string _token = string.Empty;
+
     private static readonly string AppHostPath =
         Path.Combine(Path.GetDirectoryName(typeof(AppHostDriver).Assembly.Location)!,
             "Tript.App");
@@ -40,21 +45,28 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
                 if (line is null)
                     break;
                 if (line.Contains("READY", StringComparison.Ordinal))
+                {
+                    UiUrl = line[line.IndexOf("READY", StringComparison.Ordinal)..]
+                        .Split(' ', 2) is [_, var url] ? url.Trim() : string.Empty;
+                    _token = TokenFrom(UiUrl);
                     _ready.TrySetResult(line);
+                }
             }
         });
     }
 
-    internal static AppHostDriver StartFake(string contentRoot, string settingsPath, string? gameListJson = null)
-        => Start(contentRoot, settingsPath, gameListJson, fake: true);
+    internal static AppHostDriver StartFake(string contentRoot, string settingsPath, string? gameListJson = null,
+        string? webRoot = null)
+        => Start(contentRoot, settingsPath, gameListJson, fake: true, webRoot);
 
     // The real recording path: no --fake-recorder, so the host starts libobs, resets video/audio,
     // loads the safe modules, and wires a real ObsRecorderSession. The caller is responsible for
     // ensuring the muxer helper sits next to the app binary first.
     internal static AppHostDriver StartReal(string contentRoot, string settingsPath)
-        => Start(contentRoot, settingsPath, gameListJson: null, fake: false);
+        => Start(contentRoot, settingsPath, gameListJson: null, fake: false, webRoot: null);
 
-    private static AppHostDriver Start(string contentRoot, string settingsPath, string? gameListJson, bool fake)
+    private static AppHostDriver Start(string contentRoot, string settingsPath, string? gameListJson, bool fake,
+        string? webRoot)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -72,6 +84,11 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         {
             startInfo.ArgumentList.Add("--game-list");
             startInfo.ArgumentList.Add(gameListJson);
+        }
+        if (webRoot is not null)
+        {
+            startInfo.ArgumentList.Add("--web-root");
+            startInfo.ArgumentList.Add(webRoot);
         }
 
         var process = Process.Start(startInfo)
@@ -93,10 +110,38 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 
     private bool WaitForReady(TimeSpan timeout) => _ready.Task.Wait(timeout);
 
+    // The UI URL the host printed, token and all — what the desktop shell loads and what a headless
+    // user pastes into a browser.
+    internal string UiUrl { get; private set; } = string.Empty;
+
+    internal string Token => _token;
+
+    // Appends the session token to a URL the test is about to request. Every listener wants it in
+    // the query string: the control socket because a browser cannot set a handshake header, the
+    // content server because that is the only channel a <video src> carries.
+    internal string WithToken(string url) =>
+        url + (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "k=" + _token;
+
+    private static string TokenFrom(string url)
+    {
+        var query = url.IndexOf('?', StringComparison.Ordinal);
+        if (query < 0)
+            return string.Empty;
+
+        foreach (var pair in url[(query + 1)..].Split('&'))
+        {
+            if (pair.StartsWith("k=", StringComparison.Ordinal))
+                return pair[2..];
+        }
+
+        return string.Empty;
+    }
+
     internal async Task ConnectWebSocketAsync()
     {
         _socket = new ClientWebSocket();
-        await _socket.ConnectAsync(new Uri("ws://localhost:44030/"), CancellationToken.None);
+        await _socket.ConnectAsync(new Uri(WithToken($"ws://localhost:{LocalPorts.ControlSocket}/")),
+            CancellationToken.None);
         await SendAsync("""{"method":"NewConnection","parameters":{"protocolVersion":1}}""");
     }
 

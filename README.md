@@ -72,6 +72,27 @@ make run FAKE_RECORDER=false    # real recording (needs obs-studio + a display s
 
 `FAKE_RECORDER` defaults to `true`, so a dev session runs without OBS or capture hardware.
 
+### The launch key
+
+The host mints a 256-bit key at startup and refuses every request that does not carry it — the UI
+host, the control socket and the content server alike. It lives only in memory and dies with the
+process.
+
+The desktop shell passes it to its own window in-process, so there is nothing to do. The **headless**
+host prints the URL to open on its `READY` line; open that, not a bare `http://localhost:2882/`,
+which is answered with 403. `vite dev` cannot mint one, so the dev server on 2882 serves the SPA and
+the app then reports a missing key rather than retrying a socket that will never be accepted.
+
+What the key is for: the Origin check already refuses a malicious web page, but loopback is **not**
+user-scoped — another user's process on the same machine reaches 127.0.0.1 and sends no Origin at
+all. The key closes that, along with browser extensions (which need not present a page Origin) and
+the content server, which by design cannot check Origin because a `<video>` element sends none.
+
+What it is **not**: protection against a process running as you. That process can read the recordings
+straight off disk. The key rides in the URL query, because a WebSocket handshake and a `<video src>`
+have no other channel, so treat a pasted URL or a screenshot of the address bar as handing over
+control for the life of that launch.
+
 ## First launch: seed the game list for auto-record
 
 The host reads `settings.Game.GameList` for the game catalogue; auto-start only fires when a game is in settings. If your settings file has no games yet, add an entry:

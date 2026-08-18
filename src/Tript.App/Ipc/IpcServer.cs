@@ -18,6 +18,7 @@ internal sealed class IpcServer : IDisposable
     private const int Port = LocalPorts.ControlSocket;
 
     private readonly AppController _controller;
+    private readonly SessionToken _token;
     private readonly HttpListener _listener = new();
     private readonly object _gate = new();
     private readonly List<ClientConnection> _clients = [];
@@ -26,9 +27,10 @@ internal sealed class IpcServer : IDisposable
     private Thread? _acceptThread;
     private volatile bool _running;
 
-    public IpcServer(AppController controller)
+    public IpcServer(AppController controller, SessionToken token)
     {
         _controller = controller;
+        _token = token;
     }
 
     public event Action? ShutdownRequested;
@@ -75,6 +77,21 @@ internal sealed class IpcServer : IDisposable
                 // distinguishes the app's own UI from someone else's page, and a browser will not
                 // let script forge it.
                 if (!IsAllowedOrigin(context.Request.Headers["Origin"]))
+                {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                    continue;
+                }
+
+                // The session token, required IN ADDITION to the Origin check and never instead of
+                // it. The Origin check answers "is this the app's own page"; it says nothing about
+                // a client that presents no Origin at all — another user's process on this machine,
+                // or a browser extension with host permissions — and those are exactly what the
+                // allowlist has to let through so the app's own webview can connect. It rides in
+                // the query string because a browser cannot set a header on a WebSocket handshake.
+                // Refused before the upgrade, so nothing is ever dispatched for an unauthorised
+                // client.
+                if (!_token.Authorises(context.Request))
                 {
                     context.Response.StatusCode = 403;
                     context.Response.Close();

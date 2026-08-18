@@ -23,7 +23,7 @@ public sealed class OutputSettingsKeyTests
         new OutputSettingsKey("muxer_settings", ObsSettingsValueType.String, Pinned.PluginBehavior)
     };
 
-    [Fact]
+    [SkippableFact]
     public void EverySpecifiedKey_RoundTripsWithItsSpecifiedType()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -50,7 +50,7 @@ public sealed class OutputSettingsKeyTests
 
     // obs_data keys are matched byte for byte, so every plausible near-miss must come up empty. A
     // typo in the table above fails here rather than as a silent default in a recording.
-    [Fact]
+    [SkippableFact]
     public void EverySpecifiedKey_IsFoundOnlyUnderItsExactSpelling()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -85,7 +85,7 @@ public sealed class OutputSettingsKeyTests
     // that is what "pinned from live readback" means. Keys pinned as PluginBehavior (muxer_settings)
     // are not properties and are deliberately excluded here; their pinning is the presence-in-log
     // observation recorded in the table.
-    [Fact]
+    [SkippableFact]
     public void EveryOutputPropertyPinnedKey_IsPresentInTheLivePropertySurface()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -100,7 +100,7 @@ public sealed class OutputSettingsKeyTests
     // The guard half of the pin: on OBS 32.2.1 the surface is exactly this. When the plugin gains a
     // key, this fails and the table is extended deliberately — with the new key and the observation
     // that says why it is pinned — rather than silently drifting out of sync.
-    [Fact]
+    [SkippableFact]
     public void TheLivePropertySurface_IsThePinnedOneOnThisOBS()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -114,7 +114,7 @@ public sealed class OutputSettingsKeyTests
     // The path key carries a *path* property whose default lives in the property object, not in the
     // defaults object. obs_output_defaults returns an empty object — measured — so a recorder must
     // not expect the plugin's defaults to seed the path for it.
-    [Fact]
+    [SkippableFact]
     public void TheLiveDefaults_AreEmptyOnThisOBS()
     {
         using var session = ObsSession.StartWithSourceTypes();

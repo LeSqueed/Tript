@@ -12,14 +12,16 @@ internal sealed class UiHost : IDisposable
     private const int Port = LocalPorts.Ui;
 
     private readonly string _webRoot;
+    private readonly SessionToken _token;
     private readonly HttpListener _listener = new();
 
     private Thread? _serverThread;
     private volatile bool _running;
 
-    internal UiHost(string webRoot)
+    internal UiHost(string webRoot, SessionToken token)
     {
         _webRoot = Path.GetFullPath(webRoot);
+        _token = token;
     }
 
     public void Start()
@@ -68,6 +70,21 @@ internal sealed class UiHost : IDisposable
     {
         try
         {
+            // Gated like the other two listeners, and for the sharpest reason: this host serves the
+            // SPA, so an ungated UI host hands the frontend — and with it the app's whole behaviour
+            // — to anything that asks for the page.
+            //
+            // The document request carries ?k=; on success it is answered with a cookie, so the
+            // assets it pulls in need no token in their URLs. Nothing is served either way without
+            // one, and the refusal never repeats what was presented.
+            if (!_token.Authorises(context.Request, acceptCookie: true))
+            {
+                Refuse(context);
+                return;
+            }
+
+            var setCookie = context.Request.QueryString[SessionToken.QueryKey] is not null;
+
             var path = context.Request.Url?.AbsolutePath ?? "/";
             if (path == "/")
                 path = "/index.html";
@@ -102,6 +119,15 @@ internal sealed class UiHost : IDisposable
                 }
             }
 
+            if (setCookie)
+            {
+                // HttpOnly so no script can read it back out, SameSite=Strict so another site's
+                // navigation never carries it, and no Max-Age so it dies with the browser session —
+                // the token is per launch and must not outlive one.
+                context.Response.AppendHeader("Set-Cookie",
+                    $"{SessionToken.CookieName}={_token.Value}; Path=/; HttpOnly; SameSite=Strict");
+            }
+
             context.Response.ContentType = ContentTypeFor(candidate);
             context.Response.ContentLength64 = new FileInfo(candidate).Length;
             using var stream = File.OpenRead(candidate);
@@ -119,6 +145,17 @@ internal sealed class UiHost : IDisposable
             {
             }
         }
+    }
+
+    // A short plain-text refusal, never the SPA and never an echo of what was presented.
+    private static void Refuse(HttpListenerContext context)
+    {
+        var body = "Tript: this page is served only to the session that launched the app.\n"u8.ToArray();
+        context.Response.StatusCode = 403;
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        context.Response.ContentLength64 = body.Length;
+        context.Response.OutputStream.Write(body, 0, body.Length);
+        context.Response.Close();
     }
 
     private static string ContentTypeFor(string path)

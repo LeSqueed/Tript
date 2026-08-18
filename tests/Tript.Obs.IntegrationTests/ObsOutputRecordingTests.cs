@@ -127,7 +127,7 @@ public sealed class ObsOutputRecordingTests
 
     // The synchronous failure channel, provoked with a bad path. The bad directory is deliberately
     // unique so a stale directory from an earlier run cannot satisfy it.
-    [Fact]
+    [SkippableFact]
     public void ABadPath_IsRefusedSynchronouslyWithANamedReason()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -174,6 +174,7 @@ public sealed class ObsOutputRecordingTests
 
         var exited = await Task.Run(() => process.WaitForExit(TimeSpan.FromSeconds(60)));
         Assert.True(exited, "The harness did not exit after its muxer helper was killed.");
+        ObsRecorderHarnessDriver.RequireHarnessFoundADisplay(process.ExitCode);
 
         // The killed recording never wrote the moov atom — measured — so ffprobe reports no usable
         // streams. Assert that the harness reported *some* verdict (not a hang and not a clean

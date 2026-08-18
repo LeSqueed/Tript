@@ -22,7 +22,10 @@ namespace Tript.Shell;
 // disposed on the main thread after the background thread has drained.
 internal static class Program
 {
-    private const string UiUrl = "http://localhost:2882/";
+    // Where the UI host listens. The URL the window actually loads carries the launch's session
+    // token (host.UiUrl) and is built in-process — never a command-line argument, and never in the
+    // message below.
+    private static readonly string UiAddress = $"http://localhost:{LocalPorts.Ui}/";
 
     // STAThread on the entry point: WebView2's CoreWebView2Controller must be created on a
     // single-threaded apartment (the controller holds COM state the apartment owns). The .NET
@@ -66,10 +69,10 @@ internal static class Program
                 // first paint is not a connection failure. Give up gracefully: a webview that
                 // cannot reach the host is a hang, and a hang is the one failure the shell must
                 // never have — report it on stderr and exit non-zero.
-                if (!WaitForUi(UiUrl, TimeSpan.FromSeconds(15)))
+                if (!WaitForUi(UiAddress, TimeSpan.FromSeconds(15)))
                 {
                     Console.Error.WriteLine(
-                        "Tript.Shell: the app host did not come up in time (no reply from " + UiUrl +
+                        "Tript.Shell: the app host did not come up in time (no reply from " + UiAddress +
                         "); giving up.");
                     return 1;
                 }
@@ -87,8 +90,10 @@ internal static class Program
                 }
 
                 // WaitForClose runs the Photino/GTK event loop and returns when the window closes.
-                // The window is the whole shell UI, so the process exits when it is gone.
-                OpenWindow(UiUrl, host);
+                // The window is the whole shell UI, so the process exits when it is gone. The URL
+                // is the tokenised one, handed over in memory: the UI host serves nothing without
+                // it, and the document request trades it for a cookie so the assets follow.
+                OpenWindow(host.UiUrl, host);
             }
             catch (Exception exception)
             {

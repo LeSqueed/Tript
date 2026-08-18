@@ -13,7 +13,7 @@ public sealed class ObsSourceLifetimeTests
 {
     private const string ColourSourceId = "color_source";
 
-    [Fact]
+    [SkippableFact]
     public void ReleasingASource_DestroysIt()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -31,7 +31,7 @@ public sealed class ObsSourceLifetimeTests
 
     // A second owning reference is what obs_source_get_ref is for, and it does exactly what it says:
     // the source outlives the first handle's disposal.
-    [Fact]
+    [SkippableFact]
     public void ASecondReference_KeepsTheSourceAliveAfterTheFirstIsDisposed()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -53,7 +53,7 @@ public sealed class ObsSourceLifetimeTests
     // reference of its own, so the caller may let go of its handle immediately. The holder is the
     // scene *item*, not the scene, which is the part a signature cannot show: detaching the item is
     // not enough while a handle to that item is still open.
-    [Fact]
+    [SkippableFact]
     public void AttachingASourceToAScene_GivesTheSceneAReferenceOfItsOwn()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -77,7 +77,7 @@ public sealed class ObsSourceLifetimeTests
         Assert.True(weak.IsExpired);
     }
 
-    [Fact]
+    [SkippableFact]
     public void DisposingTheScene_ReleasesTheSourcesItHolds()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -99,7 +99,7 @@ public sealed class ObsSourceLifetimeTests
     // A scene item handle is a reference of its own, taken because the pointer libobs hands back
     // belongs to the scene. Removing the item from the scene therefore leaves this object usable,
     // just detached.
-    [Fact]
+    [SkippableFact]
     public void ASceneItemHandle_StaysUsableAfterItIsRemovedFromItsScene()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -129,7 +129,7 @@ public sealed class ObsSourceLifetimeTests
         item.Remove();
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("source, item, scene")]
     [InlineData("item, scene, source")]
     [InlineData("scene, item, source")]
@@ -172,7 +172,7 @@ public sealed class ObsSourceLifetimeTests
     }
 
     // The cycle a recorder actually performs when the user switches what is being captured.
-    [Fact]
+    [SkippableFact]
     public void RepeatedAttachAndDetachCycles_LeakNothing()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -205,7 +205,7 @@ public sealed class ObsSourceLifetimeTests
     // The measured asymmetry between the two ways of creating a scene: a findable one is held by the
     // OBS core as well as by its caller, so disposal has to make the core let go too. Without that
     // this test finds the scene still there.
-    [Fact]
+    [SkippableFact]
     public void DisposingAFindableScene_LeavesItNeitherFindableNorAlive()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -233,7 +233,7 @@ public sealed class ObsSourceLifetimeTests
         return source.CreateWeakReference();
     }
 
-    [Fact]
+    [SkippableFact]
     public void APrivateScene_IsNeverFindableByName()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -245,7 +245,7 @@ public sealed class ObsSourceLifetimeTests
     // libobs frees every source at shutdown whether or not a caller still holds a reference, so the
     // pointer in a handle that outlives the context refers to nothing. Releasing it would be a
     // use-after-free; the handle has to notice and decline.
-    [Fact]
+    [SkippableFact]
     public void AHandleThatOutlivesTheContext_DeclinesToRelease()
     {
         var session = ObsSession.StartWithSourceTypes();
@@ -261,7 +261,7 @@ public sealed class ObsSourceLifetimeTests
 
     // A weak reference is the opposite case, and for the same reason as a settings object: its
     // control block is bmem's, it survives obs_shutdown, and declining to release it would leak it.
-    [Fact]
+    [SkippableFact]
     public void AWeakReferenceDisposedAfterTheContextIsGone_IsReleasedRatherThanLeaked()
     {
         ObsWeakSource weak;
@@ -285,7 +285,7 @@ public sealed class ObsSourceLifetimeTests
     // Measured on 32.2.1 and documented nowhere: obs_shutdown crashes — a segmentation fault inside
     // libobs, not a leak — when a scene the caller still references still has items attached. This
     // test leaks exactly that arrangement on purpose.
-    [Fact]
+    [SkippableFact]
     public void ASceneStillHoldingItemsAtShutdown_DoesNotTakeTheProcessDown()
     {
         var session = ObsSession.StartWithSourceTypes();

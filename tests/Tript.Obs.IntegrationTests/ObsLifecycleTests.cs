@@ -11,7 +11,7 @@ namespace Tript.Obs.IntegrationTests;
 // in part of what is being tested.
 public sealed class ObsLifecycleTests
 {
-    [Fact]
+    [SkippableFact]
     public void Startup_MakesTheContextCurrent()
     {
         Assert.False(ObsRuntime.IsInitialized);
@@ -22,7 +22,7 @@ public sealed class ObsLifecycleTests
         Assert.Same(session.Runtime, ObsRuntime.Current);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Shutdown_LeavesNoContextBehind()
     {
         using (ObsSession.Start())
@@ -33,7 +33,7 @@ public sealed class ObsLifecycleTests
         Assert.Null(ObsRuntime.Current);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASecondContext_IsRefusedWhileOneIsRunning()
     {
         using var session = ObsSession.Start();
@@ -41,7 +41,7 @@ public sealed class ObsLifecycleTests
         Assert.Throws<InvalidOperationException>(() => ObsRuntime.Start(new ObsStartupOptions()));
     }
 
-    [Fact]
+    [SkippableFact]
     public void DisposingTwice_ShutsDownOnce()
     {
         var session = ObsSession.Start();
@@ -51,7 +51,7 @@ public sealed class ObsLifecycleTests
         Assert.False(ObsRuntime.IsInitialized);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ADisposedRuntime_ThrowsRatherThanCallingIntoADeadContext()
     {
         var session = ObsSession.Start();
@@ -62,7 +62,7 @@ public sealed class ObsLifecycleTests
         Assert.Throws<ObjectDisposedException>(() => runtime.EnumerateInputTypes());
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheStartupBanner_ArrivesThroughTheInstalledHandler()
     {
         using var session = ObsSession.Start();
@@ -75,7 +75,7 @@ public sealed class ObsLifecycleTests
 
     // The locale is the one string the core stores and hands straight back, which makes it the
     // cleanest byte-level round trip through libobs's own storage.
-    [Fact]
+    [SkippableFact]
     public void TheLocale_RoundTripsByteIdentically()
     {
         const string locale = "zh-Hàn — Ω — 🎮";
@@ -125,7 +125,7 @@ public sealed class ObsLifecycleTests
     // The check that matters most here: a startup and shutdown cycle must give libobs's
     // allocator back everything it took. Measured after a warm-up cycle, because the first one
     // legitimately retains process-wide state — the point is that repetition does not accumulate.
-    [Fact]
+    [SkippableFact]
     public void RepeatedStartupAndShutdown_LeavesNoLiveAllocations()
     {
         RunCycle();

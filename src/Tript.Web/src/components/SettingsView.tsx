@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Settings — logical pages: recording, buffer/replay, audio, capture, game. The buffer has its
-// own page; the audio page drives the multi-track model (track count, source→track routing,
-// per-source volume) — spec/frontend.md. Each page reads the full `settings` push from the
-// backend and writes page-scoped partials via `UpdateSettings` (the backend is the source of
-// truth; see useSettings.ts for the cause-echo discipline).
+// Settings — logical pages: recording, buffer/replay, audio, capture, game. The buffer has its own
+// page; the audio page drives the multi-track model (track count, source→track routing, per-source
+// volume).
 
 import { useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -74,7 +72,12 @@ export function SettingsView({ client }: { client: IpcClient }) {
           <AudioPage settings={controller.settings.audio} update={controller.update} page={page} />
         )}
         {page === 'capture' && (
-          <CapturePage settings={controller.settings.capture} update={controller.update} page={page} />
+          <CapturePage
+            settings={controller.settings.capture}
+            update={controller.update}
+            page={page}
+            availableDisplays={controller.availableDisplays}
+          />
         )}
         {page === 'game' && (
           <GamePage

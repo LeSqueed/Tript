@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The library grid, rendered.
-//
-// The derivation itself is tested without a DOM (library/libraryModel.test.ts); what needs a DOM is
-// the wiring: that each control reaches the right dimension of the query, that a filter change resets
-// the page (so the user cannot be left looking at a page that no longer exists), that a thumbnail the
-// backend cannot supply degrades to the placeholder tile instead of a broken image, and that the two
-// empty states are actually distinguishable — the one thing that separates "you have no recordings"
-// from "your filters hide all of them", which otherwise looks identical to a broken backend.
-//
-// `nowSeconds` is injected so the date filter measures against a fixed point instead of the clock.
+// The library grid, rendered. The derivation itself is tested without a DOM
+// (library/libraryModel.test.ts); what needs a DOM is the wiring: that each control reaches the
+// right dimension of the query, that a filter change resets the page (so the user cannot be left
+// looking at a page that no longer exists), that a thumbnail the backend cannot supply degrades to
+// the placeholder tile instead of a broken image, and that the two empty states are actually
+// distinguishable — the one thing that separates "you have no recordings" from "your filters hide
+// all of them", which otherwise looks identical to a broken backend.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -319,5 +316,161 @@ describe('LibraryView empty states', () => {
     renderLibrary([]);
     expect(screen.queryByTestId('library-empty-filtered')).toBeNull();
     expect(screen.getByTestId('library-empty')).toBeTruthy();
+  });
+});
+
+describe('LibraryView delete and selection', () => {
+  /** The commands a mock client saw, so the wire shape can be asserted rather than assumed. */
+  function recordingClient(): { client: IpcClient; sent: { method: string; parameters?: unknown }[] } {
+    const sent: { method: string; parameters?: unknown }[] = [];
+    return {
+      sent,
+      client: {
+        state: 'connected',
+        connect: () => {},
+        close: () => {},
+        send: (method, parameters) => sent.push({ method, parameters }),
+        on: () => () => {},
+        onStateChange: () => () => {},
+      },
+    };
+  }
+
+  function renderWith(items: ContentItem[], retentionHours = 24) {
+    const { client, sent } = recordingClient();
+    const view = render(
+      <LibraryView client={client} items={items} nowSeconds={NOW} retentionHours={retentionHours} />,
+    );
+    return { sent, view, client };
+  }
+
+  it('confirms a per-item delete before sending anything, and cancels cleanly', () => {
+    const { sent } = renderWith([session, clip]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Delete "Ranked win"?' });
+    expect(within(dialog).getByTestId('confirm-delete-notice').textContent).toContain(
+      'moved to the trash',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByTestId('confirm-delete')).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('sends DeleteContent with no permanent flag for the trash path', () => {
+    const { sent } = renderWith([session, clip]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Nice shot' }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent).toEqual([
+      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clip-1.mp4' } },
+    ]);
+  });
+
+  it('sends permanent: true when the skip-trash checkbox is ticked', () => {
+    const { sent } = renderWith([session]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /skip trash/i }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent).toEqual([
+      {
+        method: 'DeleteContent',
+        parameters: { contentType: 'recording', fileName: 'cs2.mp4', permanent: true },
+      },
+    ]);
+  });
+
+  it('quotes the retention the shell was pushed, not a hardcoded 24 hours', () => {
+    renderWith([session], 72);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('for the next 3 days');
+  });
+
+  it('offers no checkboxes until selection mode is entered, and drops them again on Done', () => {
+    renderWith([session, clip]);
+    expect(screen.queryByRole('checkbox')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Select' })).toBeTruthy();
+  });
+
+  it('selects the whole page and clears it again', () => {
+    renderWith([session, clip]);
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('2 selected');
+    // The affordance flips once the page is covered, so it is never a no-op.
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect page' }));
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
+  });
+
+  it('bulk-deletes the selection through DeleteMultipleContent', () => {
+    const { sent } = renderWith([session, clip]);
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Ranked win' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Nice shot' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 2' }));
+    expect(screen.getByRole('dialog', { name: 'Delete 2 items?' })).toBeTruthy();
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent).toEqual([
+      {
+        method: 'DeleteMultipleContent',
+        parameters: {
+          items: [
+            { contentType: 'recording', fileName: 'cs2.mp4' },
+            { contentType: 'clip', fileName: 'clip-1.mp4' },
+          ],
+        },
+      },
+    ]);
+    // The cards go when the `content` push arrives; the selection must not still claim them.
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
+  });
+
+  it('cannot bulk-delete nothing', () => {
+    renderWith([session]);
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getByRole('button', { name: 'Delete' })).toHaveProperty('disabled', true);
+  });
+
+  it('keeps a selection across a content push, but not the items that push removed', () => {
+    const { client } = recordingClient();
+    const view = render(
+      <LibraryView client={client} items={[session, clip]} nowSeconds={NOW} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('2 selected');
+
+    // A push after someone else deleted the clip. The selection must follow the list, not lag it.
+    view.rerender(<LibraryView client={client} items={[session]} nowSeconds={NOW} />);
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('1 selected');
+    expect(
+      (screen.getByRole('checkbox', { name: 'Select Ranked win' }) as HTMLInputElement).checked,
+    ).toBe(true);
+  });
+
+  it('only selects what the filters still show, so a hidden item cannot be deleted by "Select page"', () => {
+    const { sent } = renderWith([session, clip]);
+    fireEvent.click(screen.getByRole('button', { name: 'Clips' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    expect(screen.getByTestId('library-selection-count').textContent).toBe('1 selected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+    expect(sent).toEqual([
+      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clip-1.mp4' } },
+    ]);
   });
 });

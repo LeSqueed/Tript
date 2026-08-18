@@ -5,8 +5,7 @@ namespace Tript.Settings;
 
 // The seam the dependency map flagged: the recorder receives already-resolved values, never the
 // settings schema. This resolver computes the effective value — global setting plus any per-game
-// override — and hands consumers a flat, resolved config. The recorder consumes
-// ResolvedRecorderSettings and knows nothing about Settings, overrides, or the merge.
+// override — and hands consumers a flat, resolved config.
 public sealed class SettingsResolver
 {
     public static ResolvedRecorderSettings Resolve(Settings settings, string? gameId = null)
@@ -40,6 +39,10 @@ public sealed class SettingsResolver
 
             CaptureMethod = settings.Capture.Method,
             Display = settings.Capture.Display,
+
+            // The capture policy is global: which layers the scene has, and how long a game-only
+            // capture waits for its hook, are not per-game overrides.
+            GameCaptureTimeout = settings.Game.GameCaptureTimeout,
 
             AudioTracks = [.. settings.Audio.Tracks]
         };
@@ -91,6 +94,10 @@ public sealed class ResolvedRecorderSettings
 
     public string? Display { get; set; }
 
+    // How long game capture is given to attach before the Game method gives up. Only the Game
+    // method acts on it: Auto has a display layer to show meanwhile.
+    public TimeSpan GameCaptureTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     public List<AudioTrack> AudioTracks { get; set; } = [];
 
     public ResolvedRecorderSettings Clone() => new()
@@ -110,6 +117,7 @@ public sealed class ResolvedRecorderSettings
         BufferMaxSizeBytes = BufferMaxSizeBytes,
         CaptureMethod = CaptureMethod,
         Display = Display,
+        GameCaptureTimeout = GameCaptureTimeout,
         AudioTracks = [.. AudioTracks]
     };
 }

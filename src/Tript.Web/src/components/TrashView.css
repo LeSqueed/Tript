@@ -1,0 +1,106 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
+.trash-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.trash-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.trash-header h2 {
+  margin: 0;
+}
+
+.trash-retention {
+  margin-left: auto;
+}
+
+.trash-empty {
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.trash-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.trash-selection-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* Emptying the trash is the one action here that cannot be aimed at anything, so it is pushed away
+ * from the selection-scoped buttons rather than sitting in the same run of them. */
+
+.trash-empty-action {
+  margin-left: auto;
+}
+
+.trash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.trash-row-select {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex: none;
+}
+
+.trash-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.trash-row-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-row-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.trash-row-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}

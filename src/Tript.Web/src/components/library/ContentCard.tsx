@@ -3,21 +3,11 @@
 // One card in the library grid: a 16:9 thumbnail, the title, and chips for what the item is, which
 // game it came from, when it was recorded and how big it is.
 //
-// The card is a `<button>` and not a div with a click handler, so it is keyboard-reachable and
-// activatable for free (Enter/Space), and the overlay it opens can restore focus to it on close —
-// a div would need a tabindex and a key handler to get the same thing half right. Nothing inside is
-// interactive, which is what keeps the nesting valid.
-//
-// THE THUMBNAIL SEAM. `GET /api/thumbnail/<filePath>` answers with a 480x270 JPEG when one exists and
-// **204 No Content** when one does not (an extraction that failed, a file the backend has not got to
-// yet, an older backend with no thumbnail store at all). A 204 leaves the `<img>` with no image data,
-// so the browser fires `error` — which is the only signal the element gives us, and is therefore what
-// swaps in the placeholder tile. The card never waits on the thumbnail to render its text: a library
-// of items with no thumbnails is a grid of placeholders, not an empty page.
-//
-// Images are `loading="lazy"` because a library is unbounded — a thousand cards must not become a
-// thousand requests the moment the grid mounts. The intrinsic 480x270 is declared on the element so
-// the card reserves its space before the bytes arrive and the grid does not reflow as they land.
+// The card's *open* affordance is a `<button>` rather than a div with a click handler, so it is
+// keyboard-reachable and activatable for free (Enter/Space) and the player overlay can restore focus
+// to it on close. The select checkbox and the delete button are its SIBLINGS inside a positioned
+// wrapper, not its children: a button inside a button is invalid markup and browsers disagree about
+// which one a click activates.
 
 import { useEffect, useState } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
@@ -35,10 +25,20 @@ import {
 export function ContentCard({
   item,
   onOpen,
+  onDelete,
+  selectable = false,
+  selected = false,
+  onToggleSelected,
 }: {
   item: ContentItem;
   /** The library's open seam: called with the item the user activated. */
   onOpen?: (item: ContentItem) => void;
+  /** The library's delete seam. Absent means the card offers no delete at all. */
+  onDelete?: (item: ContentItem) => void;
+  /** Whether the grid is in selection mode — the checkbox only exists then. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (item: ContentItem) => void;
 }) {
   // Per-card, per-path: a `content` push can replace the item under this card (a rename keeps the
   // path, a delete + re-record does not), and a previous path's failure must not condemn the new one.
@@ -56,45 +56,68 @@ export function ContentCard({
   const showThumbnail = item.filePath.length > 0 && !thumbnailFailed;
 
   return (
-    <button
-      type="button"
-      className="content-card"
-      data-testid="content-card"
-      onClick={() => onOpen?.(item)}
-      aria-label={`Open ${label}`}
-    >
-      <span className="content-card-thumb">
-        {showThumbnail ? (
-          <img
-            className="content-card-image"
-            src={thumbnailUrl(item.filePath)}
-            // Decorative: the title sits right beside it, so describing the frame again would only
-            // make a screen reader say the same name twice.
-            alt=""
-            loading="lazy"
-            decoding="async"
-            width={480}
-            height={270}
-            onError={() => setThumbnailFailed(true)}
-          />
-        ) : (
-          <span className="content-card-placeholder" data-testid="content-card-placeholder" aria-hidden="true">
-            ▶
+    <div className={selected ? 'content-card-shell selected' : 'content-card-shell'}>
+      <button
+        type="button"
+        className="content-card"
+        data-testid="content-card"
+        onClick={() => onOpen?.(item)}
+        aria-label={`Open ${label}`}
+      >
+        <span className="content-card-thumb">
+          {showThumbnail ? (
+            <img
+              className="content-card-image"
+              src={thumbnailUrl(item.filePath)}
+              // Decorative: the title sits right beside it, so describing the frame again would only
+              // make a screen reader say the same name twice.
+              alt=""
+              loading="lazy"
+              decoding="async"
+              width={480}
+              height={270}
+              onError={() => setThumbnailFailed(true)}
+            />
+          ) : (
+            <span className="content-card-placeholder" data-testid="content-card-placeholder" aria-hidden="true">
+              ▶
+            </span>
+          )}
+          {duration !== null && <span className="content-card-duration">{duration}</span>}
+        </span>
+        <span className="content-card-body">
+          <span className="content-card-title" title={label}>
+            {label}
           </span>
-        )}
-        {duration !== null && <span className="content-card-duration">{duration}</span>}
-      </span>
-      <span className="content-card-body">
-        <span className="content-card-title" title={label}>
-          {label}
+          <span className="content-card-chips">
+            <span className="pill content-card-type">{typeLabel(item)}</span>
+            <span className="pill pill-muted">{game}</span>
+            <span className="pill pill-muted">{formatDateChip(item)}</span>
+            {size !== null && <span className="pill pill-muted">{size}</span>}
+          </span>
         </span>
-        <span className="content-card-chips">
-          <span className="pill content-card-type">{typeLabel(item)}</span>
-          <span className="pill pill-muted">{game}</span>
-          <span className="pill pill-muted">{formatDateChip(item)}</span>
-          {size !== null && <span className="pill pill-muted">{size}</span>}
-        </span>
-      </span>
-    </button>
+      </button>
+
+      {selectable && (
+        <input
+          type="checkbox"
+          className="content-card-select"
+          checked={selected}
+          aria-label={`Select ${label}`}
+          onChange={() => onToggleSelected?.(item)}
+        />
+      )}
+
+      {onDelete && (
+        <button
+          type="button"
+          className="content-card-delete"
+          onClick={() => onDelete(item)}
+          aria-label={`Delete ${label}`}
+        >
+          <span aria-hidden="true">🗑</span>
+        </button>
+      )}
+    </div>
   );
 }

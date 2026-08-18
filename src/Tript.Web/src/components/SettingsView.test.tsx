@@ -16,6 +16,8 @@ import { MockWebSocket, createMockSocketFactory } from '../ipc/test/mockWebSocke
 import { SettingsView } from './SettingsView';
 import type {
   AudioSourceKind,
+  CaptureSettings,
+  DisplayInfo,
   DisplayResolution,
   SettingsMessageContent,
 } from '../settings/settingsModel';
@@ -62,8 +64,7 @@ function makeSettings(): SettingsMessageContent['settings'] {
  * **siblings** of `settings`, exactly as AppHost.PushSettings sends them: they are facts about the
  * machine — its encoder registry and its primary display — not persisted settings, so neither is
  * nested under the recording page (RecordingSettings carries JsonExtensionData, so a nested field
- * would be round-tripped into the settings file). Pass `null` for a host that could not determine
- * one, and omit it for a backend that does not send the field at all.
+ * would be round-tripped into the settings file).
  */
 function pushSettings(
   ws: MockWebSocket,
@@ -71,6 +72,7 @@ function pushSettings(
   cause?: string,
   availableEncoders?: string[] | null,
   displayResolution?: DisplayResolution | null,
+  availableDisplays?: DisplayInfo[] | null,
 ) {
   const content: SettingsMessageContent = { settings };
   if (cause !== undefined) {
@@ -81,6 +83,9 @@ function pushSettings(
   }
   if (displayResolution !== undefined) {
     content.displayResolution = displayResolution;
+  }
+  if (availableDisplays !== undefined) {
+    content.availableDisplays = availableDisplays;
   }
   act(() => {
     ws.serverMessage(JSON.stringify({ method: 'settings', content }));
@@ -421,8 +426,8 @@ describe('SettingsView', () => {
       'Variable bitrate (VBR)',
     ]);
 
-    // VAAPI: CQP rather than CRF, and no VBR — the specification has no VAAPI table, so its VBR
-    // ceiling key is not something we are willing to guess at.
+    // VAAPI: CQP rather than CRF, and no VBR — its VBR ceiling key is not something we are
+    // willing to guess at.
     const withVaapi = makeSettings();
     withVaapi.recording.encoder = 'ffmpeg_vaapi';
     pushSettings(ws, withVaapi, 'server:init', ['obs_x264', 'ffmpeg_vaapi']);
@@ -724,3 +729,103 @@ interface AudioTrackLike {
   }[];
   [key: string]: unknown;
 }
+
+// ---- capture: monitor selection ----
+//
+// The picker's job is to keep the user's choice visible and unchanged: `capture.display` is never
+// rewritten when the monitor is absent (the recorder falls back for that session and says so), so a
+// saved monitor that is gone must still render as the selection rather than blanking the select.
+
+const MONITORS: DisplayInfo[] = [
+  { id: 'monitor-1', name: 'DP-1', width: 2560, height: 1440, primary: true },
+  { id: 'monitor-2', name: 'HDMI-A-1', width: 1920, height: 1080, primary: false },
+];
+
+/** Render, push a capture page plus a monitor list, and open the Capture tab. */
+function renderCapture(
+  capture: CaptureSettings,
+  availableDisplays?: DisplayInfo[] | null,
+): { ws: MockWebSocket } {
+  const { factory } = createMockSocketFactory();
+  const client = createIpcClient({ createSocket: factory });
+  render(<SettingsView client={client} />);
+  client.connect();
+  const ws = activeSocket();
+  act(() => {
+    ws.serverOpen();
+  });
+  const settings = makeSettings();
+  settings.capture = capture;
+  pushSettings(ws, settings, undefined, undefined, undefined, availableDisplays);
+  fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
+  return { ws };
+}
+
+function displaySelect(): HTMLSelectElement {
+  return screen.getByTestId('capture-display-select') as HTMLSelectElement;
+}
+
+describe('SettingsView capture page — monitor selection', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('offers the attached monitors, labelled with their size and the primary marked', () => {
+    renderCapture({ method: 'Display', display: null, displayLabel: null }, MONITORS);
+    expect(Array.from(displaySelect().options).map((option) => option.text)).toEqual([
+      'Primary monitor (automatic)',
+      'DP-1 — 2560x1440 (primary)',
+      'HDMI-A-1 — 1920x1080',
+    ]);
+  });
+
+  it('shows the picker under Auto as well, and hides it for Game', () => {
+    renderCapture({ method: 'Auto', display: null, displayLabel: null }, MONITORS);
+    expect(displaySelect()).toBeTruthy();
+    cleanup();
+    renderCapture({ method: 'Game', display: null, displayLabel: null }, MONITORS);
+    expect(screen.queryByTestId('capture-display-select')).toBeNull();
+    expect(screen.queryByTestId('capture-display-input')).toBeNull();
+  });
+
+  it('sends the id and the name in one patch when a monitor is picked', () => {
+    const { ws } = renderCapture({ method: 'Display', display: null, displayLabel: null }, MONITORS);
+    fireEvent.change(displaySelect(), { target: { value: 'monitor-2' } });
+    expect(sentUpdates(ws)).toEqual([
+      { capture: { display: 'monitor-2', displayLabel: 'HDMI-A-1' } },
+    ]);
+  });
+
+  it('clears both fields when the primary sentinel is picked', () => {
+    const { ws } = renderCapture(
+      { method: 'Display', display: 'monitor-2', displayLabel: 'HDMI-A-1' },
+      MONITORS,
+    );
+    fireEvent.change(displaySelect(), { target: { value: '__primary_display__' } });
+    expect(sentUpdates(ws)).toEqual([{ capture: { display: null, displayLabel: null } }]);
+  });
+
+  it('keeps a monitor that is no longer attached selected, marked "(not connected)"', () => {
+    renderCapture({ method: 'Display', display: 'monitor-gone', displayLabel: 'DP-3' }, MONITORS);
+    const select = displaySelect();
+    expect(select.value).toBe('monitor-gone');
+    expect(select.selectedOptions[0].text).toBe('DP-3 (not connected)');
+  });
+
+  it('degrades to a typed identifier when the host could not enumerate (null)', () => {
+    const { ws } = renderCapture({ method: 'Display', display: 'DP-1', displayLabel: null }, null);
+    const input = screen.getByTestId('capture-display-input') as HTMLInputElement;
+    expect(input.value).toBe('DP-1');
+    fireEvent.change(input, { target: { value: 'DP-2' } });
+    expect(sentUpdates(ws)).toEqual([{ capture: { display: 'DP-2', displayLabel: null } }]);
+  });
+
+  it('says so instead of showing an empty dropdown when nothing was found ([])', () => {
+    renderCapture({ method: 'Display', display: 'monitor-gone', displayLabel: 'DP-3' }, []);
+    expect(screen.queryByTestId('capture-display-select')).toBeNull();
+    expect(screen.queryByTestId('capture-display-input')).toBeNull();
+    const note = screen.getByTestId('capture-display-none').textContent ?? '';
+    expect(note).toContain('No monitors were detected');
+    expect(note).toContain('DP-3 (not connected)');
+  });
+});

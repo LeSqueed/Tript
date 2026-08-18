@@ -10,14 +10,7 @@ namespace Tript.Obs.IntegrationTests;
 // source, and the game-capture path that on Linux is deliberately absent. The capture settings keys
 // are plugin-side and not in the libobs headers, so everything here is asserted through the runtime
 // discovery route (obs_get_source_properties / obs_source_properties) rather than a hardcoded table
-// (spec/obs-binding.md, Part 11).
-//
-// Measured on this machine (OBS 32.2.1, Xwayland): the *type-level* property probe for xshm_input
-// crashes inside linux-capture.so's property builder — it fires the server-change callback which
-// opens a fresh XCB connection and enumerates monitors, and that crashes on this Xwayland server.
-// The *instance-level* probe (obs_source_properties on a created source) works, because the source
-// already holds its display connection. So the tests use the instance route for xshm_input, and the
-// type route is exercised against capture-source types whose property builder is safe here.
+//.
 public sealed class ObsCaptureSourceTests
 {
     private const string XshmInputId = "xshm_input";
@@ -195,9 +188,66 @@ public sealed class ObsCaptureSourceTests
         Assert.True(readBack.HasUserValue(screenKey), $"The discovered screen key '{screenKey}' did not survive creation.");
     }
 
+    // ---- the display-capture fallback layer ----
+
+    // The recorder scene keeps a display capture under the game capture so an unattached game
+    // capture records the desktop rather than a black frame. Which id that is has to come from the
+    // runtime: linux-capture registers xshm_input, win-capture registers monitor_capture, and
+    // nothing registers both.
+    [Fact]
+    public void TheDisplayCaptureId_IsDiscoveredFromTheRegisteredInputTypes()
+    {
+        using var session = ObsSession.StartWithSourceTypes();
+
+        var id = ObsCaptureSource.FindDisplayCaptureId();
+
+        Assert.Equal(XshmInputId, id);
+        Assert.Contains(id, ObsSourceProperties.EnumerateTypeIds());
+    }
+
+    // The id the discovery reports must be one obs_source_create actually accepts — the whole point
+    // of discovering it instead of assuming a name per platform.
+    [Fact]
+    public void TheDiscoveredDisplayCaptureId_CreatesARealSource()
+    {
+        using var session = ObsSession.StartWithSourceTypes();
+
+        var id = ObsCaptureSource.FindDisplayCaptureId();
+        Assert.NotNull(id);
+
+        using var source = ObsSource.CreatePrivate(id, "fallback layer");
+        Assert.Equal(id, source.Id);
+        Assert.Equal(ObsSourceType.Input, source.Type);
+    }
+
+    // The recorder's own composition step: create the discovered source, then write the first
+    // display back through the instance-discovered selection key. It has to survive the update,
+    // because on Windows the equivalent key's default is a sentinel that matches no monitor at all.
+    [Fact]
+    public void TheDisplayCaptureFallback_KeepsTheSelectionItWasUpdatedWith()
+    {
+        using var session = ObsSession.StartWithSourceTypes();
+
+        var id = ObsCaptureSource.FindDisplayCaptureId();
+        Assert.NotNull(id);
+
+        using var source = ObsSource.CreatePrivate(id, "fallback layer");
+        using (var settings = ObsCaptureSource.BuildDisplayCaptureSettings(source, 0))
+            source.Update(settings);
+
+        using var readBack = source.GetSettings();
+        var selectionKey = source.EnumerateProperties()
+            .First(property =>
+                property.Type == ObsPropertyType.List &&
+                property.Name.Contains("screen", StringComparison.OrdinalIgnoreCase))
+            .Name;
+
+        Assert.True(readBack.HasUserValue(selectionKey), $"The discovered key '{selectionKey}' did not survive the update.");
+    }
+
     // ---- game capture: absent on Linux ----
 
-    // Linux has no game-capture source in libobs (spec/recorder.md, "Capture"), so the game-capture
+    // Linux has no game-capture source in libobs, so the game-capture
     // surface reports the absence and the recorder falls back to display capture. This is a first-
     // class documented state, not an error.
     [Fact]

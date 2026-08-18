@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The typed settings model, mirrored from the backend schema (Tript.Settings, page-typed and
-// camelCase-serialized). The `settings` message carries this whole object; `UpdateSettings`
-// carries a partial. Enums are stored by their C# member names — the frontend must use exactly
-// the strings the backend serializes, so the member names below are a compatibility surface, not
-// a free choice. The settings object is open-ended on the wire, so the model types carry an
-// index signature; a page this build does not fully model still round-trips.
+// camelCase-serialized). The `settings` message carries this whole object; `UpdateSettings` carries
+// a partial.
 
 /** Recording mode — Session, Buffer, or Hybrid (both at once). Hybrid is the default. */
 export type RecordingMode = 'Session' | 'Buffer' | 'Hybrid';
@@ -14,12 +11,6 @@ export type RecordingMode = 'Session' | 'Buffer' | 'Hybrid';
  * How the encoder is told to spend its bits. The four members are the modes the encoder families
  * actually accept: `Crf` is x264's constant-quality mode and exists nowhere else, `Cqp` is the
  * hardware families' spelling of the same idea, and `Cbr`/`Vbr` are the rate-targeted modes.
- *
- * Which of them a given encoder accepts is a per-family fact, and getting it wrong is not a cosmetic
- * bug: the mode name is written into the encoder's own `rate_control` key, and obs-ffmpeg's VAAPI
- * encoder segfaults on a name it does not know. The backend has the final say — it coerces a mode the
- * resolved encoder cannot use into that family's constant-quality mode — so any value here is a
- * request rather than a promise (see RecordingPage).
  */
 export type RateControlMode = 'Crf' | 'Cqp' | 'Cbr' | 'Vbr';
 
@@ -74,8 +65,7 @@ export type AudioSourceKind = 'Input' | 'Output';
 
 /**
  * One source routed into a track. The source is selected by id because a device can be absent —
- * unplugged, or not present on this machine — while its selection persists. Volume is per-source,
- * never per-track.
+ * unplugged, or not present on this machine — while its selection persists.
  */
 export interface AudioSource {
   /** The source's own name (the device or capture-point name). */
@@ -99,7 +89,7 @@ export interface AudioSource {
 
 /**
  * A track is a destination in the output file, not a device — it carries one or more merged
- * sources, each with its own volume (spec/recorder.md).
+ * sources, each with its own volume.
  */
 export interface AudioTrack {
   /** Stable id so a track survives reordering in the UI. */
@@ -137,8 +127,17 @@ export type DisplayCaptureMethod = 'Auto' | 'Game' | 'Display';
 
 export interface CaptureSettings {
   method: DisplayCaptureMethod;
-  /** The monitor selected for display capture, or null when the method is game capture. */
+  /**
+   * The preferred monitor's stable id, or null meaning "the primary monitor". Never rewritten when
+   * that monitor is absent: the recorder falls back for the session and reports it, so an unplugged
+   * monitor resumes being the choice when it comes back.
+   */
   display: string | null;
+  /**
+   * The human name last seen for `display`. Exists ONLY so a warning can name a monitor that is no
+   * longer attached — never used for matching.
+   */
+  displayLabel?: string | null;
   [key: string]: unknown;
 }
 
@@ -201,10 +200,6 @@ export interface SettingsMessageContent {
    * of `settings` rather than as a field of the recording page, because it is a property of the
    * running machine and not a persisted setting — the backend's recording page has no such
    * property, so a nested copy would be round-tripped into its extension data and written to disk.
-   *
-   * Absent from an older backend, and explicitly null from a host that cannot probe the encoder
-   * registry (the fake-recorder host never loads libobs, so asking would crash rather than answer).
-   * Both mean "unknown" and the encoder selector falls back.
    */
   availableEncoders?: string[] | null;
   /**
@@ -213,16 +208,43 @@ export interface SettingsMessageContent {
    * `settings`: it describes this machine rather than the configuration, and nesting it under the
    * recording page would round-trip it into that page's extension data and write it to the settings
    * file.
-   *
-   * Absent from an older backend and explicitly null when detection failed (no display server, or a
-   * platform we could not read a monitor from). Both mean "unknown", and the resolution selector
-   * then offers its preset list alone.
    */
   displayResolution?: DisplayResolution | null;
+  /**
+   * The monitors this machine has right now, for the capture page's picker. A **sibling** of
+   * `settings` for the same reason the two above are: it describes the machine, not the
+   * configuration.
+   */
+  availableDisplays?: DisplayInfo[] | null;
+  /**
+   * Set when `capture.display` names a monitor that is not attached right now, so the recorder fell
+   * back. Also a sibling of `settings`, and likewise never written back.
+   */
+  displayFallbackWarning?: DisplayFallbackWarning | null;
 }
 
 /** The pixel size of a display, as the settings push reports it. */
 export interface DisplayResolution {
   width: number;
   height: number;
+}
+
+/** One monitor, as the settings push enumerates it. `id` is what `capture.display` stores. */
+export interface DisplayInfo {
+  id: string;
+  /** Human label, e.g. "DP-1" or "\\.\DISPLAY1". */
+  name: string;
+  width: number;
+  height: number;
+  primary: boolean;
+}
+
+/** The fallback the recorder made because the preferred monitor is not attached. */
+export interface DisplayFallbackWarning {
+  requestedId: string;
+  /** From `capture.displayLabel`; null when nothing ever recorded a name for that id. */
+  requestedLabel: string | null;
+  /** The monitor actually being used, when the host can name it. */
+  usingId: string | null;
+  usingLabel: string | null;
 }

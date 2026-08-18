@@ -136,10 +136,7 @@ internal static unsafe partial class ObsNative
     internal static partial nint obs_get_source_defaults(string id);
 
     // Returns an obs_properties_t; free with obs_properties_destroy. Null for an id that is not
-    // registered or declares no properties. Answers for any registered source type — inputs,
-    // filters, transitions and scenes alike — which is what makes it the capture-source settings
-    // discovery route (spec/obs-binding.md, Part 11): the capture keys are plugin-side and not in
-    // the libobs headers.
+    // registered or declares no properties.
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_get_source_properties(string id);
 
@@ -342,7 +339,7 @@ internal static unsafe partial class ObsNative
 
     // ---- obs.h: source audio routing ----
     //
-    // The per-source audio controls behind the multi-track routing (spec/recorder.md). A source
+    // The per-source audio controls behind the multi-track routing. A source
     // declares which mixers it feeds with a bitmask — bit n means mixer n, and MAX_AUDIO_MIXES is
     // 6 — and its per-source volume with a linear multiplier. The active pair is what makes a
     // capture source actually produce audio: libobs only runs a source's audio while its active
@@ -653,6 +650,10 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nuint obs_property_list_item_count(nint property);
+
+    // Borrowed.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_property_list_item_name(nint property, nuint index);
 
     // Borrowed.
     [LibraryImport(ObsLibrary.Name)]

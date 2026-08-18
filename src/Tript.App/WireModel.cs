@@ -3,7 +3,7 @@
 
 namespace Tript.App;
 
-// The IPC wire model (spec/local-ipc.md + Tript.Web/src/ipc/protocol.ts). These are the shapes the
+// The IPC wire model. These are the shapes the
 // frontend narrows on, so the field names and casing are a compatibility surface — not a free
 // choice. The serialization options are shared so every push behaves identically.
 internal static class Wire
@@ -31,9 +31,7 @@ internal sealed class ContentItem
     public string? Game { get; set; }
 
     // When the content starts, as unix seconds. The metadata record's StartTime when there is one —
-    // the authoritative capture time — and the file's last-write time otherwise. The meaning is
-    // unchanged; only the fallback is new, because the library shows a date on every card and a clip
-    // has no record to carry one.
+    // the authoritative capture time — and the file's last-write time otherwise.
     public double? StartTime { get; set; }
 
     // Unchanged: the end offset a metadata record declares, in seconds into the media. Nothing
@@ -119,11 +117,52 @@ internal sealed class DeleteContentParameters
     public string ContentType { get; set; } = "recording";
 
     public string FileName { get; set; } = string.Empty;
+
+    // Omitted or false moves the item to the trash; true unlinks it there and then.
+    public bool Permanent { get; set; }
 }
 
 internal sealed class DeleteMultipleContentParameters
 {
     public List<DeleteContentParameters> Items { get; set; } = [];
+
+    // Applies to the whole batch, and wins over a per-item flag.
+    public bool Permanent { get; set; }
+}
+
+internal sealed class RestoreTrashParameters
+{
+    public List<string> EntryIds { get; set; } = [];
+}
+
+internal sealed class PurgeTrashParameters
+{
+    // Absent means the whole bin; an empty list means nothing, so a client can never empty the
+    // trash by accident.
+    public List<string>? EntryIds { get; set; }
+}
+
+// One item in the trash, as the `trash` push spells it.
+internal sealed class TrashEntry
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string ContentType { get; set; } = "recording";
+
+    public string FileName { get; set; } = string.Empty;
+
+    public string? Title { get; set; }
+
+    public string? Game { get; set; }
+
+    public double? DurationSeconds { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    // Epoch seconds, both. PurgeAt is 0 when the retention is disabled.
+    public long DeletedAt { get; set; }
+
+    public long PurgeAt { get; set; }
 }
 
 internal sealed class RenameContentParameters

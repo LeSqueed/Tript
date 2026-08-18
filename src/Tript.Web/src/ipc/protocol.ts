@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The local IPC wire contract, from spec/local-ipc.md.
+// The local IPC wire contract.
 //
 // Casing convention (a deliberate fix of the reference's inconsistent casing):
 //   - Frontend → backend commands: PascalCase method names, camelCase parameter fields.
@@ -47,15 +47,9 @@ export type ChangeCause = string;
 export type ContentType = 'recording' | 'clip' | 'highlight' | 'buffer';
 
 /**
- * One item in the backend's content list.
- *
- * EVERY field but the three the content server cannot serve without (`contentType`, `fileName`,
- * `filePath`) is optional, and that is not defensive decoration — it is the observed shape of the
- * wire. A recording that was never post-processed has no metadata record, so it arrives with no
- * `title`, no `game` and no duration; an older backend does not send `game`, `durationSeconds` or
- * `fileSizeBytes` at all. The library therefore renders a fallback for each of them (see
- * components/library/libraryModel.ts) rather than gating a card on any one being present: a missing
- * field must never be able to hide content the user recorded.
+ * One item in the backend's content list. EVERY field but the three the content server cannot serve
+ * without (`contentType`, `fileName`, `filePath`) is optional, and that is not defensive decoration
+ * — it is the observed shape of the wire.
  */
 export interface ContentItem {
   contentType: ContentType;
@@ -64,15 +58,13 @@ export interface ContentItem {
   title?: string;
   /**
    * When the recording started, in Unix epoch SECONDS (not milliseconds). Absent when the item has
-   * no metadata record. Epoch 0 is treated as absent by the library — it is a placeholder written by
-   * a code path that had no clock, not a recording made in 1970.
+   * no metadata record.
    */
   startTime?: number;
   endTime?: number;
   /**
    * The game the item was recorded from, as the backend detected it. Nullable *and* optional: null
-   * from a backend that looked and found nothing, absent from one that does not report it. Both mean
-   * "unknown" to the library.
+   * from a backend that looked and found nothing, absent from one that does not report it.
    */
   game?: string | null;
   /**
@@ -118,8 +110,7 @@ export interface SettingsMessage {
   /**
    * The H.264 encoder ids this machine's runtime actually registered. A SIBLING of `settings`, not
    * a field inside it: it is not a persisted setting but a property of the running machine, so it
-   * is never written back by UpdateSettings. Absent from an older backend, and explicitly null from
-   * a host that cannot probe the encoder registry — both mean "unknown".
+   * is never written back by UpdateSettings.
    */
   availableEncoders?: string[] | null;
   /**
@@ -128,6 +119,30 @@ export interface SettingsMessage {
    * written back by UpdateSettings. Null when the host could not read a display from the platform.
    */
   displayResolution?: { width: number; height: number } | null;
+  /**
+   * The monitors attached right now. A SIBLING of `settings` like the two above — machine, not
+   * configuration — so UpdateSettings never writes it back.
+   */
+  availableDisplays?: DisplayInfo[] | null;
+  /** Set when `capture.display` names a monitor that is not attached and the recorder fell back. */
+  displayFallbackWarning?: DisplayFallbackWarning | null;
+}
+
+/** One monitor on the wire. `id` is the stable id `capture.display` stores. */
+export interface DisplayInfo {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  primary: boolean;
+}
+
+export interface DisplayFallbackWarning {
+  requestedId: string;
+  /** From `capture.displayLabel`. */
+  requestedLabel: string | null;
+  usingId: string | null;
+  usingLabel: string | null;
 }
 
 export interface RecordingState {
@@ -190,6 +205,36 @@ export interface ErrorMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Trash
+// ---------------------------------------------------------------------------
+
+/**
+ * One item sitting in the trash. `id` is opaque and only stable while the entry exists — a restored
+ * and re-deleted item may come back under a different one.
+ */
+export interface TrashEntry {
+  id: string;
+  contentType: ContentType;
+  /** The original file name, e.g. session-20260818-101112123.mp4. */
+  fileName: string;
+  title?: string;
+  game?: string | null;
+  durationSeconds?: number;
+  fileSizeBytes?: number;
+  /** Epoch SECONDS, like every other time on this wire. */
+  deletedAt: number;
+  /** Epoch SECONDS, or 0 when retention is disabled and nothing will auto-purge. */
+  purgeAt: number;
+}
+
+/** The `trash` push content: the whole trash, plus how long the backend keeps an entry. */
+export interface TrashMessage {
+  entries: TrashEntry[];
+  /** Hours; <= 0 means entries are never auto-purged. */
+  retentionHours: number;
+}
+
+// ---------------------------------------------------------------------------
 // Command parameter shapes
 // ---------------------------------------------------------------------------
 
@@ -217,10 +262,22 @@ export interface ClipSegment {
 export interface DeleteContentParameters {
   contentType: ContentType;
   fileName: string;
+  /** Omitted/false moves the item to the trash; true unlinks it immediately. */
+  permanent?: boolean;
 }
 
 export interface DeleteMultipleContentParameters {
   items: DeleteContentParameters[];
+  permanent?: boolean;
+}
+
+export interface RestoreTrashParameters {
+  entryIds: string[];
+}
+
+export interface PurgeTrashParameters {
+  /** Omitted empties the whole trash. */
+  entryIds?: string[];
 }
 
 export interface RenameContentParameters {
@@ -297,6 +354,8 @@ export type CommandParameters =
   | CreateClipParameters
   | DeleteContentParameters
   | DeleteMultipleContentParameters
+  | RestoreTrashParameters
+  | PurgeTrashParameters
   | RenameContentParameters
   | AddBookmarkParameters
   | DeleteBookmarkParameters
@@ -335,6 +394,9 @@ export type CommandName =
   | 'CancelClip'
   | 'DeleteContent'
   | 'DeleteMultipleContent'
+  | 'ListTrash'
+  | 'RestoreTrash'
+  | 'PurgeTrash'
   | 'RenameContent'
   | 'ImportFile'
   | 'AddBookmark'
@@ -356,17 +418,15 @@ export type CommandName =
   | 'RecoveryConfirm';
 
 /**
- * Backend → frontend messages, all lowercase.
- *
- * The reference contract split these between lowercase (`settings`, `state`, `importProgress`) and
- * PascalCase (`UpdateProgress`, `ReleaseNotes`, `ShowModal`). Greenfield fix: every backend → frontend
- * method is lowercase. `releaseNotes` and `showReleaseNotes` are both retained (the reference shipped
- * two names for one concern; both are accepted here until the backend settles on one).
+ * Backend → frontend messages, all lowercase. The reference contract split these between lowercase
+ * (`settings`, `state`, `importProgress`) and PascalCase (`UpdateProgress`, `ReleaseNotes`,
+ * `ShowModal`).
  */
 export type MessageName =
   | 'settings'
   | 'state'
   | 'content'
+  | 'trash'
   | 'importProgress'
   | 'updateProgress'
   | 'releaseNotes'

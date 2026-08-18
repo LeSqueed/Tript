@@ -17,5 +17,10 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>Tript.Recorder</_Parameter1>
     </AssemblyAttribute>
+    <!-- The recorder's unit tests pin the game-capture targeting rules, which are expressed in the
+         plugin's own vocabulary (win-capture's window_priority) and stay internal to it. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.Recorder.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>

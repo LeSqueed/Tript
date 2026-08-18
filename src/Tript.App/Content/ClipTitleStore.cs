@@ -8,18 +8,7 @@ namespace Tript.App.Content;
 
 // The on-disk store for a clip's own record. A clip has no RecordingMetadata record — the metadata
 // store is for recordings — so the few facts the library needs about a clip live in their own tiny
-// record in the same metadata/ tree, keyed by the clip's file name. Metadata deliberately never sits
-// next to the video: the clips directory stays plain MP4s, and this record is how the library
-// rebuilds the list.
-//
-// A record is path-keyed: <root>/metadata/<clipFileName>.title.json, where clipFileName is the
-// .mp4's own file name (for example "session-20260817-083000-clip-k2m3xq.mp4"). An absent or
-// malformed record means the clip falls back to its file-name-without-extension as the title and
-// shows no length, exactly like a recording with no metadata record.
-//
-// The record carries the user title ("The clutch") and the clip's duration. The file name stays
-// ".title.json" although the record is no longer only a title: the name is the on-disk key, and
-// changing it would orphan the title of every clip a user has already named.
+// record in the same metadata/ tree, keyed by the clip's file name.
 internal sealed class ClipTitleStore
 {
     private string _metadataRoot;
@@ -79,8 +68,7 @@ internal sealed class ClipTitleStore
 
     // Persists a clip's title. Returns true when the record was written, false when the write
     // failed (read-only media, disk full, permissions, or an existing record that could not be
-    // read). The failure is logged here; a clip whose title could not be written still completes
-    // and still lists, just under its file name.
+    // read).
     internal bool Save(string clipFileName, string title)
     {
         // Read-modify-write, not overwrite: the record holds more than the title now, and a rename
@@ -154,7 +142,7 @@ internal sealed class ClipTitleStore
 
     // <metadataRoot>/<clipFileName>.title.json — keyed by the clip's file name so a record is
     // addressable without parsing anything.
-    private string PathFor(string clipFileName) =>
+    internal string PathFor(string clipFileName) =>
         Path.Combine(_metadataRoot, $"{clipFileName}.title.json");
 }
 

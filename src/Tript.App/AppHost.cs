@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.Detection;
@@ -15,17 +16,10 @@ using SettingsModel = Tript.Settings.Settings;
 
 namespace Tript.App;
 
-// Assembles every component into the running alpha. Owns the process lifetime:
-//
-//   * the settings store and the recording-session tracker (already registered at startup),
-//   * the recorder + process-game detector + detection host (the recording path),
-//   * the three local IPC channels: control socket, content server, UI host,
-//   * the content catalogue (what the library and the content server serve),
-//   * the clip pipeline (IClipEngine) driven by CreateClip.
-//
-// State pushes: state on recorder transitions, settings after every settings mutation, gameList on
-// NewConnection and when the detection state changes. Every push is a full push (spec/local-ipc.md:
-// the frontend converges to a consistent view).
+// Assembles every component into the running app and owns the process lifetime: the settings store
+// and session tracker, the recorder plus its game detector and detection host, the three local IPC
+// channels (control socket, content server, UI host), the content catalogue, and the clip pipeline.
+// Every state push is a full push, so the frontend converges to a consistent view.
 internal sealed class AppHost : IDisposable
 {
     private const string StartupGameId = "Overwatch";
@@ -35,9 +29,8 @@ internal sealed class AppHost : IDisposable
     private readonly ObsRuntime? _runtime;
     private readonly RecordingSessionTracker _sessionTracker;
 
-    // The primary display's resolution, detected once at startup (Program.BuildApp), or null when
-    // this machine would not say. Offered to the settings UI on every settings push; never
-    // persisted, because it is a fact about the machine rather than a setting.
+    // Detected once at startup, or null when the machine would not say. Offered to the settings UI
+    // on every push; never persisted, because it is a fact about the machine rather than a setting.
     private readonly DisplaySize? _primaryDisplay;
 
     private readonly AppController _controller;
@@ -47,13 +40,11 @@ internal sealed class AppHost : IDisposable
     private readonly RecordingMetadataStore _metadata;
     private readonly ClipTitleStore _clipTitles;
     private readonly ThumbnailStore _thumbnails;
+    private readonly TrashStore _trash;
 
-    // ffmpeg/ffprobe for the library surfaces (thumbnails and the duration backfill), located at
-    // most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on both
-    // binaries to verify them, which is four processes, and the answer cannot change while the host
-    // runs. Null means the machine has no usable ffmpeg — the library then shows placeholder cards
-    // and no durations, and nothing else about it changes. The clip engine keeps its own Locate call:
-    // its failure is user-facing (the clip dialog shows the locator's message) rather than silent.
+    // Located at most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on
+    // both binaries, which is four processes, and the answer cannot change while the host runs.
+    // Null means no usable ffmpeg — the library then shows placeholder cards and no durations.
     private readonly Lazy<(string Ffmpeg, string Ffprobe)?> _libraryTools = new(() =>
     {
         try
@@ -70,8 +61,7 @@ internal sealed class AppHost : IDisposable
 
     private MediaProbe? _libraryProbe;
 
-    // Files whose duration could not be read, so a broken or non-video file is probed at most once
-    // per process instead of on every content push. Absolute paths.
+    // Files whose duration could not be read, so a broken file is probed at most once per process.
     private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
 
     private RecorderStateMachine? _recorder;
@@ -85,10 +75,15 @@ internal sealed class AppHost : IDisposable
     private readonly List<GameInfo> _catalogueGames = [];
     private IClipEngine? _clipEngine;
 
+    // The bin is swept at startup and once an hour after it, so a host that stays up for days still
+    // honours the retention.
+    private static readonly TimeSpan TrashPurgeInterval = TimeSpan.FromHours(1);
+
+    private Timer? _trashPurgeTimer;
+
     private bool _disposed;
 
-    // primaryDisplay is optional: a host constructed without one (the folder-picker tests) simply
-    // pushes no display resolution, and the settings UI offers its preset list alone.
+    // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null)
     {
@@ -105,6 +100,7 @@ internal sealed class AppHost : IDisposable
         _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
         _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
         _thumbnails = new ThumbnailStore(ThumbnailRootFor(EffectiveRoot), CreateThumbnailExtractor);
+        _trash = new TrashStore(TrashRootFor(EffectiveRoot));
         _content = new ContentServer(EffectiveRoot, _thumbnails);
         _ui = new UiHost(options.WebRoot);
 
@@ -131,9 +127,8 @@ internal sealed class AppHost : IDisposable
     private string? _currentGameId;
 
     // The single root everything content lives under: sessions, clips, the metadata tree and the
-    // content server's traversal guard all resolve against it. A configured
-    // Recording.OutputDirectory is the effective root; empty falls back to the content root. A
-    // settings change that moves OutputDirectory updates it in place.
+    // content server's traversal guard all resolve against it. A configured Recording.OutputDirectory
+    // wins; empty falls back to the content root, and a settings change updates it in place.
     internal string EffectiveRoot { get; private set; }
 
     private static string ResolveEffectiveRoot(AppOptions options, SettingsStore settingsStore)
@@ -142,13 +137,17 @@ internal sealed class AppHost : IDisposable
         return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
     }
 
-    // The thumbnail cache sits inside the metadata tree (see ThumbnailStore for why), in its own
-    // subdirectory so the record directory stays hand-readable.
+    // Inside the metadata tree (see ThumbnailStore), in its own subdirectory so the record directory
+    // stays hand-readable.
     private static string ThumbnailRootFor(string effectiveRoot) =>
         Path.Combine(effectiveRoot, "metadata", "thumbnails");
 
-    // The library's frame extractor, or null when this machine has no usable ffmpeg. Called at most
-    // once, by the thumbnail store's own lazy.
+    // At the top of the recording root, so a trashed item and its records move by rename rather
+    // than by copy, and so emptying the bin is one directory delete.
+    private static string TrashRootFor(string effectiveRoot) =>
+        Path.Combine(effectiveRoot, TrashStore.DirectoryName);
+
+    // Null when this machine has no usable ffmpeg. Called at most once, by the thumbnail store's lazy.
     private IThumbnailExtractor? CreateThumbnailExtractor()
     {
         var tools = _libraryTools.Value;
@@ -163,15 +162,17 @@ internal sealed class AppHost : IDisposable
         _content.Start();
         _ui.Start();
 
+        // Anything already past its retention goes now, and hourly after that.
+        PurgeExpiredTrash();
+        _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
+
         WireAutoStart();
 
-        // The single-line contract the smoke test waits for; the frontend's LiveIpcProbe also
-        // depends on the host being reachable once this line appears.
+        // The single-line contract the smoke test waits for.
         Console.WriteLine("READY");
         Console.Out.Flush();
 
-        // The UI is served over HTTP at the UI host; the URL is the contract on stdout. No browser
-        // is opened — the desktop shell renders the UI in its own window.
+        // No browser is opened — the desktop shell renders the UI in its own window.
         WaitForShutdown();
     }
 
@@ -192,6 +193,7 @@ internal sealed class AppHost : IDisposable
             return;
         _disposed = true;
 
+        _trashPurgeTimer?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _recorder?.Dispose();
@@ -215,8 +217,7 @@ internal sealed class AppHost : IDisposable
         var settings = _settingsStore.Load();
         var resolved = SettingsResolver.Resolve(settings, effectiveGameId);
 
-        // The alpha records Session only; the default mode is Hybrid (designed for, deferred). A
-        // resolved Hybrid is flattened to Session so the recorder accepts the start.
+        // The app records Session only; a resolved Hybrid is flattened so the recorder accepts the start.
         if (resolved.Mode == RecordingMode.Hybrid)
             resolved.Mode = RecordingMode.Session;
         if (resolved.Mode != RecordingMode.Session)
@@ -226,11 +227,9 @@ internal sealed class AppHost : IDisposable
 
         EnsureRecorderBuilt(resolved);
 
-        // Point the session's game-capture source at the detected game before the recording
-        // starts, so the recording shows the game rather than the colour background. The alpha
-        // detector matches by process name, so the executable key is that name with the platform
-        // extension; win-capture keeps retrying the hook while the source is shown, so a game
-        // that appears mid-recording is still picked up.
+        // Point the session's game-capture source at the detected game before the recording starts, so
+        // the recording shows the game rather than the background. win-capture keeps retrying the hook
+        // while the source is shown, so a game that appears mid-recording is still picked up.
         RetargetGameCapture(effectiveGameId);
 
         if (!_recorder!.Start(resolved))
@@ -261,9 +260,8 @@ internal sealed class AppHost : IDisposable
         if (!_recorder.Stop())
             return false;
 
-        // Wait for the stop signal to complete the transition back to Idle. The recorder marshals
-        // the transition onto the thread it was created on; the IPC thread is that thread for the
-        // real recorder, and the fake raises the signal synchronously inside Stop.
+        // The recorder marshals the transition onto the thread it was created on; the IPC thread is that
+        // thread for the real recorder, and the fake raises the signal synchronously inside Stop.
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (_recorder.Snapshot.State != RecorderState.Idle)
         {
@@ -290,12 +288,8 @@ internal sealed class AppHost : IDisposable
     }
 
     // Persists the recording's metadata — game, start time, content type, audio tracks, the
-    // automatic bookmarks the detection host produced and the link key back to the video — into
-    // the metadata store (spec/config-and-storage.md), so bookmarks survive the process. The
-    // record is written only when the recording actually exists. A session is now part of the
-    // library, so the content list is pushed. The auto bookmarks are best-effort: a failed write
-    // is logged (inside the store) but does not abort the stop or push an error — the record the
-    // session built is still offered to the library.
+    // automatic bookmarks and the link key back to the video — so bookmarks survive the process.
+    // Written only when the recording actually exists.
     private void WriteMetadataRecord(RecordingMetadata metadata)
     {
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
@@ -305,15 +299,10 @@ internal sealed class AppHost : IDisposable
             .Replace(Path.DirectorySeparatorChar, '/');
         metadata.VideoPath = relative;
 
-        // The one write that is allowed to replace whatever is on disk, because here the in-memory
-        // record is the authoritative one: this process just made the recording, and it holds the
-        // game, the start time, the audio track layout and the session's bookmarks. Anything already
-        // at this key belongs to a file that no longer exists (the name carries a millisecond
-        // timestamp) or is the stub the library's duration probe wrote while the recording ran — so
-        // there is nothing here that "unreadable" could be protecting.
-        //
-        // A probed duration is the exception worth carrying over: it is the one field the stub can
-        // have and the session cannot know.
+        // The one write allowed to replace whatever is on disk, because here the in-memory record
+        // is the authoritative one: this process just made the recording. Anything already at this
+        // key belongs to a file that no longer exists (the name carries a millisecond timestamp) or
+        // is the stub the duration probe wrote while the recording ran.
         if (metadata.DurationSeconds is null)
         {
             var existing = _metadata.Read(Path.GetFileName(_activeOutputPath));
@@ -351,17 +340,13 @@ internal sealed class AppHost : IDisposable
 
     // ---- native folder picker ----
 
-    // The seam the desktop shell installs: a function that opens a native folder picker and returns
-    // the chosen directory, or null when the user cancels. The headless host has no window, so the
-    // delegate stays null there and RequestVideoLocation is a documented no-op. The shell installs
-    // it after the Photino window is created (a WindowCreated handler), so it is never set before
-    // the native window exists.
+    // The seam the desktop shell installs: opens a native folder picker and returns the chosen
+    // directory, or null when the user cancels. The headless host has no window, so it stays null and
+    // RequestVideoLocation is a no-op.
     internal Func<string?>? FolderPicker { get; set; }
 
-    // The SetVideoLocation command. Invokes the shell's native picker (when one is installed) and
-    // applies the picked directory as the recording output directory through the normal settings
-    // path, so the field updates exactly as if the user had typed it: the settings file is saved
-    // and a settings push tells every client the new value. Cancelling the picker is a no-op.
+    // Applies the picked directory through the normal settings path, so the field updates exactly as
+    // if the user had typed it. Cancelling is a no-op.
     internal void RequestVideoLocation()
     {
         var picker = FolderPicker;
@@ -375,8 +360,7 @@ internal sealed class AppHost : IDisposable
         }
         catch (Exception exception)
         {
-            // A picker failure (no native dialog, a refused GTK loop) must not crash the host or
-            // tear down the IPC channel; the user simply stays where they were.
+            // A picker failure (no native dialog, a refused GTK loop) must not tear down the IPC channel.
             Console.Error.WriteLine($"Tript.App: the folder picker failed: {exception.Message}");
             return;
         }
@@ -411,12 +395,9 @@ internal sealed class AppHost : IDisposable
         if (gameNames.Count == 0)
             return;
 
-        // The auto-start seam subscribes the detector straight to the same host methods the IPC
-        // path uses, so an auto-recorded session gets the whole lifecycle — metadata sidecar,
-        // session tracking, detection and state pushes — rather than a bare recorder Start/Stop.
-        // Resolving the detected game's settings is StartRecording's own job. The booleans the
-        // methods return are the start/stop refusal channel, which the detector's lifecycle does
-        // not need to see.
+        // The detector is subscribed straight to the same host methods the IPC path uses, so an
+        // auto-recorded session gets the whole lifecycle — metadata sidecar, session tracking, detection
+        // and state pushes — rather than a bare recorder Start/Stop.
         _detector = new ProcessNameGameDetector(gameNames);
         _detector.GameStarted += name => StartRecording(name);
         _detector.GameStopped += () => StopRecording();
@@ -463,9 +444,8 @@ internal sealed class AppHost : IDisposable
 
         _settingsStore.Save();
 
-        // A changed OutputDirectory takes effect immediately, without a restart: the effective
-        // root, the content server's guard root and the metadata store are rebuilt from the
-        // updated settings.
+        // A changed OutputDirectory takes effect without a restart: the effective root, the content
+        // server's guard root and the metadata store are all rebuilt.
         var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, _settingsStore));
         if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))
         {
@@ -474,6 +454,7 @@ internal sealed class AppHost : IDisposable
             _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             _clipTitles.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             _thumbnails.UpdateRoot(ThumbnailRootFor(effectiveRoot));
+            _trash.UpdateRoot(TrashRootFor(effectiveRoot));
             Directory.CreateDirectory(effectiveRoot);
         }
 
@@ -511,9 +492,8 @@ internal sealed class AppHost : IDisposable
 
     private static void ApplyObjectPatch(object page, JsonElement patch)
     {
-        // The page objects carry JsonExtensionData, so round-tripping the page through the
-        // serializer with the patch merged preserves unknown keys. The serializer options are the
-        // settings model's own (camelCase, string enums).
+        // The page objects carry JsonExtensionData, so round-tripping the page through the serializer
+        // with the patch merged preserves unknown keys.
         var current = JsonSerializer.Serialize(page, SettingsSerialization.Options);
         var merged = MergeObjects(JsonDocument.Parse(current).RootElement, patch);
         var clone = JsonSerializer.Deserialize(merged, page.GetType(), SettingsSerialization.Options);
@@ -583,13 +563,9 @@ internal sealed class AppHost : IDisposable
         }, Wire.Options));
     }
 
-    // The machine's active audio endpoints (WASAPI), inputs first then outputs, as the settings
-    // model's device list — the specific microphones, capture devices, speakers and headsets the
-    // audio page can route into a track. Each entry carries its direction (Input/Output) so the
-    // frontend can label it and the routing can pick the matching capture type: an input endpoint
-    // becomes a wasapi_input_capture, an output endpoint a wasapi_output_capture on that device.
-    // A failure to enumerate — no endpoints, or a COM error — yields an empty list rather than
-    // failing the push; the frontend then falls back to the built-in sources.
+    // The machine's active WASAPI endpoints, inputs first then outputs. Each entry carries its
+    // direction so the routing can pick the matching capture type: an input endpoint becomes a
+    // wasapi_input_capture, an output endpoint a wasapi_output_capture.
     private static IReadOnlyList<AudioDeviceSetting> EnumerateAudioDevices()
     {
         try
@@ -610,32 +586,82 @@ internal sealed class AppHost : IDisposable
     {
         var settings = _settingsStore.Load();
         var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
-        // The audio device list is a fact about this machine, not a persisted setting — like the
-        // encoder list it is settled per push, so a device unplugged after a save is not stuck in
-        // the settings file. It is injected into the serialized element only; the live model (which
-        // Save() would persist) is never touched.
+        // A fact about this machine, not a persisted setting, so it is settled per push and a device
+        // unplugged after a save is not stuck in the settings file. Injected into the serialized element
+        // only; the live model that Save() would persist is never touched.
         if (settingsNode?["audio"] is JsonObject audioNode)
             audioNode["devices"] = JsonSerializer.SerializeToNode(EnumerateAudioDevices(), SettingsSerialization.Options);
         var settingsElement = JsonSerializer.Deserialize<JsonElement>(
             settingsNode?.ToJsonString() ?? "{}", SettingsSerialization.Options);
+        var displays = EnumerateDisplays();
         _ipc.Broadcast("settings", JsonSerializer.SerializeToElement(new
         {
             settings = settingsElement,
-            // The encoder list is the machine's actual H.264 set, settled by the runtime. It can
-            // only be probed when libobs is loaded — the fake-recorder host never starts it, so a
-            // P/Invoke there would segfault rather than answer — so the list is absent (null) and
-            // the frontend falls back to the current value plus obs_x264.
+            // Only probeable when libobs is loaded — the fake-recorder host never starts it, and a P/Invoke
+            // there would segfault rather than answer — so the list is absent (null) and the frontend falls
+            // back to the current value plus obs_x264.
             availableEncoders = _runtime is null ? null : ObsRecorderSession.EnumerateUsableEncoderIds(),
-            // The primary display's resolution, so the resolution selector can offer this machine's
-            // own size. A sibling of `settings` for the same reason the encoder list is one: it is a
-            // property of the machine, not a persisted setting, and RecordingSettings carries
-            // JsonExtensionData — a field nested under `recording` would be round-tripped straight
-            // into the settings file on the next save. Null when detection failed, and the frontend
-            // then offers the presets alone.
+            // A sibling of `settings` for the same reason the encoder list is one: RecordingSettings carries
+            // JsonExtensionData, so a field nested under `recording` would be round-tripped straight into the
+            // settings file on the next save. Null when detection failed.
             displayResolution = _primaryDisplay is { IsUsable: true } display
                 ? (object?)new { width = display.Width, height = display.Height }
                 : null,
+            // The monitors this machine offers, and — when the saved one is not among them — which
+            // one is standing in. Machine facts, siblings of `settings` for the same reason the
+            // encoder list is one; UpdateSettings must never write either back.
+            availableDisplays = displays?.Select(monitor => new
+            {
+                id = monitor.Id,
+                name = monitor.Name,
+                width = monitor.Width,
+                height = monitor.Height,
+                primary = monitor.Primary,
+            }).ToList(),
+            displayFallbackWarning = BuildDisplayFallbackWarning(settings.Capture, displays),
         }, Wire.Options));
+    }
+
+    // The monitors the display-capture source itself accepts, or null when the host cannot ask —
+    // no libobs (the fake-recorder host), no registered display-capture type, or a plugin that
+    // refused. Enumerated through a throwaway instance because the type-level property probe can
+    // crash for a capture source, and per push because a monitor can be unplugged while we run.
+    private IReadOnlyList<ObsDisplay>? EnumerateDisplays()
+    {
+        if (_runtime is null || ObsCaptureSource.FindDisplayCaptureId() is not { } displayId)
+            return null;
+
+        try
+        {
+            using var probe = ObsSource.CreatePrivate(displayId, "app display probe");
+            return ObsCaptureSource.EnumerateDisplays(probe);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "AppHost: {DisplayId} would not enumerate its monitors.", displayId);
+            return null;
+        }
+    }
+
+    // Set only when the saved monitor is genuinely absent from a list we could read: a null list is
+    // "could not ask", which is not evidence that anything is missing. The preference itself is
+    // never rewritten — replugging the monitor must restore the user's choice by itself.
+    private static object? BuildDisplayFallbackWarning(CaptureSettings capture, IReadOnlyList<ObsDisplay>? displays)
+    {
+        if (displays is null || string.IsNullOrEmpty(capture.Display))
+            return null;
+
+        var resolution = ObsCaptureSource.ResolveDisplay(displays, capture.Display);
+        if (!resolution.RequestedMissing)
+            return null;
+
+        return new
+        {
+            requestedId = capture.Display,
+            requestedLabel = capture.DisplayLabel,
+            usingId = resolution.Selected?.Id,
+            usingLabel = resolution.Selected?.Name,
+        };
     }
 
     internal void PushGameList()
@@ -646,13 +672,12 @@ internal sealed class AppHost : IDisposable
 
     // ---- content ----
 
-    // The path every content URL is resolved against. ContentServer holds the same root (it owns
-    // the traversal guard), so this is kept for callers that need the root without the server.
+    // ContentServer holds the same root (it owns the traversal guard); this is for callers that need
+    // the root without the server.
     internal string ContentRoot => EffectiveRoot;
 
-    // Rebuilds the content catalogue from disk and broadcasts it as the "content" message. The
-    // frontend requests it on mount (the ListContent command) and the host pushes it whenever the
-    // catalogue changes — after a recording stops, a clip completes, a rename, or a delete.
+    // Rebuilds the content catalogue from disk and broadcasts it. Pushed whenever the catalogue
+    // changes — after a recording stops, a clip completes, a rename, or a delete.
     internal void PushContent()
     {
         _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
@@ -661,11 +686,9 @@ internal sealed class AppHost : IDisposable
         }, Wire.Options));
     }
 
-    // Surfaces a metadata write failure to the user. A bookmark or title that failed to persist
-    // must not silently vanish: this broadcasts the error so the frontend can show it (and keep
-    // the in-memory change out of the list). The 'error' method is a backend -> frontend message;
-    // the frontend registers it the same way it registers state/content pushes.
-    private void PushMetadataSaveError(string message)
+    // Surfaces a failure to the user, so a bookmark, title or delete that did not go through does
+    // not silently vanish.
+    private void PushError(string message)
     {
         _ipc.Broadcast("error", JsonSerializer.SerializeToElement(new
         {
@@ -673,19 +696,13 @@ internal sealed class AppHost : IDisposable
         }, Wire.Options));
     }
 
-    // How many previously-unseen files one call may probe for a duration. See TryReadDuration for
-    // why probing happens at all; the budget is what keeps a first list of a large existing library
-    // from becoming an ffprobe per item in one go. A library fills in over a few pushes and then
-    // never probes those files again, in this process or a later one.
+    // How many previously-unseen files one call may probe for a duration — what keeps a first list of
+    // a large existing library from becoming an ffprobe per item in one go.
     private const int DurationProbeBudget = 12;
 
-    // The library, rebuilt from disk. Every field the grid needs is here: the thumbnail is a URL
-    // built from FilePath (the content server's /api/thumbnail route), the game, the date, the
-    // duration and the size.
-    //
-    // The order is newest first, and it is a total order — the frontend paginates over this list, so
-    // two items with the same timestamp must not be able to swap places between two pushes (and
-    // EnumerateFiles' order is the file system's, not one we can rely on).
+    // The library, rebuilt from disk. Newest first, and a TOTAL order: the frontend paginates over
+    // this list, so two items with the same timestamp must not be able to swap places between pushes
+    // (EnumerateFiles' order is the file system's, not one we can rely on).
     internal List<ContentItem> ListContent()
     {
         var items = new List<ContentItem>();
@@ -693,8 +710,7 @@ internal sealed class AppHost : IDisposable
         if (!root.Exists)
             return items;
 
-        // Recording base name -> game, collected while the recordings are projected and used to give
-        // the clips a game afterwards (a clip's file name starts with its source session's).
+        // Recording base name -> game, used to give the clips a game after the loop.
         var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
         var clips = new List<ContentItem>();
         var probeBudget = DurationProbeBudget;
@@ -703,6 +719,10 @@ internal sealed class AppHost : IDisposable
         {
             var relative = Path.GetRelativePath(EffectiveRoot, file.FullName)
                 .Replace(Path.DirectorySeparatorChar, '/');
+            // Deleted content is still on disk until it is purged; the library must not show it.
+            if (IsTrashPath(relative))
+                continue;
+
             var topLevel = TopLevelDirectory(relative);
             var contentType = topLevel.Equals("clips", StringComparison.Ordinal) ? "clip" : "recording";
 
@@ -745,26 +765,22 @@ internal sealed class AppHost : IDisposable
             }
             else
             {
-                // A clip with a stored user title shows it; a clip without one falls back to its
-                // file-name-without-extension, exactly like a session with no metadata record. The
-                // clip's own record carries its duration too.
+                // A clip without a stored title falls back to its file name. Its own record carries the duration.
                 var record = _clipTitles.LoadRecord(file.Name);
                 if (!string.IsNullOrWhiteSpace(record?.Title))
                     item.Title = record.Title;
                 item.DurationSeconds = record?.DurationSeconds;
 
-                // The game is resolved after the loop: the source session may be listed after its
-                // clip, so its record has not necessarily been read yet.
+                // Resolved after the loop: the source session may be listed after its clip.
                 clips.Add(item);
             }
 
-            // The library shows a date on every card. A metadata record's StartTime is the
-            // authoritative capture time; the file's last-write time is the fallback for content that
-            // has no record — every clip, and a recording copied in by hand.
+            // A metadata record's StartTime is the authoritative capture time; the file's last-write time is
+            // the fallback for content that has no record — every clip, and anything copied in by hand.
             item.StartTime ??= DateTimeToUnixSeconds(file.LastWriteTime);
 
-            // The budget is spent on files that will actually be probed: a file already known to be
-            // unreadable must not consume a slot a real recording later in the enumeration needs.
+            // Spent only on files that will actually be probed, so a known-unreadable file cannot consume a
+            // slot a real recording later in the enumeration needs.
             if (item.DurationSeconds is null && probeBudget > 0 && !IsUnprobeable(file.FullName))
             {
                 probeBudget--;
@@ -777,9 +793,8 @@ internal sealed class AppHost : IDisposable
         foreach (var clip in clips)
             clip.Game = InheritedGame(clip.FileName, gamesByRecording);
 
-        // Newest first, with the relative path as the tiebreak so the order is total: List.Sort is
-        // unstable, and two files written in the same second would otherwise be free to swap between
-        // pushes and shuffle a paginated grid under the user.
+        // The relative path is the tiebreak so the order is total: List.Sort is unstable, and two files
+        // written in the same second would otherwise shuffle a paginated grid under the user.
         items.Sort((left, right) =>
         {
             var byDate = (right.StartTime ?? 0).CompareTo(left.StartTime ?? 0);
@@ -789,19 +804,9 @@ internal sealed class AppHost : IDisposable
         return items;
     }
 
-    // The game a clip inherits from the session it was cut from. A clip has no metadata record of its
-    // own, and nothing on the wire carries the game into CreateClip's output, so the file name is the
-    // link: both clip naming paths start the name with the source session's base name —
-    // AppController.BuildClipOutputPath writes "<sourceBaseName>-<clipId>.mp4" for a combine clip and
-    // ClipEngine.BuildFileName writes "<sourceBaseName>-clip-<n>-<start>s-<end>s.mp4" per region in
-    // separate mode.
-    //
-    // The longest matching session name wins, and the match must end on a '-' boundary: with sessions
-    // "session-1" and "session-10" both present, "session-10-clip-x" belongs to the second, and if
-    // only "session-1" has a record the boundary check stops it from claiming the other's clips.
-    //
-    // A clip whose source has been deleted, or whose source never had a game, simply has no game —
-    // the same state as a recording with no metadata record.
+    // The game a clip inherits from the session it was cut from. A clip has no metadata record of
+    // its own and nothing on the wire carries the game into CreateClip's output, so the file name
+    // is the link: both naming paths start the name with the source session's base name.
     private static string? InheritedGame(string clipFileName, Dictionary<string, string> gamesByRecording)
     {
         var clipBaseName = Path.GetFileNameWithoutExtension(clipFileName);
@@ -824,18 +829,8 @@ internal sealed class AppHost : IDisposable
         return game;
     }
 
-    // Reads a file's duration and persists it, so it is read once per file and then served from the
-    // record forever after.
-    //
-    // Probing is the honest answer here and it is bounded rather than avoided. The alternatives were
-    // weighed: StartTime/EndTime cannot supply it (StartTime is a wall-clock date, EndTime is never
-    // written); writing the duration at production time is free but only ever covers content this
-    // build produced, leaves every existing recording blank, and for a clip would record the
-    // requested region length rather than the file's real length, which stream copy shifts by up to a
-    // GOP; and MediaProbe's cache alone is per-process, so it would re-probe the whole library on
-    // every start. Persisting a probed value combines the two: one ffprobe per file ever, at most
-    // DurationProbeBudget of them per push, and MediaProbe's own cache absorbs repeats within the
-    // process while the record absorbs them across restarts.
+    // Reads a file's duration and persists it, so it is read once per file and served from the
+    // record forever after. Probing is bounded rather than avoided.
     private double? TryReadDuration(FileInfo file, string relativePath, bool isRecording)
     {
         var probe = LibraryProbe;
@@ -849,8 +844,8 @@ internal sealed class AppHost : IDisposable
         }
         catch (Exception exception)
         {
-            // A text file with an .mp4 name, a truncated recording, an ffprobe that will not start:
-            // the item still lists, just without a length, and it is not probed again this process.
+            // A text file with an .mp4 name, a truncated recording, an ffprobe that will not start: the item
+            // still lists, just without a length, and it is not probed again this process.
             Console.Error.WriteLine($"Tript.App: could not read the duration of '{relativePath}': {exception.Message}");
             MarkUnprobeable(file.FullName);
             return null;
@@ -858,27 +853,14 @@ internal sealed class AppHost : IDisposable
 
         if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds <= 0)
         {
-            // ffprobe reports no duration at all for some containers; MediaProbe normalises that to
-            // NaN. Nothing to show and nothing to store.
+            // ffprobe reports no duration for some containers; MediaProbe normalises that to NaN.
             MarkUnprobeable(file.FullName);
             return null;
         }
 
-        // Persisted best-effort: a write failure (read-only media, a file where the metadata
-        // directory should be) is logged inside the store and costs one probe on the next push, which
-        // is not worth surfacing to the user for a duration label.
-        //
-        // The read-modify-write is over Read, not Load, and the difference is the whole point. Load
-        // reports an unreadable record as null, which reads as "there is no record" — and this path
-        // would then write a fresh record with nothing but a video path and a duration in it, over a
-        // file that holds the recording's game, its user title and its bookmarks. That is a real
-        // trade the wrong way round: a duration is one ffprobe away, a game and a bookmark list are
-        // gone for good. So an unreadable record is left exactly as it is.
-        //
-        // The item still shows the duration this push — the value is measured and correct, it is only
-        // not persisted — so the cost of the refusal is one probe per push for that file, bounded by
-        // DurationProbeBudget. The file is deliberately not marked unprobeable: that would make the
-        // length disappear from the card instead.
+        // Best-effort: a write failure costs one probe on the next push, which is not worth
+        // surfacing for a duration label. The read-modify-write is over Read, not Load, and that
+        // difference is the whole point.
         if (isRecording)
         {
             var existing = _metadata.Read(file.Name);
@@ -898,8 +880,7 @@ internal sealed class AppHost : IDisposable
         }
         else
         {
-            // The clip store makes the same distinction internally, for the same reason: a clip's
-            // record carries the user's clip title.
+            // The clip store makes the same distinction internally: a clip's record carries its user title.
             _clipTitles.SaveDuration(file.Name, seconds);
         }
 
@@ -918,8 +899,8 @@ internal sealed class AppHost : IDisposable
             return _unprobeable.Contains(absolutePath);
     }
 
-    // The probe the library shares, built once. Separate from the clip engine's probe only because
-    // the engine is built on demand; both are just an ffprobe path plus a per-path cache.
+    // Separate from the clip engine's probe only because the engine is built on demand; both are just
+    // an ffprobe path plus a per-path cache.
     private MediaProbe? LibraryProbe
     {
         get
@@ -928,9 +909,9 @@ internal sealed class AppHost : IDisposable
             if (tools is null)
                 return null;
 
-            // Deliberately unguarded. A clip finishing pushes content from its own thread while the
-            // IPC thread may be listing, so two probes can be built; a reference assignment cannot
-            // tear, MediaProbe locks its own cache, and the loser only costs a cold cache.
+            // Deliberately unguarded. A clip finishing pushes content from its own thread while the IPC thread
+            // may be listing, so two probes can be built; a reference assignment cannot tear, MediaProbe locks
+            // its own cache, and the loser only costs a cold cache.
             return _libraryProbe ??= new MediaProbe(tools.Value.Ffprobe);
         }
     }
@@ -943,19 +924,20 @@ internal sealed class AppHost : IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // The file went away between the enumeration and this read; a size of 0 is better than
-            // failing the whole list for it.
+            // The file went away between the enumeration and this read.
             return 0;
         }
     }
 
-    // The first path segment of a '/' separated relative path. Used to classify an item by its
-    // top-level directory (sessions/ -> recording, clips/ -> clip).
+    // Classifies an item by its top-level directory (sessions/ -> recording, clips/ -> clip).
     private static string TopLevelDirectory(string relativePath)
     {
         var separator = relativePath.IndexOf('/');
         return separator >= 0 ? relativePath[..separator] : relativePath;
     }
+
+    private static bool IsTrashPath(string relativePath) =>
+        relativePath.StartsWith(TrashStore.DirectoryName + "/", StringComparison.Ordinal);
 
     private static double? DateTimeToUnixSeconds(DateTime dateTime)
         => dateTime == default ? null : new DateTimeOffset(dateTime).ToUnixTimeSeconds();
@@ -967,39 +949,260 @@ internal sealed class AppHost : IDisposable
         if (parameters is null || string.IsNullOrEmpty(parameters.FileName))
             return;
 
-        // Resolve against the root even when the file is missing: a delete for a video whose file
-        // was removed out-of-band must still drop the metadata record (cascade-delete contract).
-        // ResolveContentFile refuses paths with no file on disk, so use the traversal-safe
-        // resolver directly and let File.Delete be the no-op it already is.
-        var target = _content.ResolveWithinRoot(parameters.FileName);
-        if (target is null)
-            return;
-
-        try
-        {
-            File.Delete(target);
-            // The cascade-delete contract: a deleted video takes its metadata records with it, so
-            // the metadata/ tree never keeps an orphaned record for a video that is gone. Clips
-            // have no RecordingMetadata record, but a clip's own record is deleted the same way, and
-            // so is the cached thumbnail — an image left behind would both leak the deleted
-            // recording's contents and be inherited by the next recording to reuse the name.
-            _metadata.Delete(Path.GetFileName(target));
-            _clipTitles.Delete(Path.GetFileName(target));
-            _thumbnails.Delete(Path.GetFileName(target));
-            PushContent();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not delete '{target}': {exception.Message}");
-        }
+        DeleteOne(parameters, parameters.Permanent);
+        PushContent();
+        PushTrash();
     }
 
     internal void DeleteMultipleContent(DeleteMultipleContentParameters? parameters)
     {
         if (parameters?.Items is null)
             return;
+
         foreach (var item in parameters.Items)
-            DeleteContent(item);
+        {
+            if (string.IsNullOrEmpty(item.FileName))
+                continue;
+            DeleteOne(item, parameters.Permanent || item.Permanent);
+        }
+
+        PushContent();
+        PushTrash();
+    }
+
+    // One item, without the pushes: a batch delete pushes once at the end rather than once per item.
+    private void DeleteOne(DeleteContentParameters item, bool permanent)
+    {
+        // Resolve against the root even when the file is missing: a delete for a video whose file was
+        // removed out-of-band must still drop the metadata record. ResolveContentFile refuses paths with
+        // no file on disk, so use the traversal-safe resolver directly.
+        var target = _content.ResolveWithinRoot(item.FileName);
+        if (target is null)
+            return;
+
+        var fileName = Path.GetFileName(target);
+        if (permanent)
+        {
+            UnlinkContent(target, fileName);
+            return;
+        }
+
+        // The records are read before they move, so the entry can be listed with the title, game and
+        // length the library was showing.
+        var relative = RelativeToRoot(target);
+        var seed = new TrashEntryRecord
+        {
+            ContentType = ResolveContentType(item.ContentType, relative),
+            FileName = fileName,
+            OriginalPath = relative,
+            DeletedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+        };
+
+        var metadata = _metadata.Load(fileName);
+        if (metadata is not null)
+        {
+            seed.Title = string.IsNullOrWhiteSpace(metadata.Title) ? null : metadata.Title;
+            seed.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
+            seed.DurationSeconds = metadata.DurationSeconds;
+        }
+
+        var clipRecord = _clipTitles.LoadRecord(fileName);
+        if (clipRecord is not null)
+        {
+            seed.Title ??= string.IsNullOrWhiteSpace(clipRecord.Title) ? null : clipRecord.Title;
+            seed.DurationSeconds ??= clipRecord.DurationSeconds;
+        }
+
+        seed.Title ??= Path.GetFileNameWithoutExtension(fileName);
+
+        var files = new List<TrashedFile>();
+        if (File.Exists(target))
+        {
+            seed.FileSizeBytes = SafeLength(new FileInfo(target));
+            files.Add(new TrashedFile(target, relative));
+        }
+
+        AddIfPresent(files, _metadata.PathFor(fileName));
+        AddIfPresent(files, _clipTitles.PathFor(fileName));
+        AddIfPresent(files, _thumbnails.PathFor(fileName));
+
+        if (files.Count == 0)
+            return;
+
+        if (_trash.Add(files, seed, out var failure) is null)
+        {
+            Console.Error.WriteLine($"Tript.App: could not move '{target}' to the trash: {failure}");
+            PushError($"'{fileName}' could not be moved to the trash ({failure}), so it was left where it is.");
+        }
+    }
+
+    // The permanent path, unchanged: the video and every record keyed to it are unlinked outright.
+    private void UnlinkContent(string target, string fileName)
+    {
+        try
+        {
+            File.Delete(target);
+            // Cascade delete, so the metadata/ tree never keeps an orphaned record. The cached thumbnail goes
+            // too: an image left behind would both leak the deleted recording's contents and be inherited by
+            // the next recording to reuse the name.
+            _metadata.Delete(fileName);
+            _clipTitles.Delete(fileName);
+            _thumbnails.Delete(fileName);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Tript.App: could not delete '{target}': {exception.Message}");
+            PushError($"'{fileName}' could not be deleted ({exception.Message}).");
+        }
+    }
+
+    private void AddIfPresent(List<TrashedFile> files, string path)
+    {
+        if (File.Exists(path))
+            files.Add(new TrashedFile(path, RelativeToRoot(path)));
+    }
+
+    private string RelativeToRoot(string absolutePath) =>
+        Path.GetRelativePath(EffectiveRoot, absolutePath).Replace(Path.DirectorySeparatorChar, '/');
+
+    // The four names the wire knows. An item whose type the frontend did not name is classified the
+    // way the library classifies it, by its top-level directory.
+    private static readonly HashSet<string> WireContentTypes =
+        new(StringComparer.Ordinal) { "recording", "clip", "highlight", "buffer" };
+
+    private static string ResolveContentType(string? requested, string relativePath)
+    {
+        if (requested is not null && WireContentTypes.Contains(requested))
+            return requested;
+        return TopLevelDirectory(relativePath).Equals("clips", StringComparison.Ordinal) ? "clip" : "recording";
+    }
+
+    // ---- trash ----
+
+    private int RetentionHours => _settingsStore.Load().Recording.TrashRetentionHours;
+
+    // The bin as the wire spells it. purgeAt is derived from the retention in force right now, so
+    // changing the setting re-dates every entry instead of pinning it to the old window.
+    internal List<TrashEntry> TrashEntries()
+    {
+        var retentionHours = RetentionHours;
+        return _trash.List().Select(entry => new TrashEntry
+        {
+            Id = entry.Id,
+            ContentType = entry.ContentType,
+            FileName = entry.FileName,
+            Title = entry.Title,
+            Game = entry.Game,
+            DurationSeconds = entry.DurationSeconds,
+            FileSizeBytes = entry.FileSizeBytes,
+            DeletedAt = entry.DeletedAt,
+            PurgeAt = retentionHours <= 0 ? 0 : entry.DeletedAt + retentionHours * 3600L,
+        }).ToList();
+    }
+
+    internal void PushTrash()
+    {
+        _ipc.Broadcast("trash", JsonSerializer.SerializeToElement(new
+        {
+            entries = TrashEntries(),
+            retentionHours = RetentionHours,
+        }, Wire.Options));
+    }
+
+    internal void RestoreTrash(RestoreTrashParameters? parameters)
+    {
+        if (parameters?.EntryIds is null)
+            return;
+
+        foreach (var entryId in parameters.EntryIds)
+        {
+            var result = _trash.Restore(entryId, EffectiveRoot);
+            if (result.Failure is not null)
+            {
+                Console.Error.WriteLine($"Tript.App: could not restore '{entryId}': {result.Failure}");
+                PushError($"That item could not be restored ({result.Failure}).");
+                continue;
+            }
+
+            if (!result.Renamed)
+                continue;
+
+            // The name changed, so the metadata record's own link back to the video has to change
+            // with it — and the user has to be told which name to look for.
+            RelinkRestoredMetadata(result.RestoredAs!);
+            PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+        }
+
+        PushContent();
+        PushTrash();
+    }
+
+    // Points a restored recording's metadata record back at the file it came back as. The record
+    // has already moved to the new key; only the videoPath inside it is stale. An unreadable record
+    // is left exactly as it is — a rewritten one would cost the game and the bookmarks.
+    private void RelinkRestoredMetadata(string restoredFileName)
+    {
+        var existing = _metadata.Read(restoredFileName);
+        if (existing.State != StoredRecordState.Loaded)
+            return;
+
+        var record = existing.Record!;
+        var separator = record.VideoPath.LastIndexOf('/');
+        record.VideoPath = separator < 0
+            ? restoredFileName
+            : $"{record.VideoPath[..separator]}/{restoredFileName}";
+        _metadata.Save(record);
+    }
+
+    internal void PurgeTrash(PurgeTrashParameters? parameters)
+    {
+        // No entryIds at all means the whole bin; an explicit (possibly empty) list means exactly
+        // those entries.
+        var entryIds = parameters?.EntryIds ?? _trash.List().Select(entry => entry.Id).ToList();
+
+        foreach (var entryId in entryIds)
+        {
+            if (_trash.Purge(entryId, out var failure))
+                continue;
+            Console.Error.WriteLine($"Tript.App: could not purge '{entryId}': {failure}");
+            PushError($"That item could not be removed from the trash ({failure}).");
+        }
+
+        PushContent();
+        PushTrash();
+    }
+
+    // Drops every entry whose retention window has closed. A retention of zero or less disables it
+    // altogether: the bin then keeps what it holds until it is emptied by hand.
+    internal void PurgeExpiredTrash()
+    {
+        try
+        {
+            var retentionHours = RetentionHours;
+            if (retentionHours <= 0)
+                return;
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var purged = 0;
+            foreach (var entry in _trash.List())
+            {
+                if (entry.DeletedAt + retentionHours * 3600L > now)
+                    continue;
+                if (_trash.Purge(entry.Id, out _))
+                    purged++;
+            }
+
+            if (purged == 0)
+                return;
+
+            PushContent();
+            PushTrash();
+        }
+        catch (Exception exception)
+        {
+            // This runs on a timer thread; an escape here would be an unhandled exception.
+            Console.Error.WriteLine($"Tript.App: the trash could not be swept: {exception.Message}");
+        }
     }
 
     internal void RenameContent(RenameContentParameters? parameters)
@@ -1011,13 +1214,9 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
-        // The title is stored on the video's metadata record; a video with no record yet gets one
-        // (the record is created with just the link key and the title). The library reads the
-        // title back when it builds the list.
-        //
-        // A record that exists but could not be read is not a record to replace: writing a fresh
-        // one would trade the recording's game and bookmarks for a title. The rename fails instead,
-        // loudly — the user asked for this write, so they are told it did not happen.
+        // The title is stored on the video's metadata record; a video with no record yet gets one.
+        // A record that exists but could not be READ is not a record to replace — writing a fresh
+        // one would trade the recording's game and bookmarks for a title.
         var fileName = Path.GetFileName(target);
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
@@ -1025,7 +1224,7 @@ internal sealed class AppHost : IDisposable
             Console.Error.WriteLine(
                 $"Tript.App: '{fileName}' has a metadata record that could not be read " +
                 $"({existing.Failure}); the rename is refused rather than replacing it.");
-            PushMetadataSaveError(
+            PushError(
                 "The recording title could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
             return;
         }
@@ -1038,10 +1237,9 @@ internal sealed class AppHost : IDisposable
 
         if (!_metadata.Save(metadata))
         {
-            // A title that could not be written must not silently vanish: surface the failure to
-            // the user and leave the library list as it was — no content push, so the old title
-            // stays on screen.
-            PushMetadataSaveError("The recording title could not be saved — check the recording folder is writable.");
+            // Surface the failure and leave the list as it was — no content push, so the old title stays on
+            // screen rather than a title that was never saved.
+            PushError("The recording title could not be saved — check the recording folder is writable.");
             return;
         }
         PushContent();
@@ -1049,9 +1247,7 @@ internal sealed class AppHost : IDisposable
 
     private string? ResolveContentFile(string fileName)
     {
-        // File names are safe by construction in the alpha (the recording names the host builds);
-        // still, the same traversal discipline applies — resolve against the root and refuse
-        // anything that escapes it.
+        // Names are safe by construction here, but the same traversal discipline applies anyway.
         var candidate = _content.ResolveWithinRoot(fileName);
         if (candidate is null || !File.Exists(candidate))
             return null;
@@ -1068,8 +1264,8 @@ internal sealed class AppHost : IDisposable
         var session = _sessionTracker.Active;
         if (session is not null)
         {
-            // The recording is live: the bookmark goes into the session so the detector and the
-            // user share one list.
+            // The recording is live: the bookmark goes into the session so the detector and the user share
+            // one list.
             var bookmark = new Tript.Core.Bookmark
             {
                 Type = ParseBookmarkType(parameters.Type),
@@ -1079,16 +1275,14 @@ internal sealed class AppHost : IDisposable
             return;
         }
 
-        // A finished recording: the bookmark is appended to the video's metadata record in the
-        // metadata store. A video with no record yet gets one (just the link key and the
-        // bookmark).
+        // A finished recording: the bookmark is appended to the video's metadata record. A video with no
+        // record yet gets one.
         var target = ResolveContentFile(parameters.FilePath);
         if (target is null)
             return;
 
-        // As in RenameContent: an unreadable record is preserved, not replaced. A blank record with
-        // one bookmark in it would cost the recording's game, title and every bookmark already on
-        // it, so the add fails and the frontend is told.
+        // As in RenameContent, an unreadable record is preserved rather than replaced: a blank record with
+        // one bookmark in it would cost the recording's game, title and every bookmark already on it.
         var fileName = Path.GetFileName(target);
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
@@ -1096,7 +1290,7 @@ internal sealed class AppHost : IDisposable
             Console.Error.WriteLine(
                 $"Tript.App: '{fileName}' has a metadata record that could not be read " +
                 $"({existing.Failure}); the bookmark is refused rather than replacing it.");
-            PushMetadataSaveError(
+            PushError(
                 "The bookmark could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
             return;
         }
@@ -1107,8 +1301,7 @@ internal sealed class AppHost : IDisposable
         };
         metadata.Bookmarks.Add(new Tript.Core.Bookmark
         {
-            // The frontend may send its own id or none at all; the store keys bookmarks by a
-            // GUID, so an unparseable or absent id gets a fresh one.
+            // The store keys bookmarks by GUID, so an unparseable or absent id gets a fresh one.
             Id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.NewGuid(),
             Type = ParseBookmarkType(parameters.Type),
             Time = TimeSpan.FromSeconds(parameters.Time),
@@ -1116,9 +1309,8 @@ internal sealed class AppHost : IDisposable
 
         if (!_metadata.Save(metadata))
         {
-            // A bookmark that could not be written must not silently vanish: the frontend needs
-            // to know the add failed so it does not keep the bookmark in the UI.
-            PushMetadataSaveError("The bookmark could not be saved — check the recording folder is writable.");
+            // The frontend needs to know the add failed so it does not keep the bookmark in the UI.
+            PushError("The bookmark could not be saved — check the recording folder is writable.");
         }
     }
 
@@ -1131,10 +1323,8 @@ internal sealed class AppHost : IDisposable
         if (target is null)
             return;
 
-        // This path already refused to write when the record would not load — it returned early on
-        // null — but it said nothing, so an unreadable record made a delete look like it worked and
-        // the bookmark came back on the next list. The two states are now told apart: nothing to
-        // delete is silence, a record that could not be read is an error the frontend must see.
+        // Nothing to delete is silence; a record that could not be READ is an error the frontend must see.
+        // Conflating the two made a delete look like it worked and the bookmark came back on the next list.
         var fileName = Path.GetFileName(target);
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
@@ -1142,7 +1332,7 @@ internal sealed class AppHost : IDisposable
             Console.Error.WriteLine(
                 $"Tript.App: '{fileName}' has a metadata record that could not be read " +
                 $"({existing.Failure}); the bookmark removal is refused rather than replacing it.");
-            PushMetadataSaveError(
+            PushError(
                 "The bookmark could not be removed — this recording's metadata record could not be read.");
             return;
         }
@@ -1155,9 +1345,8 @@ internal sealed class AppHost : IDisposable
         metadata.Bookmarks.RemoveAll(b => b.Id == id);
         if (!_metadata.Save(metadata))
         {
-            // A bookmark whose removal could not be persisted must not silently reappear on the
-            // next list build: the frontend needs to know the delete failed.
-            PushMetadataSaveError("The bookmark could not be removed — check the recording folder is writable.");
+            // A bookmark whose removal could not be persisted must not silently reappear on the next list.
+            PushError("The bookmark could not be removed — check the recording folder is writable.");
         }
     }
 
@@ -1170,10 +1359,9 @@ internal sealed class AppHost : IDisposable
 
     // ---- recovery ----
 
-    // The minimal orphan recovery: scan the recording root for files that exist on disk but have no
-    // entry in the library list (a crashed recording leaves an .mp4.part or an .mp4 without a
-    // metadata record), and offer them via recoveryPrompt. The alpha does not have a full recovery
-    // catalogue; it lists the orphan candidates and the frontend can confirm or decline.
+    // Minimal orphan recovery: scan the recording root for files that exist on disk but have no entry
+    // in the library list (a crashed recording leaves an .mp4.part, or an .mp4 with no metadata
+    // record), and offer them via recoveryPrompt for the frontend to confirm or decline.
     internal void RaiseRecoveryPromptIfNeeded(ClientHandle client)
     {
         var orphans = FindOrphanFiles();
@@ -1204,8 +1392,9 @@ internal sealed class AppHost : IDisposable
             var relative = Path.GetRelativePath(EffectiveRoot, file.FullName);
             var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
 
-            // A file is orphaned when it is not part of the catalogue the library builds — the
-            // session paths the host would have built. A file in clips/ is never orphaned.
+            // Orphaned means not part of the catalogue the library builds. A file in clips/ is never orphaned.
+            if (IsTrashPath(normalized))
+                continue;
             if (normalized.StartsWith("sessions/", StringComparison.Ordinal))
                 continue;
             if (normalized.StartsWith("clips/", StringComparison.Ordinal))
@@ -1221,21 +1410,17 @@ internal sealed class AppHost : IDisposable
     {
         if (parameters is null)
             return;
-        // The alpha's recovery is a no-op for "keep": the file already stays. A "delete" action
-        // would remove the orphan; the frontend sends the prompt's id back so the host could
-        // correlate, but the alpha has no per-file state to act on beyond deletion.
+        // "keep" is a no-op: the file already stays. Deleting an orphan is out of scope here.
         if (parameters.Action.Equals("delete", StringComparison.OrdinalIgnoreCase))
         {
-            // Deletion of an orphan is out of scope for the minimal recovery; the file stays.
         }
     }
 
     // ---- clipping ----
 
     // Reports a clip that could not even be started — a source path that does not resolve inside the
-    // recording root (AppController.CreateClip). It uses the same importProgress "error" frame the
-    // engine's failures below use, because that is the message the clip dialog already renders its
-    // failure state from; a refusal must not look like a clip that silently never happened.
+    // recording root. It reuses the importProgress "error" frame the engine's own failures use, which
+    // is what the clip dialog renders its failure state from.
     internal void PushClipError(string message)
     {
         _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
@@ -1249,8 +1434,8 @@ internal sealed class AppHost : IDisposable
     {
         _clipEngine ??= BuildClipEngine();
 
-        // Never block synchronously: the engine's ffmpeg run is off the IPC thread, and progress
-        // arrives as importProgress messages.
+        // Never block synchronously: the ffmpeg run is off the IPC thread and progress arrives as
+        // importProgress messages.
         ThreadPool.QueueUserWorkItem(_ =>
         {
             try
@@ -1262,10 +1447,8 @@ internal sealed class AppHost : IDisposable
 
                 var results = _clipEngine.CreateClips(request);
 
-                // The user's clip title is persisted against every produced file (one in combine
-                // mode, one per region in separate mode), so the clips list shows it across
-                // restarts. A failed write is logged inside the store and does not fail the clip;
-                // the clip still lists, just under its file name.
+                // Persisted against every produced file (one in combine mode, one per region in separate mode).
+                // A failed write is logged inside the store and does not fail the clip.
                 if (!string.IsNullOrWhiteSpace(request.Title))
                 {
                     foreach (var result in results)
@@ -1284,7 +1467,7 @@ internal sealed class AppHost : IDisposable
                     },
                 }, Wire.Options));
 
-                // A clip completed: the catalogue changed, so the content list is pushed.
+                // A clip completed: the catalogue changed.
                 PushContent();
             }
             catch (Exception exception)
@@ -1308,35 +1491,66 @@ internal sealed class AppHost : IDisposable
 
     private void EnsureRecorderBuilt(ResolvedRecorderSettings settings)
     {
-        if (_recorder is not null)
-            return;
-
         if (_options.FakeRecorder)
         {
+            if (_recorder is not null)
+                return;
+
             _recorderSession = new FakeRecorderSession();
             _recorder = new RecorderStateMachine(_recorderSession, settings);
             return;
         }
 
+        var policy = CapturePolicy.From(settings);
+        if (_recorder is not null)
+        {
+            // The scene's layers are composed in the session's constructor, so a changed capture
+            // method or monitor needs a new session — otherwise the setting only takes effect at
+            // the next app start. Reached from Idle only (StartRecording refuses otherwise).
+            if (_recorderSession is not ObsRecorderSession existing || existing.Policy == policy)
+                return;
+
+            Log.Information("AppHost: the capture policy changed to {Method}; rebuilding the recording scene.",
+                policy.Method);
+            _recorder.Dispose();
+            _recorder = null;
+            _recorderSession.Dispose();
+            _recorderSession = null;
+        }
+
         if (_runtime is null)
             throw new InvalidOperationException("The real recorder needs a libobs runtime; none was started.");
 
-        // The colour source is the recording's background behind the game capture. The plugin's
-        // default colour is white (0xFFFFFFFF) — without an explicit colour the recordings would
-        // render as a white canvas until a game is hooked.
-        using (var colourSettings = new ObsSettings())
+        // The plugin's default colour is white (0xFFFFFFFF), which would render recordings as a white
+        // canvas until a game is hooked.
+        if (_colourSource is null)
         {
+            using var colourSettings = new ObsSettings();
             colourSettings.SetInt("color", unchecked((int)0xFF000000));
             _colourSource = ObsSource.CreatePrivate("color_source", "app colour", colourSettings);
         }
-        _recorderSession = new ObsRecorderSession(_runtime, _colourSource);
-        _recorder = new RecorderStateMachine(_recorderSession, settings);
+
+        var session = new ObsRecorderSession(_runtime, _colourSource, gameCaptureTarget: null, policy);
+        session.GameCaptureUnavailable += OnGameCaptureUnavailable;
+        _recorderSession = session;
+        _recorder = new RecorderStateMachine(session, settings);
     }
 
-    // Re-points the session's game-capture source at the game being recorded. The alpha detector
-    // (ProcessNameGameDetector) matches by process name, so the executable key is that name with
-    // the platform extension; a game id that is not a process name falls back to the same value.
-    // The session no-ops when the platform has no game capture (Linux) or the session is the fake.
+    // The Game capture method has no display layer to fall back on, so a capture that never attaches
+    // would record a black file with working audio. The session reports it; the recording ends here
+    // and the user is told why.
+    private void OnGameCaptureUnavailable(object? sender, GameCaptureUnavailable unavailable)
+    {
+        if (!IsRecording)
+            return;
+
+        PushError(unavailable.Message);
+        StopRecording();
+    }
+
+    // Re-points the session's game-capture source at the game being recorded. ProcessNameGameDetector
+    // matches by process name, so the executable key is that name plus the platform extension. A no-op
+    // when the platform has no game capture (Linux) or the session is the fake.
     private void RetargetGameCapture(string gameId)
     {
         if (_recorderSession is not ObsRecorderSession session)
@@ -1347,16 +1561,13 @@ internal sealed class AppHost : IDisposable
         session.RetargetGame(new ObsGameCaptureTarget(null, null, executable));
     }
 
-    // The output path for a recording. Sessions are flat under <effectiveRoot>/sessions/ — the
-    // timestamp is already in the file name, so there is no date subfolder. The sessions directory
-    // is created unconditionally, as before.
+    // Sessions are flat under <effectiveRoot>/sessions/ — the timestamp is already in the file name.
     private string BuildOutputPath(SettingsModel settings)
     {
         var directory = Path.Combine(EffectiveRoot, "sessions");
         Directory.CreateDirectory(directory);
-        // Millisecond resolution keeps two sessions started in the same second from colliding on
-        // one file name (a stop/start in quick succession would otherwise overwrite the recording
-        // and its metadata record).
+        // Millisecond resolution keeps two sessions started in the same second from colliding on one file
+        // name, which would overwrite the recording and its metadata record.
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmssfff}.mp4";
         return Path.Combine(directory, name);
     }

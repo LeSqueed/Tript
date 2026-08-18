@@ -17,13 +17,17 @@ public sealed class DetectionHost : IDisposable
     private readonly TimeSpan _cleanupInterval;
     private readonly Lock _gate = new();
 
+    // Serialises Start/Stop/Dispose against each other so the cleanup thread can be joined without
+    // _gate held — the cleanup thread takes _gate every cycle, so joining under it is a guaranteed
+    // two-second stall. Always taken before _gate, never by the cleanup thread.
+    private readonly Lock _lifecycleGate = new();
+
     // The detector raises detections on its own thread, and Stop disposes the subscription that
     // handler is reading through, so a handler may be in flight while the host changes state. Every
     // piece of state the handler touches is swapped under a lock, and the handler reads the
     // swapped-out values through its own captured references.
     private DetectionRun? _run;
-    private CancellationTokenSource? _cleanupCts;
-    private Thread? _cleanupThread;
+    private CleanupWorker? _cleanup;
 
     public DetectionHost(IVisualEventDetector detector, ITrackDefinitionSource? definitionSource = null,
         TimeSpan? cleanupInterval = null)
@@ -79,29 +83,37 @@ public sealed class DetectionHost : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
 
-        lock (_gate)
+        lock (_lifecycleGate)
         {
-            if (_run != null)
+            CleanupWorker? stopped;
+            lock (_gate)
             {
-                if (_run.GameId == gameId)
+                if (_run != null && _run.GameId == gameId)
                 {
                     Log.Information("DetectionHost: detection already running for {GameId}", gameId);
                     return true;
                 }
 
-                Log.Information("DetectionHost: game switch {OldGameId} -> {NewGameId}",
-                    _run.GameId, gameId);
-                StopLocked();
+                if (_run != null)
+                    Log.Information("DetectionHost: game switch {OldGameId} -> {NewGameId}",
+                        _run.GameId, gameId);
+
+                stopped = StopLocked();
             }
 
-            try
+            stopped?.Join();
+
+            lock (_gate)
             {
-                return StartLocked(gameId);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "DetectionHost: could not start detection for {GameId}", gameId);
-                return false;
+                try
+                {
+                    return StartLocked(gameId);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "DetectionHost: could not start detection for {GameId}", gameId);
+                    return false;
+                }
             }
         }
     }
@@ -109,17 +121,29 @@ public sealed class DetectionHost : IDisposable
     // Stops detection for the current game, if any. No-op when nothing is running.
     public void Stop()
     {
-        lock (_gate)
+        lock (_lifecycleGate)
         {
-            StopLocked();
+            CleanupWorker? stopped;
+            lock (_gate)
+            {
+                stopped = StopLocked();
+            }
+
+            stopped?.Join();
         }
     }
 
     public void Dispose()
     {
-        lock (_gate)
+        lock (_lifecycleGate)
         {
-            StopLocked();
+            CleanupWorker? stopped;
+            lock (_gate)
+            {
+                stopped = StopLocked();
+            }
+
+            stopped?.Join();
             _detector.Dispose();
         }
 
@@ -163,20 +187,27 @@ public sealed class DetectionHost : IDisposable
         return true;
     }
 
-    private void StopLocked()
+    // Cancels the cleanup thread but does not join it: the caller does that with _gate released,
+    // because the cleanup thread takes _gate. Null when nothing was running.
+    private CleanupWorker? StopLocked()
     {
         var run = _run;
         if (run == null)
         {
-            return;
+            return null;
         }
 
         _run = null;
         _detector.DetectionsAvailable -= run.OnDetections;
-        StopCleanupTimer();
+
+        var cleanup = _cleanup;
+        _cleanup = null;
+        cleanup?.Cancel();
+
         _detector.Stop();
 
         Log.Information("DetectionHost: detection stopped for {GameId}", run.GameId);
+        return cleanup;
     }
 
     private bool HasRegisteredFrameSource()
@@ -195,11 +226,8 @@ public sealed class DetectionHost : IDisposable
     private void ArmCleanupTimer()
     {
         var cts = new CancellationTokenSource();
-        _cleanupCts?.Cancel();
-        _cleanupCts = cts;
-
         var token = cts.Token;
-        _cleanupThread = new Thread(() =>
+        var thread = new Thread(() =>
         {
             // Synchronously, like the detector's loop: a long-ish cleanup pass must not park on the
             // thread pool behind normal-priority detection work.
@@ -232,23 +260,29 @@ public sealed class DetectionHost : IDisposable
             IsBackground = true,
             Name = "Tript.DetectionHost.Cleanup",
         };
-        _cleanupThread.Start();
+
+        _cleanup = new CleanupWorker(thread, cts);
+        thread.Start();
     }
 
-    private void StopCleanupTimer()
+    // The cleanup thread and the token that stops it. Cancel is safe under _gate; Join must not be,
+    // because the thread it waits for takes _gate itself. The token source is disposed only after a
+    // successful join — its kernel wait handle is what the loop parks on, and disposing it while the
+    // thread is still there turns a stall into an exception.
+    private sealed class CleanupWorker(Thread thread, CancellationTokenSource cts)
     {
-        _cleanupCts?.Cancel();
-        var thread = _cleanupThread;
-        if (thread != null && thread != Thread.CurrentThread)
-        {
-            if (!thread.Join(TimeSpan.FromSeconds(2)))
-            {
-                Log.Warning("DetectionHost: cleanup thread did not exit within 2s");
-            }
-        }
+        internal void Cancel() => cts.Cancel();
 
-        _cleanupCts = null;
-        _cleanupThread = null;
+        internal void Join()
+        {
+            if (thread == Thread.CurrentThread)
+                return;
+
+            if (thread.Join(TimeSpan.FromSeconds(2)))
+                cts.Dispose();
+            else
+                Log.Warning("DetectionHost: cleanup thread did not exit within 2s");
+        }
     }
 
     // The per-game state a detector's detections are routed through. Instances are immutable once

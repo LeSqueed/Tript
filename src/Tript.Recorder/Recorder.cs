@@ -164,8 +164,18 @@ public sealed class Recorder : IDisposable
             if (_state == RecorderState.Idle)
                 return false;
 
-            _output!.Stop();
+            var output = _output;
+            if (output is null)
+                return false;
+
+            // The state moves BEFORE the call, never after. An output that raises its stop signal
+            // synchronously inside Stop — the fake session, and libobs when the output ends inline —
+            // re-enters this lock through RecordStop and completes the transition to Idle. Assigning
+            // Stopping afterwards clobbered that back, leaving a recorder stuck in Stopping with a
+            // null output: every later stop then dereferenced it, and the app's settle loop waited
+            // out its full deadline on every single stop.
             _state = RecorderState.Stopping;
+            output.Stop();
             return true;
         }
     }
@@ -182,9 +192,15 @@ public sealed class Recorder : IDisposable
             if (_state == RecorderState.Idle)
                 return false;
 
-            _output!.Stop();
+            var output = _output;
+            if (output is null)
+                return false;
+
+            // Both the state and the reason go before the call, for the reason documented on Stop:
+            // a synchronous stop signal resolves the reason as it passes through RecordStop.
             _state = RecorderState.Stopping;
             _lastStopReason = RecorderStopReason.GameStopped;
+            output.Stop();
             return true;
         }
     }
@@ -201,16 +217,18 @@ public sealed class Recorder : IDisposable
             {
                 // Told to stop without waiting: at process shutdown nothing may block on the muxer
                 // helper, and obs_shutdown releases every object regardless.
+                // Set before the call, as in Stop: a synchronous stop signal reads the reason on
+                // its way through RecordStop.
+                _lastStopReason = RecorderStopReason.Disposed;
+                _state = RecorderState.Stopping;
+
                 try
                 {
-                    _output!.Stop();
+                    _output?.Stop();
                 }
                 catch (ObjectDisposedException)
                 {
                 }
-
-                _lastStopReason = RecorderStopReason.Disposed;
-                _state = RecorderState.Stopping;
             }
 
             _disposed = true;

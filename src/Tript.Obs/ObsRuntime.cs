@@ -41,6 +41,41 @@ public sealed class ObsRuntime : IDisposable
     // this to know their pointer no longer refers to anything.
     internal static long Generation => Volatile.Read(ref _generation);
 
+    // Releases currently inside a libobs release call. A handle checking its generation and then
+    // calling release is two steps, so the stamp alone leaves a window where a shutdown lands
+    // between them; shutdown drains this counter to close it. See TryEnterRelease.
+    private static int _releasesInFlight;
+
+    // Claims the right to release a pointer stamped with `generation`, or refuses because the
+    // context that owned it is gone. Deliberately increments before reading the generation, and
+    // Dispose increments the generation before reading this counter: with a full fence on each
+    // side at least one of the two sees the other, so no release can slip past a shutdown.
+    internal static bool TryEnterRelease(long generation)
+    {
+        Interlocked.Increment(ref _releasesInFlight);
+
+        if (Volatile.Read(ref _generation) == generation)
+            return true;
+
+        Interlocked.Decrement(ref _releasesInFlight);
+        return false;
+    }
+
+    internal static void ExitRelease() => Interlocked.Decrement(ref _releasesInFlight);
+
+    // How long shutdown waits for in-flight releases. A release is a single libobs call, so this is
+    // orders of magnitude more than it can legitimately need; it is bounded at all only because a
+    // shutdown that can hang is worse than the leak that giving up produces.
+    private static readonly TimeSpan ReleaseDrainTimeout = TimeSpan.FromSeconds(2);
+
+    private static void DrainReleases()
+    {
+        var deadline = Environment.TickCount64 + (long)ReleaseDrainTimeout.TotalMilliseconds;
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _releasesInFlight) != 0 && Environment.TickCount64 < deadline)
+            spin.SpinOnce();
+    }
+
     public static ObsRuntime? Current
     {
         get
@@ -125,11 +160,15 @@ public sealed class ObsRuntime : IDisposable
             // when libobs shuts down is a segmentation fault, not a leak.
             DisposeLiveScenes();
 
+            // Before the shutdown, and before draining: a handle whose release has not yet started
+            // must observe the new generation and decline. Stamping afterwards would let a
+            // finalizer read the old generation and release into memory obs_shutdown has freed.
+            // A handle created in this window leaks instead, which obs_shutdown then reclaims.
+            Interlocked.Increment(ref _generation);
+            DrainReleases();
+
             ObsNative.obs_shutdown();
 
-            // After the shutdown, so no handle can be created against a context that is already
-            // gone and still read the old generation.
-            Interlocked.Increment(ref _generation);
             _current = null;
 
             // Only now is libobs certain not to read the strings it kept pointers to.

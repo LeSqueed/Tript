@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
@@ -99,17 +100,27 @@ internal sealed class ObsFrameSource : IFrameSource
     };
 }
 
-// One native subscription. The native callback is a static method and the subscription is the
-// pinned GCHandle it receives as param, so libobs's identity for the input — (callback, param) —
-// matches a unique subscription.
+// One native subscription. libobs's identity for an input is the (callback, param) pair, so param
+// has to be unique per subscription and has to survive being handed back to a callback that is
+// already in flight when the subscription goes away.
+//
+// A GCHandle would be the obvious param and is the wrong one: OnFrame has to dereference param
+// before it can check anything, and Dispose cannot free the handle without racing that dereference
+// — video_output_disconnect returns without waiting for an in-flight callback. Freeing it in that
+// window either resolves a recycled slot or throws across an UnmanagedCallersOnly frame, which
+// terminates the process. So param is a never-reused id and the lookup is a dictionary: a callback
+// that arrives after Dispose misses and returns, and the entry is a strong root while it is there.
 internal sealed class ObsFrameSubscription : IFrameSubscription
 {
+    private static readonly ConcurrentDictionary<nint, ObsFrameSubscription> Live = new();
+    private static long _nextId;
+
     private readonly ObsRuntime _runtime;
     private readonly nint _video;
     private readonly FramePixelFormat _format;
     private readonly VideoScaleInfoNative _conversion;
     private readonly uint _frameRateDivisor;
-    private GCHandle _pinned;
+    private readonly nint _id;
     private CallbackTarget? _target;
     private bool _connected;
     private int _disposed;
@@ -122,6 +133,7 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
         _format = format;
         _conversion = conversion;
         _frameRateDivisor = frameRateDivisor;
+        _id = (nint)Interlocked.Increment(ref _nextId);
         _target = new CallbackTarget(format, conversion.Width, conversion.Height, callback);
     }
 
@@ -130,14 +142,13 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
     // dead subscription.
     internal void Connect()
     {
-        // The pin is allocated first so that a refused connection still has a handle for
-        // Dispose to free — Subscribe wraps Connect in try/catch and disposes on failure, and a
-        // double free here would be the bug that shows up only under a refused subscription.
-        _pinned = GCHandle.Alloc(this);
+        // Registered before the connect, not after: libobs may deliver a frame from its own thread
+        // before video_output_connect2 has returned here.
+        Live[_id] = this;
         unsafe
         {
             if (!ObsNative.video_output_connect2(_video, in _conversion, _frameRateDivisor,
-                    &ObsFrameSubscription.OnFrame, GCHandle.ToIntPtr(_pinned)))
+                    &ObsFrameSubscription.OnFrame, _id))
             {
                 throw new ObsException(
                     "video_output_connect2 refused the subscription: the conversion cannot be " +
@@ -168,13 +179,15 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
         {
             unsafe
             {
-                ObsNative.video_output_disconnect(_video, &ObsFrameSubscription.OnFrame,
-                    GCHandle.ToIntPtr(_pinned));
+                ObsNative.video_output_disconnect(_video, &ObsFrameSubscription.OnFrame, _id);
             }
         }
 
         _connected = false;
-        _pinned.Free();
+
+        // Unregistering after the disconnect, and the id is never reused, so a callback still in
+        // flight resolves either this subscription (whose _target is already null) or nothing.
+        Live.TryRemove(_id, out _);
     }
 
     // The native callback, invoked on the video output's own dedicated thread. The video_data it
@@ -185,12 +198,15 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     internal static unsafe void OnFrame(nint parameter, nint framePointer)
     {
-        var target = (GCHandle.FromIntPtr(parameter).Target as ObsFrameSubscription)?._target;
-        if (target is null)
-            return;
-
         try
         {
+            if (!Live.TryGetValue(parameter, out var subscription))
+                return;
+
+            var target = subscription._target;
+            if (target is null)
+                return;
+
             target.Deliver((VideoDataNative*)framePointer);
         }
         catch

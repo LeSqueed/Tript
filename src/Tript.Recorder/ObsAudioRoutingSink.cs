@@ -68,9 +68,9 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
             source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}", settings);
         }
 
-        if (_scene is not null)
-            _scene.AddSource(source);
-        return new RoutedSource(source);
+        // The item AddSource returns carries a reference of its own; dropping it leaks both the
+        // item and the source it holds, and leaves the source in the scene for the next recording.
+        return new RoutedSource(source, _scene?.AddSource(source));
     }
 
     public void RouteSourceToMixer(IAudioRoutedSource source, int mixerIndex) =>
@@ -121,11 +121,28 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
 
     private sealed class RoutedSource : IAudioRoutedSource, IDisposable
     {
-        internal RoutedSource(ObsSource source) => Source = source;
+        private readonly ObsSceneItem? _item;
+
+        internal RoutedSource(ObsSource source, ObsSceneItem? item)
+        {
+            Source = source;
+            _item = item;
+        }
 
         internal ObsSource Source { get; }
 
-        public void Dispose() => Source.Dispose();
+        // Detach before releasing: the scene keeps its own reference, so releasing alone would
+        // leave the source in the scene after the recording that created it is gone.
+        public void Dispose()
+        {
+            if (_item is not null)
+            {
+                _item.Remove();
+                _item.Dispose();
+            }
+
+            Source.Dispose();
+        }
     }
 
     private sealed class TrackEncoder : IAudioTrackEncoder, IDisposable

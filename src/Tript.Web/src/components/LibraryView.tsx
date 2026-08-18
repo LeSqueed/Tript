@@ -1,44 +1,31 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The library — ONE grid over everything the backend has: sessions and clips together.
-//
-// There is no separate clips page any more. "Is it a clip" turned out to be a filter dimension like
-// the game and the date are, and splitting it across two tabs meant the same list, the same card, the
-// same sort and the same pagination existed twice while the user still could not ask the obvious
-// question ("everything from this game, newest first"). One grid with a type filter answers it.
-//
-// Items come from the shared IPC session source, owned by the App shell (so there is exactly one
-// `ListContent` per connection, however many views read it), and the list is live: new recordings
-// appear after StopRecording, new clips when the backend finishes them, deletes and renames are
-// reflected on the next `content` push.
-//
-// WHAT THIS COMPONENT OWNS AND WHAT IT DOES NOT. It owns the query — the user's filters, sort and page
-// — as plain state, and nothing else: every derived thing (which items are on the page, how many
-// matched, which page actually exists) comes from `deriveLibrary` in library/libraryModel.ts, which is
-// pure and unit-tested without a DOM. The state living HERE, and the component staying mounted while
-// the player overlay is up, is what makes "close the player and you are back where you were" true
-// without a single line of save/restore code.
-//
-// PAGINATION AND FILTERS, THE ONE RULE. A filter change resets to page 1 (`updateQuery` below does it
-// for every filter in one place, so a new filter cannot forget), and `deriveLibrary` clamps whatever
-// page it is given into the range that exists. Both halves are needed: the reset is what the user
-// expects from an interaction, the clamp is what covers a page going stale for a reason nobody
-// interacted with — a `content` push that removed items while the user sat on the last page.
-//
-// Nothing here waits on the optional wire fields (game, duration, size, thumbnail). Each has a
-// documented fallback in the model or on the card, because a missing field must never be able to hide
-// a recording the user made.
+// The library — ONE grid over everything the backend has: sessions and clips together. There is no
+// separate clips page any more.
 
 import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { ContentItem } from '../ipc/protocol';
+import type { ContentItem, DeleteContentParameters } from '../ipc/protocol';
 import { Field, SelectField, TextField, type SelectOption } from '../settings/form';
 import { ContentCard } from './library/ContentCard';
+import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
+import {
+  addSelection,
+  allSelected,
+  pruneSelection,
+  removeSelection,
+  selectedItems,
+  selectionKey,
+  toggleSelection,
+  type SelectionKey,
+} from './library/selectionModel';
+import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
 import {
   ANY_GAME,
   availableGames,
   DEFAULT_LIBRARY_QUERY,
   deriveLibrary,
+  itemLabel,
   NO_GAME,
   UNKNOWN_GAME_LABEL,
   type ContentTypeFilter,
@@ -78,10 +65,25 @@ export interface LibraryViewProps {
    * a test can put "now" somewhere fixed relative to its fixtures instead of racing the real clock.
    */
   nowSeconds?: number;
+  /**
+   * How long the backend keeps a trashed item, from the `trash` push. The delete confirmation quotes
+   * it; the default only stands until the first push arrives.
+   */
+  retentionHours?: number;
 }
 
-export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewProps) {
+export function LibraryView({
+  client,
+  items,
+  onOpen,
+  nowSeconds,
+  retentionHours = DEFAULT_RETENTION_HOURS,
+}: LibraryViewProps) {
   const [query, setQuery] = useState<LibraryQuery>(DEFAULT_LIBRARY_QUERY);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selected, setSelected] = useState<SelectionKey[]>([]);
+  // The items a confirmed delete will act on, captured when the dialog opens.
+  const [pendingDelete, setPendingDelete] = useState<ContentItem[] | null>(null);
   // Default to the real clock, read at render time. The date window only needs second-level accuracy,
   // so re-reading it per render is cheaper and simpler than keeping a ticking clock in state.
   const now = nowSeconds ?? Date.now() / 1000;
@@ -89,10 +91,9 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
   const games = useMemo(() => availableGames(items), [items]);
 
   /**
-   * Change a filter or the sort. Page goes back to 1 for BOTH: a filter changes which items exist and
-   * a sort changes which ones are near the front, so in either case "page 4" no longer means what the
-   * user was looking at. Doing it here, rather than at each control, is what stops a future filter
-   * from being added without the reset.
+   * Change a filter or the sort. Page goes back to 1 for BOTH: a filter changes which items exist
+   * and a sort changes which ones are near the front, so in either case "page 4" no longer means
+   * what the user was looking at.
    */
   const updateQuery = useCallback((patch: Partial<LibraryQuery>) => {
     setQuery((previous) => ({ ...previous, ...patch, page: 1 }));
@@ -107,6 +108,81 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
     setQuery((previous) => ({ ...DEFAULT_LIBRARY_QUERY, sort: previous.sort, pageSize: previous.pageSize }));
   }, []);
 
+  // Applied on the way OUT rather than stored pruned: a `content` push replaces the item array, and
+  // the selection must not name something that has since left the list even for one render.
+  const liveKeys = useMemo(() => new Set(items.map(selectionKey)), [items]);
+  const selection = useMemo(() => pruneSelection(selected, liveKeys), [selected, liveKeys]);
+  const pageKeys = useMemo(() => view.items.map(selectionKey), [view.items]);
+  const pageAllSelected = allSelected(pageKeys, selection);
+  const selectedCount = selection.length;
+
+  const toggleSelectionMode = useCallback(() => {
+    setSelectionMode((previous) => {
+      if (previous) {
+        setSelected([]);
+      }
+      return !previous;
+    });
+  }, []);
+
+  const toggleItem = useCallback((item: ContentItem) => {
+    setSelected((previous) => toggleSelection(previous, selectionKey(item)));
+  }, []);
+
+  const toggleAllOnPage = useCallback(() => {
+    setSelected((previous) =>
+      pageAllSelected ? removeSelection(previous, pageKeys) : addSelection(previous, pageKeys),
+    );
+  }, [pageAllSelected, pageKeys]);
+
+  const clearSelection = useCallback(() => setSelected([]), []);
+
+  const requestDelete = useCallback((item: ContentItem) => setPendingDelete([item]), []);
+
+  const requestBulkDelete = useCallback(() => {
+    const targets = selectedItems(items, selection);
+    if (targets.length > 0) {
+      setPendingDelete(targets);
+    }
+  }, [items, selection]);
+
+  const cancelDelete = useCallback(() => setPendingDelete(null), []);
+
+  const confirmDelete = useCallback(
+    (permanent: boolean) => {
+      const targets = pendingDelete ?? [];
+      const parameters = targets.map(
+        (item): DeleteContentParameters => ({ contentType: item.contentType, fileName: item.fileName }),
+      );
+      // `permanent` is omitted rather than sent false — the contract reads omitted/false as "trash",
+      // and the quieter frame is the one that cannot be misread.
+      const flag = permanent ? { permanent: true } : {};
+      if (parameters.length === 1) {
+        client.send('DeleteContent', { ...parameters[0], ...flag });
+      } else if (parameters.length > 1) {
+        client.send('DeleteMultipleContent', { items: parameters, ...flag });
+      }
+      // Drop just what was sent. The rest of the selection is still valid, and the `content` push
+      // that follows is what actually removes the cards.
+      setSelected((previous) => removeSelection(previous, targets.map(selectionKey)));
+      setPendingDelete(null);
+    },
+    [client, pendingDelete],
+  );
+
+  const confirmation: DeleteConfirmation | null = useMemo(() => {
+    if (pendingDelete === null || pendingDelete.length === 0) {
+      return null;
+    }
+    const names = pendingDelete.map(itemLabel);
+    return {
+      title: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items?`,
+      names,
+      confirmLabel: names.length === 1 ? 'Move to trash' : `Move ${names.length} to trash`,
+      retentionHours,
+    };
+  }, [pendingDelete, retentionHours]);
+
   const gameOptions: SelectOption[] = useMemo(() => {
     const options: SelectOption[] = [
       { value: ANY_GAME, label: 'All games' },
@@ -115,11 +191,10 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
       // nothing is worse than no option.
       ...(games.hasUnknown ? [{ value: NO_GAME, label: UNKNOWN_GAME_LABEL }] : []),
     ];
-    // The selected game can leave the list under the user: a `content` push deletes its last item and
-    // the option derived from the items goes with it. It is kept while it is still selected, because a
-    // `<select>` whose value matches none of its options renders BLANK — which reads as a broken
-    // control, when what actually happened is a filter that now matches nothing. The grid's
-    // filtered-empty state is already saying so and offering the way out.
+    // The selected game can leave the list under the user: a `content` push deletes its last item
+    // and the option derived from the items goes with it. It is kept while it is still selected,
+    // because a `<select>` whose value matches none of its options renders BLANK — which reads as a
+    // broken control, when what actually happened is a filter that now matches nothing.
     if (!options.some((option) => option.value === query.game)) {
       options.push({
         value: query.game,
@@ -198,6 +273,41 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
         </div>
       </div>
 
+      {view.totalCount > 0 && (
+        <div className="library-selection" data-testid="library-selection">
+          {selectionMode ? (
+            <>
+              {/* A live region: the count is the only feedback a checkbox click gives, and a user who
+                  cannot see the highlighted cards has nothing else to go on. */}
+              <span className="library-selection-count" data-testid="library-selection-count" aria-live="polite">
+                {selectedCount} selected
+              </span>
+              <button type="button" className="btn ghost" onClick={toggleAllOnPage} disabled={pageKeys.length === 0}>
+                {pageAllSelected ? 'Deselect page' : 'Select page'}
+              </button>
+              <button type="button" className="btn ghost" onClick={clearSelection} disabled={selectedCount === 0}>
+                Clear selection
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={requestBulkDelete}
+                disabled={selectedCount === 0}
+              >
+                Delete {selectedCount > 0 ? selectedCount : ''}
+              </button>
+              <button type="button" className="btn ghost library-selection-done" onClick={toggleSelectionMode}>
+                Done
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn ghost" onClick={toggleSelectionMode}>
+              Select
+            </button>
+          )}
+        </div>
+      )}
+
       {view.totalCount === 0 ? (
         // No content at all. Deliberately worded as an expectation rather than as an error: a fresh
         // install and a backend that is not answering look identical here, and the connection badge in
@@ -220,8 +330,15 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
       ) : (
         <ul className="library-grid" data-testid="library-grid">
           {view.items.map((item) => (
-            <li key={`${item.contentType}:${item.filePath}`}>
-              <ContentCard item={item} onOpen={onOpen} />
+            <li key={selectionKey(item)}>
+              <ContentCard
+                item={item}
+                onOpen={onOpen}
+                onDelete={requestDelete}
+                selectable={selectionMode}
+                selected={selection.includes(selectionKey(item))}
+                onToggleSelected={toggleItem}
+              />
             </li>
           ))}
         </ul>
@@ -254,6 +371,14 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
       )}
 
       <LiveIpcProbe client={client} />
+
+      {confirmation && (
+        <ConfirmDeleteDialog
+          confirmation={confirmation}
+          onCancel={cancelDelete}
+          onConfirm={confirmDelete}
+        />
+      )}
     </section>
   );
 }
@@ -262,8 +387,7 @@ export function LibraryView({ client, items, onOpen, nowSeconds }: LibraryViewPr
  * Live IPC round-trip proof: sends commands on the control socket and the state push appears in the
  * recorder bar. Collapsed into a `<details>` so the grid owns the page — but kept, and kept here,
  * because these are still the only Start/Stop recording affordances in the shell: a cleaner library
- * must not be a library you can no longer record from. Fails gracefully when the backend is not
- * running (the connection badge shows it).
+ * must not be a library you can no longer record from.
  */
 function LiveIpcProbe({ client }: { client: IpcClient }) {
   return (

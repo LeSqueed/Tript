@@ -77,10 +77,8 @@ public class SettingsResolverTests
     }
 
     // The recorder consumes a flat, resolved config — the seam the dependency map flagged. This
-    // test pins the contract that the recorder does NOT depend on the settings schema: it is fed
-    // a ResolvedRecorderSettings and never reaches into a Settings. (The separation is enforced
-    // structurally — Tript.RecorderHarness references Tript.Settings only for the session and
-    // registry, not for the merge — and this test pins the shape the recorder receives.)
+    // test pins the contract that the recorder does NOT depend on the settings schema: it is fed a
+    // ResolvedRecorderSettings and never reaches into a Settings.
     [Fact]
     public void Resolve_ProducesTheFlatShapeTheRecorderConsumes()
     {
@@ -141,5 +139,38 @@ public class SettingsResolverTests
 
         Assert.Equal(RateControlMode.Cqp, resolved.RateControl);
         Assert.Equal(15_000, resolved.BitrateKbps);
+    }
+
+    // The capture policy the recorder composes its scene from: the method, the preferred monitor and
+    // the game-capture timeout are all global, and all three have to survive the clone.
+    [Fact]
+    public void Resolve_CarriesTheCapturePolicy()
+    {
+        var settings = new Settings();
+        settings.Capture.Method = DisplayCaptureMethod.Game;
+        settings.Capture.Display = "monitor-2";
+        settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(15);
+
+        var resolved = SettingsResolver.Resolve(settings);
+
+        Assert.Equal(DisplayCaptureMethod.Game, resolved.CaptureMethod);
+        Assert.Equal("monitor-2", resolved.Display);
+        Assert.Equal(TimeSpan.FromSeconds(15), resolved.GameCaptureTimeout);
+
+        var clone = resolved.Clone();
+        Assert.Equal(DisplayCaptureMethod.Game, clone.CaptureMethod);
+        Assert.Equal("monitor-2", clone.Display);
+        Assert.Equal(TimeSpan.FromSeconds(15), clone.GameCaptureTimeout);
+    }
+
+    // Auto keeps the display layer, so it is the default that never records black.
+    [Fact]
+    public void Resolve_DefaultsToAutoCaptureOnThePrimaryMonitor()
+    {
+        var resolved = SettingsResolver.Resolve(new Settings());
+
+        Assert.Equal(DisplayCaptureMethod.Auto, resolved.CaptureMethod);
+        Assert.Null(resolved.Display);
+        Assert.Equal(TimeSpan.FromSeconds(10), resolved.GameCaptureTimeout);
     }
 }

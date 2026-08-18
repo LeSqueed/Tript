@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Shell render test: the recorder bar, nav and theme render; navigation switches views; the
-// connection state is shown even when the backend is not running (fails gracefully). The IPC
-// client is mocked at the socket level so the real client logic runs against a test double.
-//
-// The nav is two routes now — `[ Library ] [ Settings ]`. Player and Clips are deliberately NOT
-// routes: the clips list folded into the library's type filter, and the player is an overlay raised
-// over the library. The nav assertions below are scoped to the nav landmark rather than to the whole
-// document, because "Clips" still exists as a *filter* button inside the library — asserting its
-// absence document-wide would assert the filter away with it.
+// connection state is shown even when the backend is not running (fails gracefully). The IPC client
+// is mocked at the socket level so the real client logic runs against a test double.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
@@ -129,9 +123,10 @@ describe('App shell', () => {
     renderApp();
     connect();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
-    // Exactly two routes, and neither of the two that were folded into the library.
+    // Exactly three routes, and neither of the two that were folded into the library.
     expect(within(nav).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Library',
+      'Trash',
       'Settings',
     ]);
     expect(within(nav).queryByRole('button', { name: 'Player' })).toBeNull();
@@ -207,6 +202,57 @@ describe('App shell', () => {
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('shot');
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Open Nice shot' })).toBeTruthy();
+  });
+
+  it('asks the backend for the trash and shows what comes back on its own route', () => {
+    renderApp();
+    connect();
+    const ws = activeSocket();
+    // The trash is not part of the NewConnection push, so it has to be asked for, like the content list.
+    expect(ws.sent.some((frame) => frame.includes('"ListTrash"'))).toBe(true);
+
+    act(() => {
+      ws.serverMessage(
+        JSON.stringify({
+          method: 'trash',
+          content: {
+            retentionHours: 72,
+            entries: [
+              {
+                id: 't1',
+                contentType: 'recording',
+                fileName: 'session-1.mp4',
+                title: 'Session 1',
+                deletedAt: 1787011200 - 3600,
+                purgeAt: 1787011200 + 71 * 3600,
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    // The count is visible from the nav, not only once you are already looking at the trash.
+    expect(screen.getByTestId('nav-trash-count').textContent).toBe('1');
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /Trash/ }));
+    expect(screen.getByTestId('trash-list')).toBeTruthy();
+    expect(screen.getByTestId('trash-retention').textContent).toContain('3 days');
+  });
+
+  it('quotes the pushed retention in the library\'s delete confirmation', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(
+        JSON.stringify({ method: 'trash', content: { entries: [], retentionHours: 72 } }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Session 1' }));
+    // The shell owns the trash state precisely so the FIRST delete can tell the truth about it.
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('for the next 3 days');
   });
 
   it('shows Connected when the mock backend opens the socket', () => {

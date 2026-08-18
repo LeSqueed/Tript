@@ -7,11 +7,10 @@ namespace Tript.Obs;
 
 // The source-type introspection surface of ObsSource, split out because it is a distinct seam and
 // the reason it exists is a distinct one: the capture-source settings keys are plugin-side, not in
-// the libobs headers (spec/obs-binding.md, "Capture sources" and Part 11), so a recorder that must
-// attach a game or a display cannot hardcode a key name. obs_get_source_properties is the runtime
-// discovery route the spec names; this is that route made typed. It answers for every registered
-// source type — inputs, filters, transitions and scenes alike — and is the twin of the encoder and
-// output type-level probes (ObsEncoder / ObsOutput).
+// the libobs headers, so a recorder that must attach a game or a display cannot hardcode a key
+// name. obs_get_source_properties is the runtime discovery route libobs offers; this is that route
+// made typed. It answers for every registered source type — inputs, filters, transitions and scenes
+// alike — and is the twin of the encoder and output type-level probes (ObsEncoder / ObsOutput).
 public static class ObsSourceProperties
 {
     // The ids every loaded module registered as an *input*, in registration order. The input
@@ -32,9 +31,7 @@ public static class ObsSourceProperties
     }
 
     // The settings object a plugin falls back on for a type, so a caller builds its own settings by
-    // starting here. Null when the id is not registered. A registered type does not always yield a
-    // populated object: xshm_input's defaults are empty on 32.2.1 — measured — because its screen
-    // selection is a list whose items only exist at runtime.
+    // starting here. Null when the id is not registered.
     public static ObsSettings? GetTypeDefaults(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
@@ -89,9 +86,7 @@ public static class ObsSourceProperties
 
     // The items of a List property, each carrying the value in the format the list declares. An
     // item read with the wrong accessor returns 0 or null silently, so the format is what decides
-    // which accessor is used. Non-list properties have no items. Capture-source selections are
-    // exactly this shape: the display-index list of xshm_input and the window/process list of
-    // game capture are both List properties whose items are the accepted values.
+    // which accessor is used.
     private static IReadOnlyList<ObsSourcePropertyItem> ReadListItems(nint property, ObsPropertyType type)
     {
         if (type is not (ObsPropertyType.List or ObsPropertyType.EditableList))
@@ -112,7 +107,8 @@ public static class ObsSourceProperties
                 _ => null
             };
 
-            items.Add(new ObsSourcePropertyItem(value, format));
+            items.Add(new ObsSourcePropertyItem(value, format, Utf8Marshal.ReadBorrowed(
+                ObsNative.obs_property_list_item_name(property, i))));
         }
 
         return items;
@@ -125,5 +121,6 @@ public static class ObsSourceProperties
 public readonly record struct ObsSourceProperty(string Name, ObsPropertyType Type, IReadOnlyList<ObsSourcePropertyItem> Items);
 
 // One accepted value in a List property. Format says how to interpret Value; the two are kept
-// together because the format is precisely what a wrong read discards silently.
-public readonly record struct ObsSourcePropertyItem(object? Value, ObsComboFormat Format);
+// together because the format is precisely what a wrong read discards silently. Name is the item's
+// display label — for a monitor list, the only place the plugin says which monitor an opaque id is.
+public readonly record struct ObsSourcePropertyItem(object? Value, ObsComboFormat Format, string? Name = null);

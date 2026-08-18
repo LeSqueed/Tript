@@ -6,15 +6,9 @@ using System.Text.RegularExpressions;
 
 namespace Tript.App.Content;
 
-// The HTTP content server (http://localhost:2222/, spec/local-ipc.md). Serves two routes:
-//   /api/content/<path>  range-request video streaming (206 partial content, Content-Range)
-//   /api/thumbnail/<path> a cached still frame from the video, as JPEG (204 when there is none)
-// Anything else is 404.
-//
-// Path-traversal guard (spec/local-ipc.md — "that is a path-traversal guard, not an
-// implementation detail"): every requested path resolves against the canonical content root. A
-// request whose decoded path escapes the root is refused with 403, and the route regex itself
-// rejects any encoded traversal segment. The guard is a single choke point, tested explicitly.
+// The HTTP content server. Serves two routes: /api/content/<path>  range-request video streaming
+// (206 partial content, Content-Range) /api/thumbnail/<path> a cached still frame from the video,
+// as JPEG (204 when there is none) Anything else is 404.
 internal sealed class ContentServer : IDisposable
 {
     private const int Port = 2222;
@@ -166,18 +160,18 @@ internal sealed class ContentServer : IDisposable
     // needs it: the wire's filePath is relative to the effective recording root by design (the
     // content server serves the catalogue that way), so AppController.BuildClipRequest has to
     // resolve it against that root before handing it to ffmpeg — and it must refuse a traversal
-    // exactly as an HTTP request would. Sharing this method keeps one implementation of "is this
-    // path inside the root", so the guard stays the single choke point it is documented to be.
-    internal static string? ResolveWithinRoot(string contentRoot, string requestPath)
+    // exactly as an HTTP request would. allowTrash is for the bin's own resolution against the
+    // trash root; every other caller — the HTTP routes, the clip surface, the delete path —
+    // resolves against the recording root, where a path into .trash/ is refused: trashed content is
+    // deleted content and must not be served, clipped or listed.
+    internal static string? ResolveWithinRoot(string contentRoot, string requestPath, bool allowTrash = false)
     {
         if (string.IsNullOrWhiteSpace(requestPath))
             return null;
 
         // A raw traversal segment is refused at the route boundary; this re-checks so the method is
         // safe to call directly too. The check runs before any path combine, so ".." never reaches
-        // the file system. The pattern only sees '/' separators (the wire's), which is enough for
-        // an early refusal — a Windows-style "..\.." form survives to the root comparison below,
-        // and that comparison is the final authority either way.
+        // the file system.
         if (PathSegment.IsMatch(requestPath))
             return null;
 
@@ -186,11 +180,11 @@ internal sealed class ContentServer : IDisposable
             // Combine and normalize. Path.Combine returns the second argument unchanged when it is
             // already rooted, so an absolute incoming path is kept and then judged by the root
             // comparison — accepted when it points inside the root, refused when it does not.
-            // GetFullPath collapses any ".." the checks above missed, and converts the wire's '/'
-            // separators to the platform's on Windows.
             var root = Path.GetFullPath(contentRoot);
             var candidate = Path.GetFullPath(Path.Combine(root, requestPath));
-            return IsUnderRoot(candidate, root) ? candidate : null;
+            if (!IsUnderRoot(candidate, root))
+                return null;
+            return allowTrash || !IsInTrash(candidate, root) ? candidate : null;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException
                                              or PathTooLongException)
@@ -215,6 +209,15 @@ internal sealed class ContentServer : IDisposable
             : root + Path.DirectorySeparatorChar;
 
         return candidate.StartsWith(prefix, comparison);
+    }
+
+    // Whether a resolved path sits in the recycle bin at the top of the root.
+    private static bool IsInTrash(string candidate, string root)
+    {
+        var relative = Path.GetRelativePath(root, candidate);
+        var separator = relative.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        var first = separator >= 0 ? relative[..separator] : relative;
+        return first.Equals(TrashStore.DirectoryName, ComparisonFor());
     }
 
     private static StringComparison ComparisonFor() => OperatingSystem.IsWindows()
@@ -293,8 +296,8 @@ internal sealed class ContentServer : IDisposable
         start = 0;
         end = length - 1;
 
-        // Only the first range is honoured (a multi-range request gets its first range; the spec
-        // does not require a server to support multiple ranges).
+        // Only the first range is honoured; RFC 7233 does not require a server to support multiple
+        // ranges.
         var match = Regex.Match(header, @"bytes=(\d*)-(\d*)", RegexOptions.CultureInvariant);
         if (!match.Success)
             return false;
@@ -335,19 +338,9 @@ internal sealed class ContentServer : IDisposable
 
     // ---- thumbnail ----
 
-    // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract is
-    // deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
-    // placeholder card". Every reason there might be no image collapses into 204 — the source file
-    // is gone, it is not decodable, ffmpeg is not installed, the extraction failed or overran its
-    // timeout, the cache directory is not writable. A grid of two dozen cards is two dozen requests,
-    // and a 404 or a 500 among them would fill the webview console with errors for a case the UI
-    // already renders correctly.
-    //
-    // 403 is the one exception and stays distinct: a path that escapes the recording root is a
-    // security refusal, not a missing image, and must remain visible as one.
-    //
-    // The route keeps going through ResolveWithinRoot — the guard's single choke point — before it
-    // touches the file system at all.
+    // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract
+    // is deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
+    // placeholder card".
     private void ServeThumbnail(HttpListenerContext context, string requestPath)
     {
         var resolved = ResolveWithinRoot(requestPath);
@@ -388,11 +381,9 @@ internal sealed class ContentServer : IDisposable
         context.Response.ContentType = "image/jpeg";
         context.Response.ContentLength64 = image.Length;
         // The webview re-mounts the grid on every navigation, so without a cache header each visit
-        // re-fetches every card. An hour is long enough to make scrolling and route changes free and
-        // short enough that a video replaced in place under the same name (the only way a thumbnail
-        // changes) is picked up in the same session. Conditional GETs are not implemented — the
-        // max-age is what suppresses the re-fetch; Last-Modified is sent for the browser's own
-        // heuristics.
+        // re-fetches every card. An hour is long enough to make scrolling and route changes free
+        // and short enough that a video replaced in place under the same name (the only way a
+        // thumbnail changes) is picked up in the same session.
         context.Response.Headers.Add("Cache-Control", "private, max-age=3600");
         context.Response.Headers.Add("Last-Modified",
             File.GetLastWriteTimeUtc(resolved).ToString("R", System.Globalization.CultureInfo.InvariantCulture));

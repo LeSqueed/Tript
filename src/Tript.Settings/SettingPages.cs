@@ -8,12 +8,11 @@ namespace Tript.Settings;
 
 // Each logical page is a typed object under Settings. The UI loads and saves one page at a time
 // (see SettingsStore), and the alpha recorder consumes the resolved values via
-// ResolvedRecorderSettings rather than these raw page objects. Each page carries JsonExtensionData
-// so a per-page save cannot drop a field from a page this build does not fully model.
+// ResolvedRecorderSettings rather than these raw page objects.
 
 // The recording page: the session recording itself. Alpha records a single-output session; the
 // mode is first-class from the start because the buffer/hybrid two-output shape slots in without
-// a refactor (spec/recorder.md, design decision 2026-08-15).
+// a refactor.
 public sealed class RecordingSettings
 {
     [JsonExtensionData]
@@ -29,18 +28,15 @@ public sealed class RecordingSettings
 
     public string Encoder { get; set; } = "x264";
 
-    // The quality profile applied when a game has no override of its own. The app's own 1..20 scale,
-    // higher being better; the recorder maps it onto the H.264 quantiser scale the resolved encoder
-    // family reads (ObsRecorderSession.MapQualityToQuantiser). Only the constant-quality rate-control
-    // modes consume it.
+    // The quality profile applied when a game has no override of its own. The app's own 1..20
+    // scale, higher being better; the recorder maps it onto the H.264 quantiser scale the resolved
+    // encoder family reads (ObsRecorderSession.MapQualityToQuantiser).
     public int Quality { get; set; } = 10;
 
     // How the encoder is told to spend its bits. Cqp is the default because it means "constant
     // quality" on every machine: an encoder family that does not accept CQP — x264 — has the choice
     // coerced into its own constant-quality mode (CRF) by the recorder, so the default records the
-    // user's intent rather than one family's spelling of it. The coercion is what keeps a settings
-    // file written on one machine from crashing on another, and it lives with the recorder because
-    // only the recorder knows which encoder id the runtime resolved.
+    // user's intent rather than one family's spelling of it.
     public RateControlMode RateControl { get; set; } = RateControlMode.Cqp;
 
     // The target bitrate for the rate-targeted modes (CBR and VBR), in kbps. Ignored by the
@@ -56,6 +52,10 @@ public sealed class RecordingSettings
     // The directory recordings are written to, or empty for the platform default (Videos/Tript).
     // The host resolves the effective path; the recorder never sees this field.
     public string? OutputDirectory { get; set; }
+
+    // How long a deleted recording stays in the trash before it is purged for good. Zero or less
+    // disables the automatic purge, so entries stay until they are emptied by hand.
+    public int TrashRetentionHours { get; set; } = 24;
 }
 
 // The buffer page, its own first-class settings surface even though the buffer itself is
@@ -75,11 +75,9 @@ public sealed class BufferSettings
     public long MaxSizeBytes { get; set; } = 4L * 1024 * 1024 * 1024;
 }
 
-// The audio page drives the multi-track model: the user chooses how many tracks a recording has
-// and routes sources (mics, system output, game audio) into them, each with its own volume.
-// A track is a destination, not a device; one track may carry several merged sources
-// (spec/recorder.md). The source is selected by id because a device can be absent — unplugged,
-// or not present on this machine — while its selection persists.
+// The audio page drives the multi-track model: the user chooses how many tracks a recording has and
+// routes sources (mics, system output, game audio) into them, each with its own volume. A track is
+// a destination, not a device; one track may carry several merged sources.
 public sealed class AudioSettings
 {
     [JsonExtensionData]
@@ -118,8 +116,13 @@ public sealed class CaptureSettings
 
     public DisplayCaptureMethod Method { get; set; } = DisplayCaptureMethod.Auto;
 
-    // The monitor selected for display capture, or null when the method is game capture.
+    // The monitor selected for display capture, or null for the primary monitor. The stable id the
+    // capture plugin matches on, never an index: monitors renumber when one is unplugged.
     public string? Display { get; set; }
+
+    // The human name last seen for Display, so a monitor that is no longer attached can be named in
+    // a warning. Never matched on — the id is the identity.
+    public string? DisplayLabel { get; set; }
 }
 
 // The game page: the capture-mode behaviour (GameOnly is our own prior work and part of first

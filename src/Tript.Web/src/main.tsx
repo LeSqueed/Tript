@@ -11,6 +11,7 @@ import './components/RecorderBar.css';
 import './components/LibraryView.css';
 import './components/PlayerView.css';
 import './components/player/clipDialog.css';
+import './components/TrashView.css';
 import './components/SettingsView.css';
 import './components/ErrorBanner.css';
 

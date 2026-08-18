@@ -1,83 +1,139 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Numerics;
+using Serilog;
 using Tript.Obs;
 using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// The concrete recorder session over the OBS binding: an existing runtime plus the sources the app
-// provides. What goes on the recording channel is a private scene the session composes — the
-// colour source as a canvas-sized background and, when a game-capture source can be created, that
-// source composited above it — rather than the raw colour source, whose own size is the plugin's
-// default block. Building a session output is exactly the Layer 5 wiring — an ffmpeg_muxer output,
-// a video encoder scaled to the resolved resolution, an audio encoder on mixer zero, both bound to
-// the session's mixes. The output is the recorder's to own; the sources are borrowed.
+// The recorder session over the OBS binding: composes the private scene that goes on the recording
+// channel, and builds the output — an ffmpeg_muxer, a video encoder at the resolved resolution, and
+// the audio encoders. The output is the recorder's to own; the sources are borrowed.
 public sealed class ObsRecorderSession : IRecorderSession
 {
-
     private const string FfmpegMuxerId = "ffmpeg_muxer";
     private const string X264Id = "obs_x264";
 
-    // The source type id the platform's game-capture plugin registers. The settings keys are
-    // discovered, not this literal; the id is the one ObsCaptureSource probes for.
     private const string GameCaptureId = "game_capture";
 
-    // The settings model's encoder default ("x264", SettingPages.cs). It is a placeholder meaning
-    // "the backend decides" — the real software id is obs_x264 — so it is never treated as an
-    // explicit user choice when the effective encoder is resolved.
+    // The settings model's placeholder for "the backend decides"; the real software id is obs_x264.
     private const string X264DefaultId = "x264";
 
     private const string FfmpegAacId = "ffmpeg_aac";
     private const uint VideoChannel = 0;
 
-    // The keyframe interval, in seconds, written as keyint_sec. A player can only seek to a
-    // keyframe, so this is the seek granularity of every recording and the boundary the clip
-    // engine can cut on without re-encoding. One second is the interval every family accepts
-    // (the x264 table's keyint_sec range covers it) and is short enough that a bookmark lands
-    // where the user set it.
+    // Seek granularity of every recording, and the only boundary the clip engine can cut on
+    // without re-encoding.
     private const int KeyframeIntervalSeconds = 1;
+
+    // obs_source_get_width answers 0 for a game_capture that has not attached, so the hook state
+    // costs one call and no new interop. Polled only while the scene is on the recording channel.
+    private static readonly TimeSpan HookProbeInterval = TimeSpan.FromSeconds(2);
+
+    // How long a game capture is given before the absence of a hook is reported as such. Only the
+    // Auto method uses it: under Game the deadline is the policy's own, because it ends the
+    // recording rather than logging a line.
+    private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ObsSource _source;
     private readonly ObsScene _scene;
+    private readonly ObsSource? _displaySource;
     private readonly ObsSource? _gameCaptureSource;
+    private readonly ObsSceneItem _colourItem;
+    private readonly ObsSceneItem? _displayItem;
+    private readonly ObsSceneItem? _gameItem;
 
-    // The scene is the session's own composition: the colour source is its background and, when a
-    // game-capture source was created, that source is above it. A game-capture target may be passed
-    // up front (a game already detected at session construction) and retargeted later without
-    // restarting the source via RetargetGame.
-    public ObsRecorderSession(ObsRuntime runtime, ObsSource source, ObsGameCaptureTarget? gameCaptureTarget = null)
+    private readonly Lock _probeGate = new();
+    private Timer? _hookProbe;
+    private int _probeTicks;
+    private bool _hooked;
+    private bool _hookTimeoutReported;
+    private bool _disposed;
+
+    public ObsRecorderSession(ObsRuntime runtime, ObsSource source, ObsGameCaptureTarget? gameCaptureTarget = null,
+        CapturePolicy? policy = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(source);
 
         Runtime = runtime;
+        Policy = policy ?? CapturePolicy.Default;
         _source = source.AddReference();
 
-        // The scene's items each take their own reference to the source they place (obs_scene_add),
-        // so the items keep both sources alive for as long as the scene is.
         _scene = ObsScene.CreatePrivate("recorder scene");
         try
         {
-            if (_scene.AddSource(_source) is null)
-                throw new ObsException("The recorder scene refused the colour source.");
+            _colourItem = _scene.AddSource(_source)
+                ?? throw new ObsException("The recorder scene refused the colour source.");
 
-            // The game-capture source is created whenever the platform has one, even with no
-            // initial target: RetargetGame re-points it at the detected game without restarting it,
-            // so a game detected after session construction still lands in the recording.
-            if (CreateGameCaptureSource(gameCaptureTarget, _scene) is { } capture)
-                _gameCaptureSource = capture;
+            // Bottom to top: background, desktop, game. Order is z-order — obs_scene_add always
+            // lands on top — so the display layer has to be added before the game capture.
+            if (Policy.IncludesDisplayCapture)
+            {
+                _displaySource = CreateDisplayCaptureSource(Policy.PreferredDisplayId, out var display);
+                SelectedDisplay = display;
+                if (_displaySource is not null)
+                {
+                    _displayItem = _scene.AddSource(_displaySource)
+                        ?? throw new ObsException("The recorder scene refused the display-capture source.");
+                }
+            }
+
+            // Created even without an initial target: RetargetGame re-points it without restarting,
+            // so a game detected after construction still lands in the recording.
+            if (Policy.IncludesGameCapture)
+            {
+                _gameCaptureSource = CreateGameCaptureSource(gameCaptureTarget);
+                if (_gameCaptureSource is not null)
+                {
+                    _gameItem = _scene.AddSource(_gameCaptureSource)
+                        ?? throw new ObsException("The recorder scene refused the game-capture source.");
+                }
+            }
         }
         catch
         {
-            // Nothing was handed out: the scene and the session's reference are still both ours.
-            _scene.Dispose();
-            _source.Dispose();
+            DisposeSceneObjects();
             throw;
         }
     }
 
     public ObsRuntime Runtime { get; }
+
+    // The capture policy this scene was composed for. A changed policy needs a new session: the
+    // layers are created in the constructor.
+    public CapturePolicy Policy { get; }
+
+    // The monitor the display layer is capturing, or null when there is no display layer or the
+    // runtime enumerated no monitors. Reported rather than saved — a preference that named a
+    // monitor which is not attached stays the preference (see ObsCaptureSource.ResolveDisplay).
+    public ObsDisplay? SelectedDisplay { get; }
+
+    // Raised once per recording when the Game method's capture has not hooked within the policy's
+    // timeout. There is no display layer under it to record instead, so the only honest outcome is
+    // to stop; the host owns that decision and this is how it hears about it.
+    public event EventHandler<GameCaptureUnavailable>? GameCaptureUnavailable;
+
+    // Whether the game-capture source has actually attached to a process. False on a platform with
+    // no game capture, and false whenever the scene is not on the recording channel: win-capture
+    // stops its hook while the source is not showing (game-capture.c game_capture_tick).
+    public bool IsGameCaptureHooked
+    {
+        get
+        {
+            lock (_probeGate)
+            {
+                return !_disposed && _gameCaptureSource is { } capture && capture.Width > 0;
+            }
+        }
+    }
+
+    // Whether the scene has a display-capture layer. False for the Game method by design, and false
+    // when no module registers a display capture — in both cases an unhooked game capture records
+    // the colour background and nothing else.
+    public bool HasDisplayFallback => _displaySource is not null;
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
     {
@@ -92,9 +148,8 @@ public sealed class ObsRecorderSession : IRecorderSession
         if (!Runtime.TryGetAudioHandle(out var audio))
             throw new ObsException("The runtime has no audio mix; obs_reset_audio must succeed before recording.");
 
-        // The colour source is the background; it must fill the canvas rather than render as the
-        // plugin's default block. Sizing happens here, where the resolved canvas is known.
         SizeColourSourceToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
+        FitItemsToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
 
         var videoEncoderId = ResolveVideoEncoderId(settings.Encoder);
         if (videoEncoderId is null)
@@ -108,37 +163,24 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         var output = ObsOutput.Create(FfmpegMuxerId, "recorder output", outputSettings);
 
-        // The encoders outlive this method by being handed to MuxerOutput, and that is not tidiness.
-        // The settings objects below are safe to dispose early because libobs takes a reference of
-        // its own; the encoders have no such guarantee from this side. obs_output_set_video_encoder
-        // records the encoder pointer on the output, while ObsEncoderHandle holds the only managed
-        // reference and releases it — obs_encoder_release — from its finalizer. Encoders left as
-        // locals are unreachable the moment this method returns, so a GC at any point afterwards can
-        // drop the refcount while the output is still pointing at them, and the output would then
-        // initialize a released encoder at obs_output_start. Ownership belongs with the output
-        // wrapper, which is the object whose lifetime the recorder actually controls.
+        // The encoders must stay reachable. obs_output_set_video_encoder only records the pointer,
+        // while ObsEncoderHandle holds the sole managed reference and releases it from its finalizer.
+        // Left as locals they are collectable the moment this method returns, and the output would
+        // then initialize a released encoder at obs_output_start.
         ObsEncoder? videoEncoder = null;
         ObsEncoder? audioEncoder = null;
         AudioRouting? audioRouting = null;
 
         try
         {
-            // The video encoder carries the resolved resolution and frame rate; libobs scales the mix
-            // to the requested size. The encoder id resolved above decides which key set is written:
-            // the user's rate-control choice, coerced to something the resolved family accepts, under
-            // that family's own mode string and quantiser or bitrate keys (spec/obs-binding Part 10).
             var rateControl = ResolveRateControl(videoEncoderId, settings.RateControl);
             using (var videoSettings = new ObsSettings())
             {
                 videoSettings.SetString("rate_control", rateControl.Mode);
 
-                // Which of the two dials the mode actually reads is a per-family fact, not a
-                // per-mode one: a constant-quality mode reads only the quantiser, CBR reads only the
-                // bitrate, and x264's VBR reads *both* — its bitrate is a VBV cap over a CRF target,
-                // and its crf key is documented as meaningful under VBR as well as CRF. Writing a key
-                // the mode does not read is not an error, but it is not harmless either: x264 zeroes
-                // crf under CBR and zeroes bitrate under CRF, so the settings object should say only
-                // what the mode means.
+                // Which dial a mode reads is a per-family fact: constant quality reads only the
+                // quantiser, CBR only the bitrate, and x264's VBR reads both. x264 zeroes crf under
+                // CBR and bitrate under CRF, so the object should say only what the mode means.
                 if (rateControl.QuantiserKey is { } quantiserKey)
                     videoSettings.SetInt(quantiserKey, MapQualityToQuantiser(settings.Quality));
 
@@ -148,12 +190,8 @@ public sealed class ObsRecorderSession : IRecorderSession
                 if (rateControl.MaxBitrateKey is { } maxBitrateKey)
                     videoSettings.SetInt(maxBitrateKey, ResolveMaxBitrateKbps(settings.BitrateKbps, settings.MaxBitrateKbps));
 
-                // keyint_sec is an interval in *seconds*, and the encoder converts it to frames
-                // itself using the mix's frame rate. Passing the frame rate here asked for a
-                // 60-second GOP that then clamped to 10, which is why clips and bookmark seeks
-                // landed on coarse boundaries: a player can only seek to a keyframe, so the GOP
-                // length is the seek granularity. One second is the interval the comment always
-                // claimed and the granularity the clip engine needs.
+                // keyint_sec is an interval in SECONDS; the encoder converts it using the mix's
+                // frame rate. Passing the frame rate asked for a 60-second GOP that clamped to 10.
                 videoSettings.SetInt("keyint_sec", KeyframeIntervalSeconds);
 
                 videoEncoder = ObsEncoder.CreateVideo(videoEncoderId, "recorder video", videoSettings);
@@ -162,12 +200,8 @@ public sealed class ObsRecorderSession : IRecorderSession
                 output.SetVideoEncoder(videoEncoder);
             }
 
-            // The recording's audio comes from the resolved track plan when any track is
-            // configured: each track's sources become wasapi capture sources (carrying the selected
-            // device id) routed into that track's mixer, with a per-track encoder bound to that
-            // mixer and assigned to the matching output slot. An empty track list keeps the single
-            // programme-mix encoder on slot 0 — the Layer 5 shape — so a recording with no tracks
-            // configured still carries audio.
+            // An empty track list keeps the single programme-mix encoder on slot 0, so a recording
+            // with no tracks configured still carries audio.
             if (settings.AudioTracks.Count > 0)
             {
                 var sink = new ObsAudioRoutingSink(output, audio, audioEncoderId: FfmpegAacId, scene: _scene);
@@ -188,9 +222,7 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
         catch
         {
-            // Nothing was handed over, so this method still owns all three. The output goes first,
-            // for the same reason MuxerOutput.Dispose releases in that order: an output must never be
-            // left alive pointing at a released encoder.
+            // An output must never be left alive pointing at a released encoder.
             output.Dispose();
             videoEncoder?.Dispose();
             audioEncoder?.Dispose();
@@ -199,56 +231,101 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
     }
 
-    // The scene is what the recording renders, placed on the channel like any source (a scene *is*
-    // a source); the channel takes a reference of its own.
-    public void PlaceSourceOnChannel() => Runtime.SetOutputSource(VideoChannel, _scene);
+    public void PlaceSourceOnChannel()
+    {
+        Runtime.SetOutputSource(VideoChannel, _scene);
+        StartHookProbe();
+    }
 
-    public void ClearSourceFromChannel() => Runtime.SetOutputSource(VideoChannel, (ObsSource?)null);
+    public void ClearSourceFromChannel()
+    {
+        StopHookProbe();
+        Runtime.SetOutputSource(VideoChannel, (ObsSource?)null);
+    }
 
-    // The seam AppHost calls when a game is detected at start time: re-points the live game-capture
-    // source at the new target without restarting it (obs_source_update merges, so the capture_mode
-    // the source was created with survives). False when there is no game-capture source — the
-    // initial target was null, or the platform has no game capture at all.
+    // Re-points the live game-capture source without restarting it; obs_source_update merges, so
+    // the capture_mode it was created with survives. False when the platform has no game capture.
     public bool RetargetGame(ObsGameCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        return _gameCaptureSource is not null && ObsCaptureSource.Retarget(_gameCaptureSource, target);
+
+        if (_gameCaptureSource is null || !ObsCaptureSource.Retarget(_gameCaptureSource, target))
+            return false;
+
+        Log.Information("ObsRecorderSession: game capture re-targeted at {Window}",
+            ObsCaptureSource.BuildWindowMatchString(target));
+        return true;
     }
 
-    // The scene goes first: releasing it destroys its items, and each item releases the reference
-    // it took from its source. Only then do the session's own references drop the colour and
-    // game-capture sources for good. All three Disposes are idempotent — each handle short-circuits
-    // once closed — so a second Dispose here is harmless.
+    // Scene items first — each holds a reference to its source and to its scene — then the scene,
+    // then the sources.
     public void Dispose()
     {
+        StopHookProbe();
+
+        lock (_probeGate)
+            _disposed = true;
+
+        DisposeSceneObjects();
+    }
+
+    private void DisposeSceneObjects()
+    {
+        _gameItem?.Dispose();
+        _displayItem?.Dispose();
+        _colourItem?.Dispose();
         _scene.Dispose();
         _source.Dispose();
+        _displaySource?.Dispose();
         _gameCaptureSource?.Dispose();
     }
 
     // ---- scene composition ----
 
-    // Creates and places the game-capture source for the initial target)Skip. Null when the
-    // platform has no game-capture source (Linux), which the caller treats as "background only" —
-    // exactly the scene shape before this work. A null target still creates the source (with the
-    // capture_mode forced to window so an exe-only target is meaningful later) so RetargetGame has
-    // something to re-point.
-    private static ObsSource? CreateGameCaptureSource(ObsGameCaptureTarget? target, ObsScene scene)
+    // The desktop layer. Null when no loaded module registers a display capture, which is a degraded
+    // but working state: the recording is then the colour background until the game capture hooks.
+    private static ObsSource? CreateDisplayCaptureSource(string? preferredDisplayId, out ObsDisplay? selected)
     {
-        if (ObsSourceProperties.EnumerateTypeProperties(GameCaptureId).Count == 0)
+        selected = null;
+
+        if (ObsCaptureSource.FindDisplayCaptureId() is not { } displayId)
+        {
+            Log.Warning("ObsRecorderSession: no display-capture source type is registered; " +
+                        "an unhooked game capture will record the background only.");
             return null;
+        }
 
-        using var settings = target is not null
-            ? ObsCaptureSource.BuildGameCaptureSettings(target) ?? new ObsSettings()
-            : new ObsSettings();
-
-        ApplyWindowCaptureMode(settings);
-
-        var source = ObsSource.CreatePrivate(GameCaptureId, "app capture", settings);
+        var source = ObsSource.CreatePrivate(displayId, "app display");
         try
         {
-            if (scene.AddSource(source) is null)
-                throw new ObsException("The recorder scene refused the game-capture source.");
+            // Through the instance rather than the type: monitor_capture's "monitor_id" default is
+            // the sentinel "DUMMY", which matches no monitor and captures nothing, so the chosen
+            // monitor has to be written back explicitly.
+            var displays = ObsCaptureSource.EnumerateDisplays(source);
+            var resolution = ObsCaptureSource.ResolveDisplay(displays, preferredDisplayId);
+            selected = resolution.Selected;
+
+            if (resolution.RequestedMissing)
+            {
+                Log.Warning("ObsRecorderSession: the selected monitor {RequestedId} is not attached; " +
+                            "capturing {UsingName} ({UsingId}) for this session. The preference is kept.",
+                    preferredDisplayId, selected?.Name, selected?.Id);
+            }
+
+            if (selected is null)
+            {
+                // Enumerating nothing is an ordinary state, not a failure: the source keeps whatever
+                // the plugin defaults to and the recording proceeds.
+                Log.Warning("ObsRecorderSession: {DisplayId} enumerated no monitors; " +
+                            "the display layer keeps the plugin's default.", displayId);
+            }
+            else
+            {
+                using var settings = ObsCaptureSource.BuildDisplayCaptureSettings(source, selected);
+                source.Update(settings);
+                Log.Information("ObsRecorderSession: display layer is {DisplayId} on {Name} ({Id}) {Width}x{Height}",
+                    displayId, selected.Name, selected.Id, selected.Width, selected.Height);
+            }
         }
         catch
         {
@@ -259,25 +336,55 @@ public sealed class ObsRecorderSession : IRecorderSession
         return source;
     }
 
-    // The win-capture plugin's default capture_mode is "any_fullscreen": it hooks whichever
-    // fullscreen window is in the foreground and ignores the exe key entirely (game-capture.c,
-    // CAPTURE_MODE_ANY -> get_fullscreen_window). An exe-only target is only meaningful in the
-    // window mode, where the window is matched by title/class/exe (game-capture.c,
-    // get_selected_window -> ms_find_window; the default priority is WINDOW_PRIORITY_EXE). The mode
-    // is a plugin-side value, so it is found through the source's own properties like the keys
-    // ObsCaptureSource discovers — the mode list is the one whose items include the "any" mode, and
-    // the window mode is the item that makes the exe key meaningful. Nothing here is hardcoded.
-    private static void ApplyWindowCaptureMode(ObsSettings settings)
+    // Null when the platform has no game-capture source (Linux), which the caller treats as display
+    // capture only. A null target still creates the source so RetargetGame has something to
+    // re-point.
+    private static ObsSource? CreateGameCaptureSource(ObsGameCaptureTarget? target)
     {
-        foreach (var property in ObsSourceProperties.EnumerateTypeProperties(GameCaptureId))
-        {
-            if (property.Type != ObsPropertyType.List)
-                continue;
+        var properties = ObsSourceProperties.EnumerateTypeProperties(GameCaptureId);
+        if (properties.Count == 0)
+            return null;
 
-            if (!property.Items.Any(item =>
-                    item.Format == ObsComboFormat.String &&
-                    item.Value is string itemValue &&
-                    itemValue.Contains("any", StringComparison.OrdinalIgnoreCase)))
+        using var settings = target is not null
+            ? ObsCaptureSource.BuildGameCaptureSettings(target) ?? new ObsSettings()
+            : new ObsSettings();
+
+        // Written even when the property was not discovered: the plugin's default is any_fullscreen,
+        // which hooks whatever happens to be fullscreen and ignores the window string entirely, and
+        // a key a plugin does not declare is simply ignored. There is no path that leaves it unset.
+        if (ResolveWindowCaptureMode(properties) is { } mode)
+        {
+            settings.SetString(CaptureModeKey, mode);
+        }
+        else
+        {
+            Log.Warning("ObsRecorderSession: game capture declares no '{Key}' property; " +
+                        "writing '{Value}' anyway rather than leaving it on any_fullscreen.",
+                CaptureModeKey, WindowCaptureModeValue);
+            settings.SetString(CaptureModeKey, WindowCaptureModeValue);
+        }
+
+        return ObsSource.CreatePrivate(GameCaptureId, "app capture", settings);
+    }
+
+    // win-capture's mode key, and the value that makes it match on the window string rather than
+    // grabbing whatever is fullscreen in the foreground.
+    private const string CaptureModeKey = "capture_mode";
+    private const string WindowCaptureModeValue = "window";
+
+    // Without this the plugin's default capture_mode is "any_fullscreen": it hooks whichever
+    // fullscreen window is foreground and ignores the window string entirely. The value is
+    // plugin-side, so it is taken from the property's own item list rather than assumed — but the
+    // property is found by its declared key, because game capture's window list also carries items
+    // spelled "window" and the first list that does is not necessarily this one.
+    internal static string? ResolveWindowCaptureMode(IReadOnlyList<ObsSourceProperty> properties)
+    {
+        ArgumentNullException.ThrowIfNull(properties);
+
+        foreach (var property in properties)
+        {
+            if (property.Type != ObsPropertyType.List ||
+                !string.Equals(property.Name, CaptureModeKey, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -285,21 +392,125 @@ public sealed class ObsRecorderSession : IRecorderSession
             var windowMode = property.Items.FirstOrDefault(item =>
                 item.Format == ObsComboFormat.String &&
                 item.Value is string itemValue &&
-                itemValue.Contains("window", StringComparison.OrdinalIgnoreCase));
+                string.Equals(itemValue, WindowCaptureModeValue, StringComparison.Ordinal));
 
-            if (windowMode.Value is string modeValue)
-                settings.SetString(property.Name, modeValue);
+            return windowMode.Value as string ?? WindowCaptureModeValue;
+        }
 
+        return null;
+    }
+
+    // ---- hook visibility ----
+
+    // The game item is deliberately never hidden while it waits for a hook. An invisible scene item
+    // drops the source's showing reference, and win-capture stops — and never starts — its hook
+    // while the source is not showing.
+    private void StartHookProbe()
+    {
+        // A Game-method session still probes without a game-capture source — a platform that
+        // registers none can never hook, and that has to reach the deadline rather than record a
+        // black file in silence.
+        if (_gameCaptureSource is null && !Policy.StopsWhenUnhooked)
             return;
+
+        lock (_probeGate)
+        {
+            if (_disposed || _hookProbe is not null)
+                return;
+
+            _hooked = false;
+            _probeTicks = 0;
+            _hookTimeoutReported = false;
+            _hookProbe = new Timer(ProbeHook, null, HookProbeInterval, HookProbeInterval);
         }
     }
 
-    // The colour source is the recording's background. Placed straight on a channel it renders at
-    // its own configured size — with no width/height setting, that is the plugin's default block,
-    // which is what the "black screen with a white block" recordings this fixes showed. Sizing it
-    // to the canvas once, through Update (the colour source's reconfiguration seam — GetSettings
-    // hands back the source's live settings object), makes it fill the recording whatever
-    // composites above it; game capture never changes the background's size.
+    private void StopHookProbe()
+    {
+        Timer? probe;
+        lock (_probeGate)
+        {
+            probe = _hookProbe;
+            _hookProbe = null;
+        }
+
+        probe?.Dispose();
+    }
+
+    private void ProbeHook(object? state)
+    {
+        GameCaptureUnavailable? unavailable = null;
+
+        lock (_probeGate)
+        {
+            if (_disposed || _hookProbe is null)
+                return;
+
+            _probeTicks++;
+            var hooked = _gameCaptureSource is { Width: > 0 };
+
+            if (hooked != _hooked)
+            {
+                _hooked = hooked;
+                if (hooked)
+                {
+                    Log.Information("ObsRecorderSession: game capture hooked at {Width}x{Height}",
+                        _gameCaptureSource!.Width, _gameCaptureSource.Height);
+                }
+                else if (Policy.IncludesDisplayCapture)
+                {
+                    Log.Warning("ObsRecorderSession: game capture lost its hook; recording the display fallback.");
+                }
+                else
+                {
+                    Log.Warning("ObsRecorderSession: game capture lost its hook and there is no display layer.");
+                }
+            }
+
+            // Said once, because a hook that has not happened by now is the shape of the failure
+            // that otherwise reads as a working recording of the wrong picture. Under the Game
+            // method it is not a warning at all: there is nothing under the capture, so the
+            // recording would be black and the host is told to end it.
+            var deadline = HookDeadlineFor(Policy);
+            if (!hooked && !_hookTimeoutReported && _probeTicks * HookProbeInterval >= deadline)
+            {
+                _hookTimeoutReported = true;
+
+                if (Policy.StopsWhenUnhooked)
+                {
+                    unavailable = new GameCaptureUnavailable(deadline,
+                        $"Game capture did not attach within {deadline.TotalSeconds:0}s and the capture method is " +
+                        "game capture only, so the recording was stopped rather than recorded black.");
+                }
+                else
+                {
+                    Log.Warning("ObsRecorderSession: game capture has not hooked after {Seconds}s; " +
+                                "the recording is the display fallback.", deadline.TotalSeconds);
+                }
+            }
+        }
+
+        // Outside the gate: the handler stops the recording, which clears the channel and disposes
+        // this very timer.
+        if (unavailable is not null)
+        {
+            Log.Warning("ObsRecorderSession: {Message}", unavailable.Message);
+            GameCaptureUnavailable?.Invoke(this, unavailable);
+        }
+    }
+
+    // The Game method's deadline is the user's configured game-capture timeout; every other method
+    // has a display layer showing meanwhile, so its deadline only governs a log line.
+    internal static TimeSpan HookDeadlineFor(CapturePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return policy.StopsWhenUnhooked ? policy.GameCaptureTimeout : HookTimeout;
+    }
+
+    // ---- canvas fit ----
+
+    // With no width/height setting the colour source renders at the plugin's default block size
+    // instead of filling the canvas.
     private void SizeColourSourceToCanvas(int width, int height)
     {
         using var settings = _source.GetSettings();
@@ -311,24 +522,56 @@ public sealed class ObsRecorderSession : IRecorderSession
         _source.Update(settings);
     }
 
-    // Which H.264 video encoder the runtime actually registered. The ids differ by machine and
-    // runtime — obs_x264 on a software-only install, ffmpeg_vaapi on this machine, the texture-NVENC
-    // ids where that plugin is present. Availability is structural, so whatever is registered is
-    // something the machine can actually use: the plugins probe their hardware and register nothing
-    // when it is absent.
-    //
-    // The settings value participates: a user who explicitly chose an encoder from the available
-    // set is honoured when that id is still registered, and a configured software default ("x264") is
-    // never treated as an explicit choice — it is the model's placeholder for "let the backend
-    // decide", so the fallback still applies. An id that has since stopped being registered — a
-    // pulled plugin, a swapped GPU — is not an explicit choice either; it falls through to the same
-    // fallback rather than failing the recording.
-    //
-    // The fallback prefers hardware: a registered hardware id first, obs_x264 only when none is,
-    // because a hardware encoder is what keeps a 1080p60 capture off the CPU. That is only safe
-    // because the video settings are written per family (ResolveRateControlKeys) — a hardware encoder
-    // handed x264's key set does not merely ignore it, it crashes. Null when the runtime registered
-    // no H.264 video encoder at all, which CreateOutput reports as a wiring failure.
+    // Every item is fitted to the canvas instead of being drawn 1:1 at the origin: a capture is
+    // whatever resolution its monitor or its game window happens to be, and an unbounded item at a
+    // different resolution is either cropped or a picture in the corner of a black frame. The scene
+    // renders at the mix's BASE size — the encoder does the scale to the output size — so that, not
+    // the requested recording resolution, is the box to fit to.
+    private void FitItemsToCanvas(int fallbackWidth, int fallbackHeight)
+    {
+        var width = (float)fallbackWidth;
+        var height = (float)fallbackHeight;
+
+        if (Runtime.TryGetVideoInfo(out var video) && video is not null && video.BaseWidth > 0 && video.BaseHeight > 0)
+        {
+            width = video.BaseWidth;
+            height = video.BaseHeight;
+        }
+
+        FitToCanvas(_colourItem, width, height);
+        FitToCanvas(_displayItem, width, height);
+        FitToCanvas(_gameItem, width, height);
+    }
+
+    // The individual bounds setters rather than the whole-transform one: obs_sceneitem_set_info2 is
+    // an OBS 30.1 entry point and these are not, so this path still works against an older libobs.
+    // A runtime missing even these is left unbounded rather than failing the recording.
+    private static void FitToCanvas(ObsSceneItem? item, float width, float height)
+    {
+        if (item is null)
+            return;
+
+        try
+        {
+            using (item.DeferUpdates())
+            {
+                item.Alignment = ObsAlignment.Left | ObsAlignment.Top;
+                item.Position = Vector2.Zero;
+                item.BoundsType = ObsBoundsType.ScaleInner;
+                item.BoundsAlignment = ObsAlignment.Center;
+                item.Bounds = new Vector2(width, height);
+            }
+        }
+        catch (EntryPointNotFoundException exception)
+        {
+            Log.Warning(exception, "ObsRecorderSession: this libobs has no scene-item bounds API; " +
+                                   "the scene renders unbounded.");
+        }
+    }
+
+    // Which H.264 encoder the runtime actually registered; the ids differ by machine. An explicit
+    // user choice wins while it is still registered, but the model's "x264" placeholder does not
+    // count as one.
     internal static string? ResolveVideoEncoderId(string? configuredEncoder)
     {
         if (IsUsableId(configuredEncoder))
@@ -339,24 +582,11 @@ public sealed class ObsRecorderSession : IRecorderSession
                ?? usable.FirstOrDefault();
     }
 
-    // The rate-control mode and the constant-quality key the resolved encoder's family reads, keyed
-    // by id rather than by runtime version — from OBS 31 several families' key sets are live at once,
-    // so "which id did we create" is the only answerable question (spec/obs-binding Part 10).
-    //
-    // None of these keys is in libobs; they are plugin-private literals, and the usual failure is
-    // silent — a key the plugin does not read leaves it on its own default, producing a plausible
-    // file at the wrong quality. VAAPI is not silent. obs-ffmpeg matches rate_control against a
-    // NULL-terminated table with astrcmpi and, on no match, dereferences the terminator in strcmp:
-    // writing x264's "CRF" to ffmpeg_vaapi segfaults inside obs_output_initialize_encoders at
-    // obs_output_start. Measured, from a core dump — which is why this mapping exists at all.
-    //
-    // The quality number itself carries across: H.264 CRF and H.264 QP/CQP share the 0..51 scale, so
-    // MapQualityToQuantiser's value is written unchanged and only the key name and the mode differ.
-    // VAAPI names the quantiser "qp"; NVENC (both key sets), AMF and QSV all name it "cqp".
-    //
-    // This is the *constant-quality* answer specifically. The user-selectable modes go through
-    // ResolveRateControl, which uses this pair for the quantiser modes and is where CBR and VBR are
-    // resolved; this overload stays because constant quality is the fallback every coercion lands on.
+    // The rate-control mode and constant-quality key an encoder family reads, keyed by id rather
+    // than by runtime version: from OBS 31 several families' key sets are live at once. Getting it
+    // wrong is not always silent. obs-ffmpeg matches rate_control against a NULL-terminated table
+    // with astrcmpi and, on no match, dereferences the terminator in strcmp: writing x264's "CRF"
+    // to ffmpeg_vaapi segfaults inside obs_output_start.
     internal static (string RateControl, string QualityKey) ResolveRateControlKeys(string encoderId)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -365,26 +595,15 @@ public sealed class ObsRecorderSession : IRecorderSession
         return (ConstantQualityModeString(family), QuantiserKey(family));
     }
 
-    // Which rate-control modes the resolved encoder's family accepts, in the order the settings UI
-    // should offer them. Derived from each family's accepted rate_control values (spec/obs-binding
-    // Part 10, transcribed in tests/Tript.Obs.IntegrationTests/EncoderSettingsKeyTable.cs), because a
-    // mode outside that list is the crash documented on ResolveRateControlKeys rather than a setting
-    // the plugin ignores.
+    // Which rate-control modes a family accepts, in the order the settings UI should offer them. A
+    // mode outside the list is the segfault documented on ResolveRateControlKeys, not a setting the
+    // plugin ignores. Three asymmetries are the reason this is a table:
     //
-    // Three asymmetries in this table are the whole reason it is a table:
-    //
-    //  * CRF exists only on x264. The hardware families spell constant quality "CQP", and x264 has no
-    //    CQP mode at all — so the two constant-quality modes are not interchangeable spellings on the
-    //    wire even though they mean the same thing to the user.
-    //  * VAAPI is withheld from VBR. The specification has no VAAPI table, so the only VAAPI facts we
-    //    hold are the ones measured here: it accepts CQP (what we have always written) and CBR (the
-    //    string obs-ffmpeg's own table starts with, from the crash trace). Its VBR ceiling key is not
-    //    among them, and a mistyped ceiling key fails silently at the wrong bitrate, so VBR is not
-    //    offered for VAAPI rather than guessed at.
-    //  * An id no table describes gets constant quality plus CBR. CBR is the one mode every documented
-    //    family accepts and most of them default to, and CQP is the answer ResolveRateControlKeys has
-    //    always given an unknown id. Anything beyond those two would be a guess about a plugin nobody
-    //    here has seen.
+    //  * CRF exists only on x264; the hardware families spell constant quality "CQP".
+    //  * VAAPI is withheld from VBR — its ceiling key is unverified here, and a mistyped ceiling key
+    //    fails silently at the wrong bitrate.
+    //  * An id no table describes gets constant quality plus CBR, the two modes every documented
+    //    family accepts.
     internal static IReadOnlyList<RateControlMode> SupportedRateControlModes(string encoderId)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -399,16 +618,9 @@ public sealed class ObsRecorderSession : IRecorderSession
         };
     }
 
-    // The mode actually written for a requested one. This is the safety property that lets a settings
-    // file travel: a config written on a software-only machine carries Crf, and the same file on an
-    // NVIDIA machine resolves an NVENC id whose family rejects "CRF" — the mode the *user* chose is a
-    // request, and the encoder family has the final say.
-    //
-    // An unsupported request falls back to the family's own constant-quality mode rather than to
-    // something arbitrary, because that is the mode with no configuration of its own to get wrong: it
-    // needs only the quality profile, which every mode's settings carry anyway. The two constant-quality
-    // modes therefore also map into each other — Cqp on x264 becomes CRF, Crf on hardware becomes CQP —
-    // so the intent ("constant quality") survives the coercion even though the spelling cannot.
+    // A settings file has to travel: a config written on a software-only machine carries Crf, and
+    // on an NVIDIA machine the resolved family rejects it. The user's mode is a request; the family
+    // has the final say.
     internal static RateControlMode CoerceRateControlMode(string encoderId, RateControlMode requested)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -418,9 +630,8 @@ public sealed class ObsRecorderSession : IRecorderSession
             : ConstantQualityMode(ClassifyFamily(encoderId));
     }
 
-    // The mode string and the keys to write for a requested mode on a given encoder id: the single
-    // answer CreateOutput needs. A null key means "this mode does not read that dial on this family",
-    // which is not the same as zero — see the note at the write site.
+    // The mode string and the keys to write for a requested mode on a given id. A null key means
+    // the mode does not read that dial on this family, which is not the same as zero.
     internal static EncoderRateControl ResolveRateControl(string encoderId, RateControlMode requested)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -433,14 +644,12 @@ public sealed class ObsRecorderSession : IRecorderSession
             RateControlMode.Crf or RateControlMode.Cqp =>
                 new EncoderRateControl(ConstantQualityModeString(family), QuantiserKey(family), null, null),
 
-            // CBR needs no ceiling: max_bitrate is documented as a VBR-only key on both families that
-            // have one, and AMF has none at all (spec/obs-binding Part 10, cross-family trap 4).
+            // CBR needs no ceiling: max_bitrate is a VBR-only key, and AMF has none at all.
             RateControlMode.Cbr => new EncoderRateControl("CBR", null, BitrateKey, null),
 
-            // x264's VBR is a CRF target with a VBV cap, so it is the one family that reads the
+            // x264's VBR is a CRF target with a VBV cap, so it is the one family reading the
             // quantiser and the bitrate together; its ceiling is the VBV pair (use_bufsize plus
-            // buffer_size), not a max_bitrate key, and defaulting use_bufsize leaves the cap equal to
-            // the bitrate — which is what a recording wants.
+            // buffer_size) rather than a max_bitrate key.
             RateControlMode.Vbr => new EncoderRateControl(
                 "VBR",
                 family == EncoderFamily.X264 ? QuantiserKey(family) : null,
@@ -451,13 +660,10 @@ public sealed class ObsRecorderSession : IRecorderSession
         };
     }
 
-    // Which family an id belongs to. x264 is matched exactly and the rest by substring, because the
-    // hardware families each ship several ids (jim_nvenc and obs_nvenc_h264_tex; ffmpeg_vaapi and its
-    // texture variant) while "contains x264" would also catch a third-party id that merely mentions
-    // it — and mistaking something else for x264 is the one error that writes "CRF" to a family that
-    // segfaults on it. The substring matches ignore case: a plugin cases its own id, and an Ordinal
-    // match would send FFMPEG_VAAPI down the unknown branch and write a quantiser key VAAPI never
-    // reads.
+    // x264 is matched exactly and the rest by substring: the hardware families each ship several
+    // ids, while "contains x264" would also catch a third-party id that merely mentions it — and
+    // mistaking something else for x264 is the one error that writes "CRF" to a family that
+    // segfaults on it. The substring matches ignore case, or FFMPEG_VAAPI would fall through.
     private static EncoderFamily ClassifyFamily(string encoderId)
     {
         if (string.Equals(encoderId, X264Id, StringComparison.Ordinal))
@@ -478,16 +684,14 @@ public sealed class ObsRecorderSession : IRecorderSession
         return EncoderFamily.Unknown;
     }
 
-    // x264 is the only family whose constant-quality mode is CRF; everything else, including an id no
-    // table describes, uses CQP — the one constant-quality mode every documented H.264 family accepts.
+    // x264 is the only family whose constant-quality mode is CRF.
     private static RateControlMode ConstantQualityMode(EncoderFamily family) =>
         family == EncoderFamily.X264 ? RateControlMode.Crf : RateControlMode.Cqp;
 
     private static string ConstantQualityModeString(EncoderFamily family) =>
         family == EncoderFamily.X264 ? "CRF" : "CQP";
 
-    // VAAPI names the quantiser "qp"; x264 names it "crf"; NVENC (both key sets), AMF and QSV all name
-    // it "cqp", which is also the safest answer for an unknown id.
+    // VAAPI names the quantiser "qp"; x264 names it "crf"; NVENC, AMF and QSV all name it "cqp".
     private static string QuantiserKey(EncoderFamily family) => family switch
     {
         EncoderFamily.X264 => "crf",
@@ -498,18 +702,15 @@ public sealed class ObsRecorderSession : IRecorderSession
     // Every documented family reads the target bitrate from the same key, in kbps.
     private const string BitrateKey = "bitrate";
 
-    // Only NVENC and QSV document a ceiling key. AMF has none — its VBR ceiling does not exist as a
-    // setting — and x264's ceiling is the VBV pair rather than a max_bitrate key, so writing
-    // max_bitrate to either would be a key nothing reads.
+    // Only NVENC and QSV document a ceiling key. AMF has none, and x264's ceiling is the VBV pair.
     private static string? MaxBitrateKey(EncoderFamily family) => family switch
     {
         EncoderFamily.Nvenc or EncoderFamily.Qsv => "max_bitrate",
         _ => null
     };
 
-    // The H.264 video encoder ids the runtime actually registered, in registration order. This is
-    // the available set the settings UI offers — a machine without the NVENC plugin never sees the
-    // NVENC ids, so unsupported encoders are hidden rather than listed and refused at record time.
+    // The available set the settings UI offers, so an encoder this machine cannot use is hidden
+    // rather than listed and refused at record time.
     internal static IReadOnlyList<string> EnumerateUsableEncoderIds()
     {
         var ids = new List<string>();
@@ -535,22 +736,9 @@ public sealed class ObsRecorderSession : IRecorderSession
         codec.Equals("h264", StringComparison.OrdinalIgnoreCase) &&
         ObsEncoder.GetType(id) == ObsEncoderType.Video;
 
-    // The quality profile in the resolved settings is the app's own 1..20 scale, higher being better.
-    // H.264's quantiser scale is 0..51 the other way up, and it is the *same* scale for x264's CRF and
-    // for the hardware families' QP/CQP — which is why one mapping serves every family and only the
-    // key name differs (ResolveRateControlKeys).
-    //
-    // What the mapping is not is a straight inversion. It used to be `23 + (20 - quality)`, which put
-    // the four presets the settings UI actually offers — 3, 5, 10, 18 — at CRF 40, 38, 33 and 25. For
-    // H.264 game footage the useful band is roughly 16 (visually transparent) to 28 (clearly lossy);
-    // 33 and above is smeared, so every preset below "Max" produced a recording nobody would keep, and
-    // no setting at all reached good quality. Measured on this project's own footage, which is why the
-    // anchors below are stated as a table rather than derived from a formula: the interesting part of
-    // the curve is not linear, and the preset positions are the points that matter.
-    //
-    // Anchors, interpolated linearly in between and clamped to H.264's 0..51: quality 3 (Low) is 28,
-    // 5 (Medium) 23, 10 (High) 20 and 18 (Max) 16. Monotonic by construction — a higher quality number
-    // never yields a higher quantiser — so "more quality" always means "better picture".
+    // The app's quality profile is 1..20, higher better; H.264's quantiser is 0..51 the other way
+    // up, and it is the same scale for x264's CRF and the hardware families' QP/CQP. Not a straight
+    // inversion.
     private static readonly (int Quality, int Quantiser)[] QualityAnchors =
     [
         (1, 30),
@@ -576,40 +764,33 @@ public sealed class ObsRecorderSession : IRecorderSession
             var position = (double)(clamped - lowQuality) / span;
             var quantiser = lowQuantiser + position * (highQuantiser - lowQuantiser);
 
-            // AwayFromZero rather than the banker's rounding Math.Round defaults to: a half-step here
-            // is a quantiser step, and "to even" would make the curve wobble rather than descend
-            // evenly across the interpolated points.
+            // AwayFromZero, not the banker's rounding Math.Round defaults to: a half-step here is a
+            // quantiser step, and "to even" would make the curve wobble rather than descend evenly.
             return Math.Clamp((int)Math.Round(quantiser, MidpointRounding.AwayFromZero), MinQuantiser, MaxQuantiser);
         }
 
         return QualityAnchors[^1].Quantiser;
     }
 
-    // H.264's quantiser range. 0 is lossless and 51 is unwatchable; both ends are accepted by every
-    // family, and the clamp exists so an out-of-range anchor or a future preset cannot write a value a
-    // plugin rejects.
+    // H.264's quantiser range: 0 is lossless, 51 unwatchable. The clamp keeps an out-of-range
+    // anchor or a future preset off a plugin that would reject it.
     private const int MinQuantiser = 0;
     private const int MaxQuantiser = 51;
 
-    // The bitrate bounds, in kbps. The floor and ceiling are the tightest the documented families
-    // declare — 50 is the floor everywhere, and AMF's 100000 is the lowest ceiling (x264 and QSV allow
-    // far more) — so a value clamped here is in range for every family rather than only for the one
-    // this machine happens to resolve.
+    // The tightest bounds the documented families declare — 50 is the floor everywhere and AMF's
+    // 100000 the lowest ceiling — so a clamped value is in range for every family, not just this one.
     internal const int MinBitrateKbps = 50;
     internal const int MaxBitrateKbps = 100_000;
 
-    // The fallback target for a settings file whose bitrate is missing or nonsense (0 from an older
-    // config, or negative). Clamping a zero to the floor instead would record 50 kbps, which is a
-    // worse failure than ignoring the value: it looks configured and produces a slideshow.
+    // The fallback for a bitrate that is missing or nonsense. Clamping a zero to the floor instead
+    // would record 50 kbps: configured-looking, and a slideshow.
     internal const int DefaultBitrateKbps = 15_000;
 
     internal static int ClampBitrateKbps(int bitrateKbps) =>
         bitrateKbps <= 0 ? DefaultBitrateKbps : Math.Clamp(bitrateKbps, MinBitrateKbps, MaxBitrateKbps);
 
-    // The VBR ceiling. Zero means "derive one", because a VBR ceiling is a detail most users should not
-    // have to hold an opinion about: 1.5x the target is the usual headroom, enough for the peaks VBR
-    // exists to spend on without letting a busy scene run away with the file size. A ceiling below the
-    // target is meaningless, so an explicit value is never allowed under it.
+    // Zero means "derive one": 1.5x the target is the usual VBR headroom. A ceiling below the target
+    // is meaningless, so an explicit value is never allowed under it.
     internal static int ResolveMaxBitrateKbps(int bitrateKbps, int maxBitrateKbps)
     {
         var target = ClampBitrateKbps(bitrateKbps);
@@ -617,11 +798,9 @@ public sealed class ObsRecorderSession : IRecorderSession
         return Math.Clamp(ceiling, target, MaxBitrateKbps);
     }
 
-    // The encoder families whose key sets differ, keyed by id rather than by runtime version: from OBS
-    // 31 several families' key sets are live at once, so "which id did we create" is the only
-    // answerable question (spec/obs-binding Part 10). Unknown is a first-class member, not an error —
-    // a machine can register an H.264 encoder from a plugin no table here describes, and it must still
-    // record.
+    // Keyed by id rather than by runtime version: from OBS 31 several families' key sets are live at
+    // once. Unknown is a first-class member, not an error — a machine can register an H.264 encoder
+    // from a plugin no table here describes, and it must still record.
     private enum EncoderFamily
     {
         X264,
@@ -632,23 +811,17 @@ public sealed class ObsRecorderSession : IRecorderSession
         Unknown
     }
 
-    // The keys one rate-control choice resolves to on one encoder family. A null key means the mode
-    // does not read that dial on this family, which is why the three keys are nullable rather than
-    // empty strings: nothing should ever write a key named "".
+    // A null key means the mode does not read that dial on this family, which is why the keys are
+    // nullable rather than empty strings.
     internal readonly record struct EncoderRateControl(
         string Mode,
         string? QuantiserKey,
         string? BitrateKey,
         string? MaxBitrateKey);
 
-    // The IRecorderOutput over a real ObsOutput: forwards start, stop and the stop signal, and owns
-    // the lifetime of the output *and* of the two encoders wired into it. The stop signal is
-    // marshalled the same way ObsOutput does it — onto the thread that subscribed — so the recorder's
-    // own marshalling stays as-is.
-    //
-    // The encoders are fields rather than locals at the call site because that reachability is the
-    // only thing keeping obs_encoder_release out of the GC's hands while the output still holds the
-    // pointers; see the ownership note in CreateOutput.
+// The IRecorderOutput over a real ObsOutput: forwards start, stop and the stop signal, and owns the
+// output and the two encoders wired into it. The encoders are fields rather than locals for the
+// reachability reason documented in CreateOutput.
     private sealed class MuxerOutput : IRecorderOutput
     {
         private readonly ObsOutput _output;
@@ -678,13 +851,9 @@ public sealed class ObsRecorderSession : IRecorderSession
             remove => _output.Stopped -= value;
         }
 
-        // The output is released first: obs_output_release drops the output while it still holds valid
-        // encoder pointers, and only then do the encoders lose their references. The reverse order
-        // would leave a live output pointing at released encoders. The audio routing goes last: its
-        // dispose deactivates the capture sources (balancing their MarkActive) and releases the
-        // track encoders, all after the output has stopped reading the mixes. All these Dispose
-        // calls are idempotent — ObsOutput short-circuits on a closed handle and SafeHandle.Dispose
-        // is a no-op once run — so a second Dispose here does nothing.
+        // Release order matters: the output first, while its encoder pointers are still valid, then
+        // the encoders, then the audio routing — whose dispose deactivates the capture sources only
+        // after the output has stopped reading the mixes.
         public void Dispose()
         {
             _output.Dispose();

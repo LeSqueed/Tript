@@ -94,11 +94,9 @@ export const DATE_RANGE_SECONDS: Record<DateRangeFilter, number | null> = {
 // ---------------------------------------------------------------------------
 
 /**
- * The item's game, or null when it has none.
- *
- * Three shapes mean "unknown" and all three are seen on the wire: the field absent (an older
- * backend), explicitly null (a backend that looked and found no game), and empty/whitespace (a
- * metadata record with a blank field). They are collapsed here so no caller has to know that.
+ * The item's game, or null when it has none. Three shapes mean "unknown" and all three are seen on
+ * the wire: the field absent (an older backend), explicitly null (a backend that looked and found
+ * no game), and empty/whitespace (a metadata record with a blank field).
  */
 export function itemGame(item: ContentItem): string | null {
   const game = item.game;
@@ -110,12 +108,9 @@ export function itemGame(item: ContentItem): string | null {
 }
 
 /**
- * The item's start time in epoch seconds, or undefined when it has none.
- *
- * Epoch 0 counts as "none": it is what a record written without a clock carries, and dating a
- * recording to 1970 is worse than admitting the date is unknown. Non-finite values (a malformed
- * record) go the same way — a NaN would otherwise pass every date comparison silently, since every
- * comparison against NaN is false.
+ * The item's start time in epoch seconds, or undefined when it has none. Epoch 0 counts as "none":
+ * it is what a record written without a clock carries, and dating a recording to 1970 is worse than
+ * admitting the date is unknown.
  */
 export function itemDate(item: ContentItem): number | undefined {
   const start = item.startTime;
@@ -123,12 +118,8 @@ export function itemDate(item: ContentItem): number | undefined {
 }
 
 /**
- * The item's length in seconds, or undefined when nothing declares one.
- *
- * `durationSeconds` is the metadata record's own field; `endTime` is the older way the same number
- * arrives for a recording. Both are DECLARED lengths — they have been observed overstating the file
- * (player/clipModel.ts documents a record claiming 100s for a 9.13s file), which is exactly why this
- * feeds a chip and nothing else. No clip bound is ever derived from it.
+ * The item's length in seconds, or undefined when nothing declares one. `durationSeconds` is the
+ * metadata record's own field; `endTime` is the older way the same number arrives for a recording.
  */
 export function itemDuration(item: ContentItem): number | undefined {
   for (const candidate of [item.durationSeconds, item.endTime]) {
@@ -187,7 +178,11 @@ export function formatDateChip(item: ContentItem): string {
 
 /** The file-size chip, or null when the backend does not report a size. Binary units (1 KB = 1024 B). */
 export function formatSizeChip(item: ContentItem): string | null {
-  const bytes = item.fileSizeBytes;
+  return formatBytes(item.fileSizeBytes);
+}
+
+/** A byte count as a size chip, or null when there is no usable number. Shared with the trash list. */
+export function formatBytes(bytes: number | undefined): string | null {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) {
     return null;
   }
@@ -208,12 +203,8 @@ export function formatSizeChip(item: ContentItem): string | null {
 // ---------------------------------------------------------------------------
 
 /**
- * The type dimension.
- *
- * `sessions` is "not a clip" rather than "contentType === 'recording'", deliberately. The wire has
- * four content types and two of them (highlight, buffer) belong to neither name the user is offered;
- * defining sessions as the complement of clips keeps `All` the exact union of the two filters, so no
- * item can be invisible under every filter — which is the one way a type filter can lose content.
+ * The type dimension. `sessions` is "not a clip" rather than "contentType === 'recording'",
+ * deliberately.
  */
 export function matchesType(item: ContentItem, filter: ContentTypeFilter): boolean {
   if (filter === 'all') {
@@ -236,15 +227,9 @@ export function matchesGame(item: ContentItem, game: string): boolean {
 }
 
 /**
- * The date dimension: is the item inside the trailing window ending now?
- *
- * An item with no date does NOT match a window, and that is a real decision rather than an oversight:
- * a window is a claim about when something happened, and an undated item cannot support it. The cost
- * is that a library of undated items looks empty under "Last 7 days" — which is why the caller's
- * empty state says "nothing matches these filters" and offers to clear them.
- *
- * Times in the future are kept (`>= cutoff` has no upper bound): a skewed clock on the recording
- * machine must not make a recording disappear.
+ * The date dimension: is the item inside the trailing window ending now? An item with no date does
+ * NOT match a window, and that is a real decision rather than an oversight: a window is a claim
+ * about when something happened, and an undated item cannot support it.
  */
 export function matchesDate(item: ContentItem, range: DateRangeFilter, nowSeconds: number): boolean {
   const window = DATE_RANGE_SECONDS[range];
@@ -260,10 +245,9 @@ export function matchesDate(item: ContentItem, range: DateRangeFilter, nowSecond
 
 /**
  * The free-text dimension: a case-insensitive substring of the title, the file name or the game.
- *
  * The file name is searched as well as the title because an item with no metadata record has only a
- * file name — searching just titles would make exactly the items with the least metadata the hardest
- * to find.
+ * file name — searching just titles would make exactly the items with the least metadata the
+ * hardest to find.
  */
 export function matchesSearch(item: ContentItem, search: string): boolean {
   const needle = search.trim().toLowerCase();
@@ -310,15 +294,9 @@ export function isFiltered(query: LibraryQuery): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * The games present in the list, plus whether anything has no game.
- *
- * Derived from the items rather than from a hardcoded list: the set of games is whatever the user has
- * actually recorded, and a fixed list would both miss games and offer ones that match nothing. The
- * caller turns this into the select's options, so `hasUnknown` is what decides whether an
- * "Unknown game" option is worth offering at all.
- *
- * Names are compared case-insensitively (a game detected twice with different casing is one game) and
- * the first spelling seen wins, so the option label matches what the cards show.
+ * The games present in the list, plus whether anything has no game. Derived from the items rather
+ * than from a hardcoded list: the set of games is whatever the user has actually recorded, and a
+ * fixed list would both miss games and offer ones that match nothing.
  */
 export function availableGames(items: readonly ContentItem[]): {
   names: string[];
@@ -345,14 +323,7 @@ export function availableGames(items: readonly ContentItem[]): {
 // Sorting
 // ---------------------------------------------------------------------------
 
-/**
- * Reorder the list. Never mutates the input (a `content` push's array is shared with the source).
- *
- * Undated items sort LAST under every date order, including "oldest first". An undated item is not
- * "infinitely old", it is unknown, and floating unknowns to the top of "oldest" would bury the actual
- * oldest recordings behind them. Ties break on the label so the order is total — an unstable order is
- * visible as cards jumping between pages when the list is re-derived.
- */
+/** Reorder the list. Never mutates the input (a `content` push's array is shared with the source). */
 export function sortItems(items: readonly ContentItem[], sort: LibrarySort): ContentItem[] {
   const byLabel = (a: ContentItem, b: ContentItem) =>
     itemLabel(a).localeCompare(itemLabel(b), undefined, { sensitivity: 'base' });
@@ -412,13 +383,8 @@ export function pageCountFor(total: number, pageSize: number): number {
 }
 
 /**
- * Bring a page number into [1, pageCount].
- *
- * This is the second half of the "a page is never wrongly empty" guarantee. The view resets to page 1
- * whenever a filter changes, which handles the interactive path; this handles every other way a page
- * number can go stale — a `content` push that removed items, a filter change the view forgot to reset
- * on, a page number restored from somewhere. The user lands on the last real page instead of a blank
- * grid with working Prev button, which is the shape of the bug this prevents.
+ * Bring a page number into [1, pageCount]. This is the second half of the "a page is never wrongly
+ * empty" guarantee.
  */
 export function clampPage(page: number, pageCount: number): number {
   const pages = Math.max(1, Math.floor(pageCount) || 1);
@@ -452,9 +418,8 @@ export interface LibraryPage {
 
 /**
  * The whole pipeline: filter, sort, then take the requested page (clamped into existence).
- *
- * `nowSeconds` is injected rather than read from the clock so the date window is deterministic — the
- * caller passes `Date.now() / 1000`, a test passes a fixed epoch.
+ * `nowSeconds` is injected rather than read from the clock so the date window is deterministic —
+ * the caller passes `Date.now() / 1000`, a test passes a fixed epoch.
  */
 export function deriveLibrary(
   items: readonly ContentItem[],

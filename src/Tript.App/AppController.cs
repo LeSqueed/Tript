@@ -10,12 +10,7 @@ namespace Tript.App;
 
 // The command surface of the control socket: every frontend -> backend command, implemented or an
 // explicit no-op. The implemented set is the alpha's: recording, settings, content, bookmarks,
-// clipping, and the lifecycle commands. Everything else is a named no-op so the frontend's probe
-// buttons never crash the host.
-//
-// Dispatch is by exact wire method name (PascalCase, spec/local-ipc.md). Unknown methods are
-// dropped silently — the frontend tolerates unknown backend messages, and the backend tolerates
-// unknown commands the same way.
+// clipping, and the lifecycle commands.
 internal sealed class AppController
 {
     private readonly AppHost _host;
@@ -45,14 +40,19 @@ internal sealed class AppController
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
                 parameters.Deserialize<DeleteMultipleContentParameters>()),
             ["RenameContent"] = (parameters, _) => _host.RenameContent(parameters.Deserialize<RenameContentParameters>()),
+            ["ListTrash"] = (_, _) => _host.PushTrash(),
+            ["RestoreTrash"] = (parameters, _) => _host.RestoreTrash(parameters.Deserialize<RestoreTrashParameters>()),
+            // Parameterless PurgeTrash empties the whole bin, so the absent-parameters case has to
+            // reach the host rather than being dropped as a malformed command.
+            ["PurgeTrash"] = (parameters, _) => _host.PurgeTrash(parameters.Deserialize<PurgeTrashParameters>()
+                ?? new PurgeTrashParameters()),
             ["ImportFile"] = (_, _) => { /* No import surface in the alpha. */ },
             ["AddBookmark"] = (parameters, _) => _host.AddBookmark(parameters.Deserialize<AddBookmarkParameters>()),
             ["DeleteBookmark"] = (parameters, _) => _host.DeleteBookmark(parameters.Deserialize<DeleteBookmarkParameters>()),
             // The settings counterpart of ListContent. OnNewConnection already pushes settings when
             // the socket opens, but the settings UI mounts on demand — the route is not the landing
             // one — so by then that push is long gone and the page would render on its own defaults
-            // until the user's first edit triggered one. The machine facts riding the push
-            // (availableEncoders) would be missing for exactly that window.
+            // until the user's first edit triggered one.
             ["ListSettings"] = (_, _) => _host.PushSettings(),
             ["UpdateSettings"] = (parameters, _) => _host.UpdateSettings(
                 parameters.Deserialize<UpdateSettingsParameters>()?.Settings),
@@ -100,16 +100,11 @@ internal sealed class AppController
 
     // ---- CreateClip ----
 
-    // The wire's filePath is relative to the effective recording root, by design: ListContent builds
-    // ContentItem.FilePath with Path.GetRelativePath against EffectiveRoot and '/' separators
-    // (AppHost.ListContent), because that is the form the content server's URLs take, and the
-    // frontend echoes that exact string back in CreateClip. Every consumer that then touches the
-    // file system has to resolve it against the root first. The output path always did
-    // (BuildClipOutputPath joins EffectiveRoot); the source path did not, so ffmpeg and MediaProbe
-    // resolved it against the process CWD and clipping only worked when the CWD happened to equal
-    // the recording root. In the real app, with recording.outputDirectory pointing elsewhere, it
-    // failed as "Source file does not exist: <cwd>/sessions/session-....mp4" for a session file that
-    // existed under the configured directory and listed fine in the player.
+    // The wire's filePath is relative to the effective recording root, by design: ListContent
+    // builds ContentItem.FilePath with Path.GetRelativePath against EffectiveRoot and '/'
+    // separators (AppHost.ListContent), because that is the form the content server's URLs take,
+    // and the frontend echoes that exact string back in CreateClip. Every consumer that then
+    // touches the file system has to resolve it against the root first.
     private void CreateClip(JsonElement? parameters)
     {
         var parsed = parameters.Deserialize<CreateClipParameters>() ?? new CreateClipParameters();
@@ -117,12 +112,10 @@ internal sealed class AppController
         if (request is null)
         {
             // The request never reaches the engine: either the source path did not resolve inside
-            // the recording root (a traversal, an absolute path outside it, or an empty filePath) or
-            // its segment times were not real times at all. The refusal rides the importProgress
+            // the recording root (a traversal, an absolute path outside it, or an empty filePath)
+            // or its segment times were not real times at all. The refusal rides the importProgress
             // "error" the engine's own failures already use, so the clip dialog surfaces it exactly
-            // like a bad source file instead of the command dying silently. A path that does resolve
-            // but has no file behind it still fails downstream, where MediaProbe throws
-            // ClipSourceException and AppHost.CreateClip broadcasts it.
+            // like a bad source file instead of the command dying silently.
             _host.PushClipError(refusal
                 ?? $"That clip's source is not inside the recording folder, so it was not read: '{parsed.FilePath}'.");
             return;
@@ -153,25 +146,17 @@ internal sealed class AppController
         // and OverflowException on anything past ~9.22e11 seconds — including 1e18, a JSON number a
         // client can send without trying. This runs on the IPC dispatch thread, where
         // IpcServer.Dispatch catches the throw and only writes it to stderr, so the frontend would
-        // receive no frame at all: not the "importing" one, not an error, nothing for the clip dialog
-        // to render. Refusing is strictly better than throwing, so the conversion goes through
-        // ClipRegionBounds.TryFromSeconds and unusable segments are dropped here.
-        //
-        // Only the times are checked at this layer. The source's real duration is not known until
-        // MediaProbe has run, so the clamp to [0, duration] belongs to the engine, which probes
-        // anyway (ClipEngine.Validate).
+        // receive no frame at all: not the "importing" one, not an error, nothing for the clip
+        // dialog to render.
         var wireSegments = parsed.Segments.Count > 0
             ? parsed.Segments.Select(segment => (segment.StartTime, segment.EndTime)).ToList()
             : [(parsed.StartTime, parsed.EndTime)];
 
-        // The content server's traversal guard, reused rather than re-derived: it joins the
-        // '/' separated wire path onto the root, normalizes separators for the platform, and
-        // returns null for anything that escapes the root — a "../../etc/passwd" filePath is
-        // refused here, and an already-absolute path is accepted only when it points inside the
-        // root. The result is always absolute, so the engine no longer depends on the CWD.
-        //
-        // Checked before the times so the security refusal is never masked by a message about
-        // timestamps: a traversal attempt with nonsense times is still reported as a traversal.
+        // The content server's traversal guard, reused rather than re-derived: it joins the '/'
+        // separated wire path onto the root, normalizes separators for the platform, and returns
+        // null for anything that escapes the root — a "../../etc/passwd" filePath is refused here,
+        // and an already-absolute path is accepted only when it points inside the root. The result
+        // is always absolute, so the engine no longer depends on the CWD.
         var sourcePath = ContentServer.ResolveWithinRoot(effectiveRoot, parsed.FilePath);
         if (sourcePath is null)
         {
@@ -210,12 +195,7 @@ internal sealed class AppController
     }
 
     // Where a clip is written. Clips live in a single top-level clips/ directory under the
-    // recording root. The name carries both the source session and the clip id (the frontend's
-    // newClipId()), so a combine clip and a separate-mode batch all stay distinct:
-    //   <root>/clips/session-20260817-083000-clip-k2m3xq.mp4
-    //   <root>/clips/session-20260817-083000-clip-1-0s-10s.mp4   (separate mode)
-    // Separate mode contributes only the directory; the engine (BuildFileName) supplies the
-    // per-region file names inside it.
+    // recording root.
     internal static string BuildClipOutputPath(CreateClipParameters parameters, string effectiveRoot)
     {
         var outputDirectory = Path.Combine(effectiveRoot, "clips");
@@ -278,10 +258,6 @@ internal static class JsonElementExtensions
             // is a handle into a JsonDocument; deserializing a JsonElement-typed property from it
             // keeps a reference to that document, and the nullable-conditional call sites
             // (parameters?.Deserialize<T>()) produce an element whose document handle is lost.
-            // Round-tripping through the raw text gives every deserialized JsonElement property
-            // its own backing document, and the call sites must invoke this WITHOUT the ?. operator
-            // (the extension handles null itself) — `parameters?.Deserialize<T>()` on a
-            // Nullable<JsonElement> drops the document handle before the method body runs.
             return JsonSerializer.Deserialize<T>(element.Value.GetRawText(), Wire.Options);
         }
         catch (JsonException)

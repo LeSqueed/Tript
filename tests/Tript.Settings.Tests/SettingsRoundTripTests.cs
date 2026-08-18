@@ -48,6 +48,7 @@ public class SettingsRoundTripTests : IDisposable
         settings.Audio.OutputMode = AudioOutputMode.Mute;
         settings.Capture.Method = DisplayCaptureMethod.Display;
         settings.Capture.Display = "DP-1";
+        settings.Capture.DisplayLabel = "Screen DP-1";
         settings.Game.CaptureMode = GameCaptureMode.GameOnly;
         _store.Save();
 
@@ -61,7 +62,31 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(AudioOutputMode.Mute, reloaded.Audio.OutputMode);
         Assert.Equal(DisplayCaptureMethod.Display, reloaded.Capture.Method);
         Assert.Equal("DP-1", reloaded.Capture.Display);
+
+        // The label only exists so a warning can name a monitor that is no longer attached, which
+        // means it has to outlive the monitor being unplugged.
+        Assert.Equal("Screen DP-1", reloaded.Capture.DisplayLabel);
         Assert.Equal(GameCaptureMode.GameOnly, reloaded.Game.CaptureMode);
+    }
+
+    // The trash retention is a stored setting with no UI yet, so the round trip is the only thing
+    // holding it: a default of 24 hours on a fresh model, and whatever the user set after a reload.
+    [Fact]
+    public void SaveThenLoad_RoundTripsTheTrashRetention()
+    {
+        Assert.Equal(24, _store.Load().Recording.TrashRetentionHours);
+
+        _store.Load().Recording.TrashRetentionHours = 72;
+        _store.Save();
+
+        Assert.Equal(72, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
+
+        // Zero is the "never purge" value and must survive too, rather than being read back as the
+        // default because it is falsy.
+        _store.Load().Recording.TrashRetentionHours = 0;
+        _store.Save();
+
+        Assert.Equal(0, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
     }
 
     // The recording page's output-directory setting must survive a full save/load round trip so a
@@ -110,14 +135,10 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(1440, reloaded.Recording.ResolutionHeight);
     }
 
-    // The model's own default is 1080p, and it is reached without asking the platform anything.
-    //
-    // A fresh install actually starts at the primary display's resolution, but that default is
+    // The model's own default is 1080p, and it is reached without asking the platform anything. A
+    // fresh install actually starts at the primary display's resolution, but that default is
     // applied by the host (Tript.App/Program.ApplyFirstRunDefaults) when it creates a settings file
-    // that does not exist yet — deliberately not here. Display enumeration is platform P/Invoke, and
-    // this layer has to stay unit testable on a machine with no display at all, which is exactly what
-    // this test asserts: no display server is running in the test process and the default still
-    // resolves.
+    // that does not exist yet — deliberately not here.
     [Fact]
     public void TheDefaultResolution_IsTheSafeFallback_AndNeedsNoDisplay()
     {

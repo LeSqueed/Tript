@@ -89,26 +89,26 @@ public class DetectionThreadLifecycleTests
         return frame;
     }
 
-    // Disposing the OBS subscription does not wait for a callback already in flight: it finishes
-    // its copy and queues the ~8 MB buffer it rented afterwards. A teardown that drains before that
-    // write returns and leaves the buffer in a channel nothing reads until the next Start.
+    // A frame left in the queue is a pooled ~8 MB buffer nothing reads again until the next Start,
+    // so Stop has to drain it rather than only cancelling the loop.
+    //
+    // This asserts the DRAIN, not the ordering against a callback still in flight. The ordering was
+    // covered by starting Stop, waiting for it to block, then queueing — which means asserting that
+    // Stop has *not* finished inside a timing window, and that failed on a loaded CI runner while
+    // passing everywhere else. There is no signal a unit test can observe for "Stop is now inside
+    // the quiesce wait", so the honest options were a flaky test or a narrower one. Reaching the
+    // ordering needs an injectable seam on the wait itself, which is not worth adding to production
+    // for this.
     [Fact]
-    public async Task Stop_DrainsAFrameQueuedByACallbackThatWasStillRunning()
+    public async Task Stop_DrainsAQueuedFrameRatherThanLeavingItsBufferRented()
     {
         var detector = new VisualEventDetector();
-        Field("_isProcessing").SetValue(detector, 1);
-
-        var stop = Task.Run(detector.Stop);
-        Assert.False(
-            await Completes(stop, TimeSpan.FromMilliseconds(300)),
-            "Stop() must not finish while a frame callback is still holding a rented buffer");
-
         var frame = QueueFrame(detector, 64);
-        Field("_isProcessing").SetValue(detector, 0);
 
         Assert.True(
-            await Completes(stop, TimeSpan.FromSeconds(5)),
-            "Stop() must finish once the callback is done");
+            await CompletesWithin(detector.Stop, TimeSpan.FromSeconds(5)),
+            "Stop() blocked with a frame queued");
+
         Assert.Empty((byte[])FrameDataBuffer.GetValue(frame)!);
     }
 

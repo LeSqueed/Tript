@@ -284,4 +284,62 @@ public sealed class ClipSourceResolutionSmokeTests : IDisposable
         for (var i = 0; i < count; i++)
             await host.ReceiveAsyncParsed();
     }
+    // The clip id arrives raw off the socket and is concatenated into a file name. Before this it
+    // could carry separators and walk out of the recording folder, with the engine creating the
+    // directories on the way.
+    [Theory]
+    [InlineData("x/../../../../tmp/pwn")]
+    [InlineData("../../etc/cron.d/x")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("..")]
+    public void SafeClipId_KeepsAnIdToASingleNameSegment(string hostile)
+    {
+        var safe = AppController.SafeClipId(hostile);
+
+        Assert.DoesNotContain('/', safe);
+        Assert.DoesNotContain('\\', safe);
+        Assert.DoesNotContain("..", safe, StringComparison.Ordinal);
+        Assert.NotEmpty(safe);
+    }
+
+    [Fact]
+    public void SafeClipId_KeepsAnOrdinaryIdAsItIs()
+    {
+        Assert.Equal("clip-42_A", AppController.SafeClipId("clip-42_A"));
+    }
+
+    [Fact]
+    public void SafeClipId_GivesAnIdThatSurvivesNothingAGeneratedOne()
+    {
+        var safe = AppController.SafeClipId("../..");
+
+        Assert.NotEmpty(safe);
+        Assert.DoesNotContain('.', safe);
+    }
+
+    [Fact]
+    public void SafeClipId_IsBounded()
+    {
+        Assert.True(AppController.SafeClipId(new string('a', 5000)).Length <= 64);
+    }
+
+    // A hostile id must not be able to steer the composed output path out of the clips directory.
+    [Fact]
+    public void BuildClipOutputPath_StaysUnderTheClipsDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tript-clip-output", Guid.NewGuid().ToString("N"));
+        var parameters = new CreateClipParameters
+        {
+            FilePath = "sessions/session-1.mp4",
+            Id = "x/../../../../../../tmp/pwn",
+            OutputMode = "combine",
+        };
+
+        var output = AppController.BuildClipOutputPath(parameters, root);
+
+        var clips = Path.GetFullPath(Path.Combine(root, "clips"));
+        Assert.StartsWith(clips + Path.DirectorySeparatorChar, Path.GetFullPath(output), StringComparison.Ordinal);
+    }
+
 }

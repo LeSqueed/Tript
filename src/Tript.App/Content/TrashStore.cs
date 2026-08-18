@@ -165,6 +165,7 @@ internal sealed class TrashStore
         if (restoredName is null)
             return TrashRestoreResult.Failed(entryId, "no free name could be found for the restored file");
 
+        var kept = 0;
         try
         {
             foreach (var file in stored)
@@ -175,6 +176,7 @@ internal sealed class TrashStore
                 {
                     Console.Error.WriteLine(
                         $"Tript.App: '{relative}' does not resolve inside the recording folder, so it stays in the trash.");
+                    kept++;
                     continue;
                 }
 
@@ -184,6 +186,7 @@ internal sealed class TrashStore
                     // the one thing that can still collide, and its owner on disk wins.
                     Console.Error.WriteLine(
                         $"Tript.App: '{target}' already exists, so the trashed copy was left in the trash.");
+                    kept++;
                     continue;
                 }
 
@@ -195,10 +198,14 @@ internal sealed class TrashStore
             return TrashRestoreResult.Failed(entryId, exception.Message);
         }
 
-        DeleteDirectory(entryDirectory);
+        // Only when the entry is genuinely empty of anything worth keeping. Deleting it whenever the
+        // loop finished would destroy exactly the files the skips above just said were being kept —
+        // a recording's title and bookmarks, for the sake of tidying up an empty directory.
+        if (kept == 0)
+            DeleteDirectory(entryDirectory);
 
         var renamed = !string.Equals(restoredName, originalName, StringComparison.Ordinal);
-        return new TrashRestoreResult(entryId, originalName, restoredName, renamed, null);
+        return new TrashRestoreResult(entryId, originalName, restoredName, renamed, null, kept);
     }
 
     // ---- purge ----
@@ -410,7 +417,9 @@ internal readonly record struct TrashRestoreResult(
     string? FileName,
     string? RestoredAs,
     bool Renamed,
-    string? Failure)
+    string? Failure,
+    // Files that could not be put back and are still in the trash. Non-zero means the entry was kept.
+    int KeptInTrash = 0)
 {
     internal static TrashRestoreResult Failed(string entryId, string failure) =>
         new(entryId, null, null, false, failure);

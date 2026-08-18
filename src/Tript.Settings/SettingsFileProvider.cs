@@ -31,6 +31,9 @@ public sealed class SettingsFileProvider
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        File.WriteAllText(FilePath, json);
+        // Atomic: the settings file holds the recording directory, the game list and the audio
+        // routing, and a torn write leaves a blank file that loads as defaults and is then persisted
+        // over the wreckage.
+        AtomicFile.WriteAllText(FilePath, json);
     }
 }

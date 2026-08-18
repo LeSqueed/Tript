@@ -6,13 +6,6 @@ namespace Tript.App;
 // The ffmpeg_muxer plugin records by spawning the external obs-ffmpeg-mux helper, which it locates
 // with os_get_executable_path_ptr — resolved to the *actual binary* of the current process, not the
 // current directory. So the helper must sit next to the Tript.App executable at run time.
-//
-// The helper is part of the OBS install. On Linux it lives in the system OBS package (typically
-// /usr/bin/obs-ffmpeg-mux); the app does not ship it, so instead of copying a binary out of the
-// package we create a symlink beside our own executable pointing at the system helper. A symlink
-// keeps the link honest about where the real file lives, and if the OBS package moves the helper
-// the next launch re-resolves it. On Windows the bundled OBS runtime already has obs-ffmpeg-mux.exe
-// beside the app, so nothing is done.
 internal static class MuxerHelper
 {
     private const string HelperFileName = "obs-ffmpeg-mux";
@@ -20,7 +13,7 @@ internal static class MuxerHelper
     // Resolves and links the helper beside the current executable. Best-effort: a machine where the
     // system helper is missing reports that the helper could not be provided, and the plugin itself
     // will surface the missing helper when a recording starts.
-    internal static string? EnsureNextToApp()
+    internal static string? EnsureNextToApp(string? obsModuleBinaryDir = null)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -33,7 +26,7 @@ internal static class MuxerHelper
         if (File.Exists(target) || File.Exists(target + ".symlink"))
             return target;
 
-        var systemHelper = ResolveSystemHelper();
+        var systemHelper = ResolveSystemHelper(obsModuleBinaryDir);
         if (systemHelper is null)
             return null;
 
@@ -53,23 +46,51 @@ internal static class MuxerHelper
         }
     }
 
-    private static string? ResolveSystemHelper()
+    internal static string? ResolveSystemHelper(string? obsModuleBinaryDir = null)
     {
-        // PATH first — the distro may install it there.
-        var fromPath = SearchPath(HelperFileName);
-        if (fromPath is not null)
-            return fromPath;
-
-        // Then standard dirs (the OBS package layout).
-        foreach (var dir in new[] { "/usr/bin", "/usr/local/bin" })
+        foreach (var candidate in CandidatePaths(obsModuleBinaryDir))
         {
-            var candidate = Path.Combine(dir, HelperFileName);
-            if (File.Exists(candidate))
+            if (candidate is not null && File.Exists(candidate))
                 return candidate;
         }
 
         return null;
     }
+
+    // Where the helper actually lands. It is NOT on PATH on any mainstream distro: OBS ships it as a
+    // private helper under the plugin directory, and on Debian/Ubuntu it is one level deeper still,
+    // in a per-plugin subdirectory (/usr/lib/x86_64-linux-gnu/obs-plugins/obs-ffmpeg/obs-ffmpeg-mux).
+    // Probing only PATH and the bin dirs found nothing there, so real recording failed with the
+    // plugin's own "helper missing" error on a machine that had the helper installed all along.
+    private static IEnumerable<string?> CandidatePaths(string? obsModuleBinaryDir)
+    {
+        yield return SearchPath(HelperFileName);
+
+        foreach (var dir in new[] { "/usr/bin", "/usr/local/bin" })
+            yield return Path.Combine(dir, HelperFileName);
+
+        // The module directory the OBS locator resolved for this machine is the authoritative answer;
+        // the fixed list below only covers a host that could not discover one.
+        foreach (var dir in Enumerable.Repeat(obsModuleBinaryDir, 1).Concat(FallbackPluginDirs()))
+        {
+            if (string.IsNullOrWhiteSpace(dir))
+                continue;
+
+            yield return Path.Combine(dir, HelperFileName);
+            yield return Path.Combine(dir, "obs-ffmpeg", HelperFileName);
+        }
+    }
+
+    private static IEnumerable<string> FallbackPluginDirs() =>
+    [
+        "/usr/lib/x86_64-linux-gnu/obs-plugins",
+        "/usr/lib64/obs-plugins",
+        "/usr/lib/obs-plugins",
+        "/usr/local/lib/obs-plugins",
+        "/usr/lib/x86_64-linux-gnu/obs-studio/plugins",
+        "/usr/lib64/obs-studio/plugins",
+        "/usr/lib/obs-studio/plugins",
+    ];
 
     private static string? SearchPath(string fileName)
     {

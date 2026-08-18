@@ -9,22 +9,8 @@ using System.Threading.Channels;
 
 namespace Tript.App.Ipc;
 
-// The WebSocket control socket (ws://localhost:44030/, spec/local-ipc.md). Sits on a single
-// HttpListener and answers WebSocket upgrade requests; every other path/verb gets 404. Clients are
-// tracked so the host can broadcast state/settings/gameList pushes to all of them.
-//
-// The wire contract:
-//   frontend -> backend: { method, parameters? }   PascalCase method, no parameters field when the
-//                                                  command has no arguments
-//   backend  -> frontend: { method, content }      lowercase method
-// Every frame is a notification; commands that logically have a result surface it as an unrelated
-// later message (spec/local-ipc.md "No request/response correlation").
-//
-// Threading: one listener thread accepts and dispatches; each client's receive loop is its own
-// thread, and Broadcast walks the client list. A client that has not finished reading when the host
-// pushes could be sent-to concurrently — HttpListener's WebSocket is not safe for concurrent sends
-// from multiple threads, so Broadcast queues onto each client's send channel and a single writer
-// thread per client drains it.
+// The WebSocket control socket. Sits on a single
+// HttpListener and answers WebSocket upgrade requests; every other path/verb gets 404.
 internal sealed class IpcServer : IDisposable
 {
     private const int Port = 44030;
@@ -81,6 +67,18 @@ internal sealed class IpcServer : IDisposable
                     continue;
                 }
 
+                // Browsers do not apply CORS to a WebSocket handshake, so without this any page the
+                // user happens to have open could drive this socket: delete recordings, empty the
+                // trash, move the output directory. The Origin header is the only thing that
+                // distinguishes the app's own UI from someone else's page, and a browser will not
+                // let script forge it.
+                if (!IsAllowedOrigin(context.Request.Headers["Origin"]))
+                {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                    continue;
+                }
+
                 var wsContext = context.AcceptWebSocketAsync(null).GetAwaiter().GetResult();
                 var client = new ClientConnection(wsContext.WebSocket, this);
                 lock (_gate)
@@ -105,6 +103,14 @@ internal sealed class IpcServer : IDisposable
             }
         }
     }
+
+    // The UI host's own origin, in both spellings a browser may present for the loopback address.
+    private static readonly string[] AllowedOrigins =
+        ["http://localhost:2882", "http://127.0.0.1:2882"];
+
+    internal static bool IsAllowedOrigin(string? origin) =>
+        string.IsNullOrEmpty(origin) ||
+        AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
 
     // ---- dispatch ----
 

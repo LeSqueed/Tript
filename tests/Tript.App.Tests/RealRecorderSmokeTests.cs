@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Tript.Obs;
 using Xunit;
 using Xunit.Sdk;
 
@@ -13,11 +14,6 @@ namespace Tript.App.Tests;
 // The real-recorder smoke test: the app host starts libobs and records a real MP4 through the
 // ffmpeg_muxer plugin. This exercises the full recording path — ObsRuntime, the recorder state
 // machine, and the muxer helper — which the --fake-recorder tests cannot.
-//
-// Skipped when the machine cannot host a real recording: no display server (the host needs X11),
-// no obs-ffmpeg-mux helper to deploy, or the helper deployment fails. Every skip reason is
-// checked explicitly so the suite fails loudly if a machine that SHOULD be able to record suddenly
-// cannot.
 [Collection(AppHostCollection.Name)]
 public sealed class RealRecorderSmokeTests : IDisposable
 {
@@ -91,11 +87,11 @@ public sealed class RealRecorderSmokeTests : IDisposable
             return false;
         }
 
-        // The muxer helper must exist somewhere the app can symlink it from. The app resolves it
-        // via PATH and the standard dirs, so this mirrors that.
-        if (!File.Exists("/usr/bin/obs-ffmpeg-mux") && !File.Exists("/usr/local/bin/obs-ffmpeg-mux"))
+        // Asks the app's own resolver rather than restating where the helper lives: a second copy of
+        // that list is how this skipped on a machine that had the helper all along.
+        if (MuxerHelper.ResolveSystemHelper(ObsRuntimeLocator.Discover().ModuleBinaryDir) is null)
         {
-            reason = "No obs-ffmpeg-mux helper found in the standard dirs; the ffmpeg_muxer plugin cannot record.";
+            reason = "No obs-ffmpeg-mux helper on this machine; the ffmpeg_muxer plugin cannot record.";
             return false;
         }
 

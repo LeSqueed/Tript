@@ -13,10 +13,16 @@ namespace Tript.Detection.Tests;
 // introduced (_detectionThread == null).
 public class DetectionThreadLifecycleTests
 {
+    // Awaits the completed task so a faulted one rethrows here: WhenAny alone never throws, which
+    // let a Stop() that threw count as "completed within the timeout".
     private static async Task<bool> CompletesWithin(Action action, TimeSpan timeout)
     {
         var work = Task.Run(action);
-        return await Task.WhenAny(work, Task.Delay(timeout)) == work;
+        if (await Task.WhenAny(work, Task.Delay(timeout)) != work)
+            return false;
+
+        await work;
+        return true;
     }
 
     [Fact]

@@ -52,9 +52,8 @@ public sealed class ObsOutputRecordingTests
         var (verdict, _) = ObsRecorderHarnessDriver.Run(file, durationSeconds: 1.0);
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
 
-        var probe = ProbeMedia(file);
-        Assert.True(probe is not null, $"probe-media.sh produced no parseable output for {file}.");
-        var root = probe!.RootElement;
+        using var probe = ProbeMediaScript.Run(file);
+        var root = probe.RootElement;
         var video = root.GetProperty("video");
         var audio = root.GetProperty("audio");
         var format = root.GetProperty("format");
@@ -86,8 +85,8 @@ public sealed class ObsOutputRecordingTests
         var (verdict, _) = ObsRecorderHarnessDriver.Run(file, durationSeconds: 0.5);
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
 
-        var probe = ProbeMedia(file);
-        var root = probe!.RootElement;
+        using var probe = ProbeMediaScript.Run(file);
+        var root = probe.RootElement;
         var audio = root.GetProperty("audio");
         Assert.Equal(1, root.GetProperty("audio_track_count").GetInt32());
         Assert.Equal("aac", audio[0].GetProperty("codec_name").GetString());
@@ -115,8 +114,8 @@ public sealed class ObsOutputRecordingTests
         var (verdict, _) = ObsRecorderHarnessDriver.Run(file, durationSeconds: 0.5);
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
 
-        var probe = ProbeMedia(file);
-        var video = probe!.RootElement.GetProperty("video");
+        using var probe = ProbeMediaScript.Run(file);
+        var video = probe.RootElement.GetProperty("video");
         foreach (var field in new[] { "color_transfer", "color_primaries", "color_space", "color_range" })
         {
             var value = video.GetProperty(field).GetString();
@@ -190,9 +189,9 @@ public sealed class ObsOutputRecordingTests
             .FirstOrDefault(line => line.StartsWith("RESULT:", StringComparison.Ordinal));
         Assert.NotNull(resultLine);
 
-        var probe = ProbeMedia(file);
-        Assert.True(probe is null || IsUnparseable(probe),
-            "The killed recording was expected to be unparseable, but probe-media.sh parsed it.");
+        using var probe = ProbeMediaScript.Run(file);
+        Assert.True(IsUnparseable(probe),
+            "The killed recording was expected to be unparseable, but ffprobe read it as a playable MP4.");
 
         Cleanup(directory);
     }
@@ -257,40 +256,6 @@ public sealed class ObsOutputRecordingTests
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         while (stopwatch.Elapsed < TimeSpan.FromSeconds(seconds))
             Thread.Sleep(5);
-    }
-
-    // Runs the differential probe against a recording. Returns null when the probe could not
-    // be found or produced no parseable output — which is itself the interesting answer for the
-    // killed-helper test, where "no parseable output" is the expected shape.
-    private static JsonDocument? ProbeMedia(string file)
-    {
-        var script = "/home/squeed/Projects/reference-product-separation/scripts/probe-media.sh";
-        if (!File.Exists(script))
-            return null;
-
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = script,
-            ArgumentList = { file },
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
-        };
-
-        using var process = System.Diagnostics.Process.Start(startInfo);
-        if (process is null)
-            return null;
-
-        var stdout = process.StandardOutput.ReadToEnd();
-        process.WaitForExit(TimeSpan.FromSeconds(30));
-
-        try
-        {
-            return JsonDocument.Parse(stdout);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private static void Cleanup(string directory)

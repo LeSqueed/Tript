@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-using System.Diagnostics;
+using Tript.App;
 
 namespace Tript.Obs.IntegrationTests;
 
@@ -16,75 +16,35 @@ internal static class ObsMuxerHelper
     // extension-less translation applies.
     internal const string HelperFileName = "obs-ffmpeg-mux";
 
-    // The directories, resolved, in which the plugin's os_get_executable_path_ptr will look for the
-    // helper once a recording starts. Any one of them containing a runnable helper satisfies it.
-    internal static IReadOnlyList<string> CandidateDirectories()
+    // Asks the app's own resolver rather than restating where the helper lives. OBS ships it as a
+    // private plugin helper, not on PATH — on Debian one level deeper still, under
+    // obs-plugins/obs-ffmpeg — and a second copy of that list is what reported "could not be
+    // deployed" on a machine that had the helper installed all along.
+    internal static string? SystemHelperPath() =>
+        MuxerHelper.ResolveSystemHelper(ObsRuntimeLocator.Discover().ModuleBinaryDir);
+
+    // Puts the helper in one named directory — the harness's. Guessing at candidate directories is
+    // how a copy landed beside the *test* process (~/.dotnet) and satisfied nothing.
+    internal static bool TryDeploy(string directory)
     {
-        var directories = new List<string>();
-
-        var processDirectory = Path.GetDirectoryName(Environment.ProcessPath);
-        if (processDirectory is not null)
-            directories.Add(processDirectory);
-
-        var appContextDirectory = Path.GetDirectoryName(AppContext.BaseDirectory);
-        if (appContextDirectory is not null && !directories.Contains(appContextDirectory, StringComparer.Ordinal))
-            directories.Add(appContextDirectory);
-
-        var assemblyDirectory = Path.GetDirectoryName(typeof(ObsMuxerHelper).Assembly.Location);
-        if (assemblyDirectory is not null && !directories.Contains(assemblyDirectory, StringComparer.Ordinal))
-            directories.Add(assemblyDirectory);
-
-        return directories;
-    }
-
-    internal static bool IsSatisfied()
-    {
-        foreach (var directory in CandidateDirectories())
-        {
-            var candidate = Path.Combine(directory, HelperFileName);
-            if (File.Exists(candidate))
-                return true;
-        }
-
-        return false;
-    }
-
-    // The directories to search for a system install of the helper, best-effort. Not asserting on
-    // their existence: they are where OBS installs on a Linux distro, and the machine this suite
-    // runs on happens to have it at /usr/bin.
-    internal static IReadOnlyList<string> SystemInstallDirectories() =>
-        ["/usr/bin", "/usr/local/bin"];
-
-    internal static bool TryDeploy()
-    {
-        if (IsSatisfied())
+        var target = Path.Combine(directory, HelperFileName);
+        if (File.Exists(target))
             return true;
 
-        string? systemHelper = SystemInstallDirectories()
-            .Select(directory => Path.Combine(directory, HelperFileName))
-            .FirstOrDefault(File.Exists);
-
+        var systemHelper = SystemHelperPath();
         if (systemHelper is null)
             return false;
 
-        foreach (var directory in CandidateDirectories())
+        try
         {
-            var target = Path.Combine(directory, HelperFileName);
-            if (File.Exists(target))
-                continue;
-
-            try
-            {
-                File.Copy(systemHelper, target, overwrite: true);
-                return true;
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // A read-only output directory is not a recording failure yet — the next candidate
-                // may work, and if none does the plugin itself will report the missing helper.
-            }
+            File.Copy(systemHelper, target, overwrite: true);
+            return true;
         }
-
-        return false;
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A read-only output directory is not a recording failure yet — the plugin itself will
+            // report the missing helper when the output starts.
+            return false;
+        }
     }
 }

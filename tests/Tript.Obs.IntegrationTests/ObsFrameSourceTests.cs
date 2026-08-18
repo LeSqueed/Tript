@@ -138,18 +138,22 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     [Fact]
     public void TheFrameRateDivisor_DeliversEveryNthFrame()
     {
-        // Subscribing with divisor 3, then counting deliveries and the composited frames over the
-        // same wall window. The mix runs at the reset rate (60fps default); the
-        // delivered/composited ratio must sit near 1/3.
-        using var probe = new DivisorProbe(10);
-        using var subscription = FrameSourceRegistry.Current.Subscribe(
-            FramePixelFormat.Bgra, 320, 180, probe.OnFrame, frameRateDivisor: 3);
+        // Two subscriptions over the same window: one at divisor 1, which sees every frame the mix
+        // composites, and one at divisor 3. Counting the composited frames rather than inferring
+        // them from wall clock x 60 is what keeps this honest on a machine that misses its rate.
+        using var composited = new DivisorProbe(int.MaxValue);
+        using var everyThird = new DivisorProbe(20);
+        using var compositedSubscription = FrameSourceRegistry.Current.Subscribe(
+            FramePixelFormat.Bgra, 320, 180, composited.OnFrame, frameRateDivisor: 1);
+        using var everyThirdSubscription = FrameSourceRegistry.Current.Subscribe(
+            FramePixelFormat.Bgra, 320, 180, everyThird.OnFrame, frameRateDivisor: 3);
 
-        Assert.True(probe.Gate.Wait(TimeSpan.FromSeconds(5)), "No frames delivered at divisor 3 within 5 seconds.");
+        Assert.True(everyThird.Gate.Wait(TimeSpan.FromSeconds(10)),
+            "No frames delivered at divisor 3 within 10 seconds.");
 
-        var elapsed = probe.Stopwatch.Elapsed.TotalSeconds;
-        var composited = Math.Max(1.0, elapsed * 60);
-        var ratio = probe.Delivered / composited;
+        var delivered = everyThird.Delivered;
+        var total = composited.Delivered;
+        var ratio = delivered / (double)Math.Max(1, total);
 
         Assert.InRange(ratio, 1.0 / 4.0, 1.0 / 2.5);
     }
@@ -268,7 +272,6 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
 
     private sealed class DivisorProbe : ProbeBase
     {
-        internal Stopwatch Stopwatch { get; } = Stopwatch.StartNew();
         internal int Delivered => _delivered;
 
         private readonly int _target;

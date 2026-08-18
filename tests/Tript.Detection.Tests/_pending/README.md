@@ -12,7 +12,7 @@ already specified and must not lose:
 | `DetectorTeardownOnGameSwitchTests.cs` | Teardown when the active game changes |
 | `ModelIdResolutionTests.cs` | Resolving a model from the detected game |
 | `ExclusionSuppressionTests.cs` | Per-game exclusion rules |
-| `ModelPathCasingTests.cs` | Case handling in model path resolution |
+| `ModelPathCasingTests.cs` | Resolving a model id from a display name — the rest of this file's tests now run in `../ModelPathCasingTests.cs` |
 
 When the integration subsystem lands, re-enable these against it — do not rewrite them from scratch.
 Their assertions are the record of what that subsystem owes the detector.

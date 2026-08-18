@@ -1,0 +1,46 @@
+# The gate that `make test` is: the .NET unit suites plus the frontend, on every push and PR.
+#
+# The OBS integration suite is deliberately not here. It needs OBS >= 30.1, a display server and the
+# obs-ffmpeg-mux helper, and on a runner without them it fails for reasons unrelated to the change
+# under test — which is how a red gate stops being read. `make test-integration` runs it locally.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The detection models live in Git LFS. Without them Tript.Detection.Tests fails outright
+          # rather than skipping — deliberately, since those tests pin the tensor layout.
+          lfs: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Tript.Web/package-lock.json
+
+      # ffprobe backs the library's duration and thumbnail paths; Tript.Media.Tests drives the real
+      # binaries rather than a fake, so they have to be present.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install frontend dependencies
+        working-directory: src/Tript.Web
+        run: npm ci
+
+      - name: Build
+        run: dotnet build Tript.slnx -c Release --nologo
+
+      - name: Test
+        run: make test CONFIG=Release

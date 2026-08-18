@@ -20,6 +20,10 @@ public sealed class ProcessNameGameDetector : IGameDetector
     private Timer? _timer;
     private bool _disposed;
 
+    // System.Threading.Timer does not suppress re-entry, and a subscriber can block for seconds.
+    // A tick that lands while the previous one is still running is dropped rather than queued.
+    private int _ticking;
+
     public ProcessNameGameDetector(IEnumerable<string> gameNames, TimeSpan? pollInterval = null)
     {
         ArgumentNullException.ThrowIfNull(gameNames);
@@ -60,6 +64,21 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
     private void OnTick(object? state)
     {
+        if (Interlocked.CompareExchange(ref _ticking, 1, 0) != 0)
+            return;
+
+        try
+        {
+            Poll();
+        }
+        finally
+        {
+            Volatile.Write(ref _ticking, 0);
+        }
+    }
+
+    private void Poll()
+    {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -67,7 +86,10 @@ public sealed class ProcessNameGameDetector : IGameDetector
         {
             foreach (var process in Process.GetProcesses())
             {
-                names.Add(Normalize(process.ProcessName));
+                // Each Process wraps an OS handle on Windows; a poll every few seconds that keeps
+                // them all is a handle leak until the finalizers run.
+                using (process)
+                    names.Add(Normalize(process.ProcessName));
             }
         }
         catch
@@ -83,23 +105,32 @@ public sealed class ProcessNameGameDetector : IGameDetector
                 seen.Add(game);
         }
 
+        // The transitions are decided under the lock and raised outside it. A subscriber can block
+        // for seconds (stopping a recording does), and holding _gate across that blocks Dispose and
+        // every other tick behind it.
+        List<string> started;
+        int stopped;
         lock (_gate)
         {
             if (_disposed)
                 return;
 
-            foreach (var game in seen.Except(_running))
-            {
-                _running.Add(game);
-                GameStarted?.Invoke(game);
-            }
+            started = seen.Except(_running).ToList();
+            var gone = _running.Except(seen).ToArray();
+            stopped = gone.Length;
 
-            foreach (var gone in _running.Except(seen).ToArray())
-            {
-                _running.Remove(gone);
-                GameStopped?.Invoke();
-            }
+            foreach (var game in started)
+                _running.Add(game);
+
+            foreach (var game in gone)
+                _running.Remove(game);
         }
+
+        foreach (var game in started)
+            GameStarted?.Invoke(game);
+
+        for (var i = 0; i < stopped; i++)
+            GameStopped?.Invoke();
     }
 
     // The executable-name vocabulary the catalogue carries uses extensions; the process list does

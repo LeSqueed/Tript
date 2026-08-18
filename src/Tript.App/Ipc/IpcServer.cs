@@ -116,7 +116,7 @@ internal sealed class IpcServer : IDisposable
 
     internal void Dispatch(ClientConnection client, string method, JsonElement? parameters)
     {
-        Console.Error.WriteLine($"Tript.App.Ipc: dispatching {method}");
+        Console.Error.WriteLine($"Tript.App.Ipc: dispatching {Loggable(method)}");
         try
         {
             var handle = new ClientHandle((message, content) => client.Send(Serialize(message, content)));
@@ -124,8 +124,35 @@ internal sealed class IpcServer : IDisposable
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App.Ipc: command {method} failed: {exception.Message}");
+            Console.Error.WriteLine($"Tript.App.Ipc: command {Loggable(method)} failed: {exception.Message}");
+
+            // A command that threw produced no frame of its own, so without this the client is left
+            // waiting on a reply that never comes and the user sees nothing happen at all. Several
+            // commands can throw on input the wire allows, and stderr is not somewhere a user looks.
+            TrySendError(client, $"That action could not be completed ({exception.Message}).");
         }
+    }
+
+    private void TrySendError(ClientConnection client, string message)
+    {
+        try
+        {
+            client.Send(Serialize("error", JsonSerializer.SerializeToElement(new { message }, Wire.Options)));
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or WebSocketException
+                                             or InvalidOperationException)
+        {
+            // The client that sent the command has gone. Nothing left to tell.
+        }
+    }
+
+    // A method name off the wire, bounded and stripped of anything that could forge a line in the
+    // log. It is attacker-influenced and reached on every frame.
+    private static string Loggable(string method)
+    {
+        var trimmed = method.Length <= 64 ? method : method[..64];
+        return new string(Array.ConvertAll(trimmed.ToCharArray(),
+            c => char.IsControl(c) ? '?' : c));
     }
 
     // ---- broadcast ----

@@ -169,6 +169,70 @@ public sealed class AudioRoutingServiceTests
         Assert.Equal(sink.Activated.Count, sink.Deactivated.Count);
     }
 
+    // Every capture source the sink created is the routing's to release. Leaving them to a
+    // finalizer is what fills the OBS context with live handles at the moment it is shut down.
+    [Fact]
+    public void DisposingTheRouting_DisposesEveryCreatedSourceAndEncoder()
+    {
+        var sink = new FakeSink();
+        var service = new AudioRoutingService(sink);
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f },
+                new AudioSource { Name = "Discord", Kind = AudioSourceKind.Output, Volume = 0.5f },
+            } },
+            new() { Name = "Mic", Sources = { new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1.0f } } },
+        });
+
+        var routing = service.Wire(plan);
+        Assert.All(sink.CreatedSources, source => Assert.False(source.Disposed));
+
+        routing.Dispose();
+
+        Assert.All(sink.CreatedSources, source => Assert.True(source.Disposed));
+        Assert.All(sink.CreatedEncoders, entry => Assert.True(entry.Encoder.Disposed));
+    }
+
+    // A source must be deactivated before it is released, not after: DeactivateSource reaches into
+    // the source the sink created.
+    [Fact]
+    public void DisposingTheRouting_DeactivatesEachSourceBeforeReleasingIt()
+    {
+        var sink = new FakeSink();
+        var service = new AudioRoutingService(sink);
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f } } },
+        });
+
+        var routing = service.Wire(plan);
+        routing.Dispose();
+
+        Assert.All(sink.Deactivated, source => Assert.False(source.WasDisposedWhenDeactivated));
+    }
+
+    // Dispose runs on the recorder's stop path and on its failure path, and both can reach the same
+    // routing. A second pass must not deactivate a source that is already released.
+    [Fact]
+    public void DisposingTheRoutingTwice_ReleasesEverythingOnce()
+    {
+        var sink = new FakeSink();
+        var service = new AudioRoutingService(sink);
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f } } },
+        });
+
+        var routing = service.Wire(plan);
+        routing.Dispose();
+        routing.Dispose();
+
+        Assert.Single(sink.Deactivated);
+        Assert.All(sink.CreatedSources, source => Assert.Equal(1, source.DisposeCount));
+    }
+
     // ---- the fake sink ----
 
     private sealed class FakeSink : IAudioRoutingSink
@@ -202,7 +266,12 @@ public sealed class AudioRoutingServiceTests
 
         public void ActivateSource(IAudioRoutedSource source) => Activated.Add((FakeSource)source);
 
-        public void DeactivateSource(IAudioRoutedSource source) => Deactivated.Add((FakeSource)source);
+        public void DeactivateSource(IAudioRoutedSource source)
+        {
+            var fake = (FakeSource)source;
+            fake.WasDisposedWhenDeactivated = fake.Disposed;
+            Deactivated.Add(fake);
+        }
 
         public IAudioTrackEncoder CreateTrackEncoder(int mixerIndex, string name)
         {
@@ -215,15 +284,27 @@ public sealed class AudioRoutingServiceTests
             Assigned.Add(((FakeEncoder)encoder, outputSlot));
     }
 
-    private sealed class FakeSource(string name, string? deviceId) : IAudioRoutedSource
+    private sealed class FakeSource(string name, string? deviceId) : IAudioRoutedSource, IDisposable
     {
         internal string Name { get; } = name;
 
         internal string? DeviceId { get; } = deviceId;
+
+        internal int DisposeCount { get; private set; }
+
+        internal bool Disposed => DisposeCount > 0;
+
+        internal bool WasDisposedWhenDeactivated { get; set; }
+
+        public void Dispose() => DisposeCount++;
     }
 
-    private sealed class FakeEncoder(string name) : IAudioTrackEncoder
+    private sealed class FakeEncoder(string name) : IAudioTrackEncoder, IDisposable
     {
         internal string Name { get; } = name;
+
+        internal bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
     }
 }

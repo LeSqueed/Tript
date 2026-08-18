@@ -49,6 +49,40 @@ public class ProcessNameGameDetectorTests
         Assert.Empty(started);
     }
 
+    // The subscriber the app installs stops a recording, which blocks for seconds. Raising the
+    // events under the watcher's own lock puts Dispose — and every subsequent tick — behind that
+    // handler; the events have to be raised with the lock released.
+    [Fact]
+    public void Dispose_DoesNotBlockBehindASlowSubscriber()
+    {
+        var ownName = Path.GetFileNameWithoutExtension(Environment.ProcessPath!);
+        using var handlerEntered = new ManualResetEventSlim();
+        using var releaseHandler = new ManualResetEventSlim();
+
+        var detector = new ProcessNameGameDetector(new[] { ownName }, pollInterval: TimeSpan.FromMilliseconds(10));
+        detector.GameStarted += _ =>
+        {
+            handlerEntered.Set();
+            releaseHandler.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        try
+        {
+            detector.Start();
+            Assert.True(handlerEntered.Wait(TimeSpan.FromSeconds(5)), "the start handler never ran");
+
+            var started = Stopwatch.StartNew();
+            detector.Dispose();
+            started.Stop();
+
+            Assert.True(started.Elapsed < TimeSpan.FromSeconds(2), $"Dispose took {started.Elapsed}");
+        }
+        finally
+        {
+            releaseHandler.Set();
+        }
+    }
+
     [Fact]
     public void CatalogueEntries_AreMatchedCaseInsensitively_AndWithAndWithoutExtension()
     {

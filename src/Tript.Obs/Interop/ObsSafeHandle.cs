@@ -39,18 +39,25 @@ internal abstract class ObsContextHandle : ObsSafeHandle
     protected ObsContextHandle(nint handle, bool ownsHandle) : base(handle, ownsHandle) =>
         _generation = ObsRuntime.Generation;
 
-    // True once the context that created this handle has been shut down. Callers that would
-    // otherwise pass a stale pointer back into libobs should check it.
-    internal bool IsStale => ObsRuntime.Generation != _generation;
-
     protected abstract void Release(nint handle);
 
+    // The stale check and the release have to be one step from shutdown's point of view: checking
+    // and then releasing leaves a window for obs_shutdown to land between them. The runtime's
+    // in-flight gate is that step — shutdown stamps the generation and then drains it.
     protected sealed override bool ReleaseHandle()
     {
-        if (IsStale)
+        if (!ObsRuntime.TryEnterRelease(_generation))
             return true;
 
-        Release(handle);
+        try
+        {
+            Release(handle);
+        }
+        finally
+        {
+            ObsRuntime.ExitRelease();
+        }
+
         return true;
     }
 }

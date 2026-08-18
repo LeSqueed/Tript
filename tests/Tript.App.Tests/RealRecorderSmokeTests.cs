@@ -32,11 +32,11 @@ public sealed class RealRecorderSmokeTests : IDisposable
     {
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Real_recording_writes_an_mp4_and_the_content_server_serves_it()
     {
         if (!CanRunRealRecording(out var reason))
-            throw SkipException.ForSkip(reason);
+            throw new Xunit.SkipException(reason);
 
         // The app host symlinks the system obs-ffmpeg-mux beside its own binary at startup
         // (MuxerHelper.EnsureNextToApp), so no copy is needed here.

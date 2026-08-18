@@ -12,8 +12,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <!-- The real-recorder test uses xunit 2.9's Assert.Skip (a first-class skip) to opt out when
-         the machine cannot host a real recording. No extra skip package is needed. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+    <!-- Machine-dependent tests (a real recorder needs a display, the clip and thumbnail tests need
+         ffmpeg) opt out with a dynamic skip. xunit 2.x does NOT honour one: Xunit.Sdk.SkipException
+         compiles and throws the $XunitDynamicSkip$ token, but nothing in v2 translates it, so every
+         such test was reported as a FAILURE — which is how CI first went red on a runner with no
+         display. SkippableFact is what translates the token; the tests carry [SkippableFact] /
+         [SkippableTheory] and throw Xunit.SkipException. Assert.Skip is xunit v3 and is not
+         available here. -->
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.App\Tript.App.csproj" />

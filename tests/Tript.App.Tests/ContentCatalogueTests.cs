@@ -37,7 +37,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // ---- clip naming ----
 
-    [Fact]
+    [SkippableFact]
     public void BuildClipOutputPath_Combine_UsesSourceBaseNameAndClipId_UnderClipsDir()
     {
         var parameters = new CreateClipParameters
@@ -54,7 +54,7 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.StartsWith(_contentRoot + Path.DirectorySeparatorChar, path);
     }
 
-    [Fact]
+    [SkippableFact]
     public void BuildClipOutputPath_Separate_IsTheClipsDirectory()
     {
         var parameters = new CreateClipParameters
@@ -71,7 +71,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // ---- the store, directly ----
 
-    [Fact]
+    [SkippableFact]
     public void MetadataRecord_LandsInMetadataTree_NotNextToTheVideo()
     {
         var root = _contentRoot;
@@ -99,7 +99,7 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(12), bookmark.Time);
     }
 
-    [Fact]
+    [SkippableFact]
     public void MetadataStore_Delete_RemovesTheRecord()
     {
         var root = _contentRoot;
@@ -117,7 +117,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // A write failure (read-only media, disk full, permissions) must be reported to the caller:
     // Save/Delete return false instead of only logging to stderr, so a user bookmark or title
     // that failed to persist is never silently lost.
-    [Fact]
+    [SkippableFact]
     public void MetadataStore_SaveAndDelete_ReturnFalse_WhenTheWriteFails()
     {
         // The metadata root sits on a path whose parent is a regular file, so creating the
@@ -137,7 +137,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // ---- the catalogue, over the wire ----
 
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_ClassifiesSessionsAndClips_WithRelativePaths()
     {
         Directory.CreateDirectory(Path.Combine(_contentRoot, "sessions"));
@@ -169,7 +169,7 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_SessionWithMetadataShowsBookmarks_SessionWithoutShowsEmpty()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -225,7 +225,7 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task AddAndDeleteBookmark_RoundTripThroughTheMetadataStore()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -278,7 +278,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // A bookmark that cannot be persisted must reach the user: the host broadcasts an 'error'
     // message carrying a human-readable message, instead of silently dropping the bookmark.
-    [Fact]
+    [SkippableFact]
     public async Task AddBookmark_SaveFails_BroadcastsError()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -306,7 +306,7 @@ public sealed class ContentCatalogueTests : IDisposable
     }
 
     // A bookmark whose deletion could not be persisted must reach the user the same way.
-    [Fact]
+    [SkippableFact]
     public async Task DeleteBookmark_SaveFails_BroadcastsError()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -347,7 +347,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // A title that cannot be persisted must reach the user too — and the content list must not
     // be pushed as if the rename had succeeded (the old title stays on screen).
-    [Fact]
+    [SkippableFact]
     public async Task RenameContent_SaveFails_BroadcastsError_AndDoesNotPushContent()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -375,7 +375,7 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RenameContent_StoresTheTitleInMetadata()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -408,7 +408,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // The cascade-delete contract: deleting a session removes both the .mp4 and its metadata
     // record, and leaves no stray record behind.
-    [Fact]
+    [SkippableFact]
     public async Task DeleteContent_RemovesTheVideoAndItsMetadataRecord()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -444,7 +444,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // The cascade-delete contract also holds when the video file was removed out-of-band: a delete
     // for a missing .mp4 must still drop the metadata record, so no orphan record accumulates.
-    [Fact]
+    [SkippableFact]
     public async Task DeleteContent_RemovesTheMetadataRecord_WhenTheVideoIsAlreadyGone()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -479,7 +479,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // A clip's user title (from the clip dialog) is stored in its own record in the metadata/
     // tree, read back into the library list instead of the file-name-without-extension, and
     // cascade-deleted with the clip.
-    [Fact]
+    [SkippableFact]
     public async Task ClipTitle_RoundTripsThroughTheStore_AndDeletesWithTheClip()
     {
         var clips = Path.Combine(_contentRoot, "clips");
@@ -528,7 +528,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // a date, a length and a size. The game comes from the recording's metadata record; the size is
     // read while the directory is enumerated; the duration is the persisted one (no probe is needed
     // when the record already carries it, which is the point of persisting it).
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_ProjectsGameSizeAndDuration_FromTheMetadataRecord()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -573,7 +573,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // A clip has no metadata record of its own, so it inherits its game from the session it was cut
     // from — recognised by its file name, which both clip naming paths start with the source
     // session's base name.
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_ClipInheritsItsGame_FromTheSourceSessionName()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -613,7 +613,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // The frontend paginates over this list, so the order must be newest first and must be total —
     // two items with the same timestamp may not swap places between two pushes (List.Sort is
     // unstable, and the directory enumeration order is the file system's).
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_IsOrderedNewestFirst_Deterministically()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -656,11 +656,11 @@ public sealed class ContentCatalogueTests : IDisposable
     // The duration is read once per file and persisted, so it is not an ffprobe per item per push.
     // With a real (probeable) source the first list fills the record in; the value on the wire is the
     // container's duration.
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_ReadsTheDurationOnce_AndPersistsItOnTheRecord()
     {
         if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
-            throw SkipException.ForSkip(reason);
+            throw new Xunit.SkipException(reason);
 
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
@@ -696,7 +696,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // The three states a load can find. The read path collapses two of them into null (an item lists
     // either way, which is the point), so the store has to report them separately for the callers
     // that write back — that is the whole defence against a blank record replacing a good one.
-    [Fact]
+    [SkippableFact]
     public void MetadataStore_Read_TellsAnAbsentRecordFromAnUnreadableOne()
     {
         var metadataRoot = Path.Combine(_contentRoot, "metadata");
@@ -733,11 +733,11 @@ public sealed class ContentCatalogueTests : IDisposable
     // null, which the duration-persisting path read as "there is no record" — so it wrote a fresh
     // record holding a video path and a duration over a file that held the recording's game, title
     // and bookmarks. The file's bytes must survive a list untouched, and the video must still list.
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_LeavesAnUnreadableRecordUntouched_AndStillListsTheVideo()
     {
         if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
-            throw SkipException.ForSkip(reason);
+            throw new Xunit.SkipException(reason);
 
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
@@ -775,11 +775,11 @@ public sealed class ContentCatalogueTests : IDisposable
     // The regression test for the reported data loss: a record carrying a game, a user title and
     // bookmarks goes through a ListContent that fills in the duration, and comes out with all three
     // still in it.
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_PersistingADuration_KeepsTheGameTitleAndBookmarks()
     {
         if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
-            throw SkipException.ForSkip(reason);
+            throw new Xunit.SkipException(reason);
 
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
@@ -832,11 +832,11 @@ public sealed class ContentCatalogueTests : IDisposable
     // members, a content type by name, and a start time carrying a local offset. Every part of it
     // loads (the offset form is the same one the app itself writes), so the game reaches the wire and
     // the timestamp is not reset when the duration is filled in.
-    [Fact]
+    [SkippableFact]
     public async Task ListContent_HandWrittenRecordWithAnOffsetTimestamp_KeepsItsGameAndStartTime()
     {
         if (!TryLocateFfmpeg(out var ffmpeg, out var reason))
-            throw SkipException.ForSkip(reason);
+            throw new Xunit.SkipException(reason);
 
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
@@ -887,7 +887,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // durations into them. Measured on the plain File.WriteAllText this replaced: 115041 of 506391
     // concurrent reads (22.7%) threw JsonException, most often "The input does not contain any JSON
     // tokens" — the window where the file has been truncated and not yet rewritten.
-    [Fact]
+    [SkippableFact]
     public void MetadataStore_ARecordBeingRewritten_IsNeverReadHalfWritten()
     {
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
@@ -936,7 +936,7 @@ public sealed class ContentCatalogueTests : IDisposable
     // Unix rename(2) only needs a writable directory, so an atomic write silently gained the ability
     // to replace a record that the read-only bit exists to protect (DeleteBookmark_SaveFails_
     // BroadcastsError depends on this, and it hung when the save unexpectedly succeeded).
-    [Fact]
+    [SkippableFact]
     public void MetadataStore_AReadOnlyRecord_IsNotRewritten()
     {
         var metadataRoot = Path.Combine(_contentRoot, "metadata");
@@ -966,7 +966,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
     // The clip record carries the user's clip title, so it gets the same protection: a record that
     // cannot be read is not replaced by one holding just a duration.
-    [Fact]
+    [SkippableFact]
     public void ClipStore_LeavesAnUnreadableRecordUntouched_AndReportsTheFailure()
     {
         var metadataRoot = Path.Combine(_contentRoot, "metadata");
@@ -1035,7 +1035,7 @@ public sealed class ContentCatalogueTests : IDisposable
         var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();
         if (process.ExitCode != 0 || !File.Exists(path))
-            throw SkipException.ForSkip($"The test source could not be generated by ffmpeg: {stderr.Trim()}");
+            throw new Xunit.SkipException($"The test source could not be generated by ffmpeg: {stderr.Trim()}");
     }
 
     private static async Task WaitUntil(Func<bool> condition)

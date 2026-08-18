@@ -9,6 +9,12 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The production muxer lookup, compiled in rather than restated. MuxerHelper is internal to
+         Tript.App and this suite has no reference to it; a second copy of the list is what made the
+         recording tests report "could not be deployed" on a machine that had the helper all along. -->
+    <Compile Include="..\..\src\Tript.App\MuxerHelper.cs" Link="MuxerHelper.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.Obs\Tript.Obs.csproj" />
     <ProjectReference Include="..\..\src\Tript.RecorderHarness\Tript.RecorderHarness.csproj" />
   </ItemGroup>

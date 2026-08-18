@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-using System.Text.Json;
 using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
@@ -27,9 +26,8 @@ public sealed class ObsRoutingRoundTripTests
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
         Assert.Equal(0, exitCode);
 
-        var probe = ProbeMedia(file);
-        Assert.True(probe is not null, $"probe-media.sh produced no parseable output for {file}.");
-        var root = probe!.RootElement;
+        using var probe = ProbeMediaScript.Run(file);
+        var root = probe.RootElement;
 
         // The file carries one audio stream per track the routing was given.
         var audio = root.GetProperty("audio");
@@ -57,9 +55,8 @@ public sealed class ObsRoutingRoundTripTests
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
         Assert.Equal(0, exitCode);
 
-        var probe = ProbeMedia(file);
-        Assert.True(probe is not null, $"probe-media.sh produced no parseable output for {file}.");
-        var root = probe!.RootElement;
+        using var probe = ProbeMediaScript.Run(file);
+        var root = probe.RootElement;
         Assert.Equal(trackCount, root.GetProperty("audio_track_count").GetInt32());
 
         Cleanup(directory);
@@ -70,39 +67,6 @@ public sealed class ObsRoutingRoundTripTests
         var directory = Path.Combine(Path.GetTempPath(), $"tript-routing-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         return directory;
-    }
-
-    // Runs the differential probe against a recording. Returns null when the probe could not
-    // be found or produced no parseable output.
-    private static JsonDocument? ProbeMedia(string file)
-    {
-        var script = "/home/squeed/Projects/reference-product-separation/scripts/probe-media.sh";
-        if (!File.Exists(script))
-            return null;
-
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = script,
-            ArgumentList = { file },
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
-        };
-
-        using var process = System.Diagnostics.Process.Start(startInfo);
-        if (process is null)
-            return null;
-
-        var stdout = process.StandardOutput.ReadToEnd();
-        process.WaitForExit(TimeSpan.FromSeconds(30));
-
-        try
-        {
-            return JsonDocument.Parse(stdout);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private static void Cleanup(string directory)

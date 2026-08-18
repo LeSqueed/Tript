@@ -130,7 +130,10 @@ internal static class Program
             return 7;
         }
 
-        foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source" })
+        // The recorder path builds an Output audio track, which the routing turns into a pulse
+        // capture source, so linux-pulseaudio has to be loaded here too — the multi-track path below
+        // already says so, and omitting it here made the recorder refuse the start.
+        foreach (var module in new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" })
             runtime.AddSafeModule(module);
 
         ApplyDiscoveredModulePaths(runtime);

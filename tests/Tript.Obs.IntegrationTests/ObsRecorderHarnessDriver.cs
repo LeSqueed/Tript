@@ -25,21 +25,13 @@ internal sealed class ObsRecorderHarnessDriver
     {
         Success,
         EncodeError,
-        Failed,
-        NotReported
+        Failed
     }
 
     // Ensures the helper sits next to the harness binary. The harness is built into the same output
     // directory as the test assembly, and the helper is copied there when the build layout does not
     // already satisfy the plugin — see ObsMuxerHelper.
-    internal static bool EnsureHelperPresent()
-    {
-        var target = Path.Combine(HarnessDirectory, HelperFileName);
-        if (File.Exists(target))
-            return true;
-
-        return ObsMuxerHelper.TryDeploy();
-    }
+    internal static bool EnsureHelperPresent() => ObsMuxerHelper.TryDeploy(HarnessDirectory);
 
     internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds) =>
         RunCore(outputPath, durationSeconds, multiTrackCount: null, useRecorder: false);
@@ -91,19 +83,21 @@ internal sealed class ObsRecorderHarnessDriver
         if (!process.WaitForExit(TimeSpan.FromSeconds(60)))
             throw new TimeoutException("The recorder harness did not exit in time.");
 
+        // The harness prints a RESULT line for every outcome it recognises, so a missing one means
+        // it bailed out earlier — and its own reason on stderr is the only useful thing to report.
         var resultLine = stdout.Result
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault(line => line.StartsWith("RESULT:", StringComparison.Ordinal));
+            .FirstOrDefault(line => line.StartsWith("RESULT:", StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"The harness exited {process.ExitCode} without a RESULT line: {stderr.Result.Trim()}");
 
-        var verdict = Parse(resultLine);
-        return (verdict, process.ExitCode);
+        return (Parse(resultLine), process.ExitCode);
     }
 
-    private static Verdict Parse(string? line) => line switch
+    private static Verdict Parse(string line) => line switch
     {
         "RESULT:SUCCESS" => Verdict.Success,
         "RESULT:ENCODE_ERROR" => Verdict.EncodeError,
-        null => Verdict.NotReported,
         _ => Verdict.Failed
     };
 

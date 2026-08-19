@@ -261,6 +261,7 @@ export interface ClipSegment {
 
 export interface DeleteContentParameters {
   contentType: ContentType;
+  /** The video's path RELATIVE to the content root (e.g. `sessions/session-1.mp4`), not the bare file name. */
   fileName: string;
   /** Omitted/false moves the item to the trash; true unlinks it immediately. */
   permanent?: boolean;

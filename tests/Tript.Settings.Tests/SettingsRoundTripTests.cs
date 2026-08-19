@@ -336,7 +336,26 @@ public class SettingsRoundTripTests : IDisposable
             {
                 while (!stop.IsSet)
                 {
-                    var text = File.Exists(path) ? File.ReadAllText(path) : "{}";
+                    // Read the way SettingsFileProvider reads (ReadWrite|Delete sharing): a plain
+                    // ReadAllText holds the file without delete sharing and blocks the writer's
+                    // replace-rename on Windows, which is a writer failure, not a reader failure.
+                    string text = "{}";
+                    if (File.Exists(path))
+                    {
+                        try
+                        {
+                            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                                FileShare.ReadWrite | FileShare.Delete);
+                            using var reader = new StreamReader(stream);
+                            text = reader.ReadToEnd();
+                        }
+                        catch (Exception ex) when (ex is IOException or FileNotFoundException or UnauthorizedAccessException)
+                        {
+                            // Lost the race against a rename mid-flight; the next loop turn reads
+                            // the renamed-in file, which is the state the test is trying to pin.
+                        }
+                    }
+
                     if (string.IsNullOrWhiteSpace(text))
                         Interlocked.Increment(ref blank);
                 }

@@ -364,7 +364,8 @@ describe('LibraryView delete and selection', () => {
     fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
 
     expect(sent).toEqual([
-      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clip-1.mp4' } },
+      // `fileName` is the root-relative path from the item's `filePath`, never the bare file name.
+      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clips/clip-1.mp4' } },
     ]);
   });
 
@@ -377,7 +378,7 @@ describe('LibraryView delete and selection', () => {
     expect(sent).toEqual([
       {
         method: 'DeleteContent',
-        parameters: { contentType: 'recording', fileName: 'cs2.mp4', permanent: true },
+        parameters: { contentType: 'recording', fileName: 'sessions/cs2.mp4', permanent: true },
       },
     ]);
   });
@@ -427,8 +428,8 @@ describe('LibraryView delete and selection', () => {
         method: 'DeleteMultipleContent',
         parameters: {
           items: [
-            { contentType: 'recording', fileName: 'cs2.mp4' },
-            { contentType: 'clip', fileName: 'clip-1.mp4' },
+            { contentType: 'recording', fileName: 'sessions/cs2.mp4' },
+            { contentType: 'clip', fileName: 'clips/clip-1.mp4' },
           ],
         },
       },
@@ -470,7 +471,7 @@ describe('LibraryView delete and selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
     fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
     expect(sent).toEqual([
-      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clip-1.mp4' } },
+      { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clips/clip-1.mp4' } },
     ]);
   });
 });

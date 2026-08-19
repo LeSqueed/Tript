@@ -13,6 +13,13 @@ namespace Tript.Settings;
 // because a blank file reads as "no settings" and loads defaults.
 public static class AtomicFile
 {
+    // Bounded so a reader that never lets go surfaces rather than hanging the write: the product of
+    // the two is the ceiling a caller can wait.
+    private const int RenameRetryAttempts = 50;
+    private static readonly TimeSpan RenameRetryDelay = TimeSpan.FromMilliseconds(20);
+    internal static readonly TimeSpan RenameRetryWindow =
+        TimeSpan.FromMilliseconds(RenameRetryAttempts * RenameRetryDelay.TotalMilliseconds);
+
     public static void WriteAllText(string path, string contents)
     {
         // A rename does not consult the destination's own permissions — rename(2) needs a writable
@@ -28,7 +35,28 @@ public static class AtomicFile
         File.WriteAllText(temporary, contents);
         try
         {
-            File.Move(temporary, path, overwrite: true);
+            // A replace-rename needs delete access on the target while it is in place. On Linux the
+            // rename succeeds no matter what handles exist; on Windows it is refused for as long as
+            // even one reader holds the file open. Which exception surfaces depends on how that
+            // reader opened it: a sharing violation arrives as IOException, an access denial as
+            // UnauthorizedAccessException, so both have to be caught. Readers are transient, so a
+            // bounded retry lands in a gap between their opens instead of surfacing it to the
+            // caller. The cost is that a genuinely fatal IOException (a full disk) takes the whole
+            // RenameRetryWindow to report.
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    File.Move(temporary, path, overwrite: true);
+                    break;
+                }
+                catch (Exception exception)
+                    when (exception is IOException or UnauthorizedAccessException
+                          && attempt < RenameRetryAttempts)
+                {
+                    Thread.Sleep(RenameRetryDelay);
+                }
+            }
         }
         catch
         {

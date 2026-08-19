@@ -135,9 +135,9 @@ public sealed class RealRecorderSmokeTests : IDisposable
         AppHostDriver host, string path, string range)
     {
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", 2222);
+        await client.ConnectAsync("localhost", LocalPorts.Content);
         await using var stream = client.GetStream();
-        var request = $"GET {host.WithToken($"/api/content/{path}")} HTTP/1.1\r\nHost: localhost:2222\r\nRange: {range}\r\nConnection: close\r\n\r\n";
+        var request = $"GET {host.WithToken($"/api/content/{path}")} HTTP/1.1\r\nHost: localhost:{LocalPorts.Content}\r\nRange: {range}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
 
         using var ms = new MemoryStream();

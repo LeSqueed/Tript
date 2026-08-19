@@ -184,7 +184,7 @@ public sealed class ThumbnailRouteTests : IDisposable
     private readonly AppHostCollectionFixture _fixture;
     private readonly string _contentRoot;
     private readonly string _settingsPath;
-    private const string Base = "http://localhost:2222";
+    private static readonly string Base = $"http://localhost:{LocalPorts.Content}";
 
     public ThumbnailRouteTests(AppHostCollectionFixture fixture)
     {
@@ -344,9 +344,9 @@ public sealed class ThumbnailRouteTests : IDisposable
     {
         rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", 2222);
+        await client.ConnectAsync("localhost", LocalPorts.Content);
         await using var stream = client.GetStream();
-        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:2222\r\nConnection: close\r\n\r\n";
+        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{LocalPorts.Content}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
 
         using var buffered = new MemoryStream();

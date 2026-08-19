@@ -48,9 +48,12 @@ public class RecordingLocationsTests : IDisposable
     }
 
     // On Linux the XDG videos directory is honoured when the desktop sets it.
-    [Fact]
+    [SkippableFact]
     public void DefaultDirectory_HonoursXdgVideosDir()
     {
+        if (OperatingSystem.IsWindows())
+            throw new Xunit.SkipException("XDG_VIDEOS_DIR is honoured on Linux only");
+
         var xdg = Path.Combine(Path.GetTempPath(), "tript-test-xdg-videos");
         Environment.SetEnvironmentVariable("XDG_VIDEOS_DIR", xdg);
         try

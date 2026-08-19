@@ -126,7 +126,10 @@ internal static class WebviewAudioSink
 
         return directories
             .Distinct(StringComparer.Ordinal)
-            .Select(directory => Path.Combine(directory, PluginLibrary))
+            // Joined with '/' rather than Path.Combine: every directory here is a Unix path (GLib's
+            // search path, the system layouts) and the list is only ever consulted on Unix, so the
+            // platform separator would introduce a backslash where the probe expects none.
+            .Select(directory => directory.TrimEnd('/') + "/" + PluginLibrary)
             .ToList();
     }
 

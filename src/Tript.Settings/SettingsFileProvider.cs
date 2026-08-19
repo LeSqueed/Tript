@@ -21,7 +21,23 @@ public sealed class SettingsFileProvider
         if (!File.Exists(FilePath))
             return null;
 
-        var text = File.ReadAllText(FilePath);
+        // Open with ReadWrite|Delete sharing, the same way RecordingMetadataStore reads: a plain
+        // ReadAllText (FileShare.Read) cannot be open while AtomicFile's replace-rename needs the
+        // target's delete access, and on Windows the writer then fails with an access denial.
+        // Linux has no sharing model, so this changes nothing there.
+        string text;
+        try
+        {
+            using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            text = reader.ReadToEnd();
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 

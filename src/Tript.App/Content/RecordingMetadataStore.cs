@@ -43,7 +43,20 @@ internal sealed class RecordingMetadataStore
 
         try
         {
-            var record = JsonSerializer.Deserialize<RecordingMetadata>(File.ReadAllText(path),
+            // File.ReadAllText opens with FileShare.Read, which cannot tolerate a concurrent
+            // AtomicFile rename on Windows: the move briefly locks the destination path, and a read
+            // that opens in that window fails with a sharing violation — a torn read even though the
+            // write is atomic. Opening with delete/write sharing lets the read coexist with the
+            // rename: it sees the old or the new complete file, never a half-written one.
+            string json;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream))
+            {
+                json = reader.ReadToEnd();
+            }
+
+            var record = JsonSerializer.Deserialize<RecordingMetadata>(json,
                 SettingsSerialization.Options);
             // A file holding the literal "null" parses to no record at all. There is nothing to
             // preserve in it, but there is a file, so it counts as present-and-unreadable rather

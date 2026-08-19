@@ -90,14 +90,14 @@ internal static class MediaTestFixture
         var args = new List<string>
         {
             "-hide_banner", "-y",
-            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds:R}:size=320x240:rate=30",
+            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds.ToString(CultureInfo.InvariantCulture)}:size=320x240:rate=30",
         };
 
         for (var t = 0; t < audioTracks; t++)
         {
             var freq = 1000 + t * 500;
             args.Add("-f"); args.Add("lavfi");
-            args.Add("-i"); args.Add($"sine=frequency={freq}:duration={durationSeconds:R}:sample_rate=48000");
+            args.Add("-i"); args.Add($"sine=frequency={freq}:duration={durationSeconds.ToString(CultureInfo.InvariantCulture)}:sample_rate=48000");
         }
 
         args.Add("-map"); args.Add("0:v");
@@ -129,7 +129,7 @@ internal static class MediaTestFixture
         var args = new List<string>
         {
             "-hide_banner", "-y",
-            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds:R}:size=320x240:rate=30",
+            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds.ToString(CultureInfo.InvariantCulture)}:size=320x240:rate=30",
             "-c:v", "libx264", "-qp", "0", "-g", "30", "-keyint_min", "30",
             path,
         };
@@ -147,7 +147,7 @@ internal static class MediaTestFixture
         var args = new List<string>
         {
             "-hide_banner", "-y",
-            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds:R}:size=640x360:rate=30",
+            "-f", "lavfi", "-i", $"testsrc2=duration={durationSeconds.ToString(CultureInfo.InvariantCulture)}:size=640x360:rate=30",
             "-pix_fmt", "yuv420p10le",
             "-c:v", "libx265",
             "-profile:v", "main10",

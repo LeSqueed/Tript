@@ -53,7 +53,10 @@ describe('serializeCommand', () => {
   it('uses camelCase field names — a wrong-cased field is absent, so serialisation is the guard', () => {
     // The reference contract mixed `OutputMode` with `fileName`. Our convention is camelCase for
     // parameters, so a command built with PascalCase keys must not leak them onto the wire.
-    const wire = serializeCommand('DeleteContent', { contentType: 'recording', fileName: 'a.mp4' });
+    const wire = serializeCommand('DeleteContent', {
+      contentType: 'recording',
+      fileName: 'sessions/a.mp4',
+    });
     const parsed = JSON.parse(wire) as Record<string, unknown>;
     const params = parsed.parameters as Record<string, unknown>;
     expect(params).toHaveProperty('contentType');

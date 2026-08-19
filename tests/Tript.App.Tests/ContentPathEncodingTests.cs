@@ -30,13 +30,19 @@ public sealed class ContentPathEncodingTests
         _settingsPath = fixture.NewSettingsPath(nameof(ContentPathEncodingTests));
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("my clip.mp4", "my%20clip.mp4")]
     [InlineData("my#clip.mp4", "my%23clip.mp4")]
     [InlineData("what?.mp4", "what%3F.mp4")]
     [InlineData("100% real.mp4", "100%25%20real.mp4")]
     public async Task AnEscapedFileName_IsServed(string fileName, string escaped)
     {
+        // A file name Windows forbids (e.g. a '?') cannot be created here, so there is nothing to
+        // serve — the case is meaningless off-Unix. On Linux GetInvalidFileNameChars() is only
+        // {'\0','/'}, so every case still runs on CI.
+        if (fileName.Any(c => Path.GetInvalidFileNameChars().Contains(c)))
+            throw new Xunit.SkipException("the file name is not representable on this platform");
+
         const string payload = "0123456789";
         Write($"sessions/{fileName}", payload);
 

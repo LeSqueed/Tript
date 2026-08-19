@@ -476,6 +476,47 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    // The exact payload the frontend sends: `fileName` is the item's root-relative path — including
+    // the nested date directory the recorder lays out — so the video itself is moved, its records
+    // follow, and the item leaves the next `content` push instead of surviving on the grid.
+    [SkippableFact]
+    public async Task DeleteContent_WithTheFrontendRootRelativePath_MovesTheVideo_DropsFromTheNextPush()
+    {
+        var nested = Path.Combine(_contentRoot, "sessions", "2026-08-01");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "session-1.mp4"), "session");
+
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/2026-08-01/session-1.mp4",
+            Game = "Overwatch",
+        });
+        var recordPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
+        Assert.True(File.Exists(recordPath));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync(
+            """{"method":"DeleteContent","parameters":{"fileName":"sessions/2026-08-01/session-1.mp4","contentType":"recording"}}""");
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("content", method);
+
+        Assert.False(File.Exists(Path.Combine(nested, "session-1.mp4")), "the video must leave the library");
+        Assert.False(File.Exists(recordPath), "the metadata record must be moved with its video");
+
+        var listed = new List<string>();
+        foreach (var element in content.GetProperty("content").EnumerateArray())
+            listed.Add(element.GetProperty("fileName").GetString() ?? string.Empty);
+        Assert.False(listed.Contains("session-1.mp4"),
+            "the deleted item must not be relisted on the content push that follows its delete");
+
+        await host.ShutdownAsync();
+    }
+
     // A clip's user title (from the clip dialog) is stored in its own record in the metadata/
     // tree, read back into the library list instead of the file-name-without-extension, and
     // cascade-deleted with the clip.

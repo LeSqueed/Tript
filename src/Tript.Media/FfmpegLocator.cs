@@ -6,20 +6,32 @@ using System.Runtime.InteropServices;
 
 namespace Tript.Media;
 
-// Finds the ffmpeg and ffprobe binaries the engine shells out to. The binaries are never bundled:
-// they are located on PATH and verified to exist and run, failing with a clear error when absent.
-// On the dev box they live at /usr/bin; on Windows they resolve the same way via PATH.
+// Finds the ffmpeg and ffprobe binaries the engine shells out to. Today they are a system
+// dependency on both platforms, resolved on PATH. A bundled copy is probed first so that shipping
+// one later is a build change alone — nothing is assembled into vendor/ffmpeg/ yet, so on every
+// current build this falls straight through to PATH. Either way the binaries are verified to exist
+// and run, failing with a clear error when absent.
 public sealed class FfmpegLocator
 {
+    // The layout a bundled ffmpeg would use: <app root>/vendor/ffmpeg/{ffmpeg,ffprobe}[.exe]. No
+    // build step populates it at present; it is probed so that adding one needs no code change.
+    private static readonly string VendorDirectory =
+        Path.Combine(AppContext.BaseDirectory, "vendor", "ffmpeg");
+
     // Overridable so tests can point at a fixture directory or a packaged runtime without touching
-    // the environment. Null means "search PATH".
+    // the environment. Null means "search the vendor directory, then PATH".
     public string? SearchDirectory { get; init; }
 
     public (string Ffmpeg, string Ffprobe) Locate()
     {
         var candidates = ResolveCandidates();
-        var ffmpeg = candidates.FirstOrDefault(c => c.Name == "ffmpeg");
-        var ffprobe = candidates.FirstOrDefault(c => c.Name == "ffprobe");
+        // Match on the name WITHOUT the platform extension: candidates are registered under
+        // whatever name they were searched for ("ffmpeg" on Unix, "ffmpeg.exe" on Windows), and a
+        // filter on the bare name silently matched nothing on Windows.
+        var ffmpeg = candidates.FirstOrDefault(c =>
+            Path.GetFileNameWithoutExtension(c.Name).Equals("ffmpeg", StringComparison.OrdinalIgnoreCase));
+        var ffprobe = candidates.FirstOrDefault(c =>
+            Path.GetFileNameWithoutExtension(c.Name).Equals("ffprobe", StringComparison.OrdinalIgnoreCase));
 
         if (ffmpeg is null)
             throw new FfmpegNotFoundException("ffmpeg was not found. Install ffmpeg and ensure it is on PATH.");
@@ -42,30 +54,35 @@ public sealed class FfmpegLocator
             ? new[] { "ffmpeg.exe", "ffprobe.exe" }
             : new[] { "ffmpeg", "ffprobe" };
 
-        var found = new List<Candidate>();
         if (SearchDirectory is not null)
         {
-            foreach (var name in names)
-            {
-                var path = Path.Combine(SearchDirectory, name);
-                if (File.Exists(path))
-                    found.Add(new Candidate(name, path));
-            }
-
-            return found;
+            return CollectDirectories(new[] { SearchDirectory }, names);
         }
 
+        // A vendored copy first, so that once one is bundled it is the exact build the app was
+        // assembled with and a stray older ffmpeg on PATH can never win. The directory is absent on
+        // every current build, so today this always falls through to PATH.
+        return CollectDirectories(new[] { VendorDirectory }, names)
+            .Concat(CollectDirectories(PathDirectories(), names))
+            .ToList();
+    }
+
+    private static IEnumerable<string> PathDirectories()
+    {
         // Walk PATH exactly the way a shell would: the first executable hit wins. PATH entries are
         // colon-separated on Unix, semicolon-separated on Windows.
         var pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
             .Split(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ';' : ':',
                 StringSplitOptions.RemoveEmptyEntries);
 
-        foreach (var entry in pathEntries)
-        {
-            var directory = entry.Trim('"');
-            if (directory.Length == 0) continue;
+        return pathEntries.Select(entry => entry.Trim('"')).Where(directory => directory.Length > 0);
+    }
 
+    private static List<Candidate> CollectDirectories(IEnumerable<string> directories, string[] names)
+    {
+        var found = new List<Candidate>();
+        foreach (var directory in directories)
+        {
             foreach (var name in names)
             {
                 var candidate = Path.Combine(directory, name);

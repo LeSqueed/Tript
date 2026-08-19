@@ -122,6 +122,8 @@ internal sealed class DeleteContentParameters
 {
     public string ContentType { get; set; } = "recording";
 
+    // The video's path RELATIVE to the content root (e.g. "sessions/session-1.mp4"), never the bare
+    // file name: it is resolved against the root, and a bare name would not find the file.
     public string FileName { get; set; } = string.Empty;
 
     // Omitted or false moves the item to the trash; true unlinks it there and then.

@@ -152,7 +152,7 @@ export function LibraryView({
     (permanent: boolean) => {
       const targets = pendingDelete ?? [];
       const parameters = targets.map(
-        (item): DeleteContentParameters => ({ contentType: item.contentType, fileName: item.fileName }),
+        (item): DeleteContentParameters => ({ contentType: item.contentType, fileName: item.filePath }),
       );
       // `permanent` is omitted rather than sent false — the contract reads omitted/false as "trash",
       // and the quieter frame is the one that cannot be misread.

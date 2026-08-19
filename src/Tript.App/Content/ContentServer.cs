@@ -289,7 +289,12 @@ internal sealed class ContentServer : IDisposable
         // below is bounded by it. A session still being recorded grows between the two, so a
         // snapshot length meant declaring one Content-Length and then writing more bytes than that
         // — a protocol violation the client sees as a corrupt or truncated video.
-        using var stream = File.OpenRead(resolved);
+        // Open with ReadWrite|Delete sharing: a recording that is actively being written holds the
+        // file open for write, and File.OpenRead (FileShare.Read) cannot open alongside it on
+        // Windows — a sharing violation, so a 500 for a session that is mid-record. Linux has no
+        // sharing model, so the open there was always fine and the mode still matches.
+        using var stream = new FileStream(resolved, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
         var length = stream.Length;
 
         context.Response.ContentType = "video/mp4";

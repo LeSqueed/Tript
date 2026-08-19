@@ -7,6 +7,9 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Dynamic skips (the XDG test is Linux-only): xunit 2.x does not translate a bare
+         SkipException without this — see the same note in Tript.App.Tests.csproj. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tript.Settings\Tript.Settings.csproj" />

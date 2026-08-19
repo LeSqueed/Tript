@@ -742,15 +742,17 @@ public sealed class ObsRecorderSession : IRecorderSession
         return plan;
     }
 
-    // What the capture is, when that is knowable without rendering. It is not knowable for a game:
-    // win-capture only hooks while the source is showing, the mix only renders while an output is
-    // live, and the output cannot exist until the canvas has been chosen — so asking a game capture
-    // here always gets the unhooked default. That cycle is why there is no wait here; a wait would
-    // only be a guess with a number on it.
+    // Nothing, deliberately, and measured rather than assumed: this libobs answers Srgb for a game
+    // capture that is demonstrably hooked to a game presenting an FP16 scRGB swap chain, with the
+    // full set of acceptable spaces offered, and answers Srgb for a monitor capture of a display
+    // running Rec.2100 PQ. Neither capture reports the colour space it actually carries, so there is
+    // no source signal to read — and returning the SDR they claim would override the display probe,
+    // which does work, and send every HDR recording to an SDR canvas.
     //
-    // A display capture has no such dependency and answers straight away, which is why it is the one
-    // source consulted. Everything else falls back to the display's own mode.
-    private ObsSourceColorSpace? CaptureColourSpace() => _displaySource?.ColorSpace;
+    // The plumbing above it stays because the signal is the right one in principle and costs nothing
+    // to keep: HdrPlanner takes the space, ObsSource.GetColorSpace asks for it properly. When a
+    // libobs reports it honestly this becomes one line.
+    private static ObsSourceColorSpace? CaptureColourSpace() => null;
 
     // Moves the canvas onto the plan's format and colour space, keeping every other dimension of the
     // mix as it was. A refused reset is not fatal: the canvas is still the SDR one that was working,

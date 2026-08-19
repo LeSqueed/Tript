@@ -187,12 +187,35 @@ public sealed class ObsSource : IDisposable
 
     public uint Height => ObsNative.obs_source_get_height(Pointer);
 
-    // What colour space this source's texture is in. For a game capture this is the game's own swap
-    // chain — Scrgb709 for an HDR game, Srgb for an SDR one — and it is the honest answer to "does
-    // this recording need an HDR canvas", which the monitor's mode only approximates. Meaningful
-    // once the source has attached; an unhooked game capture reports the default.
-    public ObsSourceColorSpace ColorSpace =>
-        (ObsSourceColorSpace)ObsNative.obs_source_get_color_space(Pointer, 0, nint.Zero);
+    // What colour space this source's texture is in, chosen from the ones the CALLER says it can
+    // accept. That argument is not optional in practice: a source picks the best of the offered
+    // spaces, and offering none gets the default — an HDR game capture answers Srgb when asked with
+    // an empty list, whatever its swap chain actually is.
+    //
+    // For a game capture the answer describes the game's own swap chain, which is the honest input
+    // to "does this recording need an HDR canvas". The monitor's mode only approximates it, and gets
+    // an SDR game on an HDR desktop exactly as wrong as the reverse.
+    //
+    // Meaningful only once the source has attached; an unhooked game capture has nothing to report.
+    public ObsSourceColorSpace GetColorSpace(params ObsSourceColorSpace[] acceptable)
+    {
+        ArgumentNullException.ThrowIfNull(acceptable);
+
+        if (acceptable.Length == 0)
+            return (ObsSourceColorSpace)ObsNative.obs_source_get_color_space(Pointer, 0, null);
+
+        var spaces = Array.ConvertAll(acceptable, space => (int)space);
+        return (ObsSourceColorSpace)ObsNative.obs_source_get_color_space(
+            Pointer, (nuint)spaces.Length, spaces);
+    }
+
+    // The full set, so the source reports what it actually has rather than the nearest thing to a
+    // constrained request. This is the "what are you?" question, not "what can you give me?".
+    public ObsSourceColorSpace ColorSpace => GetColorSpace(
+        ObsSourceColorSpace.Srgb,
+        ObsSourceColorSpace.Srgb16F,
+        ObsSourceColorSpace.Extended709,
+        ObsSourceColorSpace.Scrgb709);
 
     // Before filters. Differs from Width once a filter that resizes is in the chain.
     public uint BaseWidth => ObsNative.obs_source_get_base_width(Pointer);

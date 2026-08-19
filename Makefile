@@ -140,8 +140,24 @@ assemble-windows: obs-fetch
 	# (obs-ffmpeg) and the encoder capability probes (obs-amf-test, obs-nvenc-test, obs-qsv-test).
 	# Without a probe binary the corresponding hardware encoder ids never register — a missing
 	# obs-nvenc-test.exe silently leaves an NVIDIA machine with software-only encoding.
-	cp $(OBS_EXTRACTED)/bin/64bit/obs-ffmpeg-mux.exe $(WIN_PUBLISH_DIR)/ 2>/dev/null || true
-	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/obs-*-test.exe) $(WIN_PUBLISH_DIR)/ 2>/dev/null || true
+	#
+	# A shell glob, not $(wildcard): make caches the directory listings it globs, and obs-fetch
+	# creates these files during the same run — so a cached empty result would ship no probes at
+	# all. And no "|| true" on either: both failures are silent and neither is survivable. Without
+	# the muxer there is no recording; without a probe the machine quietly falls back to software
+	# encoding, which is the difference between a playable capture and a slideshow.
+	cp $(OBS_EXTRACTED)/bin/64bit/obs-ffmpeg-mux.exe $(WIN_PUBLISH_DIR)/
+	@probes="$$(ls $(OBS_EXTRACTED)/bin/64bit/obs-*-test.exe 2>/dev/null)"; \
+	if [ -z "$$probes" ]; then \
+		echo "assemble-windows: no obs-*-test.exe encoder probes in $(OBS_EXTRACTED)/bin/64bit."; \
+		echo "  Every hardware encoder would be absent at runtime and recordings would fall back"; \
+		echo "  to x264. Refusing to assemble a bundle that silently encodes in software."; \
+		exit 1; \
+	fi; \
+	for probe in $$probes; do \
+		echo "  encoder probe: $$(basename $$probe)"; \
+		cp "$$probe" $(WIN_PUBLISH_DIR)/; \
+	done
 
 # ---- shell (desktop window) ----
 # Publish the desktop shell (Photino webview) next to the app host. The shell reuses the app host's

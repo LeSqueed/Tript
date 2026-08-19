@@ -222,6 +222,68 @@ public sealed class DetectionHostTests
         }
     }
 
+    // An exclusion is a cycle-level veto, not merely an event that happens to carry no bookmark
+    // type. It suppresses a trigger detected in the same inference batch.
+    [Fact]
+    public void Detections_ExclusionInTheSameBatch_SuppressesTriggers()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] =
+            [
+                Trigger(0, BookmarkType.Kill),
+                new EventDefinition
+                {
+                    ClassId = 1,
+                    Name = "Death Spectating",
+                    Type = EventType.Exclusion,
+                },
+            ],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0), Box(1));
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    // Suppression is scoped to one detector batch. A clean trigger in the next cycle is still
+    // eligible for bookmarking.
+    [Fact]
+    public void Detections_ExclusionInAnEarlierBatch_DoesNotSuppressLaterTriggers()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] =
+            [
+                Trigger(0, BookmarkType.Kill),
+                new EventDefinition
+                {
+                    ClassId = 1,
+                    Name = "Death Spectating",
+                    Type = EventType.Exclusion,
+                },
+            ],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(1));
+            detector.RaiseDetections(Box(0));
+
+            var bookmark = Assert.Single(recording.Bookmarks);
+            Assert.Equal(BookmarkType.Kill, bookmark.Type);
+        }
+    }
+
     // A detection whose ClassId no definition covers is dropped before the cooldown tracker sees it:
     // the model can emit classes events.json says nothing about, and there is no bookmark type to
     // give them. Ported from _pending/DetectionSessionTests, whose subsystem never landed — this

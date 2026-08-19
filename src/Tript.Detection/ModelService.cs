@@ -194,7 +194,7 @@ public static class ModelService
         options.AppendExecutionProvider_CPU();
         var session = new InferenceSession(modelPath, options);
 
-        Log.Information("Loaded ONNX model for game {GameId}", gameId);
+        Log.Information("Loaded ONNX model for game {GameId} from {ModelPath}", gameId, modelPath);
         return session;
     }
 

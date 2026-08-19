@@ -99,45 +99,4 @@ public sealed class ObsDisplayEnumerationTests
         Assert.Null(game.SelectedDisplay);
     }
 
-    // The Game method's whole risk: nothing under the game capture, so a capture that never attaches
-    // is a black file with working audio. The session must report that once, so the host can end the
-    // recording. (linux-capture registers no game capture at all, which is the never-hooks case.)
-    [SkippableFact]
-    public void UnderTheGameMethod_AnUnhookedCaptureIsReportedOnce()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var colour = ObsSource.CreatePrivate(ColourSourceId, "timeout colour");
-        using var recorder = new ObsRecorderSession(session.Runtime, colour, null,
-            new CapturePolicy(DisplayCaptureMethod.Game, null, TimeSpan.FromSeconds(1)));
-
-        using var reported = new ManualResetEventSlim(false);
-        var events = new List<GameCaptureUnavailable>();
-        recorder.GameCaptureUnavailable += (_, unavailable) =>
-        {
-            lock (events)
-                events.Add(unavailable);
-            reported.Set();
-        };
-
-        recorder.PlaceSourceOnChannel();
-        try
-        {
-            Assert.True(reported.Wait(TimeSpan.FromSeconds(15)),
-                "The Game method never reported that its capture had not hooked.");
-
-            // Said once per recording, not every probe tick.
-            Thread.Sleep(TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            recorder.ClearSourceFromChannel();
-        }
-
-        lock (events)
-        {
-            var unavailable = Assert.Single(events);
-            Assert.Equal(TimeSpan.FromSeconds(1), unavailable.Timeout);
-            Assert.Contains("stopped", unavailable.Message, StringComparison.OrdinalIgnoreCase);
-        }
-    }
 }

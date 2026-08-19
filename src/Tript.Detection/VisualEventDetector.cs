@@ -60,6 +60,8 @@ public class VisualEventDetector : IDisposable
     private RunOptions? _runOptions;
     private string? _gameId;
     private int _isProcessing;
+    private int _diagnosticFrameCount;
+    private DateTime _lastEmptyInferenceLog;
     private List<RegionGroup> _regionGroups = new();
     private GrayscaleStrategy _grayscaleStrategy = GrayscaleStrategy.PerGroupCrop;
     private int _numClasses;
@@ -362,6 +364,10 @@ public class VisualEventDetector : IDisposable
                 Height = height
             });
 
+            if (queued && Interlocked.Increment(ref _diagnosticFrameCount) % 15 == 0)
+                Log.Information("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
+                    _diagnosticFrameCount, width, height);
+
             // DropOldest only refuses once the channel is completed, which nothing does today.
             if (!queued)
                 Log.Warning("VisualEventDetector: frame queue rejected a frame, dropping it");
@@ -472,6 +478,12 @@ public class VisualEventDetector : IDisposable
                     }
 
                     Log.Debug("DetectionLoop: {Count} results across {Groups} groups", allResults.Count, _regionGroups.Count);
+                    if (allResults.Count == 0 && DateTime.UtcNow - _lastEmptyInferenceLog >= TimeSpan.FromSeconds(5))
+                    {
+                        _lastEmptyInferenceLog = DateTime.UtcNow;
+                        Log.Information("DetectionLoop: processed live frame {W}x{H}; inference returned no detections",
+                            fW, fH);
+                    }
                     DetectionsAvailable?.Invoke(allResults);
                 }
                 finally

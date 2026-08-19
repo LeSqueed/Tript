@@ -32,9 +32,8 @@ public sealed class ObsRecorderSession : IRecorderSession
     // costs one call and no new interop. Polled only while the scene is on the recording channel.
     private static readonly TimeSpan HookProbeInterval = TimeSpan.FromSeconds(2);
 
-    // How long a game capture is given before the absence of a hook is reported as such. Only the
-    // Auto method uses it: under Game the deadline is the policy's own, because it ends the
-    // recording rather than logging a line.
+    // How long a Game capture is allowed to wait before the user sees a warning. The wait itself is
+    // unbounded because the game window may appear well after the process starts.
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ObsSource _source;
@@ -110,11 +109,6 @@ public sealed class ObsRecorderSession : IRecorderSession
     // runtime enumerated no monitors. Reported rather than saved — a preference that named a
     // monitor which is not attached stays the preference (see ObsCaptureSource.ResolveDisplay).
     public ObsDisplay? SelectedDisplay { get; }
-
-    // Raised once per recording when the Game method's capture has not hooked within the policy's
-    // timeout. There is no display layer under it to record instead, so the only honest outcome is
-    // to stop; the host owns that decision and this is how it hears about it.
-    public event EventHandler<GameCaptureUnavailable>? GameCaptureUnavailable;
 
     // Whether the game-capture source has actually attached to a process. False on a platform with
     // no game capture, and false whenever the scene is not on the recording channel: win-capture
@@ -416,10 +410,9 @@ public sealed class ObsRecorderSession : IRecorderSession
     // while the source is not showing.
     private void StartHookProbe()
     {
-        // A Game-method session still probes without a game-capture source — a platform that
-        // registers none can never hook, and that has to reach the deadline rather than record a
-        // black file in silence.
-        if (_gameCaptureSource is null && !Policy.StopsWhenUnhooked)
+        // A platform that registers no game-capture source cannot hook, so there is nothing to
+        // probe. The host skips preflight for that case rather than waiting forever.
+        if (_gameCaptureSource is null)
             return;
 
         lock (_probeGate)
@@ -448,8 +441,6 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     private void ProbeHook(object? state)
     {
-        GameCaptureUnavailable? unavailable = null;
-
         lock (_probeGate)
         {
             if (_disposed || _hookProbe is null)
@@ -465,6 +456,8 @@ public sealed class ObsRecorderSession : IRecorderSession
                 {
                     Log.Information("ObsRecorderSession: game capture hooked at {Width}x{Height}",
                         _gameCaptureSource!.Width, _gameCaptureSource.Height);
+                    if (_hookTimeoutReported)
+                        Log.Information("ObsRecorderSession: late game-capture warning cleared; hook recovered.");
                 }
                 else if (Policy.IncludesDisplayCapture)
                 {
@@ -477,35 +470,59 @@ public sealed class ObsRecorderSession : IRecorderSession
             }
 
             // Said once, because a hook that has not happened by now is the shape of the failure
-            // that otherwise reads as a working recording of the wrong picture. Under the Game
-            // method it is not a warning at all: there is nothing under the capture, so the
-            // recording would be black and the host is told to end it.
+            // that otherwise reads as a working recording of the wrong picture. The game may still
+            // be loading in the background, so this is diagnostic only and never ends the recording.
             var deadline = HookDeadlineFor(Policy);
             if (!hooked && !_hookTimeoutReported && _probeTicks * HookProbeInterval >= deadline)
             {
                 _hookTimeoutReported = true;
-
-                if (Policy.StopsWhenUnhooked)
-                {
-                    unavailable = new GameCaptureUnavailable(deadline,
-                        $"Game capture did not attach within {deadline.TotalSeconds:0}s and the capture method is " +
-                        "game capture only, so the recording was stopped rather than recorded black.");
-                }
-                else
-                {
-                    Log.Warning("ObsRecorderSession: game capture has not hooked after {Seconds}s; " +
-                                "the recording is the display fallback.", deadline.TotalSeconds);
-                }
+                Log.Warning("ObsRecorderSession: game capture has not hooked after {Seconds}s; " +
+                            "continuing to retry while recording.", deadline.TotalSeconds);
             }
         }
+    }
 
-        // Outside the gate: the handler stops the recording, which clears the channel and disposes
-        // this very timer.
-        if (unavailable is not null)
+    public bool HasGameCaptureSource => _gameCaptureSource is not null;
+
+    // Shows the scene without starting an output so win-capture can attach before the recording
+    // begins. The wait is intentionally unbounded; cancellation is reserved for host teardown.
+    public bool WaitForGameCapture(TimeSpan warningAfter, Action showWarning, Action clearWarning,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(showWarning);
+        ArgumentNullException.ThrowIfNull(clearWarning);
+
+        if (_gameCaptureSource is null)
+            return true;
+
+        var started = DateTime.UtcNow;
+        var warningShown = false;
+        while (!cancellationToken.IsCancellationRequested)
         {
-            Log.Warning("ObsRecorderSession: {Message}", unavailable.Message);
-            GameCaptureUnavailable?.Invoke(this, unavailable);
+            if (IsGameCaptureHooked)
+            {
+                if (warningShown)
+                    clearWarning();
+                return true;
+            }
+
+            if (!warningShown && DateTime.UtcNow - started >= warningAfter)
+            {
+                warningShown = true;
+                showWarning();
+            }
+
+            lock (_probeGate)
+            {
+                if (_disposed)
+                    return false;
+            }
+
+            if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(250)))
+                break;
         }
+
+        return false;
     }
 
     // The Game method's deadline is the user's configured game-capture timeout; every other method
@@ -513,7 +530,7 @@ public sealed class ObsRecorderSession : IRecorderSession
     internal static TimeSpan HookDeadlineFor(CapturePolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        return policy.StopsWhenUnhooked ? policy.GameCaptureTimeout : HookTimeout;
+        return policy.Method == DisplayCaptureMethod.Game ? policy.GameCaptureTimeout : HookTimeout;
     }
 
     // ---- canvas fit ----

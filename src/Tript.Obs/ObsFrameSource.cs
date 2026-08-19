@@ -12,17 +12,8 @@ namespace Tript.Obs;
 // composited frames in a format and size of its choosing and get either exactly that or a refused
 // subscription — never a silent mismatch.
 //
-// The subscription is the media-io pair on the main video mix's video_t, never the core
-// obs_add_raw_video_callback2:
-//
-//   * video_output_connect2 returns the boolean the core function discards, and that boolean is
-//     the only signal for two of the three refusal modes — an unsatisfiable conversion (the scaler
-//     could not be created) and a duplicate (callback, param) pair. It also rejects a zero
-//     frame_rate_divisor.
-//   * video_output_disconnect returns void, and that loses nothing: its bool-reporting sibling,
-//     video_output_disconnect2, exists only from 31.1.2, and its boolean reports whether the input
-//     was found — not whether the callback is quiescent, which is the thing that actually matters
-//     at teardown. (See ObsFrameSubscription.Dispose for how quiescence is actually bought.)
+// The subscription uses the stable core raw-video callback. video_output_connect2 accepts the
+// subscription on OBS 31.x but does not deliver frames there.
 //
 // The video_t handle comes from ObsRuntime.TryGetVideoHandle, which is gated on HasVideo because
 // obs_get_video() itself segfaults when no video mix exists — measured on 32.2.1.
@@ -57,9 +48,8 @@ internal sealed class ObsFrameSource : IFrameSource
 
         var subscription = new ObsFrameSubscription(_runtime, video, format, conversion, frameRateDivisor, callback);
 
-        // video_output_connect2 is the one place the seam can be refused. Throwing here rather
-        // than handing out a subscription that silently delivers nothing is the whole reason the
-        // media-io pair is bound at all.
+        // The raw callback API has no success return. The target is registered first so a frame
+        // delivered synchronously by libobs during registration can resolve the subscription.
         try
         {
             subscription.Connect();
@@ -138,23 +128,18 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
     }
 
     // Registers the native callback. Called once, from Subscribe, before the subscription is ever
-    // handed to a consumer — so a refused connection is observable at Subscribe and never as a
-    // dead subscription.
+    // handed to a consumer.
     internal void Connect()
     {
-        // Registered before the connect, not after: libobs may deliver a frame from its own thread
-        // before video_output_connect2 has returned here.
+        // Registered before the native call: libobs may deliver a frame from its own thread before
+        // registration returns here.
         Live[_id] = this;
         unsafe
         {
-            if (!ObsNative.video_output_connect2(_video, in _conversion, _frameRateDivisor,
-                    &ObsFrameSubscription.OnFrame, _id))
-            {
-                throw new ObsException(
-                    "video_output_connect2 refused the subscription: the conversion cannot be " +
-                    "satisfied, the (callback, param) pair is already connected, or the frame-rate " +
-                    "divisor is zero.");
-            }
+            var conversion = _conversion;
+            var conversionPointer = (nint)Unsafe.AsPointer(ref conversion);
+            ObsNative.obs_add_raw_video_callback2(conversionPointer, _frameRateDivisor,
+                &ObsFrameSubscription.OnFrame, _id);
         }
 
         _connected = true;
@@ -165,27 +150,23 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        // The teardown race: video_output_disconnect returns without waiting for an in-flight
+        // The teardown race: obs_remove_raw_video_callback returns without waiting for an in-flight
         // callback, and a callback already inside OnFrame holds a strong reference to _target.
         // Swapping _target out first means that callback observes null and returns, while the
         // target object it captured stays alive until the callback itself is done.
         Volatile.Write(ref _target, null);
 
-        // A subscription whose video mix was torn down by obs_reset_video must not disconnect
-        // from the freed handle. The check is cheap (one obs_get_video_info probe) and safe
-        // because Dispose runs on the control plane, which holds libobs's global lock for the
-        // duration of a reset — no reset can land between the probe and the disconnect.
-        if (_connected && _runtime.IsCurrentVideoHandle(_video))
+        if (_connected)
         {
             unsafe
             {
-                ObsNative.video_output_disconnect(_video, &ObsFrameSubscription.OnFrame, _id);
+                ObsNative.obs_remove_raw_video_callback(&ObsFrameSubscription.OnFrame, _id);
             }
         }
 
         _connected = false;
 
-        // Unregistering after the disconnect, and the id is never reused, so a callback still in
+        // Unregistering after the native removal, and the id is never reused, so a callback still in
         // flight resolves either this subscription (whose _target is already null) or nothing.
         Live.TryRemove(_id, out _);
     }

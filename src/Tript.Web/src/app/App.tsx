@@ -7,6 +7,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useIpcClient } from './useConnection';
 import { RecorderBar } from '../components/RecorderBar';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { WarningBanner } from '../components/WarningBanner';
 import { ConnectionBanner } from '../components/ConnectionBanner';
 import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
 import { LibraryView } from '../components/LibraryView';
@@ -109,6 +110,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       <RecorderBar client={client} connectionState={connectionState} />
       <ConnectionBanner reachability={reachability} />
       <ErrorBanner client={client} />
+      <WarningBanner client={client} />
       <DisplayFallbackBanner client={client} />
       <nav className="app-nav" aria-label="Primary">
         <button

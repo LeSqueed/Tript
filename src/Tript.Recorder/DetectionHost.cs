@@ -170,6 +170,8 @@ public sealed class DetectionHost : IDisposable
 
         var definitions = _definitionSource.LoadEventDefinitions(gameId);
         var byClass = definitions.ToDictionary(d => d.ClassId);
+        Log.Information("DetectionHost: loaded event definitions for {GameId}: {Definitions}",
+            gameId, string.Join(", ", definitions.Select(d => $"{d.ClassId}={d.Name}/{d.BookmarkType?.ToString() ?? "none"}")));
 
         // The detector is told about a live game with a model; a failure to actually start it
         // (model file missing, ORT refusing the session) is reported up and the run is not armed.
@@ -309,16 +311,37 @@ public sealed class DetectionHost : IDisposable
                 return;
 
             var now = DateTime.Now;
+            Log.Information("DetectionHost: received {Count} detection(s) for {GameId}: classes {Classes}",
+                detections.Count, GameId, string.Join(",", detections.Select(d => d.ClassId).Distinct()));
+
+            var resolved = new List<(DetectionResult Detection, EventDefinition Definition)>();
             foreach (var detection in detections)
             {
                 if (!_definitionsByClass.TryGetValue(detection.ClassId, out var definition))
                 {
-                    Log.Debug("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping",
+                    Log.Warning("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping",
                         detection.ClassId, GameId);
                     continue;
                 }
 
-                Tracker.ProcessDetection(detection, definition, now);
+                resolved.Add((detection, definition));
+            }
+
+            // Exclusions are modelled as vetoes for the complete inference cycle: a kill-feed icon
+            // seen alongside a kill-cam/death-spectating icon is ambiguous and must not create a
+            // bookmark. Do this before the cooldown tracker so suppressed triggers do not leave
+            // active instances that could affect a later, unexcluded cycle.
+            if (resolved.Any(item => item.Definition.Type == EventType.Exclusion))
+            {
+                Log.Information("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
+                    GameId, resolved.Count);
+                return;
+            }
+
+            foreach (var (detection, definition) in resolved)
+            {
+                if (definition.Type == EventType.Trigger)
+                    Tracker.ProcessDetection(detection, definition, now);
             }
         }
     }

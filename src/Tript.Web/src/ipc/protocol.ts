@@ -204,6 +204,10 @@ export interface ErrorMessage {
   message: string;
 }
 
+export interface WarningMessage {
+  message: string;
+}
+
 // ---------------------------------------------------------------------------
 // Trash
 // ---------------------------------------------------------------------------
@@ -437,4 +441,5 @@ export type MessageName =
   | 'recoveryPrompt'
   | 'selectedGameExecutable'
   | 'gameList'
-  | 'error';
+  | 'error'
+  | 'warning';

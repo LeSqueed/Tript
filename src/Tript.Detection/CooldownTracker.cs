@@ -161,7 +161,8 @@ public class CooldownTracker
         var recording = RecordingSessionRegistry.Active;
         if (recording == null)
         {
-            Log.Debug("CreateBookmark: no active recording");
+            Log.Warning("CreateBookmark: detected '{EventName}' but no active recording was available",
+                definition.Name);
             return;
         }
 

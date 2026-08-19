@@ -145,7 +145,7 @@ public class ModelClassCountTests
     // own session rather than ModelService's cached one: test classes run in parallel and
     // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
     [Fact]
-    public void ShippedModel_DeclaresSevenClasses_AndAgreesWithEventsJson()
+    public void ShippedModel_DeclaresElevenClasses_AndAgreesWithEventsJson()
     {
         var modelPath = ModelService.GetModelPath(GameId);
         Assert.True(File.Exists(modelPath),
@@ -160,7 +160,7 @@ public class ModelClassCountTests
         Assert.True(VisualEventDetector.TryDeriveClassCount(dimensions, out var numClasses),
             $"Output {outputName} has shape [{string.Join(',', dimensions)}], which carries no " +
             "static class dimension — the detector would be falling back to events.json.");
-        Assert.Equal(7, numClasses);
+        Assert.Equal(11, numClasses);
 
         var names = VisualEventDetector.ParseClassNames(
             session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw) ? raw : null);

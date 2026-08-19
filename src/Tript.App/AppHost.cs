@@ -86,6 +86,8 @@ internal sealed class AppHost : IDisposable
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
+    private CancellationTokenSource? _captureWaitCancellation;
+    private int _recordingStopRequested;
 
     // Replaced wholesale under _gameListGate, never mutated in place: GameList is read from the
     // IPC pool, the detector's timer and the hook probe, and a reader holding the old list must
@@ -287,6 +289,7 @@ internal sealed class AppHost : IDisposable
 
         // Refuse new starts before anything is torn down. The detector's Dispose deliberately does
         // not block behind an in-flight handler, so a GameStarted can still arrive after it returns.
+        _captureWaitCancellation?.Cancel();
         lock (_recorderGate)
             _shuttingDown = true;
 
@@ -363,6 +366,36 @@ internal sealed class AppHost : IDisposable
         // while the source is shown, so a game that appears mid-recording is still picked up.
         RetargetGameCapture(effectiveGameId);
 
+        if (_recorderSession is ObsRecorderSession capture &&
+            capture.Policy.IncludesGameCapture && capture.HasGameCaptureSource)
+        {
+            Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
+                effectiveGameId);
+            // StopRecording publishes its intent before taking the recorder gate. Check again after
+            // publishing the source so a stop that arrived during setup cannot miss this wait.
+            var waitCancellation = new CancellationTokenSource();
+            _captureWaitCancellation = waitCancellation;
+            if (Volatile.Read(ref _recordingStopRequested) != 0)
+                waitCancellation.Cancel();
+            capture.PlaceSourceOnChannel();
+            try
+            {
+                var captureReady = capture.WaitForGameCapture(
+                    capture.Policy.GameCaptureTimeout,
+                    () => PushWarning("Waiting for the game window to appear. Recording has not started yet."),
+                    () => PushWarning(null), waitCancellation.Token);
+                if (!captureReady)
+                    return false;
+            }
+            finally
+            {
+                _captureWaitCancellation = null;
+                PushWarning(null);
+                capture.ClearSourceFromChannel();
+            }
+            waitCancellation.Dispose();
+        }
+
         if (!_recorder!.Start(resolved))
             return false;
 
@@ -385,8 +418,21 @@ internal sealed class AppHost : IDisposable
 
     internal bool StopRecording()
     {
+        // StartRecording can be holding the gate while waiting for the game-capture hook. Publish
+        // the stop before taking the gate, and let StartRecording handle the setup race above.
+        Interlocked.Exchange(ref _recordingStopRequested, 1);
+        _captureWaitCancellation?.Cancel();
         lock (_recorderGate)
-            return StopRecordingLocked();
+        {
+            try
+            {
+                return StopRecordingLocked();
+            }
+            finally
+            {
+                Volatile.Write(ref _recordingStopRequested, 0);
+            }
+        }
     }
 
     private bool StopRecordingLocked()
@@ -550,7 +596,11 @@ internal sealed class AppHost : IDisposable
 
         _detector = new ProcessNameGameDetector(executables);
         _detector.GameStarted += processName => StartRecording(ResolveDetectedGameId(processName));
-        _detector.GameStopped += () => StopRecording();
+        _detector.GameStopped += () =>
+        {
+            _captureWaitCancellation?.Cancel();
+            StopRecording();
+        };
         _detector.Start();
     }
 
@@ -597,7 +647,13 @@ internal sealed class AppHost : IDisposable
         if (_detectionHost.Start(gameId))
         {
             PushGameList();
+            return;
         }
+
+        _detectionHost.Dispose();
+        _detectionHost = null;
+        Log.Warning("AppHost: automatic detection did not start for {GameId}; recording continues without automatic bookmarks",
+            gameId);
     }
 
     private void StopDetection()
@@ -906,6 +962,12 @@ internal sealed class AppHost : IDisposable
         {
             message,
         }, Wire.Options));
+    }
+
+    private void PushWarning(string? message)
+    {
+        _ipc.Broadcast("warning", JsonSerializer.SerializeToElement(
+            message is null ? null : new { message }, Wire.Options));
     }
 
     // How many previously-unseen files one call may probe for a duration — what keeps a first list of
@@ -1801,21 +1863,8 @@ internal sealed class AppHost : IDisposable
         }
 
         var session = new ObsRecorderSession(_runtime, _colourSource, gameCaptureTarget: null, policy);
-        session.GameCaptureUnavailable += OnGameCaptureUnavailable;
         _recorderSession = session;
         _recorder = new RecorderStateMachine(session, settings);
-    }
-
-    // The Game capture method has no display layer to fall back on, so a capture that never attaches
-    // would record a black file with working audio. The session reports it; the recording ends here
-    // and the user is told why.
-    private void OnGameCaptureUnavailable(object? sender, GameCaptureUnavailable unavailable)
-    {
-        if (!IsRecording)
-            return;
-
-        PushError(unavailable.Message);
-        StopRecording();
     }
 
     // Re-points the session's game-capture source at the game being recorded. win-capture keys on the

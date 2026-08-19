@@ -8,27 +8,25 @@ namespace Tript.Recorder.Tests;
 
 // Which layers a recording scene has, per capture method. This is the table the whole capture
 // policy is: a display layer that is always there records the desktop when the user asked for the
-// game only, and one that is never there records black when the game does not hook.
+// game only, and one that keeps retrying when the game does not hook immediately.
 public sealed class CapturePolicyTests
 {
     [Fact]
-    public void Auto_HasBothLayers_AndNeverStopsForAnUnhookedCapture()
+    public void Auto_HasBothLayers()
     {
         var policy = new CapturePolicy(DisplayCaptureMethod.Auto, null, TimeSpan.FromSeconds(10));
 
         Assert.True(policy.IncludesDisplayCapture);
         Assert.True(policy.IncludesGameCapture);
-        Assert.False(policy.StopsWhenUnhooked);
     }
 
     [Fact]
-    public void Game_HasNoDisplayLayer_AndStopsWhenTheCaptureNeverHooks()
+    public void Game_HasNoDisplayLayer()
     {
         var policy = new CapturePolicy(DisplayCaptureMethod.Game, null, TimeSpan.FromSeconds(10));
 
         Assert.False(policy.IncludesDisplayCapture);
         Assert.True(policy.IncludesGameCapture);
-        Assert.True(policy.StopsWhenUnhooked);
     }
 
     [Fact]
@@ -38,7 +36,6 @@ public sealed class CapturePolicyTests
 
         Assert.True(policy.IncludesDisplayCapture);
         Assert.False(policy.IncludesGameCapture);
-        Assert.False(policy.StopsWhenUnhooked);
     }
 
     // Auto is the default in the settings model, and a session built without a policy must agree
@@ -69,7 +66,7 @@ public sealed class CapturePolicyTests
         Assert.Equal(TimeSpan.FromSeconds(25), policy.GameCaptureTimeout);
     }
 
-    // A zero or negative timeout would end every Game recording on the first probe.
+    // A zero or negative timeout would show the late-hook warning on the first probe.
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]

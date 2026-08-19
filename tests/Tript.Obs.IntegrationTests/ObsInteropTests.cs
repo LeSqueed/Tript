@@ -67,6 +67,7 @@ public sealed class ObsInteropTests
             $"Expected the binding to declare at least 30 libobs entry points, found {declarations.Length}.");
 
         var unresolved = declarations
+            .Where(entryPoint => !IsPlatformSpecific(entryPoint))
             .Where(entryPoint => !NativeLibrary.TryGetExport(handle, entryPoint, out _))
             .ToArray();
 
@@ -228,6 +229,17 @@ public sealed class ObsInteropTests
             Utf8Marshal.Free(native);
         }
     }
+
+    // The binding keeps every symbol in one table so the test above can find them by reflection,
+    // which means the table necessarily holds a few the loaded runtime cannot export. Desktop
+    // duplication is DXGI and exists only in the Windows build — verified: the Linux libobs exports
+    // obs_enter_graphics and obs_set_video_levels but no gs_duplicator_* at all. The nix platform
+    // hooks are the mirror image. Excluded by name rather than by letting the assertion be weakened,
+    // so a symbol that goes missing on its OWN platform still fails loudly.
+    private static bool IsPlatformSpecific(string entryPoint) =>
+        OperatingSystem.IsWindows()
+            ? entryPoint.Contains("nix_platform", StringComparison.Ordinal)
+            : entryPoint.StartsWith("gs_duplicator_", StringComparison.Ordinal);
 
     private static IEnumerable<string> DeclaredEntryPoints() =>
         typeof(ObsNative)

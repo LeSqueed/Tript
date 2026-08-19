@@ -742,17 +742,36 @@ public sealed class ObsRecorderSession : IRecorderSession
         return plan;
     }
 
-    // Nothing, deliberately, and measured rather than assumed: this libobs answers Srgb for a game
-    // capture that is demonstrably hooked to a game presenting an FP16 scRGB swap chain, with the
-    // full set of acceptable spaces offered, and answers Srgb for a monitor capture of a display
-    // running Rec.2100 PQ. Neither capture reports the colour space it actually carries, so there is
-    // no source signal to read — and returning the SDR they claim would override the display probe,
-    // which does work, and send every HDR recording to an SDR canvas.
+    // The colour the recording is being made in, from the desktop duplicator — the one Windows
+    // signal that reports it honestly. The capture SOURCES do not: game capture answers Srgb while
+    // hooked to a game presenting scRGB, and monitor capture answers Srgb for a Rec.2100 PQ desktop.
     //
-    // The plumbing above it stays because the signal is the right one in principle and costs nothing
-    // to keep: HdrPlanner takes the space, ObsSource.GetColorSpace asks for it properly. When a
-    // libobs reports it honestly this becomes one line.
-    private static ObsSourceColorSpace? CaptureColourSpace() => null;
+    // The DISPLAY is deliberately the input, not the game, and not only because the game will not
+    // say. A display's HDR mode is stable for the length of a recording; a game's is not — it can be
+    // toggled in the game's own settings mid-session, and obs_reset_video refuses once an output is
+    // running, so a canvas chosen from the game can go stale with no way to correct it. A canvas
+    // chosen from the display cannot. The mismatch that a mid-recording toggle then creates is
+    // absorbed by the compositor's own conversion, which works now that the video levels are set.
+    //
+    // The probe also carries the display's real SDR white level, which is the number that conversion
+    // is done with, so it is applied here rather than left at the generic default.
+    private ObsSourceColorSpace? CaptureColourSpace()
+    {
+        var index = SelectedDisplay?.Index ?? 0;
+        if (Runtime.ProbeDisplay(index) is not { } display)
+            return null;
+
+        // Guarded, because zero is the value that started all of this: a white level of zero makes
+        // every conversion between colour spaces black, and a probe that answered zero would put it
+        // straight back. The reset's default stands in that case.
+        if (display.SdrWhiteLevelNits > 0f)
+            Runtime.SetVideoLevels(display.SdrWhiteLevelNits, ObsRuntime.DefaultHdrNominalPeakLevelNits);
+
+        Log.Debug("ObsRecorderSession: display {Index} reports {Space} at {Nits} nits SDR white.",
+            index, display.ColorSpace, display.SdrWhiteLevelNits);
+
+        return display.ColorSpace;
+    }
 
     // Moves the canvas onto the plan's format and colour space, keeping every other dimension of the
     // mix as it was. A refused reset is not fatal: the canvas is still the SDR one that was working,

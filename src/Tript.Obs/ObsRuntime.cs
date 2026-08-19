@@ -368,6 +368,12 @@ public sealed class ObsRuntime : IDisposable
     {
         ThrowIfDisposed();
 
+        // Windows only, and not merely because that is where HDR desktops are: a duplicator is a
+        // DXGI object, the OpenGL backend has no device function behind gs_duplicator_create, and
+        // calling it there does not fail cleanly — it took the recording thread with it.
+        if (!OperatingSystem.IsWindows())
+            return null;
+
         ObsNative.obs_enter_graphics();
         try
         {

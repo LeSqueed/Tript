@@ -47,6 +47,21 @@ public enum ObsColorSpace
     Rec2100Hlg
 }
 
+// enum gs_color_space — what a SOURCE reports, and a different enum from ObsColorSpace above, which
+// is the video mix's video_colorspace. The two are easy to confuse and share no values.
+//
+// This is the one that answers "is the thing being captured HDR", because it describes the texture
+// the source hands over rather than the mode the monitor happens to be in. A game presenting an FP16
+// scRGB swap chain reports Scrgb709 whatever the desktop is doing, and an SDR game on an HDR desktop
+// still reports Srgb.
+public enum ObsSourceColorSpace
+{
+    Srgb = 0,
+    Srgb16F,
+    Extended709,
+    Scrgb709
+}
+
 // enum video_range_type. Default resolves to Partial for YUV formats and Full otherwise; libobs
 // does that with a static inline that is not exported, so a consumer handed Default has been told
 // less than the compositor knows.

@@ -187,6 +187,13 @@ public sealed class ObsSource : IDisposable
 
     public uint Height => ObsNative.obs_source_get_height(Pointer);
 
+    // What colour space this source's texture is in. For a game capture this is the game's own swap
+    // chain — Scrgb709 for an HDR game, Srgb for an SDR one — and it is the honest answer to "does
+    // this recording need an HDR canvas", which the monitor's mode only approximates. Meaningful
+    // once the source has attached; an unhooked game capture reports the default.
+    public ObsSourceColorSpace ColorSpace =>
+        (ObsSourceColorSpace)ObsNative.obs_source_get_color_space(Pointer, 0, nint.Zero);
+
     // Before filters. Differs from Width once a filter that resizes is in the chain.
     public uint BaseWidth => ObsNative.obs_source_get_base_width(Pointer);
 

@@ -318,6 +318,11 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_source_get_height(nint source);
 
+    // The preferred-spaces argument is a hint for sources that can produce more than one; passing
+    // none asks for what the source actually has, which is the question here.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int obs_source_get_color_space(nint source, nuint count, nint preferredSpaces);
+
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_source_get_base_width(nint source);
 

@@ -50,17 +50,31 @@ public static class HdrPlanner
         return HdrCapableCodecs.Contains(candidate.Codec, StringComparer.OrdinalIgnoreCase);
     }
 
+    // Whether a source's colour space needs an HDR canvas. The two extended spaces are the HDR ones;
+    // Srgb16F is high-precision SDR and still belongs on an SDR canvas.
+    public static bool IsHdr(ObsSourceColorSpace space) =>
+        space is ObsSourceColorSpace.Extended709 or ObsSourceColorSpace.Scrgb709;
+
     // The mix and encoder for one recording.
     //
-    // HDR is taken only when all three hold: the display we capture is in HDR mode, the user has not
-    // turned it off, and some registered encoder can actually encode it. Any one missing falls back
-    // to SDR with force_sdr on the capture sources — which is what makes an HDR game record at all,
-    // rather than as a black or washed-out frame.
+    // The colour decision comes from what is being CAPTURED, not from the monitor's mode. A game
+    // hands over its own swap chain, so an HDR game reports Scrgb709 and an SDR game reports Srgb
+    // whatever the desktop is set to. Keying off the display instead gets both cases wrong on a
+    // mixed setup: an HDR game on an SDR display records black, and — the case that is easy to miss
+    // — an SDR game on an HDR display records black too, because the mismatch is symmetric.
+    //
+    // captured is null when nothing is hooked yet and there is no source to ask, which is the
+    // display-capture path; the display's own mode is the right answer there and the only one
+    // available.
+    //
+    // HDR is taken only when all three hold: the captured content is HDR, the user has not turned it
+    // off, and some registered encoder can actually encode it.
     //
     // A configured encoder is honoured in SDR. It is NOT honoured in HDR when it cannot encode HDR:
     // the alternative is writing a PQ-tagged file the encoder truncated to eight bits, which reads
     // as a corrupt recording rather than as a setting that did not apply.
     public static HdrPlan Decide(
+        ObsSourceColorSpace? capturedColorSpace,
         bool displayIsHdr,
         bool hdrEnabledInSettings,
         IReadOnlyList<VideoEncoderCandidate> registered,
@@ -73,8 +87,13 @@ public static class HdrPlanner
 
         var sdrEncoder = ResolveSdrEncoder(registered, configuredEncoderId);
 
-        if (!displayIsHdr)
-            return Sdr(sdrEncoder, "the captured display is not in HDR mode");
+        var contentIsHdr = capturedColorSpace is { } space ? IsHdr(space) : displayIsHdr;
+        var because = capturedColorSpace is { } reported
+            ? $"the captured source reports {reported}"
+            : "nothing is hooked, so the display's mode stands in";
+
+        if (!contentIsHdr)
+            return Sdr(sdrEncoder, because + " and that is SDR");
 
         if (!hdrEnabledInSettings)
             return Sdr(sdrEncoder, "HDR recording is turned off in settings");
@@ -88,7 +107,7 @@ public static class HdrPlanner
             UseHdr = true,
             EncoderId = hdrEncoder.Id,
             Profile = hdrEncoder.Codec.Equals(Hevc, StringComparison.OrdinalIgnoreCase) ? "main10" : null,
-            Reason = $"the captured display is in HDR mode and '{hdrEncoder.Id}' can encode it"
+            Reason = $"{because} and '{hdrEncoder.Id}' can encode it"
         };
     }
 

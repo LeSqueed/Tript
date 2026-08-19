@@ -730,13 +730,27 @@ public sealed class ObsRecorderSession : IRecorderSession
         var configured = IsUsableId(settings.Encoder) ? settings.Encoder : null;
 
         var plan = HdrPlanner.Decide(
-            HdrDisplayProbe.AnyDisplayIsHdr(), settings.EnableHdr, candidates, configured);
+            CaptureColourSpace(),
+            HdrDisplayProbe.AnyDisplayIsHdr(),
+            settings.EnableHdr,
+            candidates,
+            configured);
 
         Log.Information("ObsRecorderSession: recording in {Colour} with '{Encoder}' — {Reason}.",
             plan.UseHdr ? "HDR (Rec.2100 PQ, 10-bit P010)" : "SDR (Rec.709)", plan.EncoderId, plan.Reason);
 
         return plan;
     }
+
+    // What the capture is, when that is knowable without rendering. It is not knowable for a game:
+    // win-capture only hooks while the source is showing, the mix only renders while an output is
+    // live, and the output cannot exist until the canvas has been chosen — so asking a game capture
+    // here always gets the unhooked default. That cycle is why there is no wait here; a wait would
+    // only be a guess with a number on it.
+    //
+    // A display capture has no such dependency and answers straight away, which is why it is the one
+    // source consulted. Everything else falls back to the display's own mode.
+    private ObsSourceColorSpace? CaptureColourSpace() => _displaySource?.ColorSpace;
 
     // Moves the canvas onto the plan's format and colour space, keeping every other dimension of the
     // mix as it was. A refused reset is not fatal: the canvas is still the SDR one that was working,
@@ -756,7 +770,12 @@ public sealed class ObsRecorderSession : IRecorderSession
         });
 
         if (result == ObsVideoResetResult.Success)
+        {
+            // obs_reset_video rebuilds the mix. Re-asserting the program source costs nothing and
+            // removes any question about whether the scene survived the rebuild.
+            PlaceSourceOnChannel();
             return plan;
+        }
 
         if (!plan.UseHdr)
         {
@@ -770,7 +789,10 @@ public sealed class ObsRecorderSession : IRecorderSession
         Log.Warning("ObsRecorderSession: obs_reset_video refused the HDR canvas ({Result}); " +
                     "recording SDR instead.", result);
 
+        // Forced to SDR outright rather than re-asked: the canvas the mix still has is the SDR one,
+        // so the plan has to match that fact and not the content's preference.
         var downgraded = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
             displayIsHdr: false,
             hdrEnabledInSettings: false,
             EnumerateVideoEncoderCandidates(),

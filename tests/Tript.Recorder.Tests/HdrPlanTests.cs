@@ -19,6 +19,7 @@ public sealed class HdrPlanTests
     public void AnSdrDisplay_RecordsSdr_EvenWithAnHdrEncoderAvailable()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: false, hdrEnabledInSettings: true, [X264, NvencHevc], configuredEncoderId: null);
 
         Assert.False(plan.UseHdr);
@@ -31,6 +32,7 @@ public sealed class HdrPlanTests
     public void AnHdrDisplay_WithAnHevcEncoder_TakesThePqCanvasAndMain10()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: true, [X264, NvencHevc], configuredEncoderId: null);
 
         Assert.True(plan.UseHdr);
@@ -46,6 +48,7 @@ public sealed class HdrPlanTests
     public void AnAv1Encoder_TakesHdrWithoutAProfile()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: true, [X264, NvencAv1], configuredEncoderId: null);
 
         Assert.True(plan.UseHdr);
@@ -58,6 +61,7 @@ public sealed class HdrPlanTests
     public void AnHdrDisplay_WithOnlyH264_RecordsSdrAndForcesTheCaptureToTonemap()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: true, [X264, Nvenc], configuredEncoderId: null);
 
         Assert.False(plan.UseHdr);
@@ -69,6 +73,7 @@ public sealed class HdrPlanTests
     public void TurningHdrOff_RecordsSdrAndStillTonemaps()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: false, [X264, NvencHevc], configuredEncoderId: null);
 
         Assert.False(plan.UseHdr);
@@ -82,6 +87,7 @@ public sealed class HdrPlanTests
     public void AnHdrRecording_LeavesTheCaptureAlone()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: true, [NvencHevc], configuredEncoderId: null);
 
         Assert.False(plan.ForceSdrOnCapture);
@@ -91,6 +97,7 @@ public sealed class HdrPlanTests
     public void AConfiguredEncoder_IsKeptForAnSdrRecording()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: false, hdrEnabledInSettings: true, [X264, Nvenc], configuredEncoderId: "obs_nvenc_h264_tex");
 
         Assert.Equal("obs_nvenc_h264_tex", plan.EncoderId);
@@ -102,6 +109,7 @@ public sealed class HdrPlanTests
     public void AConfiguredEncoderThatCannotDoHdr_IsReplacedRatherThanUsed()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true, hdrEnabledInSettings: true, [X264, NvencHevc], configuredEncoderId: "obs_x264");
 
         Assert.True(plan.UseHdr);
@@ -112,6 +120,7 @@ public sealed class HdrPlanTests
     public void AConfiguredHdrCapableEncoder_IsKeptOverTheFirstOneFound()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true,
             hdrEnabledInSettings: true,
             [NvencHevc, NvencAv1],
@@ -126,6 +135,7 @@ public sealed class HdrPlanTests
     public void HardwareHevc_WinsOverSoftwareAv1_EvenWhenSoftwareEnumeratesFirst()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true,
             hdrEnabledInSettings: true,
             [
@@ -146,6 +156,7 @@ public sealed class HdrPlanTests
     public void ATextureEncoder_WinsOverTheSameFamilysFallback()
     {
         var plan = HdrPlanner.Decide(
+            capturedColorSpace: null,
             displayIsHdr: true,
             hdrEnabledInSettings: true,
             [new VideoEncoderCandidate("h265_fallback_amf", "hevc"), new VideoEncoderCandidate("h265_texture_amf", "hevc")],
@@ -154,11 +165,55 @@ public sealed class HdrPlanTests
         Assert.Equal("h265_texture_amf", plan.EncoderId);
     }
 
+    // The regression that keying off the display created. On an HDR desktop an SDR game still hands
+    // over an sRGB swap chain, and putting that on a PQ canvas records black just as surely as the
+    // other way round — the mismatch is symmetric, so the source has the last word.
+    [Fact]
+    public void AnSdrGameOnAnHdrDisplay_RecordsSdr()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
+            displayIsHdr: true,
+            hdrEnabledInSettings: true,
+            [X264, NvencHevc],
+            configuredEncoderId: null);
+
+        Assert.False(plan.UseHdr);
+        Assert.Equal(ObsVideoFormat.Nv12, plan.OutputFormat);
+        Assert.Contains("Srgb", plan.Reason, StringComparison.Ordinal);
+    }
+
+    // And the case that started all of this: Overwatch presents FP16 scRGB.
+    [Fact]
+    public void AnHdrGame_RecordsHdr_EvenWhenTheDisplayProbeSaysOtherwise()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Scrgb709,
+            displayIsHdr: false,
+            hdrEnabledInSettings: true,
+            [X264, NvencHevc],
+            configuredEncoderId: null);
+
+        Assert.True(plan.UseHdr);
+        Assert.Equal(ObsVideoFormat.P010, plan.OutputFormat);
+        Assert.Equal(ObsColorSpace.Rec2100Pq, plan.ColorSpace);
+    }
+
+    // Srgb16F is high-precision SDR, not HDR. Treating "16F" as a synonym for HDR would put an
+    // ordinary source on a PQ canvas.
+    [Theory]
+    [InlineData(ObsSourceColorSpace.Srgb, false)]
+    [InlineData(ObsSourceColorSpace.Srgb16F, false)]
+    [InlineData(ObsSourceColorSpace.Extended709, true)]
+    [InlineData(ObsSourceColorSpace.Scrgb709, true)]
+    public void OnlyTheExtendedSpacesCountAsHdr(ObsSourceColorSpace space, bool hdr) =>
+        Assert.Equal(hdr, HdrPlanner.IsHdr(space));
+
     [Fact]
     public void NoRegisteredEncoder_IsRefusedRatherThanPlanned()
     {
         Assert.Throws<ArgumentException>(() =>
-            HdrPlanner.Decide(displayIsHdr: false, hdrEnabledInSettings: true, [], configuredEncoderId: null));
+            HdrPlanner.Decide(null, displayIsHdr: false, hdrEnabledInSettings: true, [], configuredEncoderId: null));
     }
 
     [Theory]

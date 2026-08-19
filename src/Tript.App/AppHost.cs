@@ -117,13 +117,13 @@ internal sealed class AppHost : IDisposable
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
         _controller = new AppController(this);
-        _ipc = new IpcServer(_controller, _token);
+        _ipc = new IpcServer(_controller, _token, options.ControlPort, options.UiPort);
         _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
         _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
         _thumbnails = new ThumbnailStore(ThumbnailRootFor(EffectiveRoot), CreateThumbnailExtractor);
         _trash = new TrashStore(TrashRootFor(EffectiveRoot));
-        _content = new ContentServer(EffectiveRoot, _token, _thumbnails);
-        _ui = new UiHost(options.WebRoot, _token);
+        _content = new ContentServer(EffectiveRoot, _token, _thumbnails, options.ContentPort);
+        _ui = new UiHost(options.WebRoot, _token, options.UiPort);
 
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
@@ -142,7 +142,7 @@ internal sealed class AppHost : IDisposable
     // The UI URL with this launch's token on it: what the desktop shell loads in-process, and what
     // the READY line prints for a headless user's own terminal. It is never passed on a command
     // line and never written to the log.
-    internal string UiUrl => _token.UiUrl;
+    internal string UiUrl => _token.BuildUiUrl(_options.UiPort);
 
     internal bool IsRecording => _recorder is not null && _recorder.Snapshot.State != RecorderState.Idle;
 

@@ -15,7 +15,8 @@ namespace Tript.App.Ipc;
 // HttpListener and answers WebSocket upgrade requests; every other path/verb gets 404.
 internal sealed class IpcServer : IDisposable
 {
-    private const int Port = LocalPorts.ControlSocket;
+    private readonly int _port;
+    private readonly string[] _allowedOrigins;
 
     private readonly AppController _controller;
     private readonly SessionToken _token;
@@ -27,10 +28,13 @@ internal sealed class IpcServer : IDisposable
     private Thread? _acceptThread;
     private volatile bool _running;
 
-    public IpcServer(AppController controller, SessionToken token)
+    public IpcServer(AppController controller, SessionToken token, int port = LocalPorts.ControlSocket,
+        int uiPort = LocalPorts.Ui)
     {
         _controller = controller;
         _token = token;
+        _port = port;
+        _allowedOrigins = [$"http://localhost:{uiPort}", $"http://127.0.0.1:{uiPort}"];
     }
 
     public event Action? ShutdownRequested;
@@ -44,7 +48,7 @@ internal sealed class IpcServer : IDisposable
             if (_running)
                 return;
 
-            _listener.Prefixes.Add($"http://localhost:{Port}/");
+            _listener.Prefixes.Add($"http://localhost:{_port}/");
             _listener.Start();
             _running = true;
 
@@ -76,7 +80,7 @@ internal sealed class IpcServer : IDisposable
                 // trash, move the output directory. The Origin header is the only thing that
                 // distinguishes the app's own UI from someone else's page, and a browser will not
                 // let script forge it.
-                if (!IsAllowedOrigin(context.Request.Headers["Origin"]))
+                if (!IsOriginAllowed(context.Request.Headers["Origin"]))
                 {
                     context.Response.StatusCode = 403;
                     context.Response.Close();
@@ -125,6 +129,10 @@ internal sealed class IpcServer : IDisposable
 
     // The UI host's own origin, in both spellings a browser may present for the loopback address.
     private static readonly string[] AllowedOrigins = LocalPorts.UiOrigins;
+
+    private bool IsOriginAllowed(string? origin) =>
+        string.IsNullOrEmpty(origin) ||
+        _allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
 
     internal static bool IsAllowedOrigin(string? origin) =>
         string.IsNullOrEmpty(origin) ||

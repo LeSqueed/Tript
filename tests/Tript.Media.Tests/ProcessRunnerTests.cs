@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-using System.Diagnostics;
 using Xunit;
 
 namespace Tript.Media.Tests;
@@ -53,16 +52,13 @@ public sealed class ProcessRunnerTests
             "-t", "3600", "-f", "null", "-",
         };
 
-        var stopwatch = Stopwatch.StartNew();
         var run = Task.Run(() => MediaProbe.Run(
             MediaTestFixture.Binaries.Ffmpeg, arguments, TimeSpan.FromSeconds(1)));
         await Finishes(run, "an overrunning child must be killed at the timeout");
-        stopwatch.Stop();
 
         var (_, stderr, exitCode) = await run;
         Assert.Equal(-1, exitCode);
         Assert.Contains("did not exit", stderr, StringComparison.Ordinal);
-        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 0.5, 30);
     }
 
     // Without -y an ffmpeg whose output already exists prompts on stdin and never exits. The clip

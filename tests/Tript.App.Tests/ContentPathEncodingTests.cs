@@ -155,11 +155,11 @@ public sealed class ContentPathEncodingTests
         // The session token, on every request: the content server serves nothing without it.
         rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", LocalPorts.Content);
+        await client.ConnectAsync("localhost", TestPorts.Content);
         await using var stream = client.GetStream();
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(
-            $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{LocalPorts.Content}\r\nConnection: close\r\n\r\n"));
+            $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{TestPorts.Content}\r\nConnection: close\r\n\r\n"));
 
         using var response = new MemoryStream();
         var buffer = new byte[8192];

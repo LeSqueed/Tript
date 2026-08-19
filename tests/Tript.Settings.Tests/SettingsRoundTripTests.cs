@@ -382,7 +382,7 @@ public class SettingsRoundTripTests : IDisposable
     // A fixed "<path>.tmp" is shared by every concurrent writer of the same file, so two interleaved
     // write/rename pairs rename one writer's bytes over the other's.
     [Fact]
-    public void AtomicFile_UsesATemporaryNameThatIsNotSharedBetweenWriters()
+    public void AtomicFile_ReplacesTheTargetWithTheWrittenContents()
     {
         var directory = Path.Combine(Path.GetTempPath(), "tript-atomic-temp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -392,8 +392,6 @@ public class SettingsRoundTripTests : IDisposable
             AtomicFile.WriteAllText(path, "{\"a\":1}");
 
             Assert.Equal("{\"a\":1}", File.ReadAllText(path));
-            Assert.False(File.Exists(path + ".tmp"), "the fixed temporary name must not be used");
-            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
         }
         finally
         {

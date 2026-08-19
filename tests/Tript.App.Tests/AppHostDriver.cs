@@ -90,6 +90,12 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             startInfo.ArgumentList.Add("--web-root");
             startInfo.ArgumentList.Add(webRoot);
         }
+        startInfo.ArgumentList.Add("--ui-port");
+        startInfo.ArgumentList.Add(TestPorts.Ui.ToString());
+        startInfo.ArgumentList.Add("--content-port");
+        startInfo.ArgumentList.Add(TestPorts.Content.ToString());
+        startInfo.ArgumentList.Add("--control-port");
+        startInfo.ArgumentList.Add(TestPorts.ControlSocket.ToString());
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("The app host could not be started.");
@@ -140,7 +146,7 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     internal async Task ConnectWebSocketAsync()
     {
         _socket = new ClientWebSocket();
-        await _socket.ConnectAsync(new Uri(WithToken($"ws://localhost:{LocalPorts.ControlSocket}/")),
+        await _socket.ConnectAsync(new Uri(WithToken($"ws://localhost:{TestPorts.ControlSocket}/")),
             CancellationToken.None);
         await SendAsync("""{"method":"NewConnection","parameters":{"protocolVersion":1}}""");
     }

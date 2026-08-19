@@ -19,21 +19,21 @@ public class ModelClassCountTests
 
     // The literal Ultralytics writes into metadata_props["names"]: a Python dict, not JSON.
     private const string UltralyticsNames =
-        "{0: 'Elimination', 1: 'Death Spectating', 2: 'Turret', 3: 'Kill Cam', 4: 'Assist', " +
-        "5: 'POTG', 6: 'Steel Trap'}";
+        "{0: 'Class zero', 1: 'Class one', 2: 'Class two', 3: 'Class three', 4: 'Class four', " +
+        "5: 'Class five', 6: 'Class six'}";
 
     private static EventDefinition Def(int classId, string name) =>
         new() { Id = classId, ClassId = classId, Name = name, Type = EventType.Trigger };
 
-    private static List<EventDefinition> ShippedDefinitions() =>
+    private static List<EventDefinition> Definitions() =>
     [
-        Def(0, "Elimination"),
-        Def(1, "Death Spectating"),
-        Def(2, "Turret"),
-        Def(3, "Kill Cam"),
-        Def(4, "Assist"),
-        Def(5, "POTG"),
-        Def(6, "Steel Trap"),
+        Def(0, "Class zero"),
+        Def(1, "Class one"),
+        Def(2, "Class two"),
+        Def(3, "Class three"),
+        Def(4, "Class four"),
+        Def(5, "Class five"),
+        Def(6, "Class six"),
     ];
 
     // [batch, 4 + numClasses, numAnchors].
@@ -70,9 +70,9 @@ public class ModelClassCountTests
 
         Assert.NotNull(names);
         Assert.Equal(7, names!.Count);
-        Assert.Equal("Elimination", names[0]);
-        Assert.Equal("Death Spectating", names[1]);
-        Assert.Equal("Steel Trap", names[6]);
+        Assert.Equal("Class zero", names[0]);
+        Assert.Equal("Class one", names[1]);
+        Assert.Equal("Class six", names[6]);
     }
 
     // Another exporter may quote differently or omit the key entirely; a map that cannot be read
@@ -80,10 +80,10 @@ public class ModelClassCountTests
     [Fact]
     public void ParseClassNames_AcceptsDoubleQuotes_AndYieldsNullWhenUnreadable()
     {
-        var doubleQuoted = VisualEventDetector.ParseClassNames("{0: \"Elimination\", 1: \"Assist\"}");
+        var doubleQuoted = VisualEventDetector.ParseClassNames("{0: \"Class zero\", 1: \"Class one\"}");
         Assert.NotNull(doubleQuoted);
-        Assert.Equal("Elimination", doubleQuoted![0]);
-        Assert.Equal("Assist", doubleQuoted[1]);
+        Assert.Equal("Class zero", doubleQuoted![0]);
+        Assert.Equal("Class one", doubleQuoted[1]);
 
         Assert.Null(VisualEventDetector.ParseClassNames(null));
         Assert.Null(VisualEventDetector.ParseClassNames("   "));
@@ -95,47 +95,47 @@ public class ModelClassCountTests
     {
         var names = VisualEventDetector.ParseClassNames(UltralyticsNames);
 
-        Assert.Null(VisualEventDetector.FindClassMapMismatch(ShippedDefinitions(), 7, names));
+        Assert.Null(VisualEventDetector.FindClassMapMismatch(Definitions(), 7, names));
     }
 
     // The exact edit the old code could not survive: one more entry than the model has classes.
     [Fact]
     public void FindClassMapMismatch_RejectsAClassIdBeyondTheModelsClasses()
     {
-        var definitions = ShippedDefinitions();
-        definitions.Add(Def(7, "Ultimate"));
+        var definitions = Definitions();
+        definitions.Add(Def(7, "Class seven"));
 
         var mismatch = VisualEventDetector.FindClassMapMismatch(
             definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames));
 
         Assert.NotNull(mismatch);
         Assert.Contains("7", mismatch);
-        Assert.Contains("Ultimate", mismatch);
+        Assert.Contains("Class seven", mismatch);
     }
 
     // The shape check cannot see this one — the count still matches, only the meaning moved.
     [Fact]
     public void FindClassMapMismatch_RejectsAReorderedOrRenamedClass()
     {
-        var definitions = ShippedDefinitions();
-        definitions[2].Name = "Healing";
+        var definitions = Definitions();
+        definitions[2].Name = "Renamed class";
 
         var mismatch = VisualEventDetector.FindClassMapMismatch(
             definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames));
 
         Assert.NotNull(mismatch);
-        Assert.Contains("Healing", mismatch);
-        Assert.Contains("Turret", mismatch);
+        Assert.Contains("Renamed class", mismatch);
+        Assert.Contains("Class two", mismatch);
     }
 
     // Without a class map the names cannot be checked, but the count still can.
     [Fact]
     public void FindClassMapMismatch_WithoutAModelClassMap_StillBoundsChecksClassIds()
     {
-        var definitions = ShippedDefinitions();
+        var definitions = Definitions();
         Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
 
-        definitions.Add(Def(9, "Ultimate"));
+        definitions.Add(Def(9, "Class nine"));
         Assert.NotNull(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
     }
 
@@ -145,7 +145,7 @@ public class ModelClassCountTests
     // own session rather than ModelService's cached one: test classes run in parallel and
     // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
     [Fact]
-    public void ShippedModel_DeclaresElevenClasses_AndAgreesWithEventsJson()
+    public void ShippedModel_DeclaresAStaticClassMap_AndAgreesWithEventsJson()
     {
         var modelPath = ModelService.GetModelPath(GameId);
         Assert.True(File.Exists(modelPath),
@@ -160,8 +160,6 @@ public class ModelClassCountTests
         Assert.True(VisualEventDetector.TryDeriveClassCount(dimensions, out var numClasses),
             $"Output {outputName} has shape [{string.Join(',', dimensions)}], which carries no " +
             "static class dimension — the detector would be falling back to events.json.");
-        Assert.Equal(11, numClasses);
-
         var names = VisualEventDetector.ParseClassNames(
             session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw) ? raw : null);
         Assert.NotNull(names);

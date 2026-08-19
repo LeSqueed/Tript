@@ -59,13 +59,13 @@ public sealed class SessionTokenTests : IDisposable
 
         foreach (var query in new[] { "", $"?k={WrongToken}", $"?k={ShortToken}", "?k=" })
         {
-            var (status, body) = await GetAsync($"http://localhost:{LocalPorts.Ui}/{query}");
+            var (status, body) = await GetAsync($"http://localhost:{TestPorts.Ui}/{query}");
             Assert.Equal(HttpStatusCode.Forbidden, status);
             Assert.DoesNotContain("<!doctype html>", body, StringComparison.OrdinalIgnoreCase);
         }
 
         // An asset is gated too: an ungated bundle is the SPA's whole behaviour served anyway.
-        var (assetStatus, _) = await GetAsync($"http://localhost:{LocalPorts.Ui}/app.js");
+        var (assetStatus, _) = await GetAsync($"http://localhost:{TestPorts.Ui}/app.js");
         Assert.Equal(HttpStatusCode.Forbidden, assetStatus);
 
         await host.ShutdownAsync();
@@ -89,7 +89,7 @@ public sealed class SessionTokenTests : IDisposable
 
         var jar = setCookie!.Split(';')[0];
         var (assetStatus, assetBody, _) = await GetWithCookieAsync(
-            $"http://localhost:{LocalPorts.Ui}/app.js", jar);
+            $"http://localhost:{TestPorts.Ui}/app.js", jar);
         Assert.Equal(HttpStatusCode.OK, assetStatus);
         Assert.Contains("export const ok", assetBody, StringComparison.Ordinal);
 
@@ -111,19 +111,19 @@ public sealed class SessionTokenTests : IDisposable
         foreach (var query in new[] { "", $"?k={WrongToken}", $"?k={ShortToken}" })
         {
             var (status, body) = await GetAsync(
-                $"http://localhost:{LocalPorts.Content}/api/content/sessions/clip.mp4{query}");
+                $"http://localhost:{TestPorts.Content}/api/content/sessions/clip.mp4{query}");
             Assert.Equal(HttpStatusCode.Forbidden, status);
             Assert.DoesNotContain("0123456789", body, StringComparison.Ordinal);
 
             var (thumbStatus, _) = await GetAsync(
-                $"http://localhost:{LocalPorts.Content}/api/thumbnail/sessions/clip.mp4{query}");
+                $"http://localhost:{TestPorts.Content}/api/thumbnail/sessions/clip.mp4{query}");
             Assert.Equal(HttpStatusCode.Forbidden, thumbStatus);
         }
 
         // The same file, with this launch's token, is served — so the refusals above are the token
         // and not a broken path.
         var (ok, served) = await GetAsync(
-            host.WithToken($"http://localhost:{LocalPorts.Content}/api/content/sessions/clip.mp4"));
+            host.WithToken($"http://localhost:{TestPorts.Content}/api/content/sessions/clip.mp4"));
         Assert.Equal(HttpStatusCode.OK, ok);
         Assert.Equal("0123456789", served);
 
@@ -140,12 +140,12 @@ public sealed class SessionTokenTests : IDisposable
 
         foreach (var query in new[] { "", $"?k={WrongToken}", $"?k={ShortToken}" })
         {
-            var refused = await ConnectAsync($"ws://localhost:{LocalPorts.ControlSocket}/{query}", origin: null);
+            var refused = await ConnectAsync($"ws://localhost:{TestPorts.ControlSocket}/{query}", origin: null);
             Assert.Equal(HttpStatusCode.Forbidden, refused);
         }
 
         var accepted = await ConnectAsync(
-            host.WithToken($"ws://localhost:{LocalPorts.ControlSocket}/"), origin: null);
+            host.WithToken($"ws://localhost:{TestPorts.ControlSocket}/"), origin: null);
         Assert.Null(accepted);
 
         await host.ShutdownAsync();
@@ -160,17 +160,17 @@ public sealed class SessionTokenTests : IDisposable
         await using var _ = host;
 
         var refused = await ConnectAsync(
-            host.WithToken($"ws://localhost:{LocalPorts.ControlSocket}/"), origin: "https://evil.example");
+            host.WithToken($"ws://localhost:{TestPorts.ControlSocket}/"), origin: "https://evil.example");
         Assert.Equal(HttpStatusCode.Forbidden, refused);
 
         // And the other half of "in addition": the app's own origin is not enough on its own.
         var untokened = await ConnectAsync(
-            $"ws://localhost:{LocalPorts.ControlSocket}/", origin: $"http://localhost:{LocalPorts.Ui}");
+            $"ws://localhost:{TestPorts.ControlSocket}/", origin: $"http://localhost:{TestPorts.Ui}");
         Assert.Equal(HttpStatusCode.Forbidden, untokened);
 
         var accepted = await ConnectAsync(
-            host.WithToken($"ws://localhost:{LocalPorts.ControlSocket}/"),
-            origin: $"http://localhost:{LocalPorts.Ui}");
+            host.WithToken($"ws://localhost:{TestPorts.ControlSocket}/"),
+            origin: $"http://localhost:{TestPorts.Ui}");
         Assert.Null(accepted);
 
         await host.ShutdownAsync();
@@ -184,7 +184,7 @@ public sealed class SessionTokenTests : IDisposable
         var host = Start();
         using var _ = host;
 
-        Assert.StartsWith($"http://localhost:{LocalPorts.Ui}/?k=", host.UiUrl, StringComparison.Ordinal);
+        Assert.StartsWith($"http://localhost:{TestPorts.Ui}/?k=", host.UiUrl, StringComparison.Ordinal);
 
         // 256 bits, hex: anything shorter is guessable by a process that can hammer loopback.
         Assert.Equal(64, host.Token.Length);

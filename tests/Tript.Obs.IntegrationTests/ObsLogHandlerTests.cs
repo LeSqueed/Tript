@@ -16,9 +16,10 @@ public sealed class ObsLogHandlerTests
     private const int LogInfo = 300;
     private const int LogWarning = 200;
 
-    [Fact]
+    [SkippableFact]
     public void AnUnformattedMessage_ArrivesThroughTheInstalledHandler()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         var received = new List<(ObsLogLevel Level, string Message)>();
 
         using (ObsLog.Install((level, message) => received.Add((level, message))))
@@ -34,9 +35,10 @@ public sealed class ObsLogHandlerTests
     // Formatting intact: a string, an integer and a double, substituted by libobs's printf from a
     // System V argument list. If GpOffset, FpOffset or OverflowArgArea were wrong, this is where it
     // would show — the values would come from the wrong place and the text would still arrive.
-    [Fact]
+    [SkippableFact]
     public void MixedFormatArguments_AreSubstitutedThroughTheVaList()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         var received = new List<string>();
 
         using (ObsLog.Install((_, message) => received.Add(message)))
@@ -53,9 +55,10 @@ public sealed class ObsLogHandlerTests
 
     // Byte-identical, not merely equal as strings: both sides are compared as UTF-8 bytes so that a
     // round trip which mangled the text symmetrically cannot pass.
-    [Fact]
+    [SkippableFact]
     public void ANonAsciiArgument_RoundTripsByteIdentically()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         const string original = "café — 日本語 — Ω — 🎮 — ünïcödé";
         var received = new List<string>();
 
@@ -69,9 +72,10 @@ public sealed class ObsLogHandlerTests
     }
 
     // A format string is itself UTF-8 and reaches libobs unchanged.
-    [Fact]
+    [SkippableFact]
     public void ANonAsciiFormatString_SurvivesSubstitution()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         const string format = "трипт %s ✅";
         var received = new List<string>();
 
@@ -83,9 +87,10 @@ public sealed class ObsLogHandlerTests
         Assert.Equal("трипт 日本語 ✅", Assert.Single(received));
     }
 
-    [Fact]
+    [SkippableFact]
     public void TheEndOfAScope_RestoresThePreviousHandler()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         ObsNative.base_get_log_handler(out var before, out var beforeParameter);
 
         using (ObsLog.Install((_, _) => { }))
@@ -99,9 +104,10 @@ public sealed class ObsLogHandlerTests
         Assert.Equal(beforeParameter, afterParameter);
     }
 
-    [Fact]
+    [SkippableFact]
     public void ASecondInstall_IsRefusedWithoutConsumingTheSlot()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         using (ObsLog.Install((_, _) => { }))
         {
             Assert.Throws<InvalidOperationException>(() => ObsLog.Install((_, _) => { }));
@@ -115,9 +121,10 @@ public sealed class ObsLogHandlerTests
 
     // An exception thrown by a handler must not cross back into libobs's frame; it would terminate
     // the process rather than fail a test.
-    [Fact]
+    [SkippableFact]
     public void AThrowingHandler_DoesNotPropagateIntoLibobs()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
         using (ObsLog.Install((_, _) => throw new InvalidOperationException("deliberate")))
         {
             Blogva(LogInfo, "tript throwing handler");

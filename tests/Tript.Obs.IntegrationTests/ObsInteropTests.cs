@@ -14,9 +14,11 @@ namespace Tript.Obs.IntegrationTests;
 // no context — nothing here starts one.
 public sealed class ObsInteropTests
 {
-    [Fact]
+    [SkippableFact]
     public void TheObsRuntime_LoadsToASingleHandle()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         var handle = ObsLibrary.EnsureLoaded();
 
         Assert.NotEqual(nint.Zero, handle);
@@ -26,17 +28,21 @@ public sealed class ObsInteropTests
     // Tript ships its own OBS runtime, so where it is loaded from is a decision the application
     // makes once at startup. Once the library is mapped the decision cannot be revisited, and
     // saying so is better than appearing to accept a new directory that changes nothing.
-    [Fact]
+    [SkippableFact]
     public void ChangingTheRuntimeDirectory_IsRefusedOnceTheLibraryIsLoaded()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         ObsLibrary.EnsureLoaded();
 
         Assert.Throws<InvalidOperationException>(() => ObsRuntime.SetRuntimeDirectory("/nonexistent/obs-runtime"));
     }
 
     [SkippableFact]
-    public void TheLoadedRuntime_IsThePinnedVersionLine()
+    public void TheLoadedRuntime_MeetsTheSupportedMinimumVersion()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         var version = ObsRuntime.Version;
 
         // Two entry points that must agree, and this is the only place they meet: Version decodes
@@ -44,21 +50,20 @@ public sealed class ObsInteropTests
         // shift in the decode would go unnoticed everywhere else.
         Assert.StartsWith($"{version.Major}.{version.Minor}.", ObsRuntime.VersionString, StringComparison.Ordinal);
 
-        // 32.2.x is the pinned target — the line the Windows bundle ships. Another line is not a
-        // defect in anything here, so it says which one it found and skips; as a failure it was one
-        // more red test on a machine already failing for exactly this reason.
-        if (version.Major != 32 || version.Minor != 2)
-            throw new Xunit.SkipException(
-                $"This machine's OBS runtime is {ObsRuntime.VersionString}, not the pinned 32.2.x line. "
-                + "Everything this suite measures would be measured against a different library.");
+        // Linux uses the installed runtime, while Windows uses the separately pinned bundle. The
+        // durable cross-platform contract is the documented API floor, not the current bundle patch.
+        Assert.True(version >= new Version(30, 1),
+            $"OBS {ObsRuntime.VersionString} is below the supported 30.1 minimum.");
     }
 
     // The point of the exercise: a declared entry point that does not exist fails at the moment it
     // is first called, which may be deep in a recording session. Resolving all of them up front
     // turns that into one loud failure naming every offender.
-    [Fact]
+    [SkippableFact]
     public void EveryDeclaredEntryPoint_ResolvesAgainstTheLoadedRuntime()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         var handle = ObsLibrary.EnsureLoaded();
         var declarations = DeclaredEntryPoints().ToArray();
 
@@ -198,9 +203,11 @@ public sealed class ObsInteropTests
     // A bmem allocation round-trips through the binding's owned-string path and is freed on libobs's
     // heap. Non-ASCII throughout, compared as bytes rather than as strings, because a comparison of
     // two strings that were both mangled the same way passes.
-    [Fact]
+    [SkippableFact]
     public unsafe void AnOwnedString_RoundTripsByteIdenticallyAndIsFreedOnLibobsHeap()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         const string original = "café — 日本語 — Ω — 🎮 — ünïcödé";
         var expected = Encoding.UTF8.GetBytes(original);
 

@@ -13,7 +13,7 @@ namespace Tript.App.Content;
 // as JPEG (204 when there is none) Anything else is 404.
 internal sealed class ContentServer : IDisposable
 {
-    private const int Port = LocalPorts.Content;
+    private readonly int _port;
 
     // The route regexes only ever capture the path after /api/content/ or /api/thumbnail/. They
     // accept the raw path including ".." segments: the resolver below is the guard's single choke
@@ -50,11 +50,13 @@ internal sealed class ContentServer : IDisposable
     private Thread? _serverThread;
     private volatile bool _running;
 
-    internal ContentServer(string contentRoot, SessionToken token, ThumbnailStore? thumbnails = null)
+    internal ContentServer(string contentRoot, SessionToken token, ThumbnailStore? thumbnails = null,
+        int port = LocalPorts.Content)
     {
         _contentRoot = Path.GetFullPath(contentRoot);
         _token = token;
         _thumbnails = thumbnails;
+        _port = port;
     }
 
     internal string ContentRoot => _contentRoot;
@@ -74,7 +76,7 @@ internal sealed class ContentServer : IDisposable
             if (_running)
                 return;
 
-            _listener.Prefixes.Add($"http://localhost:{Port}/");
+            _listener.Prefixes.Add($"http://localhost:{_port}/");
             _listener.Start();
             _running = true;
 

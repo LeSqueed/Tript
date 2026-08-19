@@ -48,7 +48,9 @@ internal sealed class SessionToken
     internal string Value { get; }
 
     // The URL the shell opens and the headless user pastes into a browser.
-    internal string UiUrl => $"http://localhost:{LocalPorts.Ui}/?{QueryKey}={Value}";
+    internal string UiUrl => BuildUiUrl(LocalPorts.Ui);
+
+    internal string BuildUiUrl(int port) => $"http://localhost:{port}/?{QueryKey}={Value}";
 
     internal bool Matches(string? presented)
     {

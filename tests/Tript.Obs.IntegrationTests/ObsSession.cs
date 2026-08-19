@@ -25,6 +25,8 @@ internal sealed class ObsSession : IDisposable
 
     internal static ObsSession Start()
     {
+        ObsTestEnvironment.RequireUsableRuntime();
+
         // A previous test that leaked a context would otherwise show up as an unrelated failure
         // somewhere later. Report it here, where the state is still attributable.
         if (ObsRuntime.Current is not null || ObsRuntime.IsInitialized)

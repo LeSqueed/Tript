@@ -9,7 +9,7 @@ namespace Tript.App;
 // directory.
 internal sealed class UiHost : IDisposable
 {
-    private const int Port = LocalPorts.Ui;
+    private readonly int _port;
 
     private readonly string _webRoot;
     private readonly SessionToken _token;
@@ -18,10 +18,11 @@ internal sealed class UiHost : IDisposable
     private Thread? _serverThread;
     private volatile bool _running;
 
-    internal UiHost(string webRoot, SessionToken token)
+    internal UiHost(string webRoot, SessionToken token, int port = LocalPorts.Ui)
     {
         _webRoot = Path.GetFullPath(webRoot);
         _token = token;
+        _port = port;
     }
 
     public void Start()
@@ -31,7 +32,7 @@ internal sealed class UiHost : IDisposable
             if (_running)
                 return;
 
-            _listener.Prefixes.Add($"http://localhost:{Port}/");
+            _listener.Prefixes.Add($"http://localhost:{_port}/");
             _listener.Start();
             _running = true;
 

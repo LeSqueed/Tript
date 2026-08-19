@@ -671,14 +671,14 @@ internal sealed class ActiveOutput : IDisposable
         try
         {
             _output.Stop();
-            stopped.Task.Wait(TimeSpan.FromSeconds(5));
+            Assert.True(stopped.Task.Wait(TimeSpan.FromSeconds(5)),
+                "The output did not publish its asynchronous stop signal within 5 seconds.");
         }
         finally
         {
             _output.Stopped -= handler;
         }
 
-        Thread.Sleep(300);
         _output.Dispose();
         _encoder.Dispose();
     }

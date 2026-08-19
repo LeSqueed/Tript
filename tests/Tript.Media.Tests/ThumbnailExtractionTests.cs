@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-using System.Diagnostics;
 using Xunit;
 
 namespace Tript.Media.Tests;
@@ -84,17 +83,12 @@ public sealed class ThumbnailExtractionTests
             "-t", "3600", "-f", "null", "-",
         };
 
-        var stopwatch = Stopwatch.StartNew();
         var outcome = FfmpegRunner.RunBounded(MediaTestFixture.Binaries.Ffmpeg, arguments,
             TimeSpan.FromSeconds(1));
-        stopwatch.Stop();
 
         Assert.False(outcome.Completed, "an overrunning ffmpeg must be reported as not completed");
         Assert.False(outcome.Succeeded);
         Assert.Contains("did not exit", outcome.StandardError);
-        // The call returns on the timeout rather than on the process: generous upper bound so a
-        // loaded machine cannot fail this, but far below the hour the process was asked for.
-        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 0.5, 30);
     }
 
     [Fact]

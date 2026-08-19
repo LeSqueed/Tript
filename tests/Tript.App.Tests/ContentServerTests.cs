@@ -17,7 +17,7 @@ public sealed class ContentServerTests : IDisposable
     private readonly AppHostCollectionFixture _fixture;
     private readonly string _contentRoot;
     private readonly string _settingsPath;
-    private static readonly string Base = $"http://localhost:{LocalPorts.Content}";
+    private static readonly string Base = $"http://localhost:{TestPorts.Content}";
 
     public ContentServerTests(AppHostCollectionFixture fixture)
     {
@@ -116,9 +116,9 @@ public sealed class ContentServerTests : IDisposable
     {
         rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", LocalPorts.Content);
+        await client.ConnectAsync("localhost", TestPorts.Content);
         await using var stream = client.GetStream();
-        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{LocalPorts.Content}\r\nConnection: close\r\n\r\n";
+        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{TestPorts.Content}\r\nConnection: close\r\n\r\n";
         var bytes = Encoding.ASCII.GetBytes(request);
         await stream.WriteAsync(bytes);
 

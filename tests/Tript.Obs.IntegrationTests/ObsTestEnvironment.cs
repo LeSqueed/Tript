@@ -3,6 +3,7 @@
 
 using System.Runtime.InteropServices;
 using Tript.Obs;
+using Tript.Obs.Interop;
 
 namespace Tript.Obs.IntegrationTests;
 
@@ -13,6 +14,27 @@ namespace Tript.Obs.IntegrationTests;
 internal static class ObsTestEnvironment
 {
     private static readonly Lazy<ObsRuntimeLocations> Loc = new(ObsRuntimeLocator.Discover);
+
+    // Keep prerequisite failures out of native test bodies. In particular, the integration project
+    // is not part of the portable test gate and may run on a machine with no libobs or no Unix
+    // display stack at all.
+    internal static void RequireUsableRuntime()
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new Xunit.SkipException("The OBS integration suite requires the Linux libobs runtime and X11/XWayland.");
+
+        if (!Loc.Value.Found)
+            throw new Xunit.SkipException("No OBS runtime found; the integration tests need a system obs-studio install.");
+
+        try
+        {
+            ObsLibrary.EnsureLoaded();
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or BadImageFormatException or InvalidOperationException)
+        {
+            throw new Xunit.SkipException($"The discovered OBS runtime could not be loaded: {exception.Message}");
+        }
+    }
 
     // The module binary dir and data dir from discovery. A machine with no OBS install cannot run
     // any of this, which is a fact about the machine rather than a defect: it skips. xunit 2.x only

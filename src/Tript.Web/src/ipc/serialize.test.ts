@@ -65,12 +65,45 @@ describe('serializeCommand', () => {
     expect(params).not.toHaveProperty('ContentType');
     expect(params).not.toHaveProperty('FileName');
   });
+
+  it.each([
+    ['AddBookmark', { contentType: 'recording', filePath: 'sessions/a.mp4', id: 'b1', time: 12.5, type: 'kill' }],
+    ['DeleteBookmark', { contentType: 'recording', filePath: 'sessions/a.mp4', id: 'b1' }],
+  ] as const)('keeps the bookmark command shape on the wire: %s', (method, parameters) => {
+    expect(JSON.parse(serializeCommand(method, parameters))).toEqual({ method, parameters });
+  });
 });
 
 describe('parseMessage', () => {
   it('parses a valid backend frame', () => {
     const parsed = parseMessage('{"method":"state","content":{"recording":true}}');
     expect(parsed).toEqual({ method: 'state', content: { recording: true } });
+  });
+
+  it('preserves bookmark metadata in a content push', () => {
+    const parsed = parseMessage(JSON.stringify({
+      method: 'content',
+      content: {
+        content: [{
+          contentType: 'recording',
+          fileName: 'session.mp4',
+          filePath: 'sessions/session.mp4',
+          bookmarks: [{ id: 'b1', type: 'kill', subtype: 'headshot', time: 12.5, label: 'Opening pick' }],
+        }],
+      },
+    }));
+
+    expect(parsed).toEqual({
+      method: 'content',
+      content: {
+        content: [{
+          contentType: 'recording',
+          fileName: 'session.mp4',
+          filePath: 'sessions/session.mp4',
+          bookmarks: [{ id: 'b1', type: 'kill', subtype: 'headshot', time: 12.5, label: 'Opening pick' }],
+        }],
+      },
+    });
   });
 
   it('tolerates an absent content field', () => {

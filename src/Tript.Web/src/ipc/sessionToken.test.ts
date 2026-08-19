@@ -57,8 +57,8 @@ describe('the captured token', () => {
   it('is not written to localStorage or sessionStorage', () => {
     captureSessionToken(`?k=${TOKEN}`);
 
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.length).toBe(0);
+    expect(window.localStorage?.length ?? 0).toBe(0);
+    expect(window.sessionStorage?.length ?? 0).toBe(0);
   });
 });
 

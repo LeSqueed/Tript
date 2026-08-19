@@ -21,6 +21,12 @@ internal sealed class AppOptions
     // without libobs (or a display server, or the muxer helper) present.
     public bool FakeRecorder { get; init; }
 
+    public int UiPort { get; init; } = LocalPorts.Ui;
+
+    public int ContentPort { get; init; } = LocalPorts.Content;
+
+    public int ControlPort { get; init; } = LocalPorts.ControlSocket;
+
     // The game-list source. When null the host uses its own catalogue; the tests override this to
     // push a deterministic game list into the gameList broadcast.
     public string? GameListJson { get; init; }
@@ -36,6 +42,9 @@ internal sealed class AppOptions
         string webRoot = DefaultWebRoot();
         var fakeRecorder = false;
         string? gameListJson = null;
+        var uiPort = LocalPorts.Ui;
+        var contentPort = LocalPorts.Content;
+        var controlPort = LocalPorts.ControlSocket;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -56,11 +65,18 @@ internal sealed class AppOptions
                 case "--game-list" when index + 1 < args.Length:
                     gameListJson = args[++index];
                     break;
+                case "--ui-port" when index + 1 < args.Length && int.TryParse(args[++index], out uiPort):
+                    break;
+                case "--content-port" when index + 1 < args.Length && int.TryParse(args[++index], out contentPort):
+                    break;
+                case "--control-port" when index + 1 < args.Length && int.TryParse(args[++index], out controlPort):
+                    break;
                 case "--help":
                 case "-h":
                     Console.WriteLine(
                         "Usage: Tript.App [--content-root <dir>] [--settings-path <file>] " +
-                        "[--web-root <dir>] [--fake-recorder] [--game-list <json>]");
+                        "[--web-root <dir>] [--fake-recorder] [--game-list <json>] " +
+                        "[--ui-port <port>] [--content-port <port>] [--control-port <port>]");
                     return null;
                 default:
                     Console.Error.WriteLine($"Tript.App: unknown argument '{args[index]}'.");
@@ -75,6 +91,9 @@ internal sealed class AppOptions
             WebRoot = webRoot,
             FakeRecorder = fakeRecorder,
             GameListJson = gameListJson,
+            UiPort = uiPort,
+            ContentPort = contentPort,
+            ControlPort = controlPort,
         };
 
         options.Validate();
@@ -98,6 +117,10 @@ internal sealed class AppOptions
     {
         if (string.IsNullOrWhiteSpace(ContentRoot))
             throw new ArgumentException("The content root must not be empty.");
+
+        var ports = new[] { UiPort, ContentPort, ControlPort };
+        if (ports.Any(port => port is < 1 or > 65535) || ports.Distinct().Count() != ports.Length)
+            throw new ArgumentException("The IPC ports must be distinct values between 1 and 65535.");
     }
 
     // The game list pushed on every NewConnection and broadcast when it changes. The alpha has no

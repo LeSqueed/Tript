@@ -170,6 +170,82 @@ public class ClipEngineTests
         Assert.Equal(double.NegativeInfinity, outputTrack1Db);
     }
 
+    // Regression: production sends an empty AudioTrackAdjustments list. default(AudioTrackAdjustment)
+    // has Volume=0, and FindFirst's default result used to put every unlisted track through
+    // "volume=0" — every clip came out digitally silent. Unlisted tracks must pass through.
+    [Fact]
+    public void CreateClips_Separate_NoAdjustments_AudioPassesThrough()
+    {
+        var source = MediaTestFixture.CreateSdrSource("audio2-passthrough.mp4", audioTracks: 2);
+        var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-audio-passthrough");
+        var ffmpeg = MediaTestFixture.Binaries.Ffmpeg;
+
+        var baselineDb = new[]
+        {
+            MediaTestFixture.AudioRmsDb(ffmpeg, source, 0),
+            MediaTestFixture.AudioRmsDb(ffmpeg, source, 1),
+        };
+
+        var engine = NewEngine();
+        var paths = engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0.5, 2.5)],
+            Mode = ClipMode.Separate,
+            OutputPath = outputDir,
+            // Intentionally no AudioTrackAdjustments: the default empty list is the production path.
+        });
+        var output = Assert.Single(paths);
+
+        for (var t = 0; t < 2; t++)
+        {
+            var clipDb = MediaTestFixture.AudioRmsDb(ffmpeg, output, t);
+            Assert.True(double.IsFinite(clipDb), $"clip track {t} must not be silent, got {clipDb:0.##} dB");
+            // The fixture tone is steady, so the re-encode should land within ~2 dB of the source.
+            Assert.True(
+                Math.Abs(clipDb - baselineDb[t]) <= 2.0,
+                $"clip track {t} ({clipDb:0.##} dB) should match source ({baselineDb[t]:0.##} dB)");
+        }
+    }
+
+    // Same regression on the combine path, with two regions.
+    [Fact]
+    public void CreateClips_Combine_NoAdjustments_AudioPassesThrough()
+    {
+        var source = MediaTestFixture.CreateSdrSource("audio2-combine-passthrough.mp4", audioTracks: 2);
+        var output = Path.Combine(MediaTestFixture.ScratchRoot, "clip-audio-passthrough.mp4");
+        var ffmpeg = MediaTestFixture.Binaries.Ffmpeg;
+
+        var baselineDb = new[]
+        {
+            MediaTestFixture.AudioRmsDb(ffmpeg, source, 0),
+            MediaTestFixture.AudioRmsDb(ffmpeg, source, 1),
+        };
+
+        var engine = NewEngine();
+        engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions =
+            [
+                ClipRegion.FromSeconds(0.5, 2.0),
+                ClipRegion.FromSeconds(3.0, 4.5),
+            ],
+            Mode = ClipMode.Combine,
+            OutputPath = output,
+            // Intentionally no AudioTrackAdjustments: the default empty list is the production path.
+        });
+
+        for (var t = 0; t < 2; t++)
+        {
+            var clipDb = MediaTestFixture.AudioRmsDb(ffmpeg, output, t);
+            Assert.True(double.IsFinite(clipDb), $"clip track {t} must not be silent, got {clipDb:0.##} dB");
+            Assert.True(
+                Math.Abs(clipDb - baselineDb[t]) <= 2.0,
+                $"clip track {t} ({clipDb:0.##} dB) should match source ({baselineDb[t]:0.##} dB)");
+        }
+    }
+
     // ---- Verification 5: HDR handling ----
 
     [Fact]

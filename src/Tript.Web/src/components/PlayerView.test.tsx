@@ -114,11 +114,10 @@ describe('PlayerView', () => {
   });
 
   it('renders the bookmark ticks on the full-session bar', () => {
-    const { container } = renderPlayer();
-    const ticks = container.querySelectorAll('.timeline-tick');
-    expect(ticks.length).toBe(2);
-    // 20s of 100s → left 20%.
-    expect((ticks[0] as HTMLElement).style.left).toBe('20%');
+    renderPlayer();
+    expect(screen.getAllByRole('button', { name: /^Bookmark at / })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Bookmark at 20.0s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Bookmark at 80.0s' })).toBeTruthy();
   });
 
   it('keeps the two timelines synced: full-session bar seek updates the transport readout', () => {
@@ -200,9 +199,9 @@ describe('bookmark interaction', () => {
   });
 
   it('clicking a full-session tick jumps the playhead to the bookmark time', () => {
-    const { container } = renderPlayer();
+    renderPlayer();
     act(() => {
-      fireEvent.pointerDown(container.querySelectorAll('.timeline-tick')[0] as Element, { clientX: 20, pointerId: 1 });
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Bookmark at 20.0s' }), { clientX: 20, pointerId: 1 });
     });
     expect(currentReadout()).toBe('0:20');
   });

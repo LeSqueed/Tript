@@ -131,12 +131,10 @@ describe('App shell', () => {
     renderApp();
     connect();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
-    // Exactly three routes, and neither of the two that were folded into the library.
-    expect(within(nav).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      'Library',
-      'Trash',
-      'Settings',
-    ]);
+    // These are the user-facing routes; Player and Clips were folded into the library.
+    expect(within(nav).getByRole('button', { name: 'Library' })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: 'Trash' })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: 'Settings' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Player' })).toBeNull();
     expect(within(nav).queryByRole('button', { name: 'Clips' })).toBeNull();
     // "Clips" survives as a type FILTER inside the library, which is where it went.

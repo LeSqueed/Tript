@@ -75,6 +75,20 @@ public static partial class HdrDisplayProbe
         return (request.Value & AdvancedColorEnabled) != 0;
     }
 
+    // The sizes the Windows headers define for the structs above. A managed layout that disagrees
+    // does not crash — QueryDisplayConfig fills the buffer to ITS idea of the stride and every entry
+    // after the first is then read from the wrong offset, so the probe simply answers "no HDR". That
+    // failure is invisible, which is why the sizes are asserted rather than assumed.
+    internal static IReadOnlyList<(string Name, int Actual, int Expected)> NativeStructSizes() =>
+    [
+        ("DISPLAYCONFIG_PATH_SOURCE_INFO", Marshal.SizeOf<DisplayConfigPathSourceInfo>(), 20),
+        ("DISPLAYCONFIG_PATH_TARGET_INFO", Marshal.SizeOf<DisplayConfigPathTargetInfo>(), 48),
+        ("DISPLAYCONFIG_PATH_INFO", Marshal.SizeOf<DisplayConfigPathInfo>(), 72),
+        ("DISPLAYCONFIG_DEVICE_INFO_HEADER", Marshal.SizeOf<DisplayConfigDeviceInfoHeader>(), 20),
+        ("DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO", Marshal.SizeOf<DisplayConfigGetAdvancedColorInfo>(), 32),
+        ("DISPLAYCONFIG_MODE_INFO", Marshal.SizeOf<DisplayConfigModeInfo>(), 64),
+    ];
+
     private const uint QueryOnlyActivePaths = 0x00000002;
     private const int ErrorSuccess = 0;
     private const uint GetAdvancedColorInfo = 9;
@@ -105,7 +119,15 @@ public static partial class HdrDisplayProbe
         public uint OutputTechnology;
         public uint Rotation;
         public uint Scaling;
-        public ulong RefreshRate;
+
+        // DISPLAYCONFIG_RATIONAL is two UINT32s, and it has to stay two of them. A ulong here is the
+        // same eight bytes but carries eight-byte alignment, and the 28 bytes ahead of it are not
+        // eight-aligned — so the runtime inserts four bytes of padding, grows the struct from 48 to
+        // 56, and every path in the array after the first is read at the wrong offset. The symptom
+        // is not a crash: the query succeeds and reports no HDR display anywhere.
+        public uint RefreshRateNumerator;
+        public uint RefreshRateDenominator;
+
         public uint ScanLineOrdering;
         public int TargetAvailable;
         public uint StatusFlags;

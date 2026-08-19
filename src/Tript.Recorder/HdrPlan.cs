@@ -113,7 +113,9 @@ public static class HdrPlanner
     }
 
     // The configured encoder when it can do the job, so a user who picked one keeps it; otherwise the
-    // first registered encoder that can, in the order the caller enumerated them.
+    // best HDR-capable one registered — hardware ahead of software, because the software AV1 encoders
+    // register on every machine and enumerate before the GPU's own. Picking by enumeration order put
+    // ffmpeg_svt_av1 ahead of h265_texture_amf, which is a real-time recording done in software.
     private static VideoEncoderCandidate? ResolveHdrEncoder(
         IReadOnlyList<VideoEncoderCandidate> registered, string? configuredEncoderId)
     {
@@ -124,6 +126,24 @@ public static class HdrPlanner
             return chosen;
         }
 
-        return registered.FirstOrDefault(IsHdrCapable);
+        return registered
+            .Where(IsHdrCapable)
+            .OrderBy(HardwarePreference)
+            .FirstOrDefault();
     }
+
+    // Lower sorts first. Judged by id because libobs exposes no "is this hardware" flag: the encoders
+    // that take a texture straight off the GPU say so in their ids, and the three software encoders
+    // are a closed set worth naming rather than inferring.
+    internal static int HardwarePreference(VideoEncoderCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        if (SoftwareEncoderIds.Contains(candidate.Id, StringComparer.OrdinalIgnoreCase))
+            return 2;
+
+        return candidate.Id.Contains("texture", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+    }
+
+    private static readonly string[] SoftwareEncoderIds = ["obs_x264", "ffmpeg_svt_av1", "ffmpeg_aom_av1"];
 }

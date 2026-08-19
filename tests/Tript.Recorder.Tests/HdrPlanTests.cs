@@ -120,6 +120,40 @@ public sealed class HdrPlanTests
         Assert.Equal("obs_nvenc_av1_tex", plan.EncoderId);
     }
 
+    // The exact set this machine registers, in the order libobs enumerates it. The software AV1
+    // encoders come first, so picking by enumeration order would record a game in software.
+    [Fact]
+    public void HardwareHevc_WinsOverSoftwareAv1_EvenWhenSoftwareEnumeratesFirst()
+    {
+        var plan = HdrPlanner.Decide(
+            displayIsHdr: true,
+            hdrEnabledInSettings: true,
+            [
+                new VideoEncoderCandidate("ffmpeg_svt_av1", "av1"),
+                new VideoEncoderCandidate("ffmpeg_aom_av1", "av1"),
+                new VideoEncoderCandidate("h265_texture_amf", "hevc"),
+                new VideoEncoderCandidate("obs_x264", "h264")
+            ],
+            configuredEncoderId: null);
+
+        Assert.True(plan.UseHdr);
+        Assert.Equal("h265_texture_amf", plan.EncoderId);
+        Assert.Equal("main10", plan.Profile);
+    }
+
+    // A texture encoder takes the frame straight off the GPU; the fallback path copies it back first.
+    [Fact]
+    public void ATextureEncoder_WinsOverTheSameFamilysFallback()
+    {
+        var plan = HdrPlanner.Decide(
+            displayIsHdr: true,
+            hdrEnabledInSettings: true,
+            [new VideoEncoderCandidate("h265_fallback_amf", "hevc"), new VideoEncoderCandidate("h265_texture_amf", "hevc")],
+            configuredEncoderId: null);
+
+        Assert.Equal("h265_texture_amf", plan.EncoderId);
+    }
+
     [Fact]
     public void NoRegisteredEncoder_IsRefusedRatherThanPlanned()
     {
@@ -146,5 +180,17 @@ public sealed class HdrPlanTests
 
         if (!OperatingSystem.IsWindows())
             Assert.False(isHdr);
+    }
+
+    // These sizes are the whole correctness of the probe, and getting one wrong is silent: the query
+    // succeeds, the array is walked at the wrong stride, and every display reads as SDR. That is not
+    // hypothetical — DISPLAYCONFIG_RATIONAL declared as a ulong padded the target struct from 48 to
+    // 56 bytes and made an HDR monitor invisible, which sent an HDR game to an SDR canvas and
+    // recorded a black video. Runs everywhere: the layout is the platform's either way.
+    [Fact]
+    public void TheDisplayConfigStructs_MatchTheWindowsHeaders()
+    {
+        foreach (var (name, actual, expected) in HdrDisplayProbe.NativeStructSizes())
+            Assert.Equal((name, expected), (name, actual));
     }
 }

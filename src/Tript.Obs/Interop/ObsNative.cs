@@ -321,6 +321,26 @@ internal static unsafe partial class ObsNative
     // The two nit levels the compositor converts between SDR and HDR with. obs_reset_video does not
     // set them, so an application that never calls obs_set_video_levels gets whatever the process
     // started with.
+    // The duplicator is the one thing on Windows that reports a display's real colour state, and it
+    // reports it before any output exists. Requires the graphics context.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint gs_duplicator_create(int monitorIndex);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void gs_duplicator_destroy(nint duplicator);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial int gs_duplicator_get_color_space(nint duplicator);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float gs_duplicator_get_sdr_white_level(nint duplicator);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_enter_graphics();
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_leave_graphics();
+
     [LibraryImport(ObsLibrary.Name)]
     internal static partial float obs_get_video_sdr_white_level();
 

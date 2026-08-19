@@ -353,6 +353,44 @@ public sealed class ObsRuntime : IDisposable
         ObsNative.obs_set_video_levels(sdrWhiteLevelNits, hdrNominalPeakLevelNits);
     }
 
+    // What a monitor is actually displaying, straight from the desktop duplicator: its colour space
+    // and the nits it treats as SDR white. This is the one Windows signal that answers "is this
+    // display in HDR" honestly — the capture SOURCES do not, reporting Srgb for an HDR desktop and
+    // for a hooked HDR game alike.
+    //
+    // It also has no ordering problem. A duplicator can be created and thrown away before any output
+    // exists, so the canvas can be decided from it without the hook/render/output cycle that makes
+    // the source route unusable.
+    //
+    // Null when the index names no monitor, or when duplication is refused — which on Windows is
+    // most often because the process is not DPI aware, and is then null for every monitor.
+    public (ObsSourceColorSpace ColorSpace, float SdrWhiteLevelNits)? ProbeDisplay(int monitorIndex)
+    {
+        ThrowIfDisposed();
+
+        ObsNative.obs_enter_graphics();
+        try
+        {
+            var duplicator = ObsNative.gs_duplicator_create(monitorIndex);
+            if (duplicator == nint.Zero)
+                return null;
+
+            try
+            {
+                return ((ObsSourceColorSpace)ObsNative.gs_duplicator_get_color_space(duplicator),
+                    ObsNative.gs_duplicator_get_sdr_white_level(duplicator));
+            }
+            finally
+            {
+                ObsNative.gs_duplicator_destroy(duplicator);
+            }
+        }
+        finally
+        {
+            ObsNative.obs_leave_graphics();
+        }
+    }
+
     public ObsVideoResetResult ResetVideo(ObsVideoSettings settings)
     {
         ThrowIfDisposed();

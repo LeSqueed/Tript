@@ -142,7 +142,21 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Encoder/)).toBeTruthy();
     expect(screen.getByLabelText(/^Rate control/)).toBeTruthy();
     expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
+    expect(screen.getByLabelText(/^HDR/)).toBeTruthy();
     expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
+  });
+
+  // A push from a backend without the field must not read as "off": the backend default is on, and
+  // a selector showing "Always record SDR" would be reporting a setting the recorder does not hold.
+  it('shows HDR as on when the push carries no enableHdr', () => {
+    renderSettings();
+    expect((screen.getByLabelText(/^HDR/) as HTMLSelectElement).value).toBe('on');
+  });
+
+  it('sends enableHdr false when HDR is turned off', () => {
+    const { ws } = renderSettings();
+    changeInput(/^HDR/, 'off');
+    expect(sentUpdates(ws).at(-1)).toMatchObject({ recording: { enableHdr: false } });
   });
 
   it('renders the buffer page controls', () => {

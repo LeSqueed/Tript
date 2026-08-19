@@ -49,6 +49,16 @@ public sealed class RecordingSettings
     // x264's ceiling is its VBV pair) — see ObsRecorderSession for which key each family reads.
     public int MaxBitrateKbps { get; set; }
 
+    // Whether to record in HDR when the captured display is in HDR mode. On by default because the
+    // alternative is worse than a preference: an HDR game hands win-capture an FP16 scRGB swapchain,
+    // and composited into an SDR canvas that is a black or washed-out recording. Turning this off
+    // does not go back to that — it makes the capture sources tonemap to SDR instead, which is the
+    // right answer for anyone whose player cannot handle a PQ file.
+    //
+    // Ignored where nothing can act on it: HDR needs a display in HDR mode, an HEVC or AV1 encoder,
+    // and (today) Windows. Any of those missing records SDR with tonemapping.
+    public bool EnableHdr { get; set; } = true;
+
     // The directory recordings are written to, or empty for the platform default (Videos/Tript).
     // The host resolves the effective path; the recorder never sees this field.
     public string? OutputDirectory { get; set; }

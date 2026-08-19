@@ -41,6 +41,12 @@ export interface RecordingSettings {
   /** The VBR ceiling in kbps, or 0 for "derive one from the target". */
   maxBitrateKbps?: number;
   /**
+   * Whether to record HDR when the captured display is in HDR mode. Optional for the same reason as
+   * rateControl: a push from a backend without the field must still render. Undefined reads as on,
+   * matching the backend default.
+   */
+  enableHdr?: boolean;
+  /**
    * The directory recordings are written to, or empty/null for the platform default
    * (Videos/Tript). A path the user types is a local draft, committed on blur like resolution.
    */

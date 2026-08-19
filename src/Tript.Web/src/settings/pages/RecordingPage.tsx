@@ -377,6 +377,20 @@ export function RecordingPage({
       </Field>
 
       <Field
+        label="HDR"
+        hint="Record in HDR when the captured display is in HDR mode and an HEVC or AV1 encoder is available. Off tonemaps an HDR game down to SDR instead, which is the right choice if your player cannot open a PQ file."
+      >
+        <SelectField
+          value={settings.enableHdr === false ? 'off' : 'on'}
+          onChange={(value) => update(page, { enableHdr: value === 'on' })}
+          options={[
+            { value: 'on', label: 'Record HDR when available' },
+            { value: 'off', label: 'Always record SDR' },
+          ]}
+        />
+      </Field>
+
+      <Field
         label="Rate control"
         hint={
           coercedFrom

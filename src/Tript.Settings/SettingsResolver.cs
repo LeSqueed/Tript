@@ -32,6 +32,7 @@ public sealed class SettingsResolver
             RateControl = settings.Recording.RateControl,
             BitrateKbps = settings.Recording.BitrateKbps,
             MaxBitrateKbps = settings.Recording.MaxBitrateKbps,
+            EnableHdr = settings.Recording.EnableHdr,
 
             BufferEnabled = settings.Buffer.Enabled,
             BufferDuration = settings.Buffer.Duration,
@@ -84,6 +85,11 @@ public sealed class ResolvedRecorderSettings
 
     public int MaxBitrateKbps { get; set; }
 
+    // A request, not a promise: HDR is taken only when the captured display is actually in HDR mode
+    // and a registered encoder can encode it (HdrPlanner.Decide). False means the capture sources
+    // tonemap an HDR game down instead.
+    public bool EnableHdr { get; set; } = true;
+
     public bool BufferEnabled { get; set; }
 
     public TimeSpan BufferDuration { get; set; }
@@ -112,6 +118,7 @@ public sealed class ResolvedRecorderSettings
         RateControl = RateControl,
         BitrateKbps = BitrateKbps,
         MaxBitrateKbps = MaxBitrateKbps,
+        EnableHdr = EnableHdr,
         BufferEnabled = BufferEnabled,
         BufferDuration = BufferDuration,
         BufferMaxSizeBytes = BufferMaxSizeBytes,

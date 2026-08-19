@@ -142,6 +142,12 @@ public sealed class ObsRecorderSession : IRecorderSession
         if (!ObsOutput.IsTypeRegistered(FfmpegMuxerId))
             throw new ObsException($"No loaded module registers the output type '{FfmpegMuxerId}'.");
 
+        // Before anything binds to the mix: obs_reset_video answers CurrentlyActive once an output
+        // exists, so the canvas colour space is settled here or not at all.
+        var plan = ResolveHdrPlan(settings);
+        plan = ApplyCanvasColour(plan);
+        ApplyCaptureColour(plan);
+
         if (!Runtime.TryGetVideoHandle(out var video))
             throw new ObsException("The runtime has no video mix; obs_reset_video must succeed before recording.");
 
@@ -151,9 +157,7 @@ public sealed class ObsRecorderSession : IRecorderSession
         SizeColourSourceToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
         FitItemsToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
 
-        var videoEncoderId = ResolveVideoEncoderId(settings.Encoder);
-        if (videoEncoderId is null)
-            throw new ObsException("No loaded module registers a usable H.264 video encoder.");
+        var videoEncoderId = plan.EncoderId;
 
         if (!ObsEncoder.IsTypeRegistered(FfmpegAacId))
             throw new ObsException($"No loaded module registers the audio encoder '{FfmpegAacId}'.");
@@ -193,6 +197,11 @@ public sealed class ObsRecorderSession : IRecorderSession
                 // keyint_sec is an interval in SECONDS; the encoder converts it using the mix's
                 // frame rate. Passing the frame rate asked for a 60-second GOP that clamped to 10.
                 videoSettings.SetInt("keyint_sec", KeyframeIntervalSeconds);
+
+                // HEVC carries ten bits only under main10; an HDR mix into "main" is truncated to
+                // eight and the PQ transfer then describes a file that no longer holds its range.
+                if (plan.Profile is { } profile)
+                    videoSettings.SetString("profile", profile);
 
                 videoEncoder = ObsEncoder.CreateVideo(videoEncoderId, "recorder video", videoSettings);
                 videoEncoder.BindToVideo(video);
@@ -709,6 +718,100 @@ public sealed class ObsRecorderSession : IRecorderSession
         _ => null
     };
 
+    // What this machine can actually do with the colour the captured display is in.
+    private HdrPlan ResolveHdrPlan(ResolvedRecorderSettings settings)
+    {
+        var candidates = EnumerateVideoEncoderCandidates();
+        if (candidates.Count == 0)
+            throw new ObsException("No loaded module registers a usable video encoder.");
+
+        // The configured id only counts when it is one this machine registered; the settings model's
+        // "x264" placeholder is a request for the default, not an encoder id.
+        var configured = IsUsableId(settings.Encoder) ? settings.Encoder : null;
+
+        var plan = HdrPlanner.Decide(
+            HdrDisplayProbe.AnyDisplayIsHdr(), settings.EnableHdr, candidates, configured);
+
+        Log.Information("ObsRecorderSession: recording in {Colour} with '{Encoder}' — {Reason}.",
+            plan.UseHdr ? "HDR (Rec.2100 PQ, 10-bit P010)" : "SDR (Rec.709)", plan.EncoderId, plan.Reason);
+
+        return plan;
+    }
+
+    // Moves the canvas onto the plan's format and colour space, keeping every other dimension of the
+    // mix as it was. A refused reset is not fatal: the canvas is still the SDR one that was working,
+    // so the plan is downgraded to match rather than recording HDR metadata over SDR pixels.
+    private HdrPlan ApplyCanvasColour(HdrPlan plan)
+    {
+        if (!Runtime.TryGetVideoInfo(out var current) || current is null)
+            return plan;
+
+        if (current.OutputFormat == plan.OutputFormat && current.ColorSpace == plan.ColorSpace)
+            return plan;
+
+        var result = Runtime.ResetVideo(current with
+        {
+            OutputFormat = plan.OutputFormat,
+            ColorSpace = plan.ColorSpace
+        });
+
+        if (result == ObsVideoResetResult.Success)
+            return plan;
+
+        if (!plan.UseHdr)
+        {
+            // Refused on the way back to SDR: the mix stays where it is, and the capture sources are
+            // still told to tonemap, so the frame remains watchable.
+            Log.Warning("ObsRecorderSession: obs_reset_video refused the SDR canvas ({Result}); " +
+                        "the mix keeps its current colour space.", result);
+            return plan;
+        }
+
+        Log.Warning("ObsRecorderSession: obs_reset_video refused the HDR canvas ({Result}); " +
+                    "recording SDR instead.", result);
+
+        var downgraded = HdrPlanner.Decide(
+            displayIsHdr: false,
+            hdrEnabledInSettings: false,
+            EnumerateVideoEncoderCandidates(),
+            configuredEncoderId: null);
+
+        ApplyCaptureColour(downgraded);
+        return downgraded;
+    }
+
+    // Tells the capture sources whether they are feeding an SDR canvas. This is the line that makes
+    // an HDR game record at all when we are not recording HDR: win-capture hands over the game's
+    // FP16 scRGB texture untouched otherwise, and Rec.709 has nowhere to put it.
+    private void ApplyCaptureColour(HdrPlan plan)
+    {
+        ApplyForceSdr(_gameCaptureSource, plan.ForceSdrOnCapture);
+        ApplyForceSdr(_displaySource, plan.ForceSdrOnCapture);
+    }
+
+    private static void ApplyForceSdr(ObsSource? source, bool forceSdr)
+    {
+        if (source is null)
+            return;
+
+        try
+        {
+            using var settings = new ObsSettings();
+            settings.SetBool(ForceSdrKey, forceSdr);
+            source.Update(settings);
+        }
+        catch (ObsException exception)
+        {
+            // A capture plugin without the key ignores it; only a failure to talk to the source at
+            // all lands here, and that is not worth failing a recording over.
+            Log.Debug(exception, "ObsRecorderSession: could not set '{Key}' on a capture source.", ForceSdrKey);
+        }
+    }
+
+    // win-capture's key on both game and monitor capture. Absent on the Linux sources, where it is
+    // simply ignored — there is no HDR desktop path there to disagree with.
+    private const string ForceSdrKey = "force_sdr";
+
     // The available set the settings UI offers, so an encoder this machine cannot use is hidden
     // rather than listed and refused at record time.
     internal static IReadOnlyList<string> EnumerateUsableEncoderIds()
@@ -724,6 +827,39 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         return ids;
     }
+
+    // Every registered video encoder with its codec, H.264 first so an SDR recording keeps choosing
+    // what it always chose. The HDR planner needs the codec as well as the id, because whether an
+    // encoder can carry Rec.2100 PQ is a fact about the codec and not about the family.
+    internal static IReadOnlyList<VideoEncoderCandidate> EnumerateVideoEncoderCandidates()
+    {
+        var candidates = new List<VideoEncoderCandidate>();
+
+        foreach (var id in EnumerateUsableEncoderIds())
+        {
+            if (ObsEncoder.GetTypeCodec(id) is { } codec)
+                candidates.Add(new VideoEncoderCandidate(id, codec));
+        }
+
+        foreach (var id in ObsEncoder.EnumerateTypeIds())
+        {
+            if (candidates.Any(c => string.Equals(c.Id, id, StringComparison.Ordinal)))
+                continue;
+
+            if (ObsEncoder.GetType(id) != ObsEncoderType.Video || ObsEncoder.GetTypeCodec(id) is not { } codec)
+                continue;
+
+            if (HdrCapableCodecs.Contains(codec, StringComparer.OrdinalIgnoreCase))
+                candidates.Add(new VideoEncoderCandidate(id, codec));
+        }
+
+        return candidates;
+    }
+
+    // Only the codecs the HDR path can use are admitted beyond H.264. Enumerating every registered
+    // video encoder would offer families the rate-control table below does not describe, and an
+    // undescribed family is the segfault ResolveRateControlKeys documents, not a missing feature.
+    private static readonly string[] HdrCapableCodecs = ["hevc", "av1"];
 
     private static bool IsUsableId(string? id) =>
         !string.IsNullOrWhiteSpace(id) &&

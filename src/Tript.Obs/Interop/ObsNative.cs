@@ -318,6 +318,18 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_source_get_height(nint source);
 
+    // The two nit levels the compositor converts between SDR and HDR with. obs_reset_video does not
+    // set them, so an application that never calls obs_set_video_levels gets whatever the process
+    // started with.
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float obs_get_video_sdr_white_level();
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial float obs_get_video_hdr_nominal_peak_level();
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_set_video_levels(float sdrWhiteLevel, float hdrNominalPeakLevel);
+
     // The preferred-spaces argument is a hint for sources that can produce more than one; passing
     // none asks for what the source actually has, which is the question here.
     [LibraryImport(ObsLibrary.Name)]

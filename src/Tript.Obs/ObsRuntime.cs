@@ -324,6 +324,35 @@ public sealed class ObsRuntime : IDisposable
 
     // ---- video ----
 
+    // How many nits SDR white is taken to be, and the peak an HDR canvas is scaled to. These are the
+    // numbers the compositor converts between the two with, and obs_reset_video does NOT set them —
+    // OBS Studio's frontend does, from its own settings, so a bare libobs consumer that never calls
+    // obs_set_video_levels is composing against whatever the process happened to start with. An SDR
+    // source drawn onto a PQ canvas at an SDR white level of zero is black.
+    public float SdrWhiteLevelNits
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return ObsNative.obs_get_video_sdr_white_level();
+        }
+    }
+
+    public float HdrNominalPeakLevelNits
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return ObsNative.obs_get_video_hdr_nominal_peak_level();
+        }
+    }
+
+    public void SetVideoLevels(float sdrWhiteLevelNits, float hdrNominalPeakLevelNits)
+    {
+        ThrowIfDisposed();
+        ObsNative.obs_set_video_levels(sdrWhiteLevelNits, hdrNominalPeakLevelNits);
+    }
+
     public ObsVideoResetResult ResetVideo(ObsVideoSettings settings)
     {
         ThrowIfDisposed();
@@ -353,8 +382,37 @@ public sealed class ObsRuntime : IDisposable
         if (!Enum.IsDefined((ObsVideoResetResult)code))
             throw new ObsException($"obs_reset_video returned {code}, which is not a documented video status.");
 
-        return (ObsVideoResetResult)code;
+        var result = (ObsVideoResetResult)code;
+        if (result == ObsVideoResetResult.Success)
+            EnsureVideoLevels();
+
+        return result;
     }
+
+    // Zero is not a value the compositor can convert with, and zero is what a process that never
+    // calls obs_set_video_levels has: obs_reset_video does not set these, and OBS Studio's frontend
+    // is what normally does. At an SDR white level of zero every conversion between an SDR and an
+    // HDR colour space collapses to black — an HDR game recorded onto a Rec.709 canvas is a black
+    // file with working audio, and an SDR source on a PQ canvas is black the same way.
+    //
+    // Defaulted here rather than at the call sites so that no reset can leave the mix unable to
+    // composite. An explicit SetVideoLevels afterwards still wins.
+    private void EnsureVideoLevels()
+    {
+        if (ObsNative.obs_get_video_sdr_white_level() > 0f &&
+            ObsNative.obs_get_video_hdr_nominal_peak_level() > 0f)
+        {
+            return;
+        }
+
+        ObsNative.obs_set_video_levels(DefaultSdrWhiteLevelNits, DefaultHdrNominalPeakLevelNits);
+    }
+
+    // OBS Studio's own defaults. 300 nits is the SDR white level Windows composites SDR content at
+    // on a typical HDR desktop; a display's actual level can differ and is worth reading one day,
+    // but any sane number beats zero by the whole difference between a picture and a black frame.
+    public const float DefaultSdrWhiteLevelNits = 300f;
+    public const float DefaultHdrNominalPeakLevelNits = 1000f;
 
     // The struct is zeroed before the call rather than left uninitialised: obs_get_video_info
     // returns false without touching it when there is no video, and handing back whatever was on

@@ -16,10 +16,10 @@ import { stylesheetPaths } from './cssRules';
 const SRC_ROOT = join(import.meta.dirname, '..');
 
 /** Stylesheets still declaring a serif family. Empty this; do not add to it. */
-const KNOWN_SERIF = ['components/PlayerView.css', 'components/SettingsView.css', 'components/ui/ui.css'];
+const KNOWN_SERIF = ['components/PlayerView.css'];
 
 /** Stylesheets still shipping the tracked micro-caps eyebrow. Empty this; do not add to it. */
-const KNOWN_TRACKED = ['components/ui/ui.css'];
+const KNOWN_TRACKED: string[] = [];
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
 

@@ -223,7 +223,6 @@ export function LibraryView({
           second header element muddies that (some accessibility mappings promote any <header> to
           banner) for a row that is only a heading and a count. */}
       <WorkspaceIntro
-        eyebrow="Your capture archive"
         title="Library"
         description="Find the moments worth keeping, then open them in the review workspace."
         aside={
@@ -334,7 +333,6 @@ export function LibraryView({
       {view.totalCount === 0 && connectionState === 'disconnected' ? (
         <div data-testid="library-unavailable">
           <EmptyState
-            eyebrow="Connection interrupted"
             title="Library unavailable"
             description="Tript cannot reach the capture host right now. Reconnect to load your archive."
           />
@@ -342,7 +340,6 @@ export function LibraryView({
       ) : view.totalCount === 0 && (!contentLoaded || connectionState === 'connecting') ? (
         <div data-testid="library-loading">
           <EmptyState
-            eyebrow="Connecting"
             title="Loading your archive"
             description="Tript is asking the capture host for your recordings and clips."
           />
@@ -353,7 +350,6 @@ export function LibraryView({
         // the recorder bar is what tells those apart.
         <div data-testid="library-empty">
           <EmptyState
-            eyebrow="Nothing captured yet"
             title="Your archive starts here"
             description="Your recordings and clips will appear here. Record a session and Tript will keep the source material ready for review."
           />
@@ -364,7 +360,6 @@ export function LibraryView({
         // broken backend, and the user's next move (clear the filters) is invisible.
         <div data-testid="library-empty-filtered">
           <EmptyState
-            eyebrow="No matches"
             title="Nothing fits this view"
             description={`None of your ${view.totalCount} item${view.totalCount === 1 ? '' : 's'} matches these filters.`}
             action={

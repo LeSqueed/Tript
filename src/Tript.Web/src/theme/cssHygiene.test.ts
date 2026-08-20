@@ -9,38 +9,27 @@
 //
 // KNOWN_DUPLICATES is a ratchet — exact, not a ceiling. Fixing a file fails this test until the
 // entry is updated, which is the point: the debt cannot quietly stop shrinking.
-//
-// Known limitation: the key is the whole selector text, so `.a, .b {}` and a later `.b {}` are two
-// different keys and are not reported. That is deliberate — a shared rule plus a specific override
-// is ordinary CSS, and flagging it would bury the signal this guard exists for.
 
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseRules, stylesheetPaths } from './cssRules';
+import { duplicatesIn, shadowedRules, stylesheetPaths } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
 const KNOWN_DUPLICATES: Record<string, number> = {
-  'components/LibraryView.css': 10,
   'components/PlayerView.css': 6,
-  'components/TrashView.css': 2,
 };
 
-/** Selectors declared more than once in the same scope, as `selector (Nx) @ line,line`. */
-export function duplicatesIn(css: string): string[] {
-  const scopes = new Map<string, { lines: number[] }>();
-  for (const rule of parseRules(css)) {
-    const key = `${rule.context.join(' > ')}||${rule.selector}`;
-    const entry = scopes.get(key) ?? { lines: [] };
-    entry.lines.push(rule.line);
-    scopes.set(key, entry);
-  }
-  return [...scopes.entries()]
-    .filter(([, entry]) => entry.lines.length > 1)
-    .map(([key, entry]) => `${key.split('||')[1]} (${entry.lines.length}x) @ ${entry.lines.join(',')}`)
-    .sort();
-}
+/**
+ * Rules that render nothing because a later rule overrides every declaration. A separate ratchet
+ * because duplicatesIn structurally cannot see them: `.a, .b {}` and a later `.a {}` are different
+ * selector keys. TrashView.css had one — an appended block sitting above what it meant to replace,
+ * so the redesign's surface never rendered at all and no test noticed.
+ */
+const KNOWN_SHADOWED: Record<string, number> = {
+  'components/PlayerView.css': 1,
+};
 
 describe('css hygiene', () => {
   it('declares each selector at most once per scope', () => {
@@ -55,5 +44,19 @@ describe('css hygiene', () => {
       }
     }
     expect(actual, detail.join('\n')).toEqual(KNOWN_DUPLICATES);
+  });
+
+  it('carries no rule whose every declaration a later rule overrides', () => {
+    const actual: Record<string, number> = {};
+    const detail: string[] = [];
+    for (const file of stylesheetPaths(SRC_ROOT)) {
+      const name = relative(SRC_ROOT, file);
+      const dead = shadowedRules(readFileSync(file, 'utf8'));
+      if (dead.length > 0) {
+        actual[name] = dead.length;
+        detail.push(`${name}: ${dead.join('; ')}`);
+      }
+    }
+    expect(actual, detail.join('\n')).toEqual(KNOWN_SHADOWED);
   });
 });

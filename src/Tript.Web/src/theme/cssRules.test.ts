@@ -4,7 +4,7 @@
 // wrong by failing open — reporting fewer rules than the stylesheet contains.
 
 import { describe, expect, it } from 'vitest';
-import { normaliseSelector, parseRules } from './cssRules';
+import { normaliseSelector, parseRules, shadowedRules } from './cssRules';
 
 const selectorsOf = (css: string) => parseRules(css).map((rule) => rule.selector);
 
@@ -68,5 +68,47 @@ describe('normaliseSelector', () => {
 
   it('collapses internal whitespace', () => {
     expect(normaliseSelector('.a   >   .b')).toBe('.a > .b');
+  });
+});
+
+describe('shadowedRules', () => {
+  it('reports a group rule whose every declaration a later rule overrides', () => {
+    // The TrashView.css shape: an appended "replacement" group placed ABOVE the rules it meant to
+    // replace, so at equal specificity it never rendered.
+    const css = `
+      .toolbar, .row { background: panel; border-radius: 11px; }
+      .toolbar { background: base; border-radius: 6px; }
+      .row { background: base; border-radius: 6px; }
+    `;
+    expect(shadowedRules(css)).toEqual(['.row, .toolbar @ 2 (every declaration overridden later)']);
+  });
+
+  it('leaves a shared rule alone when the later rule overrides only some of it', () => {
+    // The legitimate pattern: shared family/weight, then a size per element. Flagging this would
+    // bury the signal.
+    const css = `
+      .intro h2, .empty h3 { font-family: sans; font-weight: 600; }
+      .empty h3 { font-size: 19px; }
+    `;
+    expect(shadowedRules(css)).toEqual([]);
+  });
+
+  it('counts a shorthand as overriding the longhands it resets', () => {
+    const css = '.a { border-color: red; }\n.a { border: 1px solid blue; }';
+    expect(shadowedRules(css)).toEqual(['.a @ 1 (every declaration overridden later)']);
+  });
+
+  it('knows `border` does not reset border-radius', () => {
+    const css = '.a { border-radius: 11px; }\n.a { border: 1px solid blue; }';
+    expect(shadowedRules(css)).toEqual([]);
+  });
+
+  it('does not let a rule in one scope shadow a rule in another', () => {
+    const css = '.a { color: red; }\n@media (max-width: 700px) { .a { color: blue; } }';
+    expect(shadowedRules(css)).toEqual([]);
+  });
+
+  it('ignores a rule that declares nothing', () => {
+    expect(shadowedRules('.a { }\n.a { color: red; }')).toEqual([]);
   });
 });

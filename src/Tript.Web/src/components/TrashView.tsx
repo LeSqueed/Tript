@@ -112,7 +112,6 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
   return (
     <section className="trash-view">
       <WorkspaceIntro
-        eyebrow="Recovery archive"
         title="Trash"
         description="Deleted recordings stay recoverable until their retention window expires."
         aside={
@@ -132,7 +131,6 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
       {!loaded ? (
         <div className="trash-empty" data-testid="trash-loading">
           <EmptyState
-            eyebrow="Checking recovery archive"
             title="Loading trash"
             description="Tript is checking which recordings and clips are still recoverable."
           />
@@ -143,7 +141,6 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
         // arriving at an empty trash by accident actually wants to know.
         <div className="trash-empty" data-testid="trash-empty">
           <EmptyState
-            eyebrow="Nothing to recover"
             title="Trash is empty"
             description="The trash is empty. Recordings and clips you delete land here first, so you can put them back before the retention window closes."
           />

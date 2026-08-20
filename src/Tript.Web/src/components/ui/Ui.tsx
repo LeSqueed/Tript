@@ -3,12 +3,10 @@
 import type { ReactNode } from 'react';
 
 export function WorkspaceIntro({
-  eyebrow,
   title,
   description,
   aside,
 }: {
-  eyebrow: string;
   title: string;
   description?: string;
   aside?: ReactNode;
@@ -16,7 +14,6 @@ export function WorkspaceIntro({
   return (
     <div className="workspace-intro">
       <div>
-        <span className="workspace-intro-eyebrow">{eyebrow}</span>
         <h2>{title}</h2>
         {description && <p>{description}</p>}
       </div>
@@ -30,19 +27,16 @@ export function StatusDot({ tone = 'success' }: { tone?: 'success' | 'warning' |
 }
 
 export function EmptyState({
-  eyebrow,
   title,
   description,
   action,
 }: {
-  eyebrow?: string;
   title: string;
   description: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
-      {eyebrow && <span className="empty-state-eyebrow">{eyebrow}</span>}
       <h3>{title}</h3>
       <p>{description}</p>
       {action && <div className="empty-state-action">{action}</div>}

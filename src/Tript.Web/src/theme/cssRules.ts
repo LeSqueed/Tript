@@ -18,6 +18,8 @@ export interface CssRule {
   context: string[];
   /** 1-based line the selector starts on, so a failure can point somewhere. */
   line: number;
+  /** Property names this rule declares, in source order. */
+  properties: string[];
 }
 
 export function normaliseSelector(raw: string): string {
@@ -34,7 +36,13 @@ export function parseRules(css: string): CssRule[] {
   let index = 0;
   let line = 1;
 
-  function scanBlock(context: string[]): void {
+  function scanBlock(context: string[], owner?: CssRule): void {
+    const noteDeclaration = (text: string) => {
+      const colon = text.indexOf(':');
+      if (owner && colon > 0) {
+        owner.properties.push(text.slice(0, colon).trim().toLowerCase());
+      }
+    };
     let prelude = '';
     let preludeLine = line;
     let started = false;
@@ -89,12 +97,15 @@ export function parseRules(css: string): CssRule[] {
       // a rule, and crucially neither consumes what follows.
       if (char === ';') {
         index += 1;
+        noteDeclaration(prelude);
         resetPrelude();
         continue;
       }
 
       if (char === '}') {
         index += 1;
+        // A final declaration needs no trailing semicolon.
+        noteDeclaration(prelude);
         return;
       }
 
@@ -105,9 +116,10 @@ export function parseRules(css: string): CssRule[] {
           scanBlock([...context, text]);
         } else if (text.length > 0) {
           const selector = normaliseSelector(text);
-          rules.push({ selector, context, line: preludeLine });
+          const rule: CssRule = { selector, context, line: preludeLine, properties: [] };
+          rules.push(rule);
           // Nested rules belong to this one, so a repeat inside it is still a repeat.
-          scanBlock([...context, selector]);
+          scanBlock([...context, selector], rule);
         } else {
           scanBlock(context);
         }
@@ -128,6 +140,27 @@ export function parseRules(css: string): CssRule[] {
   return rules;
 }
 
+/**
+ * Selectors declared more than once in the same scope, as `selector (Nx) @ line,line`.
+ *
+ * The key is the whole selector text, so `.a, .b {}` and a later `.b {}` are different keys and are
+ * not reported. That is deliberate: a shared rule plus a specific override is ordinary CSS, and
+ * flagging it would bury the appended-replacement-block smell this exists to catch.
+ */
+export function duplicatesIn(css: string): string[] {
+  const scopes = new Map<string, number[]>();
+  for (const rule of parseRules(css)) {
+    const key = `${rule.context.join(' > ')}||${rule.selector}`;
+    const lines = scopes.get(key) ?? [];
+    lines.push(rule.line);
+    scopes.set(key, lines);
+  }
+  return [...scopes.entries()]
+    .filter(([, lines]) => lines.length > 1)
+    .map(([key, lines]) => `${key.split('||')[1]} (${lines.length}x) @ ${lines.join(',')}`)
+    .sort();
+}
+
 /** Every stylesheet the app ships, as absolute paths. */
 export function stylesheetPaths(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];
@@ -140,4 +173,63 @@ export function stylesheetPaths(root: string = join(import.meta.dirname, '..')):
     }
   }
   return found;
+}
+
+/**
+ * Which longhand properties a shorthand resets. Deliberately conservative: an unlisted shorthand
+ * simply covers nothing, so the shadow analysis below under-reports rather than accusing a live
+ * rule of being dead. `border` is the one that needs care — it does NOT reset border-radius.
+ */
+const COVERS: Record<string, (property: string) => boolean> = {
+  border: (p) => /^border(-(top|right|bottom|left))?(-(color|width|style))?$/.test(p),
+  background: (p) => p.startsWith('background'),
+  margin: (p) => p.startsWith('margin'),
+  padding: (p) => p.startsWith('padding'),
+  font: (p) => p.startsWith('font') || p === 'line-height',
+  transition: (p) => p.startsWith('transition'),
+  overflow: (p) => p.startsWith('overflow'),
+  flex: (p) => p.startsWith('flex'),
+  gap: (p) => p === 'gap' || p === 'row-gap' || p === 'column-gap',
+  inset: (p) => ['inset', 'top', 'right', 'bottom', 'left'].includes(p),
+  'border-radius': (p) => p.endsWith('radius'),
+};
+
+const isCovered = (property: string, by: string[]): boolean =>
+  by.includes(property) || by.some((candidate) => COVERS[candidate]?.(property) ?? false);
+
+const partsOf = (selector: string): string[] => selector.split(',').map((part) => part.trim());
+
+/**
+ * Rules every one of whose declarations is overridden by a later rule at the same specificity — so
+ * the rule renders nothing and is pure dead weight.
+ *
+ * This is the case duplicatesIn cannot see: `.a, .b { background: x }` followed by `.a { background:
+ * y }` and `.b { background: z }` uses three different selector keys, yet the group is inert. That
+ * exact shape appeared in TrashView.css, where an appended "replacement" block sat ABOVE the rules
+ * it meant to replace and therefore never rendered at all.
+ *
+ * Specificity is compared by identical selector-part text, so no specificity maths is needed: the
+ * same part written the same way always has the same specificity.
+ */
+export function shadowedRules(css: string): string[] {
+  const rules = parseRules(css);
+  const dead: string[] = [];
+
+  for (const [position, rule] of rules.entries()) {
+    if (rule.properties.length === 0) {
+      continue;
+    }
+    const scope = rule.context.join(' > ');
+    const everyPartShadowed = partsOf(rule.selector).every((part) => {
+      const laterProperties = rules
+        .slice(position + 1)
+        .filter((other) => other.context.join(' > ') === scope && partsOf(other.selector).includes(part))
+        .flatMap((other) => other.properties);
+      return rule.properties.every((property) => isCovered(property, laterProperties));
+    });
+    if (everyPartShadowed) {
+      dead.push(`${rule.selector} @ ${rule.line} (every declaration overridden later)`);
+    }
+  }
+  return dead;
 }

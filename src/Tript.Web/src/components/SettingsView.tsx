@@ -29,7 +29,6 @@ export function SettingsView({ client }: { client: IpcClient }) {
   return (
     <section className="settings-view">
       <WorkspaceIntro
-        eyebrow="Capture configuration"
         title="Settings"
         description="Shape how Tript captures, routes, and preserves your sessions."
       />

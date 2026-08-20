@@ -47,7 +47,9 @@
 .library-view {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 26px;
+  max-width: 1500px;
+  margin: 0 auto;
 }
 
 .library-range {
@@ -64,10 +66,10 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-4);
-  padding: var(--space-3);
-  background: var(--color-base-200);
+  padding: 16px;
+  background: var(--color-panel);
   border: var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
 }
 
 /* A segmented control, styled like the shell's nav so "All / Sessions / Clips" reads as the same kind
@@ -140,8 +142,8 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 22px;
 }
 
 .content-card {
@@ -150,17 +152,33 @@
   gap: var(--space-2);
   width: 100%;
   padding: 0;
-  background: var(--color-base-200);
+  background: var(--color-panel);
   border: var(--border);
-  border-radius: var(--radius);
+  border-radius: 11px;
   overflow: hidden;
   color: var(--color-base-content);
   cursor: pointer;
   text-align: left;
+  transition:
+    background var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
 }
 
 .content-card:hover {
-  border-color: var(--color-accent);
+  background: var(--color-panel-raised);
+  border-color: var(--color-accent-line);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-card {
+    transition: none;
+  }
+
+  .content-card:hover {
+    transform: none;
+  }
 }
 
 .content-card:focus-visible {
@@ -172,7 +190,7 @@
   position: relative;
   display: block;
   aspect-ratio: 16 / 9;
-  background: var(--color-base-300);
+  background: var(--color-panel-raised);
 }
 
 .content-card-image {
@@ -211,13 +229,15 @@
 .content-card-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: 0 var(--space-3) var(--space-3);
+  gap: 10px;
+  padding: 14px 15px 16px;
   min-width: 0;
 }
 
 .content-card-title {
   font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
   /* Two lines, then ellipsis: titles are user-supplied and a long one must not push the chips out of
    * alignment across the row. */
   display: -webkit-box;
@@ -230,6 +250,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
+  opacity: 0.84;
 }
 
 .content-card-type {
@@ -252,33 +273,6 @@
   border-radius: var(--radius);
 }
 
-/* Replacement presentation: the library uses a quiet canvas and lets media thumbnails carry the
- * visual weight. These rules intentionally override the alpha card treatment above while the
- * remaining interaction selectors are migrated. */
-.library-view {
-  gap: 26px;
-  max-width: 1500px;
-  margin: 0 auto;
-}
-
-.library-toolbar {
-  padding: 16px;
-  background: var(--color-panel);
-  border-color: var(--color-line);
-  border-radius: 12px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.12);
-}
-
-.library-grid {
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  gap: 22px;
-}
-
-.content-card-shell {
-  position: relative;
-  min-width: 0;
-}
-
 .content-card-favorite {
   position: absolute;
   top: 10px;
@@ -297,37 +291,6 @@
 
 .content-card-favorite.active {
   color: var(--color-accent);
-}
-
-.content-card {
-  background: var(--color-panel);
-  border-color: var(--color-line);
-  border-radius: 11px;
-  transition: transform var(--motion-standard), border-color var(--motion-standard), box-shadow var(--motion-standard);
-}
-
-.content-card:hover {
-  border-color: var(--color-accent-line);
-  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18);
-  transform: translateY(-3px);
-}
-
-.content-card-thumb {
-  background: var(--color-panel-raised);
-}
-
-.content-card-body {
-  gap: 10px;
-  padding: 14px 15px 16px;
-}
-
-.content-card-title {
-  font-size: 14px;
-  line-height: 1.35;
-}
-
-.content-card-chips {
-  opacity: 0.84;
 }
 
 @media (max-width: 760px) {
@@ -417,6 +380,7 @@
 .content-card-shell {
   position: relative;
   display: block;
+  min-width: 0;
 }
 
 .content-card-shell.selected .content-card {

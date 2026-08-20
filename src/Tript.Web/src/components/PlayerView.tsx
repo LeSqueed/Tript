@@ -615,21 +615,21 @@ export function PlayerView({
             Its one home is here, beside the action it modifies — the clip dialog used to carry a
             second copy of the same setting under a different name. */}
         {regions.length > 0 && (
-          <div className="player-clip-mode" role="radiogroup" aria-label="Clip creation mode">
+          <div className="player-clip-mode" role="radiogroup" aria-label="Create as">
             <span className="player-clip-mode-label">Create as</span>
             <RadioOption
               name="player-clip-mode"
               value="combine"
               checked={dialog.mode === 'combine'}
               onChange={() => dialog.setMode('combine')}
-              label="One clip"
+              label="One merged clip"
             />
             <RadioOption
               name="player-clip-mode"
               value="separate"
               checked={dialog.mode === 'separate'}
               onChange={() => dialog.setMode('separate')}
-              label="One per segment"
+              label="Separate clips"
             />
           </div>
         )}

@@ -18,6 +18,7 @@ describe('TripwireMark', () => {
   it('accepts a custom display size', () => {
     const { container } = render(<TripwireMark size={48} />);
     expect(container.querySelector('svg')?.getAttribute('width')).toBe('48');
-    expect(container.querySelectorAll('.tripwire-line')).toHaveLength(2);
+    expect(container.querySelectorAll('.tripwire-viewfinder')).toHaveLength(1);
+    expect(container.querySelector('.tripwire-event-dot')).toBeNull();
   });
 });

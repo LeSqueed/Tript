@@ -105,61 +105,41 @@ a {
   overflow: visible;
 }
 
-.tripwire-anchor {
-  fill: currentColor;
-}
-
-.tripwire-line,
-.tripwire-spark {
+.tripwire-viewfinder,
+.tripwire-crosshair,
+.tripwire-axis {
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
+}
+
+.tripwire-viewfinder {
+  color: var(--color-cyber-secondary);
   stroke-width: 4;
-}
-
-.tripwire-line-left {
-  transform-origin: 31px 32px;
-  animation: tripwire-snap-left var(--motion-snap) ease-in-out infinite;
-}
-
-.tripwire-line-right {
-  transform-origin: 33px 32px;
-  animation: tripwire-snap-right var(--motion-snap) ease-in-out infinite;
-}
-
-.tripwire-spark {
-  opacity: 0;
+  transform-box: view-box;
   transform-origin: 32px 32px;
-  animation: tripwire-spark var(--motion-snap) ease-out infinite;
+  animation: tripwire-viewfinder-lock var(--motion-snap) cubic-bezier(0.2, 0, 0, 1) infinite;
 }
 
-@keyframes tripwire-snap-left {
-  0%,
-  68%,
-  100% { transform: rotate(0deg); }
-  76%,
-  86% { transform: rotate(-7deg); }
+.tripwire-crosshair {
+  stroke-width: 3;
+  opacity: 0.58;
 }
 
-@keyframes tripwire-snap-right {
-  0%,
-  68%,
-  100% { transform: rotate(0deg); }
-  76%,
-  86% { transform: rotate(7deg); }
+.tripwire-axis {
+  color: var(--color-cyber-secondary);
+  stroke-width: 3;
+  opacity: 0.58;
 }
 
-@keyframes tripwire-spark {
+@keyframes tripwire-viewfinder-lock {
   0%,
-  68%,
-  100% { opacity: 0; transform: scale(0.7); }
-  76% { opacity: 0.65; transform: scale(1); }
-  88% { opacity: 0; transform: scale(1.15); }
+  20%,
+  100% { opacity: 0.35; transform: scale(1.18); }
+  54% { opacity: 1; transform: scale(0.82); }
+  72% { opacity: 0.7; transform: scale(0.92); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tripwire-line-left,
-  .tripwire-line-right,
-  .tripwire-spark { animation: none; }
-  .tripwire-spark { opacity: 0; }
+  .tripwire-viewfinder { animation: none; }
 }

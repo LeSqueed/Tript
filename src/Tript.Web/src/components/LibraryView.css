@@ -126,16 +126,6 @@
   border-radius: var(--radius-panel);
 }
 
-.library-archive {
-  padding-top: 2px;
-}
-
-.library-groups-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px 18px;
-}
-
 .recording-group {
   display: flex;
   flex-direction: column;
@@ -392,8 +382,7 @@
     min-width: 0;
   }
 
-  .library-recent-grid,
-  .library-groups-list {
+  .library-recent-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -710,8 +699,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .library-recent-grid,
-  .library-groups-list {
+  .library-recent-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

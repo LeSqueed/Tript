@@ -5,7 +5,7 @@ export interface TripwireMarkProps extends Omit<SVGProps<SVGSVGElement>, 'aria-l
   size?: number | string;
 }
 
-/** The Tript mark: a taut line releases and settles again without a bright flash. */
+/** The Tript mark: a viewfinder tightens around a moment without obscuring its center. */
 export function TripwireMark({ label, size = 32, className, ...props }: TripwireMarkProps) {
   const labelled = label !== undefined;
   return (
@@ -20,11 +20,11 @@ export function TripwireMark({ label, size = 32, className, ...props }: Tripwire
       aria-hidden={labelled ? undefined : true}
       focusable="false"
     >
-      <circle className="tripwire-anchor" cx="10" cy="32" r="4" />
-      <circle className="tripwire-anchor" cx="54" cy="32" r="4" />
-      <path className="tripwire-line tripwire-line-left" d="M14 32H31" />
-      <path className="tripwire-line tripwire-line-right" d="M33 32H50" />
-      <path className="tripwire-spark" d="M32 26V38M26 32H38" />
+      <g className="tripwire-viewfinder">
+        <path d="M18 25V18H25M39 18H46V25M46 39V46H39M25 46H18V39" />
+      </g>
+      <path className="tripwire-crosshair" d="M25 32H39M32 25V39" />
+      <path className="tripwire-axis" d="M32 14V18M32 46V50" />
     </svg>
   );
 }

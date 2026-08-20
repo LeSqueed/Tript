@@ -29,6 +29,7 @@ import {
   resolveClipBounds,
 } from './player/clipModel';
 import { formatTime } from './player/timelineModel';
+import { Button, RadioOption } from '../components/ui/controls';
 
 export interface PlayerViewProps {
   client: IpcClient;
@@ -458,30 +459,6 @@ export function PlayerView({
 
   return (
     <section className="player-view">
-      <div className="player-controls-row">
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => navigate(-1)}
-          disabled={navigation.length <= 1}
-          aria-label="Previous session"
-        >
-          ← Prev
-        </button>
-        <span className="player-title" data-testid="player-title">
-          {item.title ?? item.fileName}
-        </span>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => navigate(1)}
-          disabled={navigation.length <= 1}
-          aria-label="Next session"
-        >
-          Next →
-        </button>
-      </div>
-
       <div className="video-frame">
         <video
           ref={videoRef}
@@ -507,7 +484,11 @@ export function PlayerView({
         />
       </div>
 
-      <TransportBar
+      <div className="player-console">
+        <span className="player-title" data-testid="player-title">
+          {item.title ?? item.fileName}
+        </span>
+        <TransportBar
         playing={playing}
         currentTime={currentTime}
         duration={duration}
@@ -519,7 +500,7 @@ export function PlayerView({
         onVolumeChange={changeVolume}
         onToggleMute={toggleMute}
         onPlaybackRateChange={setPlaybackRate}
-      />
+        />
 
       <div className="timeline-stack">
         <FullSessionBar
@@ -548,50 +529,64 @@ export function PlayerView({
           onRegionSelect={onRegionSelect}
           onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
         />
+        </div>
+        <div className="player-nav">
+          <Button
+            variant="ghost"
+            size="small"
+            onClick={() => navigate(-1)}
+            disabled={navigation.length <= 1}
+            aria-label="Previous session"
+          >
+            ← Prev
+          </Button>
+          <Button
+            variant="ghost"
+            size="small"
+            onClick={() => navigate(1)}
+            disabled={navigation.length <= 1}
+            aria-label="Next session"
+          >
+            Next →
+          </Button>
+        </div>
       </div>
 
       {canAdjustRegions && (
         <div className="player-clip-bar">
           <span className="player-clip-bar-label">Segments</span>
-          <button
-            type="button"
-            className="btn ghost small"
+          <Button variant="ghost" size="small"
+            
             onClick={markIn}
             disabled={!canMark}
             aria-label="Mark segment in point"
-            title="Set the segment's in point at the playhead (I)"
-          >
+            title="Set the segment's in point at the playhead (I)">
             Mark in (I)
-          </button>
-          <button
-            type="button"
-            className="btn ghost small"
+          </Button>
+          <Button variant="ghost" size="small"
+            
             onClick={markOut}
             disabled={!canMark || markInTime === null}
             aria-label="Mark segment out point"
-            title="Close the segment at the playhead (O)"
-          >
+            title="Close the segment at the playhead (O)">
             Mark out (O)
-          </button>
-          <button
-            type="button"
-            className="btn ghost small"
+          </Button>
+          <Button variant="ghost" size="small"
+            
             onClick={markSegmentAtPlayhead}
             disabled={!canMark}
             aria-label="Mark segment around the playhead"
-            title={`Mark a ${DEFAULT_REGION_SECONDS}s segment around the playhead (M)`}
-          >
+            title={`Mark a ${DEFAULT_REGION_SECONDS}s segment around the playhead (M)`}>
             Mark {DEFAULT_REGION_SECONDS}s (M)
-          </button>
+          </Button>
           {markInTime !== null && (
-            <button
-              type="button"
-              className="btn ghost small"
+            <Button variant="ghost" size="small"
+              
               onClick={() => setMarkInTime(null)}
               aria-label="Clear the in point"
             >
               Clear in
-            </button>
+            </Button>
           )}
           <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
@@ -612,47 +607,37 @@ export function PlayerView({
       <div className="player-footer">
         <div className="player-clip-mode" role="radiogroup" aria-label="Clip creation mode">
           <span className="player-clip-mode-label">Create as</span>
-          <label className={dialog.mode === 'combine' ? 'active' : ''}>
-            <input
-              type="radio"
-              name="player-clip-mode"
-              value="combine"
-              checked={dialog.mode === 'combine'}
-              onChange={() => dialog.setMode('combine')}
-            />
-            Combine
-          </label>
-          <label className={dialog.mode === 'separate' ? 'active' : ''}>
-            <input
-              type="radio"
-              name="player-clip-mode"
-              value="separate"
-              checked={dialog.mode === 'separate'}
-              onChange={() => dialog.setMode('separate')}
-            />
-            Separate
-          </label>
+          <RadioOption
+            name="player-clip-mode"
+            value="combine"
+            checked={dialog.mode === 'combine'}
+            onChange={() => dialog.setMode('combine')}
+            label="Combine"
+          />
+          <RadioOption
+            name="player-clip-mode"
+            value="separate"
+            checked={dialog.mode === 'separate'}
+            onChange={() => dialog.setMode('separate')}
+            label="Separate"
+          />
         </div>
-        <button
-          type="button"
-          className="btn"
+        <Button variant="primary"
+          
           onClick={dialog.create}
           disabled={regions.length === 0 || clipInFlight}
           title={regions.length === 0 ? 'Mark at least one segment first' : 'Create clips from marked segments'}
           aria-describedby="player-clip-hint"
-          aria-label="Create clips"
-        >
+          aria-label="Create clips">
           {clipInFlight ? 'Creating clips…' : 'Create Clips'}
-        </button>
-        <button
-          type="button"
-          className="btn ghost small"
+        </Button>
+        <Button variant="ghost" size="small"
+          
           onClick={openClipDialog}
           disabled={regions.length === 0}
-          aria-label="Open clip dialog"
-        >
+          aria-label="Open clip dialog">
           Adjust details
-        </button>
+        </Button>
         <span className="muted small">
           Bookmarks: {bookmarks.length}
         </span>

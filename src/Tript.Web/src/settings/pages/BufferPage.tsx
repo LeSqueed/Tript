@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
-import { ActionButton, Field } from '../form';
+import { Button, Checkbox, Field } from '../../components/ui/controls';
 
 /** 1 MiB — the human-readable unit the size field is edited in. */
 const MIB = 1024 * 1024;
@@ -68,13 +68,11 @@ export function BufferPage({
 
   return (
     <div className="settings-page" data-page="buffer">
-      <label className="settings-field settings-toggle">
-        <span className="settings-field-label">Enable rolling buffer</span>
-        <input
-          type="checkbox"
-          className="settings-checkbox"
+      <label className="field settings-toggle">
+        <span className="field-label">Enable rolling buffer</span>
+        <Checkbox
           checked={settings.enabled}
-          onChange={(event) => update(page, { enabled: event.target.checked })}
+          onChange={(enabled) => update(page, { enabled })}
         />
       </label>
       <p className="settings-page-note">
@@ -88,7 +86,7 @@ export function BufferPage({
       <Field label="Buffer duration" hint="How far back the rolling buffer reaches, in seconds.">
         <input
           type="number"
-          className="settings-input"
+          className="input"
           min={1}
           value={durationSeconds}
           onChange={(event) => setDurationSeconds(event.target.value)}
@@ -108,7 +106,7 @@ export function BufferPage({
       >
         <input
           type="number"
-          className="settings-input"
+          className="input"
           min={1}
           value={sizeMiB}
           onChange={(event) => setSizeMiB(event.target.value)}
@@ -123,9 +121,9 @@ export function BufferPage({
       </Field>
 
       <div className="settings-actions">
-        <ActionButton onClick={() => update(page, { duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 })}>
+        <Button onClick={() => update(page, { duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 })}>
           Reset to defaults
-        </ActionButton>
+        </Button>
       </div>
     </div>
   );

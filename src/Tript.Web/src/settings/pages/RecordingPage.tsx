@@ -12,7 +12,7 @@ import type {
   RecordingMode,
   RecordingSettings,
 } from '../settingsModel';
-import { ActionButton, Field, GhostButton, SelectField, TextField, type SelectOption } from '../form';
+import { Button, Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
 
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
   { value: 'Session', label: 'Session — one continuous recording' },
@@ -464,14 +464,14 @@ export function RecordingPage({
             placeholder="e.g. D:\\Recordings"
             aria-label="Output directory"
           />
-          <GhostButton onClick={onBrowse} title="Choose the recording folder with a native picker">
+          <Button variant="ghost" onClick={onBrowse} title="Choose the recording folder with a native picker">
             Browse
-          </GhostButton>
+          </Button>
         </span>
       </Field>
 
       <div className="settings-actions">
-        <ActionButton onClick={() => update(page, { mode: 'Hybrid' })}>Reset to defaults</ActionButton>
+        <Button onClick={() => update(page, { mode: 'Hybrid' })}>Reset to defaults</Button>
       </div>
     </div>
   );

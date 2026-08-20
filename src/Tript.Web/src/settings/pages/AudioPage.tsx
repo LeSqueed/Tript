@@ -27,7 +27,7 @@ import type {
   AudioSourceKind,
   AudioTrack,
 } from '../settingsModel';
-import { ActionButton, DangerButton, Field, GhostButton, SelectField, TextField } from '../form';
+import { Button, Field, SelectField, Slider, TextField } from '../../components/ui/controls';
 
 const OUTPUT_MODES: { value: AudioOutputMode; label: string }[] = [
   { value: 'Normal', label: 'Normal — keep app audio as-is' },
@@ -198,7 +198,7 @@ export function AudioPage({
         <h3 className="settings-subheading">
           Tracks <span className="muted small">({tracks.length})</span>
         </h3>
-        <ActionButton onClick={addTrack}>Add track</ActionButton>
+        <Button onClick={addTrack}>Add track</Button>
       </div>
 
       {tracks.length === 0 && (
@@ -214,13 +214,13 @@ export function AudioPage({
                 value={track.name}
                 onChange={(value) => renameTrack(trackIndex, value)}
               />
-              <DangerButton
+              <Button variant="danger"
                 onClick={() => removeTrack(trackIndex)}
                 disabled={tracks.length <= 1}
                 title={tracks.length <= 1 ? 'A recording needs at least one track' : 'Remove this track'}
               >
                 Remove
-              </DangerButton>
+              </Button>
             </div>
 
             <div className="audio-sources">
@@ -242,26 +242,22 @@ export function AudioPage({
                     </div>
                     <div className="audio-source-volume">
                       <span className="muted small">Volume</span>
-                      <input
-                        type="range"
-                        className="settings-range"
+                      <Slider
                         min={0}
                         max={1}
                         step={0.05}
                         value={source.volume}
-                        onChange={(event) =>
-                          setSourceVolume(trackIndex, sourceIndex, Number(event.target.value))
-                        }
+                        onChange={(value) => setSourceVolume(trackIndex, sourceIndex, value)}
                         aria-label={`Volume for ${source.label ?? source.name}`}
                       />
                       <span className="audio-source-volume-value">{Math.round(source.volume * 100)}%</span>
                     </div>
-                    <DangerButton
+                    <Button variant="danger"
                       onClick={() => removeSource(trackIndex, sourceIndex)}
                       title={`Remove ${source.label ?? source.name} from this track`}
                     >
                       Remove
-                    </DangerButton>
+                    </Button>
                   </div>
                 );
               })}
@@ -269,30 +265,27 @@ export function AudioPage({
 
             {addable.length > 0 ? (
               <div className="audio-source-add">
-                <GhostButton
+                <Button variant="ghost"
                   onClick={() => addSource(trackIndex, addable[0])}
                   title={`Route ${addable[0].label} into this track`}
                 >
                   + Add source
-                </GhostButton>
+                </Button>
                 {addable.length > 1 && (
-                  <select
-                    className="settings-input settings-select"
+                  <SelectField
                     aria-label="Source to add to this track"
                     value={addable[0].id}
-                    onChange={(event) => {
-                      const option = addable.find((o) => o.id === event.target.value);
+                    options={addable.map((o) => ({
+                      value: o.id,
+                      label: `${o.label} (${SOURCE_KIND_LABELS[o.kind]})`,
+                    }))}
+                    onChange={(selected) => {
+                      const option = addable.find((o) => o.id === selected);
                       if (option) {
                         addSource(trackIndex, option);
                       }
                     }}
-                  >
-                    {addable.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label} ({SOURCE_KIND_LABELS[option.kind]})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 )}
               </div>
             ) : (

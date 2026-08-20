@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The playback transport row: play/pause, the current/total time readout, volume, and the
-// fullscreen toggle. This is the player's entire control surface — the video element deliberately
-// does not carry the native `controls` attribute, which would paint browser chrome over the
-// picture. Controls sit below the video, never on it.
+// The playback transport row: play/pause, the timecode, speed, volume and fullscreen. This is the
+// player's entire control surface — the video carries no `controls` attribute, which would paint
+// browser chrome over the picture. Controls sit below the video, never on it.
+//
+// Icon-led rather than worded: a row of text buttons reads as a toolbar, not a player. Every icon
+// button keeps its aria-label, so nothing is lost to assistive tech.
 
+import { Button, SelectField, Slider } from '../ui/controls';
 import { formatTime } from './timelineModel';
 
 /**
- * Review speeds, either side of normal. Slow is the point as much as fast here: a fight worth
- * clipping is often decided in a second, and 0.25x is what makes it readable.
+ * Review speeds, either side of normal. Slow matters as much as fast here: a fight worth clipping is
+ * often decided in a second, and 0.25× is what makes it readable.
  */
 export const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+const RATE_OPTIONS = PLAYBACK_RATES.map((rate) => ({ value: String(rate), label: `${rate}×` }));
 
 export interface TransportBarProps {
   playing: boolean;
@@ -43,51 +48,47 @@ export function TransportBar({
 }: TransportBarProps) {
   return (
     <div className="transport-bar">
-      <button type="button" className="btn ghost" onClick={onTogglePlayPause} aria-label="Play or pause">
-        {playing ? 'Pause' : 'Play'}
-      </button>
+      <Button
+        variant="ghost"
+        size="icon"
+        icon={playing ? 'pause' : 'play'}
+        onClick={onTogglePlayPause}
+        // The name says what pressing it will do, the way native controls do — and it is the only
+        // thing carrying that state now the button has no text.
+        aria-label={playing ? 'Pause' : 'Play'}
+      />
       <span className="transport-time">
         <span data-testid="transport-current">{formatTime(currentTime)}</span>
         <span className="transport-sep"> / </span>
         <span data-testid="transport-duration">{formatTime(duration)}</span>
       </span>
+
       <span className="transport-spacer" />
+
+      <SelectField
+        compact
+        aria-label="Playback speed"
+        value={String(playbackRate)}
+        options={RATE_OPTIONS}
+        onChange={(value) => onPlaybackRateChange(Number(value))}
+      />
       <div className="transport-volume">
-        <button
-          type="button"
-          className="btn ghost small"
+        <Button
+          variant="ghost"
+          size="icon"
+          icon={muted ? 'volumeOff' : 'volume'}
           onClick={onToggleMute}
           aria-label={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? 'Unmute' : 'Mute'}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          // Muted reads as zero. Touching the slider then reports the displayed position, so the
-          // caller is what remembers where to come back to.
-          value={muted ? 0 : volume}
-          aria-label="Volume"
-          onChange={(event) => onVolumeChange(Number(event.currentTarget.value))}
         />
+        <Slider aria-label="Volume" value={muted ? 0 : volume} onChange={onVolumeChange} />
       </div>
-      <select
-        className="transport-speed"
-        aria-label="Playback speed"
-        value={playbackRate}
-        onChange={(event) => onPlaybackRateChange(Number(event.currentTarget.value))}
-      >
-        {PLAYBACK_RATES.map((rate) => (
-          <option key={rate} value={rate}>
-            {rate}×
-          </option>
-        ))}
-      </select>
-      <button type="button" className="btn ghost" onClick={onToggleFullscreen} aria-label="Toggle fullscreen">
-        Fullscreen
-      </button>
+      <Button
+        variant="ghost"
+        size="icon"
+        icon="fullscreen"
+        onClick={onToggleFullscreen}
+        aria-label="Toggle fullscreen"
+      />
     </div>
   );
 }

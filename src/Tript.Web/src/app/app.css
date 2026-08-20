@@ -75,11 +75,12 @@
 }
 
 .nav-glyph {
-  width: 16px;
   color: var(--color-muted);
-  font-size: 15px;
-  line-height: 1;
-  text-align: center;
+  transition: color var(--motion-fast) var(--motion-ease-out);
+}
+
+.nav-item:hover .nav-glyph {
+  color: var(--color-muted-strong);
 }
 
 .nav-badge {

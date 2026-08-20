@@ -2,36 +2,36 @@
 
 .player-view {
   display: grid;
-  gap: 18px;
+  gap: 12px;
   max-width: 1180px;
   margin: 0 auto;
 }
 
-.player-controls-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: 0 2px;
+/* ---------------------------------------------------------------------------
+ * The console — one surface under the video holding the transport and both
+ * timelines. It used to be three separate bordered boxes stacked on four more,
+ * which is what "blocky" meant (design-system §3).
+ * ------------------------------------------------------------------------- */
+
+.player-console {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  background: var(--color-panel);
+  border: var(--border);
+  border-radius: 10px;
 }
 
 .player-title {
-  color: var(--color-base-content);
-  font-family: var(--font-sans);
-  font-size: var(--text-h2);
+  color: var(--color-muted-strong);
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
-.btn.ghost {
-  background: var(--color-base-300);
-  color: var(--color-base-content);
-  border: var(--border);
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+.player-nav {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
 }
 
 .video-frame {
@@ -62,10 +62,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 10px 12px;
-  background: var(--color-panel);
-  border: var(--border);
-  border-radius: 9px;
 }
 
 .transport-volume {
@@ -124,12 +120,13 @@
 
 /* The thin full-session bar. */
 
+/* The scrub bar. A border here made it read as an empty text input rather than a progress bar. */
+
 .timeline-bar {
   position: relative;
-  height: 18px;
-  background: var(--color-panel);
-  border: var(--border);
-  border-radius: var(--radius);
+  height: 6px;
+  background: var(--color-base-300);
+  border-radius: 999px;
   cursor: pointer;
   touch-action: none;
 }
@@ -137,8 +134,8 @@
 .timeline-bar-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-radius: var(--radius);
+  background: var(--color-accent);
+  border-radius: 999px;
 }
 
 .timeline-tick {
@@ -154,11 +151,11 @@
 
 .timeline-window-bracket {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius);
-  opacity: 0.55;
+  top: -2px;
+  bottom: -2px;
+  border: 1px solid var(--color-muted-strong);
+  border-radius: var(--radius-sm);
+  opacity: 0.5;
   pointer-events: none;
 }
 
@@ -180,10 +177,10 @@
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: var(--space-1);
-  background: var(--color-panel);
+  background: var(--color-base-100);
   border: var(--border);
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: var(--radius);
+  padding: 8px 10px;
   user-select: none;
   touch-action: none;
 }
@@ -335,10 +332,8 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  padding: 12px;
-  background: var(--color-panel);
-  border: var(--border);
-  border-radius: 10px;
+  padding: 14px 2px 0;
+  border-top: var(--border);
 }
 
 .player-clip-bar-label {
@@ -354,15 +349,12 @@
 
 .player-footer {
   display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
+  justify-content: flex-start;
+  gap: var(--space-3);
   align-items: center;
   min-width: 0;
   flex-wrap: wrap;
-  padding: 12px;
-  background: var(--color-panel);
-  border: var(--border);
-  border-radius: 10px;
+  padding: 0 2px;
 }
 
 .player-footer .btn {

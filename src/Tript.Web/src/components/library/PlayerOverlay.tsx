@@ -5,6 +5,7 @@
 // keeps it mounted underneath.
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { Button } from '../../components/ui/controls';
 
 /**
  * What can hold focus inside the overlay. The player's video is focusable through its `tabindex`:
@@ -108,15 +109,13 @@ export function PlayerOverlay({
       ref={containerRef}
     >
       <div className="player-overlay-bar">
-        <button
-          type="button"
+        <Button variant="ghost"
           ref={closeRef}
-          className="btn ghost"
+          
           onClick={onClose}
-          aria-label="Close player"
-        >
+          aria-label="Close player">
           ← Back to library
-        </button>
+        </Button>
         <span className="player-overlay-title" data-testid="player-overlay-title">
           {title}
         </span>

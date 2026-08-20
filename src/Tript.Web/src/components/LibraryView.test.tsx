@@ -152,14 +152,14 @@ describe('LibraryView grid', () => {
 describe('LibraryView filters and sorting', () => {
   it('filters by type', () => {
     renderLibrary([session, clip]);
-    fireEvent.click(screen.getByRole('button', { name: 'Clips' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     expect(cardTitles()).toEqual(['Nice shot']);
-    expect(screen.getByRole('button', { name: 'Clips', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sessions' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
     expect(cardTitles()).toEqual(['Ranked win']);
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'All' }));
     expect(cardTitles()).toHaveLength(2);
   });
 
@@ -234,7 +234,7 @@ describe('LibraryView filters and sorting', () => {
   it('clears every filter but keeps the sort', () => {
     renderLibrary([session, clip]);
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Clips' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'nice' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
@@ -242,7 +242,7 @@ describe('LibraryView filters and sorting', () => {
     expect(cardTitles()).toEqual(['Nice shot', 'Ranked win']);
     expect((screen.getByLabelText('Sort') as HTMLSelectElement).value).toBe('oldest');
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('');
-    expect(screen.getByRole('button', { name: 'All', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'All', checked: true })).toBeTruthy();
     // The affordance only exists while something is being filtered.
     expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
   });
@@ -403,16 +403,19 @@ describe('LibraryView delete and selection', () => {
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('for the next 3 days');
   });
 
-  it('offers no checkboxes until selection mode is entered, and drops them again on Done', () => {
+  it('offers no card checkboxes until selection mode is entered, and drops them again on Done', () => {
+    // Scoped to the cards: the toolbar's "Favourites only" toggle is a checkbox too, and a
+    // page-wide query would count it.
+    const cardCheckboxes = () => document.querySelectorAll('.content-card-select');
     renderWith([session, clip]);
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(cardCheckboxes()).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Select' }));
-    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(cardCheckboxes()).toHaveLength(2);
     expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(cardCheckboxes()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Select' })).toBeTruthy();
   });
 
@@ -477,7 +480,7 @@ describe('LibraryView delete and selection', () => {
 
   it('only selects what the filters still show, so a hidden item cannot be deleted by "Select page"', () => {
     const { sent } = renderWith([session, clip]);
-    fireEvent.click(screen.getByRole('button', { name: 'Clips' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
     expect(screen.getByTestId('library-selection-count').textContent).toBe('1 selected');

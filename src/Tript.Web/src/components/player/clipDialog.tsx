@@ -28,6 +28,7 @@ import { formatTime } from './timelineModel';
 import type { TimelineRegion } from './clipSeam';
 import { DEFAULT_REGION_SECONDS, resizeRegionEnd, resizeRegionStart } from './clipModel';
 import type { ClipDialogController, ClipProgressState } from './useClipDialog';
+import { Button, Slider } from '../../components/ui/controls';
 
 export interface ClipDialogProps {
   client: IpcClient;
@@ -62,9 +63,9 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
       <div className="clip-dialog-panel">
         <div className="clip-dialog-header">
           <h2>Create clip</h2>
-          <button type="button" className="btn ghost" onClick={dialog.closeDialog} aria-label="Close clip dialog">
+          <Button variant="ghost"  onClick={dialog.closeDialog} aria-label="Close clip dialog">
             ×
-          </button>
+          </Button>
         </div>
 
         <div className="clip-field">
@@ -73,7 +74,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
           </label>
           <input
             id="clip-output-title"
-            className="settings-input"
+            className="input"
             value={dialog.title}
             onChange={(event) => dialog.setTitle(event.target.value)}
             placeholder="Clip title"
@@ -87,9 +88,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
 
         <div className="clip-mode-selector" role="radiogroup" aria-label="Clipping mode">
           <label className={`clip-mode ${dialog.mode === 'combine' ? 'active' : ''}`}>
-            <input
-              type="radio"
-              name="clip-mode"
+            <input className="radio" type="radio" name="clip-mode"
               value="combine"
               checked={dialog.mode === 'combine'}
               onChange={() => dialog.setMode('combine')}
@@ -98,9 +97,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
             <span className="clip-mode-note">Regions joined into one video</span>
           </label>
           <label className={`clip-mode ${dialog.mode === 'separate' ? 'active' : ''}`}>
-            <input
-              type="radio"
-              name="clip-mode"
+            <input className="radio" type="radio" name="clip-mode"
               value="separate"
               checked={dialog.mode === 'separate'}
               onChange={() => dialog.setMode('separate')}
@@ -119,14 +116,12 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
                 : `${dialog.regions.length} region${dialog.regions.length === 1 ? '' : 's'} → ${dialog.regions.length} clip${dialog.regions.length === 1 ? '' : 's'}`}
             </span>
             {dialog.regions.length > 0 && (
-              <button
-                type="button"
-                className="btn ghost small"
+              <Button variant="ghost" size="small"
+                
                 onClick={dialog.clearRegions}
-                aria-label="Clear all regions"
-              >
+                aria-label="Clear all regions">
                 Clear all
-              </button>
+              </Button>
             )}
           </div>
           {dialog.regions.length === 0 ? (
@@ -173,26 +168,25 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
                     <span className="clip-audio-name" title={track.device}>
                       {track.device}
                     </span>
-                    <input
-                      type="range"
-                      className="settings-range"
+                    <Slider
                       min={0}
                       max={1}
                       step={0.05}
                       value={muted ? 0 : dialog.audio.volumes[track.id] ?? 1}
                       aria-label={`${track.device} volume`}
-                      onChange={(event) => dialog.setAudioVolume(track.id, Number(event.target.value))}
-                    />
+                      onChange={(value) => dialog.setAudioVolume(track.id, value)}
+                      />
                     <span className="audio-source-volume-value">
                       {muted ? 0 : Math.round((dialog.audio.volumes[track.id] ?? 1) * 100)}%
                     </span>
-                    <button
-                      type="button"
-                      className={`btn ghost small ${muted ? 'active' : ''}`}
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      active={muted}
                       onClick={() => dialog.toggleAudioMuted(track.id)}
                     >
                       {muted ? 'Unmute' : 'Mute'}
-                    </button>
+                    </Button>
                   </li>
                 );
               })}
@@ -201,14 +195,13 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
         )}
 
         <div className="clip-actions">
-          <button
-            type="button"
-            className="btn"
+          <Button variant="primary"
+            
             onClick={dialog.create}
-            disabled={dialog.regions.length === 0 || inFlight.length > 0}
+            disabled={dialog.regions.length === 0 || inFlight.length> 0}
           >
             {dialog.mode === 'combine' ? 'Create clip' : `Create ${dialog.regions.length} clip${dialog.regions.length === 1 ? '' : 's'}`}
-          </button>
+          </Button>
         </div>
 
         {(inFlight.length > 0 || finished.length > 0) && (
@@ -289,7 +282,7 @@ function RegionRow({
   return (
     <li className={`clip-region-row ${dialog.selectedRegionId === region.id ? 'selected' : ''}`}>
       <div className="clip-region-main">
-        <button
+        <Button
           type="button"
           className="clip-region-select"
           onClick={() => dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id)}
@@ -303,22 +296,21 @@ function RegionRow({
           <span className="clip-region-length">
             {formatDuration(region.end - region.start)}
           </span>
-        </button>
-        <button
-          type="button"
-          className="btn ghost small"
+        </Button>
+        <Button variant="ghost" size="small"
+          
           onClick={() => dialog.removeRegion(region.id)}
           aria-label={`Remove region ${index + 1}`}
         >
           Remove
-        </button>
+        </Button>
       </div>
       <div className="clip-region-edit">
         <label className="clip-region-time">
           <span className="clip-region-time-label">Start</span>
           <input
             type="number"
-            className="settings-input clip-region-time-input"
+            className="input clip-region-time-input"
             min={0}
             max={Math.max(0, duration)}
             step={0.1}
@@ -334,20 +326,19 @@ function RegionRow({
             }}
           />
         </label>
-        <button
-          type="button"
-          className="btn ghost small"
+        <Button variant="ghost" size="small"
+          
           onClick={() => snapTo('start')}
           aria-label={`Set region ${index + 1} start to the playhead`}
           title={`Set the start to the playhead (${formatTime(currentTime)})`}
         >
           Start ← {formatTime(currentTime)}
-        </button>
+        </Button>
         <label className="clip-region-time">
           <span className="clip-region-time-label">End</span>
           <input
             type="number"
-            className="settings-input clip-region-time-input"
+            className="input clip-region-time-input"
             min={0}
             max={Math.max(0, duration)}
             step={0.1}
@@ -363,15 +354,14 @@ function RegionRow({
             }}
           />
         </label>
-        <button
-          type="button"
-          className="btn ghost small"
+        <Button variant="ghost" size="small"
+          
           onClick={() => snapTo('end')}
           aria-label={`Set region ${index + 1} end to the playhead`}
           title={`Set the end to the playhead (${formatTime(currentTime)})`}
         >
           End ← {formatTime(currentTime)}
-        </button>
+        </Button>
       </div>
     </li>
   );

@@ -5,7 +5,7 @@
 // machine changing under a saved setting — a monitor that has been unplugged, a host that could not
 // enumerate at all, a warning that must come back when a *different* monitor goes missing.
 
-import type { SelectOption } from './form';
+import type { SelectOption } from '../components/ui/controls';
 import type { DisplayFallbackWarning, DisplayInfo } from './settingsModel';
 
 /** The `<select>` value standing for `capture.display === null`, i.e. "whatever is primary". */

@@ -75,7 +75,7 @@ describe('TransportBar', () => {
 
   it('still carries play/pause and the time readout', () => {
     renderBar({ playing: true, currentTime: 65, duration: 100 });
-    expect(screen.getByRole('button', { name: 'Play or pause' }).textContent).toBe('Pause');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
     expect(screen.getByTestId('transport-current').textContent).toBe('1:05');
     expect(screen.getByTestId('transport-duration').textContent).toBe('1:40');
   });

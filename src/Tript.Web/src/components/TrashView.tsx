@@ -26,6 +26,7 @@ import {
 } from './trash/trashModel';
 import type { TrashController } from './trash/useTrash';
 import { WorkspaceMeta, EmptyState } from './ui/Ui';
+import { Button, Checkbox } from '../components/ui/controls';
 
 /** What a confirmed action does once the modal says yes. */
 type PendingPurge = { entries: TrashEntry[]; whole: boolean };
@@ -147,32 +148,28 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
             <span className="trash-selection-count" data-testid="trash-selection-count" aria-live="polite">
               {selection.length} selected
             </span>
-            <button type="button" className="btn ghost" onClick={toggleAll}>
+            <Button variant="ghost"  onClick={toggleAll}>
               {everythingSelected ? 'Deselect all' : 'Select all'}
-            </button>
-            <button
-              type="button"
-              className="btn"
+            </Button>
+            <Button variant="primary"
+              
               onClick={restoreSelected}
-              disabled={selection.length === 0}
-            >
+              disabled={selection.length === 0}>
               Restore
-            </button>
-            <button
-              type="button"
-              className="btn danger"
+            </Button>
+            <Button variant="danger"
+              
               onClick={() => setPending({ entries: selectedEntries, whole: false })}
               disabled={selection.length === 0}
             >
               Delete permanently
-            </button>
-            <button
-              type="button"
-              className="btn danger trash-empty-action"
+            </Button>
+            <Button variant="danger" className="trash-empty-action"
+              
               onClick={() => setPending({ entries, whole: true })}
             >
               Empty trash
-            </button>
+            </Button>
           </div>
 
           <ul className="trash-list" data-testid="trash-list">
@@ -183,8 +180,7 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
               const game = entry.game?.trim();
               return (
                 <li key={entry.id} className="trash-row" data-testid="trash-row">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     className="trash-row-select"
                     checked={selection.includes(entry.id)}
                     aria-label={`Select ${label}`}
@@ -205,22 +201,20 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
                     </span>
                   </div>
                   <div className="trash-row-actions">
-                    <button
-                      type="button"
-                      className="btn ghost"
+                    <Button variant="ghost"
+                      
                       onClick={() => restoreOne(entry)}
                       aria-label={`Restore ${label}`}
                     >
                       Restore
-                    </button>
-                    <button
-                      type="button"
-                      className="btn danger"
+                    </Button>
+                    <Button variant="danger"
+                      
                       onClick={() => setPending({ entries: [entry], whole: false })}
                       aria-label={`Delete ${label} permanently`}
                     >
                       Delete
-                    </button>
+                    </Button>
                   </div>
                 </li>
               );

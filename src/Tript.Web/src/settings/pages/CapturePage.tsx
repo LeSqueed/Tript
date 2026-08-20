@@ -6,7 +6,7 @@
 
 import type { SettingsPageName } from '../useSettings';
 import type { CaptureSettings, DisplayCaptureMethod, DisplayInfo } from '../settingsModel';
-import { Field, SelectField, TextField } from '../form';
+import { Field, SelectField, TextField } from '../../components/ui/controls';
 import {
   buildDisplayOptions,
   displayFieldMode,
@@ -79,8 +79,8 @@ export function CapturePage({
       )}
 
       {showDisplay && mode === 'none' && (
-        <div className="settings-field" data-testid="capture-display-none">
-          <span className="settings-field-label">Display</span>
+        <div className="field" data-testid="capture-display-none">
+          <span className="field-label">Display</span>
           <p className="muted small">
             No monitors were detected on this machine. Recording uses whichever monitor the system
             reports as primary.

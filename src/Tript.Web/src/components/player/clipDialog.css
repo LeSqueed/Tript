@@ -256,17 +256,6 @@
   font-size: 13px;
 }
 
-.btn.small {
-  padding: var(--space-1) var(--space-2);
-  font-size: 12px;
-}
-
-.btn.ghost.active {
-  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
 /* ------------------------------------------------------------------ */
 /* Actions + progress                                                   */
 /* ------------------------------------------------------------------ */

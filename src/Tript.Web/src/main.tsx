@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import './theme/theme.css';
 import './app/app.css';
+import './components/ui/controls.css';
 import './components/ui/ui.css';
 import './components/RecorderBar.css';
 // LibraryView.css also carries the shared primitives (.panel/.btn/.muted) and the player overlay's

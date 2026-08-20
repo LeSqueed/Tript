@@ -7,7 +7,15 @@ import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { ConnectionState } from '../ipc/websocketClient';
 import type { ContentItem, DeleteContentParameters } from '../ipc/protocol';
-import { Field, SelectField, TextField, type SelectOption } from '../settings/form';
+import {
+  Button,
+  Field,
+  SegmentedControl,
+  SelectField,
+  TextField,
+  Toggle,
+  type SelectOption,
+} from '../components/ui/controls';
 import { ContentCard } from './library/ContentCard';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
 import {
@@ -232,27 +240,14 @@ export function LibraryView({
       )}
 
       <div className="library-toolbar">
-        <div className="library-types" role="group" aria-label="Content type">
-          {TYPE_FILTERS.map((filter) => (
-            <button
-              key={filter.value}
-              type="button"
-              className={query.type === filter.value ? 'library-type active' : 'library-type'}
-              aria-pressed={query.type === filter.value}
-              onClick={() => updateQuery({ type: filter.value })}
-            >
-              {filter.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className={query.favoriteOnly ? 'library-type active' : 'library-type'}
-            aria-pressed={query.favoriteOnly}
-            onClick={() => updateQuery({ favoriteOnly: !query.favoriteOnly })}
-          >
-            Favorites
-          </button>
-        </div>
+        {/* Content type is one-of-N. Favourites is an independent boolean and lives with the other
+            filters — inside this group it read, and was announced, as a fourth exclusive type. */}
+        <SegmentedControl
+          label="Content type"
+          value={query.type}
+          segments={TYPE_FILTERS}
+          onChange={(value) => updateQuery({ type: value })}
+        />
 
         <div className="library-filters">
           <Field label="Game">
@@ -283,10 +278,16 @@ export function LibraryView({
               placeholder="Title or game"
             />
           </Field>
+
+          <Toggle
+            checked={query.favoriteOnly}
+            onChange={(checked) => updateQuery({ favoriteOnly: checked })}
+            label="Favourites only"
+          />
           {view.filtered && (
-            <button type="button" className="btn ghost library-clear" onClick={clearFilters}>
+            <Button variant="ghost" className="library-clear"  onClick={clearFilters}>
               Clear filters
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -300,28 +301,26 @@ export function LibraryView({
               <span className="library-selection-count" data-testid="library-selection-count" aria-live="polite">
                 {selectedCount} selected
               </span>
-              <button type="button" className="btn ghost" onClick={toggleAllOnPage} disabled={pageKeys.length === 0}>
+              <Button variant="ghost"  onClick={toggleAllOnPage} disabled={pageKeys.length === 0}>
                 {pageAllSelected ? 'Deselect page' : 'Select page'}
-              </button>
-              <button type="button" className="btn ghost" onClick={clearSelection} disabled={selectedCount === 0}>
+              </Button>
+              <Button variant="ghost"  onClick={clearSelection} disabled={selectedCount === 0}>
                 Clear selection
-              </button>
-              <button
-                type="button"
-                className="btn danger"
+              </Button>
+              <Button variant="danger"
+                
                 onClick={requestBulkDelete}
-                disabled={selectedCount === 0}
-              >
+                disabled={selectedCount === 0}>
                 Delete {selectedCount > 0 ? selectedCount : ''}
-              </button>
-              <button type="button" className="btn ghost library-selection-done" onClick={toggleSelectionMode}>
+              </Button>
+              <Button variant="ghost" className="library-selection-done"  onClick={toggleSelectionMode}>
                 Done
-              </button>
+              </Button>
             </>
           ) : (
-            <button type="button" className="btn ghost" onClick={toggleSelectionMode}>
+            <Button variant="ghost"  onClick={toggleSelectionMode}>
               Select
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -359,9 +358,9 @@ export function LibraryView({
             title="Nothing fits this view"
             description={`None of your ${view.totalCount} item${view.totalCount === 1 ? '' : 's'} matches these filters.`}
             action={
-              <button type="button" className="btn" onClick={clearFilters}>
+              <Button variant="primary"  onClick={clearFilters}>
                 Clear filters
-              </button>
+              </Button>
             }
           />
         </div>
@@ -385,27 +384,25 @@ export function LibraryView({
 
       {view.pageCount > 1 && (
         <nav className="library-pagination" aria-label="Library pages">
-          <button
-            type="button"
-            className="btn ghost"
+          <Button variant="ghost"
+            
             onClick={() => goToPage(view.page - 1)}
             disabled={view.page <= 1}
             aria-label="Previous page"
           >
             ← Prev
-          </button>
+          </Button>
           <span className="library-page-indicator" data-testid="library-page">
             Page {view.page} of {view.pageCount}
           </span>
-          <button
-            type="button"
-            className="btn ghost"
+          <Button variant="ghost"
+            
             onClick={() => goToPage(view.page + 1)}
             disabled={view.page >= view.pageCount}
             aria-label="Next page"
           >
             Next →
-          </button>
+          </Button>
         </nav>
       )}
 

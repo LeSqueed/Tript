@@ -7,6 +7,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { summarizeNames } from './selectionModel';
 import { deletionNotice } from '../trash/trashModel';
+import { Button, Checkbox } from '../../components/ui/controls';
 
 /** Above this many, the items are summarised instead of listed. */
 const NAME_LIMIT = 5;
@@ -137,23 +138,20 @@ export function ConfirmDeleteDialog({
 
         {!permanentOnly && (
           <label className="confirm-dialog-skip">
-            <input
-              type="checkbox"
-              className="settings-checkbox"
+            <Checkbox
               checked={skipTrash}
-              onChange={(event) => setSkipTrash(event.target.checked)}
+              onChange={setSkipTrash}
             />
             <span>Delete permanently (skip trash)</span>
           </label>
         )}
 
         <div className="confirm-dialog-actions">
-          <button type="button" className="btn ghost" ref={cancelRef} onClick={onCancel}>
+          <Button variant="ghost"  ref={cancelRef} onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="btn danger"
+          </Button>
+          <Button variant="danger"
+            
             data-testid="confirm-delete-confirm"
             onClick={() => onConfirm(permanent)}
           >
@@ -161,7 +159,7 @@ export function ConfirmDeleteDialog({
                 describe what ticking it changed. A permanent-only caller already named its own
                 action ("Empty trash"), so it keeps it. */}
             {skipTrash && !permanentOnly ? 'Delete permanently' : confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

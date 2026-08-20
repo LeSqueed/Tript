@@ -136,9 +136,9 @@ describe('App shell', () => {
     expect(within(nav).getByRole('button', { name: 'Trash' })).toBeTruthy();
     expect(within(nav).getByRole('button', { name: 'Settings' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Player' })).toBeNull();
-    expect(within(nav).queryByRole('button', { name: 'Clips' })).toBeNull();
+    expect(within(nav).queryByRole('radio', { name: 'Clips' })).toBeNull();
     // "Clips" survives as a type FILTER inside the library, which is where it went.
-    expect(screen.getByRole('button', { name: 'Clips', pressed: false })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Clips', checked: false })).toBeTruthy();
   });
 
   it('opens the player as an overlay over the library and closes it with Escape', () => {
@@ -196,7 +196,7 @@ describe('App shell', () => {
     connect();
 
     // Narrow the library to clips and search for one, so there is real state to come back to.
-    fireEvent.click(screen.getByRole('button', { name: 'Clips' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'shot' } });
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
 
@@ -204,7 +204,7 @@ describe('App shell', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     // The library was covered, not unmounted: its query is untouched.
-    expect(screen.getByRole('button', { name: 'Clips', pressed: true })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('shot');
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Open Nice shot' })).toBeTruthy();

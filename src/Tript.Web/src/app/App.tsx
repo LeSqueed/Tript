@@ -23,6 +23,7 @@ import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
 import { TripwireMark } from '../components/TripwireMark';
+import { Icon } from '../components/ui/Icon';
 import './app.css';
 
 export type Route = 'library' | 'trash' | 'settings';
@@ -143,7 +144,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               className={route === 'library' ? 'nav-item active' : 'nav-item'}
               onClick={showLibrary}
             >
-              <span className="nav-glyph" aria-hidden="true">◈</span>
+              <Icon name="library" className="nav-glyph" />
               <span>Library</span>
             </button>
             <button
@@ -151,7 +152,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               className={route === 'trash' ? 'nav-item active' : 'nav-item'}
               onClick={showTrash}
             >
-              <span className="nav-glyph" aria-hidden="true">⌁</span>
+              <Icon name="trash" className="nav-glyph" />
               <span>Trash</span>
               {trash.entries.length > 0 && (
                 <span className="nav-badge" data-testid="nav-trash-count">
@@ -164,7 +165,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               className={route === 'settings' ? 'nav-item active' : 'nav-item'}
               onClick={showSettings}
             >
-              <span className="nav-glyph" aria-hidden="true">⚙</span>
+              <Icon name="settings" className="nav-glyph" />
               <span>Settings</span>
             </button>
           </nav>

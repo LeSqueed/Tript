@@ -658,7 +658,7 @@ describe('segment looping in the player', () => {
       fireEvent.click(regionButton);
     });
     expect(currentReadout()).toBe('0:37');
-    expect(screen.getByRole('button', { name: 'Play or pause' }).textContent).toBe('Play');
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
   });
 });
 

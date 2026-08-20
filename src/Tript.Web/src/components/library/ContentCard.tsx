@@ -21,6 +21,8 @@ import {
   typeLabel,
   UNKNOWN_GAME_LABEL,
 } from './libraryModel';
+import { Icon } from '../ui/Icon';
+import { Checkbox } from '../../components/ui/controls';
 
 export function ContentCard({
   item,
@@ -81,8 +83,8 @@ export function ContentCard({
               onError={() => setThumbnailFailed(true)}
             />
           ) : (
-            <span className="content-card-placeholder" data-testid="content-card-placeholder" aria-hidden="true">
-              ▶
+            <span className="content-card-placeholder" data-testid="content-card-placeholder">
+              <Icon name="play" size={22} />
             </span>
           )}
           {duration !== null && <span className="content-card-duration">{duration}</span>}
@@ -101,8 +103,7 @@ export function ContentCard({
       </button>
 
       {selectable && (
-        <input
-          type="checkbox"
+        <Checkbox
           className="content-card-select"
           checked={selected}
           aria-label={`Select ${label}`}
@@ -117,7 +118,7 @@ export function ContentCard({
           onClick={() => onDelete(item)}
           aria-label={`Delete ${label}`}
         >
-          <span aria-hidden="true">🗑</span>
+          <Icon name="trash" size={15} />
         </button>
       )}
 
@@ -129,7 +130,7 @@ export function ContentCard({
           aria-label={`${item.favorite ? 'Remove' : 'Add'} ${label} ${item.favorite ? 'from' : 'to'} favorites`}
           aria-pressed={item.favorite === true}
         >
-          <span aria-hidden="true">{item.favorite ? '★' : '☆'}</span>
+          <Icon name="star" size={15} filled={item.favorite === true} />
         </button>
       )}
     </div>

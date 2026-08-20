@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { GameCaptureMode, GameSetting, RecordingMode } from '../settingsModel';
-import { ActionButton, DangerButton, Field, SelectField, TextField } from '../form';
+import { Button, Checkbox, Field, SelectField, TextField } from '../../components/ui/controls';
 import { executablePatch } from '../gameExecutable';
 
 const CAPTURE_MODES: { value: GameCaptureMode; label: string }[] = [
@@ -96,7 +96,7 @@ export function GamePage({
       <Field label="Game-capture timeout" hint="How long game capture waits for the game's window before falling back, in seconds.">
         <input
           type="number"
-          className="settings-input"
+          className="input"
           min={1}
           value={timeoutSeconds}
           onChange={(event) => setTimeoutSeconds(event.target.value)}
@@ -127,9 +127,9 @@ export function GamePage({
             <div className="game-row-main">
               <TextField value={game.name} onChange={(value) => patchGame(index, { name: value })} />
               <span className="muted small">{game.id}</span>
-              <DangerButton onClick={() => removeGame(index)} title="Remove this game">
+              <Button variant="danger" onClick={() => removeGame(index)} title="Remove this game">
                 Remove
-              </DangerButton>
+              </Button>
             </div>
 
             <div className="game-row-overrides">
@@ -137,7 +137,7 @@ export function GamePage({
                 <span className="muted small">Executable</span>
                 <input
                   type="text"
-                  className="settings-input"
+                  className="input"
                   value={game.executable ?? ''}
                   // The name itself, so the field shows exactly what blank falls back to.
                   placeholder={game.name}
@@ -149,7 +149,7 @@ export function GamePage({
               <label className="settings-inline-field">
                 <span className="muted small">Recording mode</span>
                 <select
-                  className="settings-input settings-select"
+                  className="input select"
                   value={game.recordingModeOverride?.mode ?? ''}
                   onChange={(event) => {
                     const value = event.target.value;
@@ -173,7 +173,7 @@ export function GamePage({
                 <span className="muted small">FPS</span>
                 <input
                   type="number"
-                  className="settings-input"
+                  className="input"
                   min={1}
                   value={game.qualityOverride?.fps ?? ''}
                   placeholder="global"
@@ -193,7 +193,7 @@ export function GamePage({
                 <span className="muted small">Encoder</span>
                 <input
                   type="text"
-                  className="settings-input"
+                  className="input"
                   value={game.qualityOverride?.encoder ?? ''}
                   placeholder="global"
                   onChange={(event) => {
@@ -212,7 +212,7 @@ export function GamePage({
                 <span className="muted small">Quality</span>
                 <input
                   type="number"
-                  className="settings-input"
+                  className="input"
                   min={1}
                   value={game.qualityOverride?.quality ?? ''}
                   placeholder="global"
@@ -230,13 +230,9 @@ export function GamePage({
 
               <label className="settings-inline-field">
                 <span className="muted small">Integrations</span>
-                <input
-                  type="checkbox"
-                  className="settings-checkbox"
+                <Checkbox
                   checked={game.integrations?.enabled ?? false}
-                  onChange={(event) =>
-                    patchGame(index, { integrations: { enabled: event.target.checked } })
-                  }
+                  onChange={(enabled) => patchGame(index, { integrations: { enabled } })}
                 />
               </label>
             </div>
@@ -246,9 +242,9 @@ export function GamePage({
         <div className="game-add">
           <TextField value={newGameName} onChange={setNewGameName} placeholder="Game name" />
           <TextField value={newGameId} onChange={setNewGameId} placeholder="id (defaults to name)" />
-          <ActionButton onClick={addGame} disabled={!newGameName.trim()}>
+          <Button onClick={addGame} disabled={!newGameName.trim()}>
             Add game
-          </ActionButton>
+          </Button>
         </div>
       </div>
     </div>

@@ -83,22 +83,6 @@
 /* Field layout                                                        */
 /* ------------------------------------------------------------------ */
 
-.settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.settings-field-label {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.settings-field-hint {
-  opacity: 0.6;
-  font-size: 12px;
-}
-
 /* An input with an adjacent control (e.g. the output-directory field next to its Browse button). */
 .settings-row {
   display: flex;
@@ -106,35 +90,14 @@
   gap: var(--space-2);
 }
 
-.settings-row .settings-input {
+.settings-row .input {
   flex: 1;
   min-width: 0;
 }
 
-.settings-input {
-  background: var(--color-base-300);
-  color: var(--color-base-content);
-  border: var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-}
-
-.settings-input:focus {
+.input:focus {
   outline: 2px solid var(--color-accent);
   outline-offset: -1px;
-}
-
-.settings-select {
-  appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--color-base-content) 50%),
-    linear-gradient(135deg, var(--color-base-content) 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) 50%,
-    calc(100% - 11px) 50%;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-  padding-right: var(--space-6);
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,22 +124,6 @@
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
-}
-
-.btn.danger {
-  background: transparent;
-  color: var(--color-error);
-  border: 1px solid var(--color-error);
-  font-weight: 500;
-}
-
-.btn.danger:hover {
-  background: rgba(248, 113, 113, 0.1);
-}
-
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .pill {
@@ -227,7 +174,7 @@
   gap: var(--space-2);
 }
 
-.audio-track-header .settings-input {
+.audio-track-header .input {
   flex: 1;
 }
 
@@ -313,7 +260,7 @@
   gap: var(--space-2);
 }
 
-.game-row-main .settings-input {
+.game-row-main .input {
   flex: 1;
 }
 

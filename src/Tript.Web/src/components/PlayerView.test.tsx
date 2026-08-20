@@ -346,7 +346,7 @@ describe('navigation', () => {
     act(() => {
       fireEvent.play(video);
     });
-    expect(screen.getByRole('button', { name: 'Play or pause' }).textContent).toBe('Pause');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
   });
 });
 

@@ -115,29 +115,29 @@ a {
 
 .tripwire-viewfinder {
   color: var(--color-cyber-secondary);
-  stroke-width: 4;
+  stroke-width: 5;
   transform-box: view-box;
   transform-origin: 32px 32px;
   animation: tripwire-viewfinder-lock var(--motion-snap) cubic-bezier(0.2, 0, 0, 1) infinite;
 }
 
 .tripwire-crosshair {
-  stroke-width: 3;
-  opacity: 0.58;
+  stroke-width: 4;
+  opacity: 0.78;
 }
 
 .tripwire-axis {
   color: var(--color-cyber-secondary);
-  stroke-width: 3;
-  opacity: 0.58;
+  stroke-width: 4;
+  opacity: 0.78;
 }
 
 @keyframes tripwire-viewfinder-lock {
   0%,
   20%,
-  100% { opacity: 0.35; transform: scale(1.18); }
-  54% { opacity: 1; transform: scale(0.82); }
-  72% { opacity: 0.7; transform: scale(0.92); }
+  100% { opacity: 0.78; transform: scale(1.08); }
+  54% { opacity: 1; transform: scale(0.88); }
+  72% { opacity: 0.88; transform: scale(0.95); }
 }
 
 @media (prefers-reduced-motion: reduce) {

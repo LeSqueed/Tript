@@ -15,6 +15,7 @@
          and `dotnet run` still prints to the terminal that launched it. -->
     <OutputType>WinExe</OutputType>
     <UseAppHost>true</UseAppHost>
+    <ApplicationIcon>../Tript.Web/public/tript.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

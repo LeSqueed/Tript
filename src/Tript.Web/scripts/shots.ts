@@ -33,7 +33,7 @@ const VIEWPORT = { width: 1440, height: 900 };
 /** The width below which the player uses the overlay rather than the full-size route. */
 const COMPACT = { width: 1000, height: 800 };
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const HOST = process.platform === 'win32' ? 'Tript.App.exe' : './Tript.App';
+const HOST = process.platform === 'win32' ? join(HOST_DIR, 'Tript.App.exe') : './Tript.App';
 
 /** Build the frontend and stage it where the host serves it from. */
 function buildFrontend(): void {

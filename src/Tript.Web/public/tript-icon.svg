@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Tript</title>
+  <desc id="desc">A viewfinder locking onto a frame</desc>
+  <rect width="256" height="256" rx="56" fill="#101116"/>
+  <rect x="8" y="8" width="240" height="240" rx="50" fill="none" stroke="#292c35" stroke-width="8"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#a79be3" stroke-width="18">
+      <path d="M72 100V72H100M156 72H184V100M184 156V184H156M100 184H72V156"/>
+      <path d="M128 56V72M128 184V200"/>
+    </g>
+    <path d="M100 128H156M128 100V156" stroke="#f08a72" stroke-width="14"/>
+  </g>
+</svg>

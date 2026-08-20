@@ -149,7 +149,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     <div className="app-shell">
       <header className="app-topbar">
         <div className="app-brand">
-          <TripwireMark size={22} />
+          <TripwireMark size={26} />
           <strong>Tript</strong>
         </div>
         {/* The player is a workspace inside Tript, so primary navigation stays available while reviewing. */}

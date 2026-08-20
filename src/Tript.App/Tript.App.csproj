@@ -11,6 +11,7 @@
     <Platforms>x64</Platforms>
     <OutputType>Exe</OutputType>
     <UseAppHost>true</UseAppHost>
+    <ApplicationIcon>../Tript.Web/public/tript.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

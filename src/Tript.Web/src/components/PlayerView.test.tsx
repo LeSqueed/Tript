@@ -379,4 +379,40 @@ describe('region selection seam (T9)', () => {
     });
     expect(onRegionSelect).toHaveBeenCalledWith({ id: 'r1', start: 20, end: 45 });
   });
+  it('does not let the browser paint its controls over the video', () => {
+    renderPlayer();
+    const video = document.querySelector('video');
+    expect(video).not.toBeNull();
+    expect(video?.hasAttribute('controls')).toBe(false);
+  });
+
+  it('keeps the video reachable by keyboard now that controls no longer focus it', () => {
+    renderPlayer();
+    expect(document.querySelector('video')?.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('applies the transport volume to the media element', () => {
+    renderPlayer();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.25' } });
+    });
+    expect((document.querySelector('video') as HTMLVideoElement).volume).toBeCloseTo(0.25);
+  });
+
+  it('mutes and unmutes the media element, restoring the chosen level', () => {
+    renderPlayer();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.6' } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mute' }));
+    });
+    const video = document.querySelector('video') as HTMLVideoElement;
+    expect(video.muted).toBe(true);
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Unmute' }));
+    });
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBeCloseTo(0.6);
+  });
 });

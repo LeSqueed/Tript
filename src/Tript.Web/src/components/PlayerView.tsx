@@ -221,6 +221,20 @@ export function PlayerView({
     [navigation.length],
   );
 
+  // Volume lives here rather than in the transport row so it survives moving between sessions: the
+  // video element is remounted per source, the preference is not. Muted keeps the level rather than
+  // zeroing it, so unmuting returns to where the user left it.
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    video.volume = volume;
+    video.muted = muted;
+  }, [volume, muted, item]);
+
   const toggleFullscreen = useCallback(() => {
     client.send('ToggleFullscreen', { enabled: true });
   }, [client]);
@@ -444,8 +458,12 @@ export function PlayerView({
         <video
           ref={videoRef}
           className="video-element"
-          controls
+          // No `controls`: the browser paints those over the picture. The transport row below the
+          // video is the control surface. tabIndex keeps the element keyboard-reachable, which
+          // `controls` used to provide — the overlay's focus trap matches it by tabindex.
+          tabIndex={0}
           src={videoSrc}
+          onClick={playback.togglePlayPause}
           onTimeUpdate={(event) => playback.onVideoTimeUpdate(event.currentTarget.currentTime)}
           onDurationChange={(event) => playback.onVideoDuration(event.currentTarget.duration)}
           onPlay={() => {
@@ -464,8 +482,16 @@ export function PlayerView({
         playing={playing}
         currentTime={currentTime}
         duration={duration}
+        volume={volume}
+        muted={muted}
         onTogglePlayPause={playback.togglePlayPause}
         onToggleFullscreen={toggleFullscreen}
+        onVolumeChange={(next) => {
+          setVolume(next);
+          // Dragging the slider off zero is an unmute in every player anyone has used.
+          setMuted(next === 0);
+        }}
+        onToggleMute={() => setMuted((previous) => !previous)}
       />
 
       <div className="timeline-stack">

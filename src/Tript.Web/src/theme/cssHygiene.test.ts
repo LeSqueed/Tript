@@ -17,9 +17,7 @@ import { duplicatesIn, shadowedRules, stylesheetPaths } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
-const KNOWN_DUPLICATES: Record<string, number> = {
-  'components/PlayerView.css': 6,
-};
+const KNOWN_DUPLICATES: Record<string, number> = {};
 
 /**
  * Rules that render nothing because a later rule overrides every declaration. A separate ratchet
@@ -27,9 +25,7 @@ const KNOWN_DUPLICATES: Record<string, number> = {
  * selector keys. TrashView.css had one — an appended block sitting above what it meant to replace,
  * so the redesign's surface never rendered at all and no test noticed.
  */
-const KNOWN_SHADOWED: Record<string, number> = {
-  'components/PlayerView.css': 1,
-};
+const KNOWN_SHADOWED: Record<string, number> = {};
 
 describe('css hygiene', () => {
   it('declares each selector at most once per scope', () => {

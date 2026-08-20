@@ -16,7 +16,7 @@ import { stylesheetPaths } from './cssRules';
 const SRC_ROOT = join(import.meta.dirname, '..');
 
 /** Stylesheets still declaring a serif family. Empty this; do not add to it. */
-const KNOWN_SERIF = ['components/PlayerView.css'];
+const KNOWN_SERIF: string[] = [];
 
 /** Stylesheets still shipping the tracked micro-caps eyebrow. Empty this; do not add to it. */
 const KNOWN_TRACKED: string[] = [];

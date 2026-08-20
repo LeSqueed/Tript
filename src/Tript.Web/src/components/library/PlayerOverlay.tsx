@@ -6,9 +6,13 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 
-/** What can hold focus inside the overlay. `video[controls]` matters — the player's video is one. */
+/**
+ * What can hold focus inside the overlay. The player's video is focusable through its `tabindex`:
+ * it carries no `controls` attribute, because those would paint browser chrome over the picture
+ * (see TransportBar), so the tabindex clause is what covers it.
+ */
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), video[controls], [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function focusableWithin(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(

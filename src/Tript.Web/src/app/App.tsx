@@ -133,15 +133,11 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     <div className={overlayOpen ? 'app-shell player-open' : 'app-shell'}>
       <div className="app-frame">
         <aside className="app-rail">
-          <div className="app-brand" aria-label="Tript review studio">
-            <TripwireMark size={30} label="" />
-            <div>
-              <strong>TRIPT</strong>
-              <span>REVIEW STUDIO</span>
-            </div>
+          <div className="app-brand" aria-label="Tript">
+            <TripwireMark size={26} />
+            <strong>Tript</strong>
           </div>
           <nav className="app-nav" aria-label="Primary">
-            <span className="nav-section-label">Workspace</span>
             <button
               type="button"
               className={route === 'library' ? 'nav-item active' : 'nav-item'}
@@ -163,7 +159,6 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
                 </span>
               )}
             </button>
-            <span className="nav-section-label nav-section-lower">System</span>
             <button
               type="button"
               className={route === 'settings' ? 'nav-item active' : 'nav-item'}
@@ -173,17 +168,10 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               <span>Settings</span>
             </button>
           </nav>
-          <div className="rail-footer">
-            <span className="rail-footer-label">Workspace</span>
-            <span className="rail-footer-value">Local review workspace</span>
-          </div>
         </aside>
         <main className="app-main">
           <div className="app-topbar">
-            <div className="app-context">
-              <span className="app-eyebrow">Workspace / {routeTitle}</span>
-              <h1>{routeTitle}</h1>
-            </div>
+            <h1>{routeTitle}</h1>
             <RecorderBar client={client} connectionState={connectionState} />
           </div>
           <ConnectionBanner reachability={reachability} />

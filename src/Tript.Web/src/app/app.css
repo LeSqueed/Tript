@@ -7,15 +7,16 @@
 
 .app-frame {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
   height: 100%;
 }
 
 .app-rail {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  padding: 22px 14px 16px;
+  padding: 12px 8px;
   background: var(--color-rail);
   border-right: 1px solid var(--color-line);
 }
@@ -23,66 +24,39 @@
 .app-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px 28px;
+  gap: 8px;
+  padding: 6px 8px 14px;
   color: var(--color-base-content);
-}
-
-.app-brand strong,
-.app-brand span,
-.rail-footer-label,
-.nav-section-label,
-.app-eyebrow {
-  display: block;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
 }
 
 .app-brand strong {
   font-size: 15px;
-  letter-spacing: 0.22em;
-}
-
-.app-brand div span {
-  margin-top: 2px;
-  color: var(--color-muted);
-  font-size: 8px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .app-nav {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-}
-
-.nav-section-label {
-  padding: 0 12px 8px;
-  color: var(--color-muted);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.nav-section-lower {
-  margin-top: 22px;
+  gap: 2px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 8px;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  border: 0;
+  border-radius: var(--radius);
   color: var(--color-muted-strong);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--text-body);
+  font-weight: 500;
   text-align: left;
-  transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
+  transition: background var(--motion-fast) var(--motion-ease-out), color var(--motion-fast) var(--motion-ease-out);
 }
 
 .nav-item:hover {
@@ -91,57 +65,32 @@
 }
 
 .nav-item.active {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent-line);
+  background: var(--color-panel-raised);
+  color: var(--color-base-content);
+}
+
+/* The accent earns its place on the active row through the glyph, not a filled pill. */
+.nav-item.active .nav-glyph {
   color: var(--color-accent);
 }
 
 .nav-glyph {
-  width: 18px;
-  color: currentColor;
-  font-size: 17px;
+  width: 16px;
+  color: var(--color-muted);
+  font-size: 15px;
   line-height: 1;
   text-align: center;
 }
 
 .nav-badge {
   margin-left: auto;
-  padding: 2px 7px;
+  padding: 1px 6px;
   border-radius: 999px;
-  background: var(--color-accent);
-  color: var(--color-accent-content);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-}
-
-.rail-footer {
-  display: grid;
-  gap: 7px;
-  margin-top: auto;
-  padding: 14px 12px 0;
-  border-top: 1px solid var(--color-line);
-}
-
-.rail-footer-label {
-  color: var(--color-muted);
-  font-size: 8px;
-  font-weight: 700;
-}
-
-.rail-footer-value {
+  background: var(--color-base-300);
   color: var(--color-muted-strong);
   font-size: 11px;
-}
-
-.rail-pulse {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: var(--color-success);
-  box-shadow: 0 0 0 3px rgba(54, 211, 153, 0.12);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .app-main {
@@ -156,34 +105,27 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  min-height: 86px;
-  padding: 18px 34px 16px;
+  gap: 16px;
+  min-height: 52px;
+  padding: 8px 20px;
   background: var(--color-base-100);
   border-bottom: 1px solid var(--color-line);
 }
 
-.app-eyebrow {
-  margin-bottom: 5px;
-  color: var(--color-accent-muted);
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.app-context h1 {
+.app-topbar h1 {
   margin: 0;
   color: var(--color-base-content);
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 26px;
-  font-weight: 500;
-  letter-spacing: -0.03em;
+  font-family: var(--font-sans);
+  font-size: var(--text-h1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .app-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 30px 34px 48px;
+  padding: 20px 20px 32px;
 }
 
 /* While the player overlay is up, the library underneath stays mounted (that is how the user's
@@ -234,8 +176,6 @@
     min-width: 0;
   }
 
-  .nav-section-label,
-  .rail-footer,
   .nav-glyph {
     display: none;
   }
@@ -250,7 +190,7 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
-    padding: 20px 18px 16px;
+    padding: 12px 16px;
   }
 
   .recorder-bar {
@@ -258,6 +198,6 @@
   }
 
   .app-content {
-    padding: 20px 16px 36px;
+    padding: 16px 16px 28px;
   }
 }

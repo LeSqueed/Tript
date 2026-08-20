@@ -173,6 +173,18 @@ public sealed class ClipEngine : IClipEngine
         return [outputPath];
     }
 
+    // The adjustment for one source track, or "leave it alone" when the request does not mention it.
+    //
+    // This helper exists because `FirstOrDefault` returns `default(AudioTrackAdjustment)` on a miss,
+    // and that value's Volume is 0.0 — the `Volume = 1.0` in the record struct's parameter list is a
+    // CONSTRUCTOR default, which `default(T)` does not apply. Reading a miss as "volume 0" put every
+    // unmentioned track through `volume=0`, and since production sends an empty adjustment list,
+    // that was every track of every clip: they all came out digitally silent.
+    private static AudioTrackAdjustment AdjustmentFor(ClipRequest request, int sourceTrackIndex) =>
+        request.AudioTrackAdjustments.FirstOrDefault(
+            adjustment => adjustment.SourceTrackIndex == sourceTrackIndex,
+            new AudioTrackAdjustment(sourceTrackIndex));
+
     // Builds the -filter_complex graph for Combine. Per region r and track t:   [r:a:t]volume=...
     // or  [r:a:t]anull   -> [ar{r}t{t}] Video inputs flow through ([0:v], [1:v], ...).
     private static string BuildCombineFilter(ClipRequest request, int regionCount,
@@ -188,7 +200,7 @@ public sealed class ClipEngine : IClipEngine
             for (var t = 0; t < audioTrackCount; t++)
             {
                 var input = $"[{r}:a:{t}]";
-                var adj = request.AudioTrackAdjustments.FirstOrDefault(a => a.SourceTrackIndex == t);
+                var adj = AdjustmentFor(request, t);
                 if (adj.Muted)
                 {
                     parts.Add($"{input}volume=0[ar{r}t{t}]");
@@ -290,7 +302,7 @@ public sealed class ClipEngine : IClipEngine
         for (var t = 0; t < audioTrackCount; t++)
         {
             var input = $"[0:a:{t}]";
-            var adj = request.AudioTrackAdjustments.FirstOrDefault(a => a.SourceTrackIndex == t);
+            var adj = AdjustmentFor(request, t);
             if (adj.Muted)
                 parts.Add($"{input}volume=0[aout{t}]");
             else if (adj.Volume != 1.0)

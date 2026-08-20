@@ -208,6 +208,33 @@ public class ClipEngineTests
         }
     }
 
+    // The ordinary case, and the one that was silently broken for every user: a single audio track
+    // and no adjustments, which is every clip created from the library.
+    [Fact]
+    public void CreateClips_SingleTrack_NoAdjustments_KeepsAudio()
+    {
+        var source = MediaTestFixture.CreateSdrSource("audio1-passthrough.mp4", audioTracks: 1);
+        var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-audio1-passthrough");
+        var ffmpeg = MediaTestFixture.Binaries.Ffmpeg;
+        var baselineDb = MediaTestFixture.AudioRmsDb(ffmpeg, source, 0);
+
+        var engine = NewEngine();
+        var paths = engine.CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0.5, 2.5)],
+            Mode = ClipMode.Separate,
+            OutputPath = outputDir,
+            // No AudioTrackAdjustments: exactly what AppController sends.
+        });
+
+        var clipDb = MediaTestFixture.AudioRmsDb(ffmpeg, Assert.Single(paths), 0);
+        Assert.True(double.IsFinite(clipDb), $"clip must not be silent, got {clipDb:0.##} dB");
+        Assert.True(
+            Math.Abs(clipDb - baselineDb) <= 2.0,
+            $"clip ({clipDb:0.##} dB) should match source ({baselineDb:0.##} dB)");
+    }
+
     // Same regression on the combine path, with two regions.
     [Fact]
     public void CreateClips_Combine_NoAdjustments_AudioPassesThrough()

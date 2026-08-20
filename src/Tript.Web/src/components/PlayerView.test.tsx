@@ -56,6 +56,11 @@ function renderPlayer() {
   return render(<PlayerView client={mockClient()} source={source} />);
 }
 
+/** Which item the player is showing, read off the video's accessible name. */
+function playingItem(): string {
+  return (document.querySelector('video')?.getAttribute('aria-label') ?? '').split(' — ')[0];
+}
+
 function currentReadout(): string {
   return screen.getByTestId('transport-current').textContent ?? '';
 }
@@ -107,7 +112,7 @@ describe('PlayerView', () => {
 
   it('renders the session title and the two timeline levels', () => {
     const { container } = renderPlayer();
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 1');
+    expect(playingItem()).toBe('Session 1');
     expect(container.querySelector('.timeline-bar')).not.toBeNull();
     expect(container.querySelector('.timeline-zoomed')).not.toBeNull();
     expect(screen.getByTestId('transport-duration').textContent).toBe('1:40');
@@ -137,7 +142,7 @@ describe('PlayerView', () => {
     act(() => clickBarAt(container, 80));
     expect(currentReadout()).toBe('1:20');
     fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 2');
+    expect(playingItem()).toBe('Session 2');
     expect(currentReadout()).toBe('0:00');
   });
 
@@ -151,9 +156,9 @@ describe('PlayerView', () => {
         navigationItems={[clip, session(2, 'sessions/b.mp4')]}
       />,
     );
-    expect(screen.getByTestId('player-title').textContent).toBe('Result clip');
+    expect(playingItem()).toBe('Result clip');
     fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 2');
+    expect(playingItem()).toBe('Session 2');
   });
 });
 
@@ -298,17 +303,17 @@ describe('navigation', () => {
   it('next moves to the next session, wrapping at the end', () => {
     renderPlayer();
     fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 2');
+    expect(playingItem()).toBe('Session 2');
     fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 3');
+    expect(playingItem()).toBe('Session 3');
     fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 1');
+    expect(playingItem()).toBe('Session 1');
   });
 
   it('previous moves backwards, wrapping at the start', () => {
     renderPlayer();
     fireEvent.click(screen.getByRole('button', { name: 'Previous session' }));
-    expect(screen.getByTestId('player-title').textContent).toBe('Session 3');
+    expect(playingItem()).toBe('Session 3');
   });
 
   it('wires the ToggleFullscreen command to the client', () => {

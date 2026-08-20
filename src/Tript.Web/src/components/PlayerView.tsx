@@ -484,10 +484,9 @@ export function PlayerView({
         />
       </div>
 
+      {/* The console does not name the item: whatever is holding the player already does — the
+          overlay's header, or the route's topbar heading. */}
       <div className="player-console">
-        <span className="player-title" data-testid="player-title">
-          {item.title ?? item.fileName}
-        </span>
         <TransportBar
         playing={playing}
         currentTime={currentTime}

@@ -145,6 +145,8 @@
 }
 
 .select-compact {
+  /* Matches .btn-icon so the transport row shares one height. */
+  height: 30px;
   padding: 4px 26px 4px 8px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;

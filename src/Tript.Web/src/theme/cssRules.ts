@@ -164,6 +164,29 @@ export function duplicatesIn(css: string): string[] {
     .sort();
 }
 
+/**
+ * Properties declared twice within a single rule. The first is always dead. `.settings-tab` carried
+ * `border: none` immediately followed by `border: 1px solid transparent`, which neither duplicatesIn
+ * (one rule, one selector) nor shadowedRules (one rule, nothing later) could see.
+ */
+export function repeatedPropertiesIn(css: string): string[] {
+  const found: string[] = [];
+  for (const rule of parseRules(css)) {
+    const seen = new Set<string>();
+    const repeated = new Set<string>();
+    for (const { property } of rule.declarations) {
+      if (seen.has(property)) {
+        repeated.add(property);
+      }
+      seen.add(property);
+    }
+    for (const property of repeated) {
+      found.push(`${rule.selector} @ ${rule.line} declares ${property} twice`);
+    }
+  }
+  return found.sort();
+}
+
 /** Every stylesheet the app ships, as absolute paths. */
 export function stylesheetPaths(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];

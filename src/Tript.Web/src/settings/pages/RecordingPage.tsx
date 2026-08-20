@@ -461,7 +461,7 @@ export function RecordingPage({
           <TextField
             value={settings.outputDirectory ?? ''}
             onChange={(value) => update(page, { outputDirectory: value === '' ? null : value })}
-            placeholder="e.g. D:\\Recordings"
+            placeholder="e.g. D:\Recordings"
             aria-label="Output directory"
           />
           <Button variant="ghost" onClick={onBrowse} title="Choose the recording folder with a native picker">

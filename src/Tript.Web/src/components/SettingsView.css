@@ -7,9 +7,16 @@
 
 .settings-layout {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 24px;
   align-items: start;
+}
+
+/* Controls stop at a readable measure. Full-bleed selects made a two-character frame rate occupy
+ * 880px, which reads as a form to fill in rather than a setting to check. */
+
+.settings-body .field {
+  max-width: 520px;
 }
 
 .settings-tabs {
@@ -23,20 +30,22 @@
 
 .settings-tab {
   background: transparent;
-  color: var(--color-base-content);
-  border: none;
+  color: var(--color-muted-strong);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 11px 12px;
+  border-radius: var(--radius);
+  padding: 6px 10px;
   cursor: pointer;
-  opacity: 0.7;
+  text-align: left;
+}
+
+.settings-tab:hover {
+  color: var(--color-base-content);
 }
 
 .settings-tab.active {
-  opacity: 1;
-  border-color: var(--color-accent-line);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-panel-raised);
+  color: var(--color-base-content);
+  font-weight: 600;
 }
 
 .settings-body h2 {

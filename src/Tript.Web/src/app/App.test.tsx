@@ -154,7 +154,7 @@ describe('App shell', () => {
     const overlay = screen.getByRole('dialog', { name: 'Player — Session 1' });
     expect(overlay).toBeTruthy();
     // The real PlayerView is inside the overlay, playing the item that was clicked.
-    expect(within(overlay).getByTestId('player-title').textContent).toBe('Session 1');
+    expect(within(overlay).getByTestId('player-overlay-title').textContent).toBe('Session 1');
     // Focus moved into the overlay rather than staying on a card the overlay is covering.
     expect(overlay.contains(document.activeElement)).toBe(true);
 

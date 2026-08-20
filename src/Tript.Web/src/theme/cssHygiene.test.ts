@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { duplicatesIn, shadowedRules, stylesheetPaths } from './cssRules';
+import { duplicatesIn, repeatedPropertiesIn, shadowedRules, stylesheetPaths } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
@@ -40,6 +40,16 @@ describe('css hygiene', () => {
       }
     }
     expect(actual, detail.join('\n')).toEqual(KNOWN_DUPLICATES);
+  });
+
+  it('declares each property at most once per rule', () => {
+    const offenders: string[] = [];
+    for (const file of stylesheetPaths(SRC_ROOT)) {
+      for (const repeat of repeatedPropertiesIn(readFileSync(file, 'utf8'))) {
+        offenders.push(`${relative(SRC_ROOT, file)}: ${repeat}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('carries no rule whose every declaration a later rule overrides', () => {

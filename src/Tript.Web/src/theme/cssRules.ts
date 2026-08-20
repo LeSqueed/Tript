@@ -187,6 +187,24 @@ export function repeatedPropertiesIn(css: string): string[] {
   return found.sort();
 }
 
+/**
+ * The leading class of each selector part — the class a rule is "about". `.settings-row .input` is
+ * about `.settings-row`, which is why positioning a control from a view does not count as styling
+ * it (design-system §4 allows exactly that, and forbids restyling its interior).
+ */
+export function styledClassesIn(css: string): Set<string> {
+  const classes = new Set<string>();
+  for (const rule of parseRules(css)) {
+    for (const part of rule.selector.split(',')) {
+      const leading = part.trim().match(/^\.[a-z0-9-]+/i);
+      if (leading) {
+        classes.add(leading[0]);
+      }
+    }
+  }
+  return classes;
+}
+
 /** Every stylesheet the app ships, as absolute paths. */
 export function stylesheetPaths(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];

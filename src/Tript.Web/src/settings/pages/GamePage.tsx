@@ -94,12 +94,11 @@ export function GamePage({
       </Field>
 
       <Field label="Game-capture timeout" hint="How long game capture waits for the game's window before falling back, in seconds.">
-        <input
-          type="number"
-          className="input"
+        <TextField
+                  type="number"
           min={1}
           value={timeoutSeconds}
-          onChange={(event) => setTimeoutSeconds(event.target.value)}
+          onChange={(value) => setTimeoutSeconds(value)}
           onBlur={commitTimeout}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -135,24 +134,22 @@ export function GamePage({
             <div className="game-row-overrides">
               <label className="settings-inline-field">
                 <span className="muted small">Executable</span>
-                <input
+                <TextField
                   type="text"
-                  className="input"
                   value={game.executable ?? ''}
                   // The name itself, so the field shows exactly what blank falls back to.
                   placeholder={game.name}
                   aria-label={`Executable for ${game.name}`}
-                  onChange={(event) => patchGame(index, executablePatch(event.target.value))}
+                  onChange={(value) => patchGame(index, executablePatch(value))}
                 />
               </label>
 
               <label className="settings-inline-field">
                 <span className="muted small">Recording mode</span>
-                <select
-                  className="input select"
+                <SelectField
                   value={game.recordingModeOverride?.mode ?? ''}
-                  onChange={(event) => {
-                    const value = event.target.value;
+                  options={RECORDING_MODE_OVERRIDES}
+                  onChange={(value) => {
                     if (value === '') {
                       const { recordingModeOverride: _dropped, ...rest } = game;
                       patchGame(index, rest);
@@ -160,25 +157,17 @@ export function GamePage({
                       patchGame(index, { recordingModeOverride: { mode: value as RecordingMode } });
                     }
                   }}
-                >
-                  {RECORDING_MODE_OVERRIDES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
 
               <label className="settings-inline-field">
                 <span className="muted small">FPS</span>
-                <input
+                <TextField
                   type="number"
-                  className="input"
                   min={1}
                   value={game.qualityOverride?.fps ?? ''}
                   placeholder="global"
-                  onChange={(event) => {
-                    const value = event.target.value;
+                  onChange={(value) => {
                     patchGame(index, {
                       qualityOverride: {
                         ...(game.qualityOverride ?? {}),
@@ -191,13 +180,11 @@ export function GamePage({
 
               <label className="settings-inline-field">
                 <span className="muted small">Encoder</span>
-                <input
+                <TextField
                   type="text"
-                  className="input"
                   value={game.qualityOverride?.encoder ?? ''}
                   placeholder="global"
-                  onChange={(event) => {
-                    const value = event.target.value;
+                  onChange={(value) => {
                     patchGame(index, {
                       qualityOverride: {
                         ...(game.qualityOverride ?? {}),
@@ -210,14 +197,12 @@ export function GamePage({
 
               <label className="settings-inline-field">
                 <span className="muted small">Quality</span>
-                <input
+                <TextField
                   type="number"
-                  className="input"
                   min={1}
                   value={game.qualityOverride?.quality ?? ''}
                   placeholder="global"
-                  onChange={(event) => {
-                    const value = event.target.value;
+                  onChange={(value) => {
                     patchGame(index, {
                       qualityOverride: {
                         ...(game.qualityOverride ?? {}),

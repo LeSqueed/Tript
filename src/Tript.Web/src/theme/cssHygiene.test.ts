@@ -13,7 +13,13 @@
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { duplicatesIn, repeatedPropertiesIn, shadowedRules, stylesheetPaths } from './cssRules';
+import {
+  duplicatesIn,
+  repeatedPropertiesIn,
+  shadowedRules,
+  styledClassesIn,
+  stylesheetPaths,
+} from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
@@ -40,6 +46,23 @@ describe('css hygiene', () => {
       }
     }
     expect(actual, detail.join('\n')).toEqual(KNOWN_DUPLICATES);
+  });
+
+  it('gives each class exactly one stylesheet', () => {
+    // `.btn` used to have its base in LibraryView.css and variants across three more files, with
+    // :disabled declared twice with different values — whichever loaded last won. A view may still
+    // position a shared control (`.settings-row .input`); that is about .settings-row, not .input.
+    const homes = new Map<string, string[]>();
+    for (const file of stylesheetPaths(SRC_ROOT)) {
+      for (const styled of styledClassesIn(readFileSync(file, 'utf8'))) {
+        homes.set(styled, [...(homes.get(styled) ?? []), relative(SRC_ROOT, file)]);
+      }
+    }
+    const scattered = [...homes.entries()]
+      .filter(([, files]) => files.length > 1)
+      .map(([styled, files]) => `${styled} in ${files.join(', ')}`)
+      .sort();
+    expect(scattered).toEqual([]);
   });
 
   it('declares each property at most once per rule', () => {

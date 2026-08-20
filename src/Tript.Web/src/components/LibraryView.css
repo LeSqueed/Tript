@@ -51,7 +51,7 @@
   padding: 16px;
   background: var(--color-panel);
   border: var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
 }
 
 /* A segmented control, styled like the shell's nav so "All / Sessions / Clips" reads as the same kind
@@ -107,7 +107,7 @@
   padding: 0;
   background: var(--color-panel);
   border: var(--border);
-  border-radius: 11px;
+  border-radius: var(--radius-panel);
   overflow: hidden;
   color: var(--color-base-content);
   cursor: pointer;
@@ -325,6 +325,9 @@
 }
 
 .player-overlay-body {
+  /* Hands the player a definite height, which is what lets its picture flex. */
+  display: flex;
+  min-height: 0;
   overflow: hidden;
   padding: var(--space-4);
 }

@@ -32,7 +32,7 @@
   padding: 12px 14px 14px;
   background: var(--color-panel);
   border: var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
 }
 
 .video-frame {
@@ -41,16 +41,8 @@
   min-height: 0;
   background: #000;
   border: var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   overflow: hidden;
-}
-
-/* Both containers hand the player a definite height, which is what lets the picture flex. */
-
-.app-content-player,
-.player-overlay-body {
-  display: flex;
-  min-height: 0;
 }
 
 .video-element {

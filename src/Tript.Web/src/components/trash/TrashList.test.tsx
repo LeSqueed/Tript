@@ -7,9 +7,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { TrashView } from './TrashView';
-import type { TrashEntry } from '../ipc/protocol';
-import type { TrashController } from './trash/useTrash';
+import { TrashList } from './TrashList';
+import type { TrashEntry } from '../../ipc/protocol';
+import type { TrashController } from './useTrash';
 
 /** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
@@ -42,12 +42,12 @@ function controller(entries: TrashEntry[], retentionHours = 24) {
 
 function renderTrash(entries: TrashEntry[], retentionHours = 24) {
   const trash = controller(entries, retentionHours);
-  return { trash, ...render(<TrashView trash={trash} nowSeconds={NOW} />) };
+  return { trash, ...render(<TrashList trash={trash} nowSeconds={NOW} />) };
 }
 
 afterEach(cleanup);
 
-describe('TrashView listing', () => {
+describe('TrashList listing', () => {
   it('says what each entry was, when it went, and when it stops being recoverable', () => {
     renderTrash([ranked, shot]);
     const rows = screen.getAllByTestId('trash-row');
@@ -55,7 +55,7 @@ describe('TrashView listing', () => {
 
     const first = within(rows[0]);
     expect(first.getByText('Ranked win')).toBeTruthy();
-    expect(first.getByText('Session')).toBeTruthy();
+    expect(first.getByText('Recording')).toBeTruthy();
     expect(first.getByText('Counter-Strike 2')).toBeTruthy();
     expect(rows[0].textContent).toContain('Deleted 2 hours ago');
     expect(rows[0].textContent).toContain('Deleted for good in 22 hours');
@@ -70,13 +70,18 @@ describe('TrashView listing', () => {
 
   it('says what would put something here when the trash is empty', () => {
     renderTrash([]);
-    expect(screen.getByTestId('trash-empty').textContent).toContain('The trash is empty');
+    // The title says it is empty; the body says what would put something here, and does not spend
+    // its first sentence repeating the title.
+    const empty = screen.getByTestId('trash-empty').textContent ?? '';
+    expect(empty).toContain('Trash is empty');
+    expect(empty).toContain('land here first');
+    expect(empty).not.toContain('The trash is empty.');
     expect(screen.queryByTestId('trash-list')).toBeNull();
     expect(screen.queryByTestId('trash-toolbar')).toBeNull();
   });
 });
 
-describe('TrashView restore', () => {
+describe('TrashList restore', () => {
   it('restores one entry without a confirmation — it undoes something', () => {
     const { trash } = renderTrash([ranked, shot]);
     fireEvent.click(screen.getByRole('button', { name: 'Restore Ranked win' }));
@@ -95,7 +100,7 @@ describe('TrashView restore', () => {
   });
 });
 
-describe('TrashView permanent removal', () => {
+describe('TrashList permanent removal', () => {
   it('confirms before purging one entry, and cancels without sending anything', () => {
     const { trash } = renderTrash([ranked, shot]);
     fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win permanently' }));
@@ -141,15 +146,15 @@ describe('TrashView permanent removal', () => {
   });
 });
 
-describe('TrashView selection', () => {
+describe('TrashList selection', () => {
   it('survives a re-render but drops entries the push no longer carries', () => {
     const trash = controller([ranked, shot]);
-    const view = render(<TrashView trash={trash} nowSeconds={NOW} />);
+    const view = render(<TrashList trash={trash} nowSeconds={NOW} />);
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(screen.getByTestId('trash-selection-count').textContent).toBe('2 selected');
 
     // A restore elsewhere took `shot` out of the trash. The count must follow it out.
-    view.rerender(<TrashView trash={controller([ranked])} nowSeconds={NOW} />);
+    view.rerender(<TrashList trash={controller([ranked])} nowSeconds={NOW} />);
     expect(screen.getByTestId('trash-selection-count').textContent).toBe('1 selected');
     expect((screen.getByRole('checkbox', { name: 'Select Ranked win' }) as HTMLInputElement).checked).toBe(
       true,

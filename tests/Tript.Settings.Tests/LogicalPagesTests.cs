@@ -72,7 +72,7 @@ public class LogicalPagesTests : IDisposable
     {
         var settings = _store.Load();
         settings.Audio.Tracks.Add(new AudioTrack { Name = "Mic" });
-        settings.Game.CaptureMode = GameCaptureMode.GameOnly;
+        settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
         _store.Save();
 
         // A later session edits only the capture page and saves.
@@ -83,7 +83,7 @@ public class LogicalPagesTests : IDisposable
         // The audio page's track survived, because the whole model is serialized on save.
         var reloaded = new SettingsStore(_provider).Load();
         Assert.Equal("Mic", Assert.Single(reloaded.Audio.Tracks).Name);
-        Assert.Equal(GameCaptureMode.GameOnly, reloaded.Game.CaptureMode);
+        Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
         Assert.Equal(DisplayCaptureMethod.Display, reloaded.Capture.Method);
     }
 

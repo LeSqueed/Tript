@@ -5,8 +5,8 @@
 // being recoverable.
 
 import { useCallback, useMemo, useState } from 'react';
-import type { TrashEntry } from '../ipc/protocol';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
+import type { TrashEntry } from '../../ipc/protocol';
+import { ConfirmDeleteDialog, type DeleteConfirmation } from '../library/ConfirmDeleteDialog';
 import {
   addSelection,
   allSelected,
@@ -14,7 +14,7 @@ import {
   removeSelection,
   toggleSelection,
   type SelectionKey,
-} from './library/selectionModel';
+} from '../library/selectionModel';
 import {
   formatDeletedAt,
   formatPurgeAt,
@@ -23,10 +23,10 @@ import {
   retentionNotice,
   trashEntryLabel,
   trashTypeLabel,
-} from './trash/trashModel';
-import type { TrashController } from './trash/useTrash';
-import { WorkspaceMeta, EmptyState } from './ui/Ui';
-import { Button, Checkbox } from '../components/ui/controls';
+} from './trashModel';
+import type { TrashController } from './useTrash';
+import { EmptyState } from '../ui/Ui';
+import { Button, Checkbox } from '../ui/controls';
 
 /** What a confirmed action does once the modal says yes. */
 type PendingPurge = { entries: TrashEntry[]; whole: boolean };
@@ -35,10 +35,14 @@ export interface TrashViewProps {
   trash: TrashController;
   /** The clock the "deleted / purges in" phrases are measured against, in epoch seconds. */
   nowSeconds?: number;
+  entries?: TrashEntry[];
+  filtered?: boolean;
+  onClearFilters?: () => void;
 }
 
-export function TrashView({ trash, nowSeconds }: TrashViewProps) {
-  const { entries, retentionHours, loaded } = trash;
+export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered = false, onClearFilters }: TrashViewProps) {
+  const { entries: sourceEntries, retentionHours, loaded } = trash;
+  const entries = visibleEntries ?? sourceEntries;
   const now = nowSeconds ?? Date.now() / 1000;
 
   const [selected, setSelected] = useState<SelectionKey[]>([]);
@@ -111,25 +115,31 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
   }, [pending, retentionHours]);
 
   return (
-    <section className="trash-view">
-      <WorkspaceMeta>
-        <div className="trash-intro-meta">
-          {entries.length > 0 && (
-            <span className="muted small" data-testid="trash-count">
-              {entries.length} item{entries.length === 1 ? '' : 's'}
-            </span>
-          )}
-          <span className="trash-retention muted small" data-testid="trash-retention">
-            {retentionNotice(retentionHours)}
+    <div className="trash-view">
+      <div className="trash-intro-meta">
+        {entries.length > 0 && (
+          <span className="muted small" data-testid="trash-count">
+            {entries.length} item{entries.length === 1 ? '' : 's'}
           </span>
-        </div>
-      </WorkspaceMeta>
+        )}
+        <span className="trash-retention muted small" data-testid="trash-retention">
+          {retentionNotice(retentionHours)}
+        </span>
+      </div>
 
       {!loaded ? (
         <div className="trash-empty" data-testid="trash-loading">
           <EmptyState
             title="Loading trash"
             description="Tript is checking which recordings and clips are still recoverable."
+          />
+        </div>
+      ) : entries.length === 0 && filtered ? (
+        <div className="trash-empty" data-testid="trash-empty-filtered">
+          <EmptyState
+            title="Nothing fits this view"
+            description={`None of your ${sourceEntries.length} deleted item${sourceEntries.length === 1 ? '' : 's'} matches these filters.`}
+            action={onClearFilters ? <Button variant="primary" onClick={onClearFilters}>Clear filters</Button> : undefined}
           />
         </div>
       ) : entries.length === 0 ? (
@@ -139,7 +149,7 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
         <div className="trash-empty" data-testid="trash-empty">
           <EmptyState
             title="Trash is empty"
-            description="The trash is empty. Recordings and clips you delete land here first, so you can put them back before the retention window closes."
+            description="Recordings and clips you delete land here first, so you can put them back before the retention window closes."
           />
         </div>
       ) : (
@@ -166,7 +176,9 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
             </Button>
             <Button variant="danger" className="trash-empty-action"
               
-              onClick={() => setPending({ entries, whole: true })}
+              // Empty trash is intentionally global; name every entry in the confirmation even when
+              // the list is currently filtered, so hidden items cannot be purged by surprise.
+              onClick={() => setPending({ entries: sourceEntries, whole: true })}
             >
               Empty trash
             </Button>
@@ -226,6 +238,6 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
       {confirmation && (
         <ConfirmDeleteDialog confirmation={confirmation} onCancel={cancel} onConfirm={confirm} />
       )}
-    </section>
+    </div>
   );
 }

@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The game page: the capture-mode behaviour (GameOnly is our own prior work and part of first
-// light) and the list of known games with their per-game overrides. The game-capture timeout is the
-// soft timeout: how long game capture waits for the game's window before falling back.
+// The game page: the known games and their per-game overrides. How capture works is a Capture-page
+// setting; this page only says which games depart from it. The game-capture timeout is the soft
+// timeout: how long game capture waits for the game's window before falling back.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
-import type { GameCaptureMode, GameSetting, RecordingMode } from '../settingsModel';
+import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import { Button, Checkbox, Field, SelectField, TextField } from '../../components/ui/controls';
 import { executablePatch } from '../gameExecutable';
 
-const CAPTURE_MODES: { value: GameCaptureMode; label: string }[] = [
-  { value: 'Auto', label: 'Auto — detect and attach to the game automatically' },
-  { value: 'GameOnly', label: 'GameOnly — game capture on the detected game process' },
+// "" means inherit; the global lives on the Capture page.
+const CAPTURE_METHOD_OVERRIDES: { value: string; label: string }[] = [
+  { value: '', label: 'Global' },
+  { value: 'Auto', label: 'Auto' },
+  { value: 'Game', label: 'Game capture only' },
+  { value: 'Display', label: 'Display capture only' },
 ];
 
 const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
@@ -85,14 +88,6 @@ export function GamePage({
 
   return (
     <div className="settings-page" data-page="game">
-      <Field label="Capture mode" hint="GameOnly is part of first light — game capture on the detected process.">
-        <SelectField
-          value={settings.captureMode}
-          onChange={(value) => update(page, { captureMode: value as GameCaptureMode })}
-          options={CAPTURE_MODES}
-        />
-      </Field>
-
       <Field label="Game-capture timeout" hint="How long game capture waits for the game's window before falling back, in seconds.">
         <TextField
                   type="number"
@@ -110,7 +105,7 @@ export function GamePage({
       </Field>
 
       <div className="game-list">
-        <h3 className="settings-subheading">Known games</h3>
+        <h3 className="subheading">Known games</h3>
         {gameList.length === 0 ? (
           <p className="muted small">No games yet — add one to set per-game overrides.</p>
         ) : (
@@ -155,6 +150,24 @@ export function GamePage({
                       patchGame(index, rest);
                     } else {
                       patchGame(index, { recordingModeOverride: { mode: value as RecordingMode } });
+                    }
+                  }}
+                />
+              </label>
+
+              <label className="settings-inline-field">
+                <span className="muted small">Capture</span>
+                <SelectField
+                  value={game.captureMethodOverride?.method ?? ''}
+                  options={CAPTURE_METHOD_OVERRIDES}
+                  onChange={(value) => {
+                    if (value === '') {
+                      const { captureMethodOverride: _dropped, ...rest } = game;
+                      patchGame(index, rest);
+                    } else {
+                      patchGame(index, {
+                        captureMethodOverride: { method: value as DisplayCaptureMethod },
+                      });
                     }
                   }}
                 />

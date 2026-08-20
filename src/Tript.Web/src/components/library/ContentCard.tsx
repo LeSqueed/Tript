@@ -9,7 +9,7 @@
 // wrapper, not its children: a button inside a button is invalid markup and browsers disagree about
 // which one a click activates.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import { thumbnailUrl } from '../../ipc/endpoints';
 import {
@@ -32,6 +32,10 @@ export function ContentCard({
   selectable = false,
   selected = false,
   onToggleSelected,
+  variant = 'grid',
+  action,
+  priority = false,
+  clipsCount = 0,
 }: {
   item: ContentItem;
   /** The library's open seam: called with the item the user activated. */
@@ -43,6 +47,22 @@ export function ContentCard({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelected?: (item: ContentItem) => void;
+  /**
+   * `wide` lays the thumbnail beside the body instead of above it, for the library's hero. It is a
+   * variant rather than a separate component because a hero that reimplemented the card lost the
+   * delete, favourite and select affordances the moment it was written.
+   */
+  variant?: 'grid' | 'wide';
+  /** Recent sessions are above the fold and should not wait for intersection before painting. */
+  priority?: boolean;
+  /** Number of clips cut from this recording, shown as a metadata chip when present. */
+  clipsCount?: number;
+  /**
+   * An extra affordance, rendered inside the shell beside the card rather than within it — a button
+   * inside a button is invalid markup, and the delete and favourite controls are siblings for the
+   * same reason. The hero's Review action uses it so the action sits with the item it acts on.
+   */
+  action?: ReactNode;
 }) {
   // Per-card, per-path: a `content` push can replace the item under this card (a rename keeps the
   // path, a delete + re-record does not), and a previous path's failure must not condemn the new one.
@@ -60,10 +80,18 @@ export function ContentCard({
   const showThumbnail = item.filePath.length > 0 && !thumbnailFailed;
 
   return (
-    <div className={selected ? 'content-card-shell selected' : 'content-card-shell'}>
+    <div
+      className={[
+        'content-card-shell',
+        variant === 'wide' ? 'content-card-shell--wide' : '',
+        selected ? 'selected' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <button
         type="button"
-        className="content-card"
+        className={variant === 'wide' ? 'content-card content-card--wide' : 'content-card'}
         data-testid="content-card"
         onClick={() => onOpen?.(item)}
         aria-label={`Open ${label}`}
@@ -76,7 +104,7 @@ export function ContentCard({
               // Decorative: the title sits right beside it, so describing the frame again would only
               // make a screen reader say the same name twice.
               alt=""
-              loading="lazy"
+               loading={priority || variant === 'wide' ? 'eager' : 'lazy'}
               decoding="async"
               width={480}
               height={270}
@@ -87,20 +115,23 @@ export function ContentCard({
               <Icon name="play" size={22} />
             </span>
           )}
+          <span className="content-card-overlay">
+            <span className="content-card-title" title={label}>
+              {label}
+            </span>
+            <span className="content-card-chips">
+              <span className="pill content-card-type">{typeLabel(item)}</span>
+              <span className="pill pill-muted">{game}</span>
+              <span className="pill pill-muted">{formatDateChip(item)}</span>
+              {clipsCount > 0 && <span className="pill pill-muted">Clips: {clipsCount}</span>}
+              {size !== null && <span className="pill pill-muted">{size}</span>}
+            </span>
+          </span>
           {duration !== null && <span className="content-card-duration">{duration}</span>}
         </span>
-        <span className="content-card-body">
-          <span className="content-card-title" title={label}>
-            {label}
-          </span>
-          <span className="content-card-chips">
-            <span className="pill content-card-type">{typeLabel(item)}</span>
-            <span className="pill pill-muted">{game}</span>
-            <span className="pill pill-muted">{formatDateChip(item)}</span>
-            {size !== null && <span className="pill pill-muted">{size}</span>}
-          </span>
-        </span>
       </button>
+
+      {action && <div className="content-card-action">{action}</div>}
 
       {selectable && (
         <Checkbox

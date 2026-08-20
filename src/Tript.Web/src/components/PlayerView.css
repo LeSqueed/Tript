@@ -9,10 +9,59 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 1180px;
+  max-width: 1500px;
+  width: 100%;
   min-height: 0;
   height: 100%;
   margin: 0 auto;
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.player-header-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted-strong);
+  font-size: var(--text-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-view-fullscreen {
+  max-width: none;
+  padding: 12px 20px;
+  background: var(--color-base-100);
+}
+
+.player-view-fullscreen .player-header {
+  display: none;
+}
+
+.player-view-fullscreen .player-console {
+  gap: 6px;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+}
+
+.player-view-fullscreen .transport-bar {
+  gap: 6px;
+}
+
+.player-view-fullscreen .transport-bar .btn-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.player-view-fullscreen .player-clip-tools .btn {
+  padding: 2px 6px;
+  font-size: 11px;
 }
 
 .player-console,
@@ -36,13 +85,42 @@
 }
 
 .video-frame {
+  position: relative;
   flex: 1 1 auto;
   /* A flex item will not shrink below its content's natural size without this. */
   min-height: 0;
-  background: #000;
-  border: var(--border);
-  border-radius: var(--radius-panel);
+  background: transparent;
   overflow: hidden;
+}
+
+.player-start-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 18px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--color-base-100) 88%, transparent);
+  border: var(--border);
+  border-radius: var(--radius);
+  color: var(--color-base-content);
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.player-start-overlay:hover,
+.player-start-overlay:focus-visible {
+  background: var(--color-panel-raised);
+  border-color: var(--color-accent);
+}
+
+.player-start-icon {
+  color: var(--color-accent);
+  font-size: 15px;
 }
 
 .video-element {
@@ -51,7 +129,7 @@
   height: 100%;
   /* The frame decides the height; the picture keeps its own ratio inside it. */
   object-fit: contain;
-  background: #000;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -339,7 +417,6 @@
 
 /* The two clip rows are labelled the same way, so they read as one area rather than two. */
 
-.player-clip-bar-label,
 .player-clip-mode-label {
   color: var(--color-muted-strong);
   font-size: 12px;
@@ -367,12 +444,6 @@
   gap: var(--space-3);
   min-width: 0;
   flex-wrap: wrap;
-}
-
-/* Pushed to the end so the actions stay grouped on the left at every width. */
-
-.player-footer-meta {
-  margin-left: auto;
 }
 
 .player-footer .btn {

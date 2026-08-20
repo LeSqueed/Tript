@@ -83,14 +83,6 @@ public enum AudioOutputMode
     Disable
 }
 
-// How the game-capture source behaves. GameOnly is our own prior work and part of first light — it
-// selects game capture attached to the detected game's process.
-public enum GameCaptureMode
-{
-    Auto,
-    GameOnly
-}
-
 // Where a captured audio source comes from. Inputs are mics and other capture devices; outputs
 // are speakers, system playback and game audio. Both are routable into any track.
 public enum AudioSourceKind

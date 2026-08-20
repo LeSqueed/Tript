@@ -219,6 +219,34 @@ export function stylesheetPaths(root: string = join(import.meta.dirname, '..')):
   return found;
 }
 
+/** Every shipped component source (no tests), as absolute paths. */
+export function sourceFiles(root: string = join(import.meta.dirname, '..')): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const full = join(root, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...sourceFiles(full));
+    } else if (entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx')) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+/** Every shipped plain module (no tests, no .tsx), as absolute paths. */
+export function moduleFiles(root: string = join(import.meta.dirname, '..')): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const full = join(root, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...moduleFiles(full));
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') && !entry.name.endsWith('.d.ts')) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
 /**
  * Which longhand properties a shorthand resets. Deliberately conservative: an unlisted shorthand
  * simply covers nothing, so the shadow analysis below under-reports rather than accusing a live

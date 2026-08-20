@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
 import {
+  deriveGroupedLibrary,
+  groupByRecording,
   ANY_GAME,
   availableGames,
   clampPage,
@@ -114,7 +116,7 @@ describe('reading the optional wire fields', () => {
   });
 
   it('names every content type, including the two the filters do not mention', () => {
-    expect(typeLabel(recentSession)).toBe('Session');
+    expect(typeLabel(recentSession)).toBe('Recording');
     expect(typeLabel(clip)).toBe('Clip');
     expect(typeLabel(item({ fileName: 'h.mp4', contentType: 'highlight' }))).toBe('Highlight');
     expect(typeLabel(item({ fileName: 'b.mp4', contentType: 'buffer' }))).toBe('Buffer');
@@ -400,5 +402,126 @@ describe('deriveLibrary', () => {
     expect(all.items).toHaveLength(4);
     expect(all.items.map(itemLabel)).toContain('session-bare.mp4');
     expect(UNKNOWN_GAME_LABEL).toBe('Unknown game');
+  });
+});
+
+describe('grouping clips under their recording', () => {
+  const link = (fileName: string, contentType: ContentItem['contentType']) =>
+    item({ fileName, contentType, filePath: `${contentType}s/${fileName}` });
+
+  it('groups a clip under the recording it was cut from', () => {
+    const groups = groupByRecording([
+      link('session-1.mp4', 'recording'),
+      link('session-1-01.mp4', 'clip'),
+      link('session-2-01.mp4', 'clip'),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].recording?.fileName).toBe('session-1.mp4');
+    expect(groups[0].clips.map((c) => c.fileName)).toEqual(['session-1-01.mp4']);
+    // A clip whose recording is gone still lists, under no recording, rather than vanishing.
+    expect(groups[1].recording).toBeNull();
+    expect(groups[1].clips.map((c) => c.fileName)).toEqual(['session-2-01.mp4']);
+  });
+
+  // The server-side rule (AppHost.InheritedFrom) that decides which recording a clip inherits its
+  // game and audio tracks from. Grouping has to agree with it, or a clip would show one recording's
+  // game while sitting under another's.
+  it('gives a clip to the longest matching recording, not the first', () => {
+    const groups = groupByRecording([
+      link('ow.mp4', 'recording'),
+      link('ow-ranked.mp4', 'recording'),
+      link('ow-ranked-01.mp4', 'clip'),
+    ]);
+
+    const owRanked = groups.find((g) => g.recording?.fileName === 'ow-ranked.mp4');
+    expect(owRanked?.clips.map((c) => c.fileName)).toEqual(['ow-ranked-01.mp4']);
+    expect(groups.find((g) => g.recording?.fileName === 'ow.mp4')?.clips).toEqual([]);
+  });
+
+  it('does not let a recording claim a clip that merely starts with its name', () => {
+    const groups = groupByRecording([
+      link('ow.mp4', 'recording'),
+      link('owl-01.mp4', 'clip'),
+    ]);
+
+    expect(groups.find((g) => g.recording?.fileName === 'ow.mp4')?.clips).toEqual([]);
+    expect(groups.find((g) => g.recording === null)?.clips.map((c) => c.fileName)).toEqual([
+      'owl-01.mp4',
+    ]);
+  });
+
+  // Order is the caller's — deriveGroupedLibrary sorts before grouping, so the sort control keeps
+  // working. Sorting here as well would silently override "oldest first".
+  it('keeps a recording with no clips, and preserves the order it was given', () => {
+    const groups = groupByRecording([
+      item({ fileName: 'old.mp4', startTime: NOW - DAY }),
+      item({ fileName: 'new.mp4', startTime: NOW }),
+    ]);
+
+    expect(groups.map((g) => g.recording?.fileName)).toEqual(['old.mp4', 'new.mp4']);
+    expect(groups[0].clips).toEqual([]);
+  });
+
+  // "Not a clip" heads its own group, the same rule matchesType draws. A buffer save is a recording
+  // in its own right, not a cut from one, even when its name happens to share a prefix.
+  it('never absorbs a non-clip into another group', () => {
+    const groups = groupByRecording([
+      link('session-1.mp4', 'recording'),
+      link('session-1-01.mp4', 'buffer'),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.every((g) => g.clips.length === 0)).toBe(true);
+  });
+});
+
+describe('deriveGroupedLibrary', () => {
+  const recording = (name: string, startTime: number) =>
+    item({ fileName: `${name}.mp4`, startTime, game: 'Overwatch' });
+  const cut = (name: string, startTime: number) =>
+    item({ fileName: `${name}.mp4`, contentType: 'clip', filePath: `clips/${name}.mp4`, startTime });
+
+  it('pages over groups, so a recording is never split from its clips', () => {
+    const items = [
+      recording('a', NOW),
+      cut('a-01', NOW),
+      cut('a-02', NOW),
+      recording('b', NOW - DAY),
+      cut('b-01', NOW - DAY),
+    ];
+
+    // A page size of one would cut 'a' away from its clips if pagination were over items.
+    const page = deriveGroupedLibrary(items, query({ pageSize: 1 }), NOW);
+    expect(page.groups).toHaveLength(1);
+    expect(page.groups[0].recording?.fileName).toBe('a.mp4');
+    expect(page.groups[0].clips).toHaveLength(2);
+    expect(page.pageCount).toBe(2);
+    expect(page.groupCount).toBe(2);
+    expect(page.matchCount).toBe(5);
+  });
+
+  it('follows the sort, rather than imposing its own order', () => {
+    const items = [recording('new', NOW), recording('old', NOW - DAY)];
+    const oldest = deriveGroupedLibrary(items, query({ sort: 'oldest' }), NOW);
+    expect(oldest.groups.map((g) => g.recording?.fileName)).toEqual(['old.mp4', 'new.mp4']);
+  });
+
+  // An orphan heads its own group in place, rather than being swept into a trailing bucket where
+  // the sort no longer reaches it.
+  it('keeps a clip whose recording is gone in sort order', () => {
+    const items = [recording('a', NOW), cut('gone-01', NOW - HOUR), recording('b', NOW - DAY)];
+    const page = deriveGroupedLibrary(items, query(), NOW);
+    expect(page.groups.map((g) => g.recording?.fileName ?? g.clips[0].fileName)).toEqual([
+      'a.mp4',
+      'gone-01.mp4',
+      'b.mp4',
+    ]);
+  });
+
+  it('clamps a page that no longer exists, like the flat view does', () => {
+    const page = deriveGroupedLibrary([recording('a', NOW)], query({ page: 9 }), NOW);
+    expect(page.page).toBe(1);
+    expect(page.groups).toHaveLength(1);
   });
 });

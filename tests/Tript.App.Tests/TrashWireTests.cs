@@ -54,7 +54,7 @@ public sealed class TrashWireTests
 
         var (trashMethod, trash) = await host.ReceiveAsyncParsed();
         Assert.Equal("trash", trashMethod);
-        Assert.Equal(24, trash.GetProperty("retentionHours").GetInt32());
+        Assert.Equal(168, trash.GetProperty("retentionHours").GetInt32());
 
         var entry = Assert.Single(trash.GetProperty("entries").EnumerateArray().ToList());
         var id = entry.GetProperty("id").GetString()!;
@@ -65,12 +65,12 @@ public sealed class TrashWireTests
         Assert.Equal("Overwatch", entry.GetProperty("game").GetString());
         Assert.True(entry.GetProperty("fileSizeBytes").GetInt64() > 0);
 
-        // Epoch seconds, not milliseconds: the window between them is 24 hours exactly.
+        // Epoch seconds, not milliseconds: the window between them is the retention exactly.
         var deletedAt = entry.GetProperty("deletedAt").GetInt64();
         var purgeAt = entry.GetProperty("purgeAt").GetInt64();
         Assert.InRange(deletedAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 120,
             DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120);
-        Assert.Equal(deletedAt + 24 * 3600, purgeAt);
+        Assert.Equal(deletedAt + 168 * 3600, purgeAt);
 
         // ListTrash answers with the same push.
         await host.SendAsync("""{"method":"ListTrash"}""");

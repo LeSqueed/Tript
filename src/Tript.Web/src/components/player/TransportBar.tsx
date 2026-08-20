@@ -62,7 +62,7 @@ export function TransportBar({
           icon="chevronLeft"
           onClick={onPrevious}
           disabled={!canNavigate}
-          aria-label="Previous session"
+          aria-label="Previous recording"
         />
       )}
       <Button
@@ -81,7 +81,7 @@ export function TransportBar({
           icon="chevronRight"
           onClick={onNext}
           disabled={!canNavigate}
-          aria-label="Next session"
+          aria-label="Next recording"
         />
       )}
       <span className="transport-time">

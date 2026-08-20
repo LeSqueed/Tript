@@ -25,8 +25,8 @@
   /* Text */
   --color-base-content: #eee9e4;
   --color-cyber-secondary: #a79be3;
-  --color-rail: #0b0c10;
-  --color-rail-hover: #171920;
+  /* The hover ground for a nav item. Named for the row, not the rail it used to sit in. */
+  --color-nav-hover: #171920;
   --color-panel: #17191f;
   --color-panel-raised: #1d2028;
   --color-line: #292c35;

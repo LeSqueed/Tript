@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The recorder bar — always visible across the shell. Shows the record state, the detected game,
-// audio routing status, and the live IPC connection state. A live proof of the round trip: the
-// state badge reflects the `state` push from the backend.
+// The recording indicator, in the topbar. Its weight tracks what is actually happening: a live
+// recording gets an elapsed clock and a stop control, an idle recorder gets a single button, and a
+// dropped connection replaces the lot because nothing else on the bar can be acted on.
+//
+// Three things it deliberately does NOT show. A "Connected" badge, because connection is only
+// information when it is broken. A game name when no game is detected — "Unknown game" is the app
+// admitting it has nothing to say. And the word "Stopped", which the absent clock already says and
+// the button already offers to change.
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { ConnectionState } from '../ipc/websocketClient';
 import type { RecordingState } from '../ipc/protocol';
+import { Button } from './ui/controls';
+import { deriveRecorderState, formatElapsed } from './recorder/recorderState';
 
-/** The `state` message content on the wire: the recording state plus the change cause. */
 interface StateMessageContent {
   state: RecordingState;
   cause?: string;
@@ -18,11 +24,16 @@ interface StateMessageContent {
 export function RecorderBar({
   client,
   connectionState,
+  /** Injectable clock so the elapsed time is testable without fake timers. */
+  nowSeconds,
 }: {
   client: IpcClient;
   connectionState: ConnectionState;
+  nowSeconds?: number;
 }) {
   const [recordingState, setRecordingState] = useState<RecordingState | null>(null);
+  const [clipJobs, setClipJobs] = useState<Set<string>>(new Set());
+  const [tick, setTick] = useState(() => Date.now() / 1000);
 
   useEffect(() => {
     return client.on('state', (content) => {
@@ -34,61 +45,74 @@ export function RecorderBar({
     });
   }, [client]);
 
+  useEffect(() => {
+    return client.on('importProgress', (content) => {
+      const message = content as { id?: unknown; status?: unknown };
+      if (typeof message.id !== 'string') {
+        return;
+      }
+      setClipJobs((current) => {
+        const next = new Set(current);
+        if (message.status === 'importing') {
+          next.add(message.id as string);
+        } else if (message.status === 'done' || message.status === 'error') {
+          next.delete(message.id as string);
+        }
+        return next;
+      });
+    });
+  }, [client]);
+
   const recording = recordingState?.recording ?? false;
-  const canControl = connectionState === 'connected';
-  const gameName = recordingState?.game?.name ?? recordingState?.game?.id ?? 'Unknown game';
+  const creatingClips = clipJobs.size > 0;
 
-  return (
-    <header className="recorder-bar">
-      <span className={`rec-dot ${recording ? 'recording' : ''}`} />
-      <span className="rec-label">{recording ? 'Recording' : 'Stopped'}</span>
-      <span className="rec-sep">·</span>
-      <span className="rec-game" title="Detected game">
-        {recordingState ? gameName : 'No game detected'}
-      </span>
-      {recordingState?.audioTracks && recordingState.audioTracks.length > 0 && (
-        <>
-          <span className="rec-sep">·</span>
-          <span className="rec-audio" title="Audio routing">
-            {recordingState.audioTracks.length} track{recordingState.audioTracks.length === 1 ? '' : 's'}
-          </span>
-        </>
-      )}
-      <div className="rec-actions" aria-label="Recording controls">
-        {!recording ? (
-          <button
-            type="button"
-            className="rec-action rec-action-primary"
-            onClick={() => client.send('StartRecording')}
-            disabled={!canControl}
-            title={canControl ? 'Start recording' : 'Waiting for the capture host'}
-          >
-            Start capture
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="rec-action rec-action-stop"
-            onClick={() => client.send('StopRecording')}
-            disabled={!canControl}
-            title={canControl ? 'Stop recording' : 'Waiting for the capture host'}
-          >
-            Stop capture
-          </button>
-        )}
+  // One tick a second, and only while there is a clock to advance.
+  useEffect(() => {
+    if (!recording) {
+      return;
+    }
+    const timer = setInterval(() => setTick(Date.now() / 1000), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
+
+  const state = deriveRecorderState({
+    connection: connectionState,
+    recording,
+    game: recordingState?.game?.name ?? recordingState?.game?.id ?? null,
+    startedAt: typeof recordingState?.startedAt === 'number' ? recordingState.startedAt : null,
+  });
+
+  if (state.kind === 'disconnected') {
+    return (
+      <div className="recorder-bar recorder-bar-error" data-testid="recorder-bar">
+        <span className="rec-problem">⚠ Not connected</span>
       </div>
-      <span className="rec-connection">
-        <ConnectionBadge state={connectionState} />
-      </span>
-    </header>
-  );
-}
+    );
+  }
 
-function ConnectionBadge({ state }: { state: ConnectionState }) {
+  if (state.kind === 'recording') {
+    const now = nowSeconds ?? tick;
+    return (
+      <div className="recorder-bar" data-testid="recorder-bar">
+        <span className="rec-dot recording" aria-hidden="true" />
+        <span className="rec-elapsed" data-testid="recording-elapsed">
+          {state.startedAt === null ? '—' : formatElapsed(now - state.startedAt)}
+        </span>
+        {state.game && <span className="rec-game">{state.game}</span>}
+        {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">Creating clips…</span>}
+        <Button variant="ghost" size="small" onClick={() => client.send('StopRecording')}>
+          Stop
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <span className={`conn-badge conn-${state}`} data-testid="connection-state">
-      {state === 'connected' ? 'Connected' : state === 'connecting' ? 'Connecting…' : 'Disconnected'}
-    </span>
+    <div className="recorder-bar" data-testid="recorder-bar">
+      {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">Creating clips…</span>}
+      <Button variant="ghost" size="small" onClick={() => client.send('StartRecording')}>
+        Record
+      </Button>
+    </div>
   );
 }
-

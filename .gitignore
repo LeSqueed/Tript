@@ -12,6 +12,8 @@ CLAUDE.md
 
 # Screenshot captures — regenerate with `cd src/Tript.Web && npm run shots`.
 docs/shots/
+# The settings file that run gives its host, so captures are always of a fresh install.
+docs/shots-settings.json
 
 # Frontend build artifacts (src/Tript.Web).
 dist/

@@ -1,86 +1,73 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
 .settings-view {
-  max-width: 1120px;
+  max-width: 640px;
   margin: 0 auto;
 }
 
 .settings-layout {
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
-/* Controls stop at a readable measure. Full-bleed selects made a two-character frame rate occupy
- * 880px, which reads as a form to fill in rather than a setting to check. */
+/* Controls stop at a readable measure — the column itself is the measure now, rather than the page
+ * being wide and each field capped inside it. Full-bleed selects made a two-character frame rate
+ * occupy 880px, which reads as a form to fill in rather than a setting to check; a field narrower
+ * than the tab strip above it left the strip's underline dangling past the last control. */
 
-.settings-body .field {
-  max-width: 520px;
-}
+/* Page tabs, not navigation. The topbar's pills say which destination you are in; these say which
+ * section of Settings you are reading. An underline strip is subordinate by shape, so a row of
+ * tabs directly beneath the nav row cannot be mistaken for a second one. */
 
 .settings-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-right: 1px solid var(--color-line);
-  border-bottom: 0;
-  padding-right: 14px;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-line);
+  overflow-x: auto;
 }
 
 .settings-tab {
+  flex: 0 0 auto;
+  margin-bottom: -1px;
+  padding: 8px 12px;
   background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
   color: var(--color-muted-strong);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 6px 10px;
+  font: inherit;
+  font-weight: 500;
   cursor: pointer;
-  text-align: left;
+  transition:
+    color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out);
 }
 
 .settings-tab:hover {
   color: var(--color-base-content);
 }
 
+/* Weight stays constant across states: bolding the active tab reflows the strip under the cursor.
+ * The accent marks where you are, the same job it does on the active topbar destination. */
+
 .settings-tab.active {
-  background: var(--color-panel-raised);
+  border-bottom-color: var(--color-accent);
   color: var(--color-base-content);
-  font-weight: 600;
 }
 
-.settings-body h2 {
-  margin: 0 0 14px;
-  color: var(--color-base-content);
-  font-family: var(--font-sans);
-  font-size: var(--text-h2);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+/* The body owns the rhythm between whatever it holds — the page, and the disconnected notice that
+ * can precede it — so no child carries a margin of its own. */
 
-@media (max-width: 760px) {
-  .settings-layout {
-    grid-template-columns: 1fr;
-    gap: 18px;
-  }
-
-  .settings-tabs {
-    flex-direction: row;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-line);
-    padding: 0 0 8px;
-  }
-
-  .settings-tab {
-    flex: 0 0 auto;
-  }
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .settings-page {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  margin-top: var(--space-3);
 }
 
 .settings-page-note {
@@ -124,30 +111,9 @@
   flex-wrap: wrap;
 }
 
-.pill {
-  display: inline-block;
-  font-size: 11px;
-  line-height: 1;
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--color-neutral);
-  white-space: nowrap;
-}
-
-.pill-muted {
-  color: var(--color-base-content);
-  opacity: 0.75;
-}
-
 /* ------------------------------------------------------------------ */
 /* Audio page — tracks and sources                                     */
 /* ------------------------------------------------------------------ */
-
-.settings-subheading {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
 
 .audio-header {
   display: flex;

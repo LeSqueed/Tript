@@ -148,13 +148,15 @@ describe('PlayerView', () => {
     renderPlayer();
     const video = document.querySelector('video') as HTMLVideoElement;
     expect(video.src).toContain('/api/content/sessions/a.mp4');
+    expect(video.poster).toContain('/api/thumbnail/sessions/a.mp4');
+    expect(screen.getByRole('button', { name: 'Play recording' })).toBeTruthy();
   });
 
   it('resets the playhead when navigating to another session', () => {
     const { container } = renderPlayer();
     act(() => clickBarAt(container, 80));
     expect(currentReadout()).toBe('1:20');
-    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     expect(playingItem()).toBe('Session 2');
     expect(currentReadout()).toBe('0:00');
   });
@@ -170,7 +172,7 @@ describe('PlayerView', () => {
       />,
     );
     expect(playingItem()).toBe('Result clip');
-    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     expect(playingItem()).toBe('Session 2');
   });
 });
@@ -315,17 +317,17 @@ describe('navigation', () => {
 
   it('next moves to the next session, wrapping at the end', () => {
     renderPlayer();
-    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     expect(playingItem()).toBe('Session 2');
-    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     expect(playingItem()).toBe('Session 3');
-    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     expect(playingItem()).toBe('Session 1');
   });
 
   it('previous moves backwards, wrapping at the start', () => {
     renderPlayer();
-    fireEvent.click(screen.getByRole('button', { name: 'Previous session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous recording' }));
     expect(playingItem()).toBe('Session 3');
   });
 
@@ -453,7 +455,7 @@ describe('region selection seam (T9)', () => {
       fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '2' } });
     });
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
     });
     const video = document.querySelector('video') as HTMLVideoElement;
     expect(video.defaultPlaybackRate).toBeCloseTo(2);

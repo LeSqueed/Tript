@@ -195,7 +195,7 @@ export function AudioPage({
       </Field>
 
       <div className="audio-header">
-        <h3 className="settings-subheading">
+        <h3 className="subheading">
           Tracks <span className="muted small">({tracks.length})</span>
         </h3>
         <Button onClick={addTrack}>Add track</Button>

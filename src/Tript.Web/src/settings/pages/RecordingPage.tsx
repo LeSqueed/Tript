@@ -14,10 +14,13 @@ import type {
 } from '../settingsModel';
 import { Button, Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
 
+// The buffer is designed for but not implemented (RecordingModeExtensions.IsAlphaSupported), and a
+// resolved Hybrid is flattened to Session at the host. The labels say so rather than offering two
+// modes that quietly do the same thing as the third.
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
   { value: 'Session', label: 'Session — one continuous recording' },
-  { value: 'Buffer', label: 'Buffer — rolling replay only, nothing written until saved' },
-  { value: 'Hybrid', label: 'Hybrid — session and rolling buffer at once' },
+  { value: 'Buffer', label: 'Buffer — rolling replay only (not available yet)' },
+  { value: 'Hybrid', label: 'Hybrid — session and rolling buffer at once (not available yet)' },
 ];
 
 /**
@@ -337,7 +340,7 @@ export function RecordingPage({
 
   return (
     <div className="settings-page" data-page="recording">
-      <Field label="Recording mode" hint="Hybrid is the default, globally and per game.">
+      <Field label="Recording mode" hint="Session is the default, globally and per game. The buffer modes are not implemented yet and record a session.">
         <SelectField
           value={settings.mode}
           onChange={(value) => update(page, { mode: value as RecordingMode })}
@@ -471,7 +474,8 @@ export function RecordingPage({
       </Field>
 
       <div className="settings-actions">
-        <Button onClick={() => update(page, { mode: 'Hybrid' })}>Reset to defaults</Button>
+        {/* Named for what it does. It used to say "Reset to defaults" and reset one field. */}
+        <Button onClick={() => update(page, { mode: 'Session' })}>Reset the recording mode</Button>
       </div>
     </div>
   );

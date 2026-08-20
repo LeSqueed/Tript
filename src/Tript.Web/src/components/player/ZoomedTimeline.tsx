@@ -276,7 +276,7 @@ export function ZoomedTimeline({
             aria-label={`Region ${formatTime(region.start)}–${formatTime(region.end)}`}
             title={
               onRegionChange
-                ? 'Drag to move the segment · drag an edge to trim it · click to loop it'
+                ? 'Drag to move the clip · drag an edge to trim it · click to loop it'
                 : undefined
             }
             onPointerDown={(event) => onRegionPointerDown(event, region)}

@@ -5,25 +5,13 @@
 // native control beside styled ones, and a view reaching for `.btn` directly — which since the
 // variants moved into the layer renders an unstyled button rather than a primary one.
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { sourceFiles } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 const LAYER = join(SRC_ROOT, 'components', 'ui');
-
-function sourceFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...sourceFiles(full));
-    } else if (entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx')) {
-      found.push(full);
-    }
-  }
-  return found;
-}
 
 /** Views only. The control layer is where bare elements are allowed to live. */
 const views = () => sourceFiles(SRC_ROOT).filter((file) => !file.startsWith(LAYER));

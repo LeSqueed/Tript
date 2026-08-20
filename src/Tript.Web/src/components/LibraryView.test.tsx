@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { LibraryView } from './LibraryView';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
+import type { TrashController } from './trash/useTrash';
 
 /** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
@@ -95,7 +96,7 @@ describe('LibraryView grid', () => {
     expect(screen.getAllByTestId('content-card')).toHaveLength(2);
 
     const card = screen.getByRole('button', { name: 'Open Ranked win' });
-    expect(within(card).getByText('Session')).toBeTruthy();
+    expect(within(card).getByText('Recording')).toBeTruthy();
     expect(within(card).getByText('Counter-Strike 2')).toBeTruthy();
     expect(within(card).getByText('30:30')).toBeTruthy();
     expect(within(card).getByText('1.4 GB')).toBeTruthy();
@@ -113,12 +114,15 @@ describe('LibraryView grid', () => {
     expect(within(card).getByText('No date')).toBeTruthy();
   });
 
-  it('lazy-loads thumbnails from the content server', () => {
-    renderLibrary([session]);
-    const image = screen.getByRole('presentation') as HTMLImageElement;
-    expect(image.getAttribute('src')).toBe('http://localhost:2222/api/thumbnail/sessions/cs2.mp4');
-    // A library is unbounded: a thousand cards must not become a thousand requests on mount.
-    expect(image.getAttribute('loading')).toBe('lazy');
+  it('lazy-loads grid thumbnails, and loads the hero eagerly', () => {
+    renderLibrary([session, clip]);
+    const images = screen.getAllByRole('presentation') as HTMLImageElement[];
+    expect(images[0].getAttribute('src')).toBe('http://localhost:2222/api/thumbnail/sessions/cs2.mp4');
+    // The hero is the picture the user came to look at; it must not wait for an intersection.
+    expect(images[0].getAttribute('loading')).toBe('eager');
+    // Everything else: a library is unbounded, and a thousand cards must not become a thousand
+    // requests on mount.
+    expect(images.slice(1).every((image) => image.getAttribute('loading') === 'lazy')).toBe(true);
   });
 
   it('falls back to the placeholder tile when the thumbnail request fails or 204s', () => {
@@ -156,7 +160,7 @@ describe('LibraryView filters and sorting', () => {
     expect(cardTitles()).toEqual(['Nice shot']);
     expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Recordings' }));
     expect(cardTitles()).toEqual(['Ranked win']);
 
     fireEvent.click(screen.getByRole('radio', { name: 'All' }));
@@ -225,7 +229,7 @@ describe('LibraryView filters and sorting', () => {
     expect(cardTitles()).toEqual(['Ranked win', 'Nice shot']);
 
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } });
-    expect(cardTitles()).toEqual(['Nice shot', 'Ranked win']);
+    expect(cardTitles()).toEqual(['Ranked win', 'Nice shot']);
 
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'game' } });
     expect(cardTitles()).toEqual(['Ranked win', 'Nice shot']);
@@ -239,7 +243,7 @@ describe('LibraryView filters and sorting', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
 
-    expect(cardTitles()).toEqual(['Nice shot', 'Ranked win']);
+    expect(cardTitles()).toEqual(['Ranked win', 'Nice shot']);
     expect((screen.getByLabelText('Sort') as HTMLSelectElement).value).toBe('oldest');
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('');
     expect(screen.getByRole('radio', { name: 'All', checked: true })).toBeTruthy();
@@ -249,7 +253,7 @@ describe('LibraryView filters and sorting', () => {
 });
 
 describe('LibraryView pagination', () => {
-  /** 25 dated sessions — three pages at the default size of 12. */
+  /** 25 dated sessions — two pages after the three-card recent shelf. */
   const many = Array.from({ length: 25 }, (_, index) =>
     item({
       fileName: `s-${index}.mp4`,
@@ -261,22 +265,21 @@ describe('LibraryView pagination', () => {
 
   it('pages the grid and reports the position', () => {
     renderLibrary(many);
-    expect(screen.getAllByTestId('content-card')).toHaveLength(12);
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 3');
-    expect(screen.getByTestId('library-range').textContent).toBe('Showing 1–12 of 25');
+    expect(screen.getAllByTestId('content-card')).toHaveLength(15);
+    expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 2');
+    // The top shelf is fixed at three recordings; the latest item grid pages the remaining items.
+    expect(screen.getByTestId('library-range').textContent).toBe('25 recordings · 25 items');
     expect(screen.getByRole('button', { name: 'Previous page' })).toHaveProperty('disabled', true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 3');
-    expect(screen.getByTestId('library-range').textContent).toBe('Showing 13–24 of 25');
+    expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 2');
+    expect(screen.getByTestId('library-range').textContent).toBe('25 recordings · 25 items');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 3 of 3');
-    expect(screen.getAllByTestId('content-card')).toHaveLength(1);
+    expect(screen.getAllByTestId('content-card')).toHaveLength(10);
     expect(screen.getByRole('button', { name: 'Next page' })).toHaveProperty('disabled', true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 3');
+    expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 2');
   });
 
   it('hides the pagination controls when everything fits on one page', () => {
@@ -287,21 +290,20 @@ describe('LibraryView pagination', () => {
   it('resets to page 1 on a filter change, so no page can be left behind', () => {
     renderLibrary(many);
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 3 of 3');
+    expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 2');
 
     // Three items match — page 3 stops existing. The grid must show the matches, not an empty page.
     fireEvent.change(screen.getByLabelText('Game'), { target: { value: 'Counter-Strike 2' } });
     expect(screen.getAllByTestId('content-card')).toHaveLength(3);
     expect(screen.queryByTestId('library-page')).toBeNull();
-    expect(screen.getByTestId('library-range').textContent).toContain('Showing 1–3 of 3');
+    expect(screen.getByTestId('library-range').textContent).toContain('3 recordings · 3 items');
   });
 
   it('resets to page 1 on a sort change, since the front of the list changed', () => {
     renderLibrary(many);
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'oldest' } });
-    expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 3');
+    expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 2');
     expect(cardTitles()[0]).toBe('Session 24');
   });
 });
@@ -309,7 +311,12 @@ describe('LibraryView pagination', () => {
 describe('LibraryView empty states', () => {
   it('says the library is empty when there is no content at all', () => {
     renderLibrary([]);
-    expect(screen.getByTestId('library-empty').textContent).toContain('will appear here');
+    const empty = screen.getByTestId('library-empty').textContent ?? '';
+    expect(empty).toContain('Nothing recorded yet');
+    // Detection is automatic and the game list ships seeded, so the copy sets an expectation rather
+    // than asking the user to configure anything.
+    expect(empty).not.toMatch(/add a game/i);
+    expect(screen.getByRole('button', { name: 'Record now' })).toBeTruthy();
     expect(screen.queryByTestId('library-empty-filtered')).toBeNull();
     expect(screen.queryByTestId('library-grid')).toBeNull();
   });
@@ -350,13 +357,48 @@ describe('LibraryView delete and selection', () => {
     };
   }
 
-  function renderWith(items: ContentItem[], retentionHours = 24) {
+  function renderWith(items: ContentItem[], retentionHours = 24, trash?: Partial<TrashController>) {
     const { client, sent } = recordingClient();
+    const controller: TrashController = {
+      entries: [],
+      retentionHours,
+      loaded: true,
+      restore: vi.fn(),
+      purge: vi.fn(),
+      emptyTrash: vi.fn(),
+      ...trash,
+    };
     const view = render(
-      <LibraryView client={client} items={items} nowSeconds={NOW} retentionHours={retentionHours} />,
+      <LibraryView
+        client={client}
+        items={items}
+        nowSeconds={NOW}
+        retentionHours={retentionHours}
+        trash={controller}
+      />,
     );
-    return { sent, view, client };
+    return { sent, view, client, trash: controller };
   }
+
+  it('lists trashed items when the type filter is Trash, and only those', () => {
+    renderWith([session, clip], 24, {
+      entries: [
+        {
+          id: 't1',
+          contentType: 'recording',
+          fileName: 'deleted.mp4',
+          title: 'Deleted run',
+          deletedAt: NOW - 60,
+          purgeAt: NOW + 3600,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Trash (1)' }));
+    expect(screen.getByText('Deleted run')).toBeTruthy();
+    // The live catalogue is not mixed in with what was deleted.
+    expect(screen.queryByText('Ranked win')).toBeNull();
+  });
 
   it('confirms a per-item delete before sending anything, and cancels cleanly', () => {
     const { sent } = renderWith([session, clip]);
@@ -490,5 +532,76 @@ describe('LibraryView delete and selection', () => {
     expect(sent).toEqual([
       { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clips/clip-1.mp4' } },
     ]);
+  });
+});
+
+describe('LibraryView recent sessions and groups', () => {
+  const newest = item({
+    fileName: 'ow-2.mp4',
+    title: 'Recording 2',
+    game: 'Overwatch',
+    startTime: NOW,
+  });
+  const older = item({
+    fileName: 'ow-1.mp4',
+    title: 'Recording 1',
+    game: 'Overwatch',
+    startTime: NOW - DAY,
+  });
+  const cutOfNewest = item({
+    contentType: 'clip',
+    fileName: 'ow-2-01.mp4',
+    filePath: 'clips/ow-2-01.mp4',
+    title: 'Recording 2 - 01',
+    startTime: NOW,
+  });
+
+  it('makes the newest sessions a recent shelf with Review actions', () => {
+    renderLibrary([older, newest, cutOfNewest]);
+    const recent = screen.getByTestId('library-recent');
+    expect(within(recent).getByRole('heading', { name: 'Recent recordings' })).toBeTruthy();
+    expect(within(recent).getAllByText('Review')).toHaveLength(2);
+    expect(within(recent).queryByText('Recording 2 - 01')).toBeNull();
+    expect(within(recent).getByText('Clips: 1')).toBeTruthy();
+    expect(within(recent).getByText('Recording 1')).toBeTruthy();
+  });
+
+  it('renders a recent session without a clips row when it has none', () => {
+    renderLibrary([newest]);
+    const recent = screen.getByTestId('library-recent');
+    expect(within(recent).getByText('Review')).toBeTruthy();
+    // No placeholder, no "no clips yet": the Review action is the point and it works regardless.
+    expect(within(recent).queryByTestId('recording-group-clips')).toBeNull();
+  });
+
+  it('keeps every card affordance on recent sessions', () => {
+    renderLibrary([newest]);
+    const recent = screen.getByTestId('library-recent');
+    expect(within(recent).getByRole('button', { name: 'Delete Recording 2' })).toBeTruthy();
+    expect(within(recent).getByRole('button', { name: /Add Recording 2 to favorites/ })).toBeTruthy();
+    expect(within(recent).getByRole('button', { name: 'Open Recording 2' })).toBeTruthy();
+  });
+
+  it('opens the recording from Review, not only from the thumbnail', () => {
+    const onOpen = vi.fn();
+    renderLibrary([newest], onOpen);
+    fireEvent.click(within(screen.getByTestId('library-recent')).getByRole('button', { name: 'Open Recording 2' }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'ow-2.mp4' }), expect.anything());
+  });
+
+  it('withdraws the recent shelf once the user is filtering', () => {
+    renderLibrary([older, newest, cutOfNewest]);
+    expect(screen.getByTestId('library-recent')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'Recording' } });
+    expect(screen.queryByTestId('library-recent')).toBeNull();
+    expect(screen.getByTestId('library-latest')).toBeTruthy();
+  });
+
+  it('falls back to the flat grid when one kind is asked for by name', () => {
+    renderLibrary([older, newest, cutOfNewest]);
+    fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
+    expect(screen.getByTestId('library-grid')).toBeTruthy();
+    expect(screen.queryByTestId('library-hero')).toBeNull();
   });
 });

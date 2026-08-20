@@ -34,71 +34,35 @@
   }
 }
 
-.rec-label {
-  font-weight: 600;
-}
-
-.rec-sep {
-  opacity: 0.4;
-}
-
 .rec-game {
-  opacity: 0.85;
   min-width: 0;
-  max-width: min(28vw, 240px);
+  max-width: min(24vw, 220px);
   overflow: hidden;
+  color: var(--color-muted-strong);
+  font-size: var(--text-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rec-actions {
-  display: flex;
-  gap: var(--space-2);
+.rec-activity {
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.rec-action {
-  padding: 4px 10px;
-  border: var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--color-muted-strong);
-  cursor: pointer;
-  font-size: 12px;
+/* The headline while recording: mono so an 8-hour clock does not jitter digit by digit. */
+
+.rec-elapsed {
+  color: var(--color-base-content);
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
-.rec-action:hover {
-  border-color: var(--color-accent-line);
-  color: var(--color-accent);
-}
-
-.rec-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.rec-action-stop {
+.rec-problem {
   color: var(--color-error);
-}
-
-.conn-badge {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--color-neutral);
-}
-
-.conn-connected {
-  color: var(--color-success);
-  border-color: var(--color-success);
-}
-
-.conn-connecting {
-  color: var(--color-warning);
-  border-color: var(--color-warning);
-}
-
-.conn-disconnected {
-  color: var(--color-error);
-  border-color: var(--color-error);
+  font-size: var(--text-small);
+  font-weight: 600;
 }

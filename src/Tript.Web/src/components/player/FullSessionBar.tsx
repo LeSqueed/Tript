@@ -46,7 +46,7 @@ export function FullSessionBar({
       ref={barRef}
       className="timeline-bar"
       role="slider"
-      aria-label="Session position"
+      aria-label="Recording position"
       aria-valuemin={0}
       aria-valuemax={Math.round(duration)}
       aria-valuenow={Math.round(currentTime)}

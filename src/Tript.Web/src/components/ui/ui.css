@@ -35,7 +35,10 @@
   margin: 40px auto;
   padding: 32px 24px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius);
+  /* The panel radius, like every other surface of this size. --radius is the control radius, and a
+   * tighter corner on a 460px box beside cards that use --radius-panel reads as a different kind of
+   * thing rather than an empty one of the same kind. */
+  border-radius: var(--radius-panel);
   background: var(--color-panel);
   text-align: center;
 }

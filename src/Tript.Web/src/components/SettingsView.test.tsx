@@ -146,6 +146,41 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
   });
 
+  // The shipped default, before any push. It has to be the mode the recorder actually runs: Buffer
+  // and Hybrid are not implemented and a resolved Hybrid is flattened to Session at the host, so a
+  // Hybrid default routed every automatic recording through that silent flattening.
+  it('defaults the recording mode to the one the recorder implements', () => {
+    const { factory } = createMockSocketFactory();
+    const client = createIpcClient({ createSocket: factory });
+    render(<SettingsView client={client} />);
+    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Session');
+  });
+
+  it('says plainly that the buffer is not implemented, in both of its states', () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Buffer' }));
+    const note = screen.getByText(/not implemented yet/i);
+    expect(note).toBeTruthy();
+
+    // And it keeps saying so once the checkbox is ticked — the old copy told the truth in one state
+    // only, promising that turning it on would start keeping something.
+    fireEvent.click(screen.getByLabelText('Enable rolling buffer'));
+    expect(screen.getByText(/not implemented yet/i)).toBeTruthy();
+  });
+
+  // Settings keeps its technical vocabulary on purpose: the people who open these pages are the
+  // ones who know what the words mean, and a "friendlier" rename would cost them the ability to
+  // match a control to the encoder documentation it comes from. The plain-language pass applies
+  // everywhere else — see src/theme/language.test.ts for the other side of the same boundary.
+  it('keeps the technical labels technical', () => {
+    renderSettings();
+    // The visible label text, not the accessible name: the name folds in the hint sentence, so it
+    // would still match after the word itself had been replaced.
+    for (const label of ['Encoder', 'Rate control', 'Frame rate', 'Resolution', 'Recording mode']) {
+      expect(screen.getByText(label, { selector: '.field-label' })).toBeTruthy();
+    }
+  });
+
   // A push from a backend without the field must not read as "off": the backend default is on, and
   // a selector showing "Always record SDR" would be reporting a setting the recorder does not hold.
   it('shows HDR as on when the push carries no enableHdr', () => {
@@ -180,12 +215,20 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Capture method/)).toBeTruthy();
   });
 
-  it('renders the game page controls', () => {
+  it('renders the game page controls, and no capture setting of its own', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
-    expect(screen.getByLabelText(/^Capture mode/)).toBeTruthy();
     expect(screen.getByLabelText(/^Game-capture timeout/)).toBeTruthy();
     expect(screen.getByPlaceholderText('Game name')).toBeTruthy();
+    // How capture works is a Capture-page setting. This page only says which games depart from it,
+    // and that lives on the game's own row rather than as a page-wide control.
+    expect(screen.queryByLabelText(/^Capture mode/)).toBeNull();
+  });
+
+  it('keeps the capture method on the Capture page', () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
+    expect(screen.getByLabelText(/^Capture method/)).toBeTruthy();
   });
 
   it('sends a partial settings object, not the whole settings, when a field is edited', () => {

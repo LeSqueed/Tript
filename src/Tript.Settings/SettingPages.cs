@@ -18,7 +18,12 @@ public sealed class RecordingSettings
     [JsonExtensionData]
     public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
 
-    public RecordingMode Mode { get; set; } = RecordingMode.Hybrid;
+    // Session, because Session is what the app does. Buffer and Hybrid are designed for but not
+    // implemented (RecordingModeExtensions.IsAlphaSupported), and AppHost flattens a resolved Hybrid
+    // to Session so the recorder will accept the start — which meant the shipped default routed
+    // EVERY automatic recording through the one path the recorder's own contract forbids: "refuse
+    // loudly rather than silently record something else". A default has to describe what happens.
+    public RecordingMode Mode { get; set; } = RecordingMode.Session;
 
     public int ResolutionWidth { get; set; } = 1920;
 
@@ -65,7 +70,12 @@ public sealed class RecordingSettings
 
     // How long a deleted recording stays in the trash before it is purged for good. Zero or less
     // disables the automatic purge, so entries stay until they are emptied by hand.
-    public int TrashRetentionHours { get; set; } = 24;
+    //
+    // A week, not a day. The trash only ever holds what the user chose to delete, so the cost of
+    // keeping it is bounded by their own actions, while the cost of purging too early is a recording
+    // that cannot be got back. Twenty-four hours does not survive "I deleted it Friday and noticed
+    // on Monday", which is the case a trash exists for.
+    public int TrashRetentionHours { get; set; } = 168;
 }
 
 // The buffer page, its own first-class settings surface even though the buffer itself is
@@ -141,8 +151,6 @@ public sealed class GameSettings
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
-
-    public GameCaptureMode CaptureMode { get; set; }
 
     // The soft timeout: how long game capture waits for the game's window before falling back.
     // What the timeout governs is part of the recorder's contract; the settings model records

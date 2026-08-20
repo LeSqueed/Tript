@@ -208,9 +208,15 @@
 
 /* ----------------------------------------------------------------- toggle */
 
+/* The same height band as an .input, so a toggle standing in a row of fields lines up with the
+ * controls rather than floating a few pixels above their bottom edge: 6px padding twice plus a
+ * 1px border twice on a 1.5 line-height body. Without it the row's flex-end alignment lands the
+ * label's box on the baseline, which is not where the eye reads the row. */
+
 .toggle {
   display: inline-flex;
   align-items: center;
+  min-height: calc(1.5em + 14px);
   gap: 8px;
   cursor: pointer;
   user-select: none;

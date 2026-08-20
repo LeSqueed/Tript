@@ -29,7 +29,7 @@ import { formatTime } from '../player/timelineModel';
 // ---------------------------------------------------------------------------
 
 /** The type dimension. `sessions` is everything that is not a clip — see `matchesType`. */
-export type ContentTypeFilter = 'all' | 'sessions' | 'clips';
+export type ContentTypeFilter = 'all' | 'sessions' | 'clips' | 'trash';
 
 /** The date dimension: a trailing window, or everything. */
 export type DateRangeFilter = 'any' | 'day' | 'week' | 'month' | 'year';
@@ -148,8 +148,91 @@ export function typeLabel(item: ContentItem): string {
     case 'buffer':
       return 'Buffer';
     default:
-      return 'Session';
+      return 'Recording';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Grouping — a recording and the clips cut from it
+// ---------------------------------------------------------------------------
+
+/** A recording with the clips cut from it. `recording` is null for clips whose source is gone. */
+export interface RecordingGroup {
+  recording: ContentItem | null;
+  clips: ContentItem[];
+}
+
+/** The file name without its extension, which is what the clip→recording link is written in. */
+function baseName(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  return dot <= 0 ? fileName : fileName.slice(0, dot);
+}
+
+/**
+ * Which recording a clip was cut from, or null when it has outlived its source.
+ *
+ * Nothing on the wire carries the link — a clip has no metadata record of its own — so the file name
+ * is it: `CreateClip` starts a clip's name with the source recording's base name. This is the same
+ * rule the backend applies in `AppHost.InheritedFrom`, character for character, because a clip
+ * inherits its game and audio-track names through it. If the two disagreed, a clip would show one
+ * recording's game while sitting under another's. The longest match wins, so a recording whose name
+ * is a prefix of another cannot claim its clips, and the character after the prefix must be the
+ * separator, so `ow` cannot claim `owl-01`.
+ */
+function sourceOf(clip: ContentItem, recordings: readonly ContentItem[]): ContentItem | null {
+  const clipBase = baseName(clip.fileName);
+  let source: ContentItem | null = null;
+  let matched = 0;
+
+  for (const recording of recordings) {
+    const recordingBase = baseName(recording.fileName);
+    if (recordingBase.length <= matched) continue;
+    if (!clipBase.startsWith(recordingBase)) continue;
+    if (clipBase.length !== recordingBase.length && clipBase[recordingBase.length] !== '-') continue;
+    source = recording;
+    matched = recordingBase.length;
+  }
+
+  return source;
+}
+
+/**
+ * The content list as recordings with their clips, **in the order they arrived**.
+ *
+ * Ordering is the caller's: `deriveGroupedLibrary` hands in an already-sorted list, so the sort
+ * control keeps working. Sorting here as well would silently override "oldest first".
+ *
+ * Every item reaches exactly one group. A clip whose recording is missing — deleted, or filtered out
+ * of the list handed in — heads its own group under `recording: null` rather than disappearing,
+ * which is the library's one invariant (see the header) applied to grouping. It heads a group of its
+ * own rather than joining a trailing catch-all so that it stays in date order: a clip outliving its
+ * recording is not something the user can act on, and burying it at the end helps nobody.
+ */
+export function groupByRecording(items: readonly ContentItem[]): RecordingGroup[] {
+  const recordings = items.filter((item) => item.contentType !== 'clip');
+  const groups = new Map<ContentItem, RecordingGroup>();
+  const ordered: RecordingGroup[] = [];
+
+  // Heads first, so every group sits where its head sat in the caller's order.
+  for (const item of items) {
+    if (item.contentType !== 'clip') {
+      const group: RecordingGroup = { recording: item, clips: [] };
+      groups.set(item, group);
+      ordered.push(group);
+    } else if (sourceOf(item, recordings) === null) {
+      ordered.push({ recording: null, clips: [item] });
+    }
+  }
+
+  for (const item of items) {
+    if (item.contentType !== 'clip') continue;
+    const source = sourceOf(item, recordings);
+    if (source !== null) {
+      groups.get(source)!.clips.push(item);
+    }
+  }
+
+  return ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +483,52 @@ export function clampPage(page: number, pageCount: number): number {
 
 function normalizePageSize(pageSize: number): number {
   return Number.isFinite(pageSize) && pageSize >= 1 ? Math.floor(pageSize) : DEFAULT_PAGE_SIZE;
+}
+
+/** What the grouped view renders: one page of recordings-with-their-clips. */
+export interface LibraryGroupPage {
+  /** The groups on the resolved page, in sort order. */
+  groups: RecordingGroup[];
+  /** The complete filtered and sorted result set, flat, used by player navigation. */
+  resultItems: ContentItem[];
+  matchCount: number;
+  totalCount: number;
+  /** How many groups matched, which is what the page count is over. */
+  groupCount: number;
+  page: number;
+  pageCount: number;
+  filtered: boolean;
+}
+
+/**
+ * The grouped pipeline: filter, sort, group, then take the requested page **of groups**.
+ *
+ * Pagination is over groups rather than items on purpose. Paginating items and grouping the page
+ * would cut a recording away from its own clips whenever the boundary fell between them — the group
+ * would render headless on one page and clipless on the other, and nothing in the UI would say why.
+ * The cost is that a page holds a variable number of items, which the count line states plainly.
+ */
+export function deriveGroupedLibrary(
+  items: readonly ContentItem[],
+  query: LibraryQuery,
+  nowSeconds: number,
+): LibraryGroupPage {
+  const matched = sortItems(filterItems(items, query, nowSeconds), query.sort);
+  const groups = groupByRecording(matched);
+  const pageSize = normalizePageSize(query.pageSize);
+  const pageCount = pageCountFor(groups.length, pageSize);
+  const page = clampPage(query.page, pageCount);
+  const start = (page - 1) * pageSize;
+  return {
+    groups: groups.slice(start, start + pageSize),
+    resultItems: matched,
+    matchCount: matched.length,
+    totalCount: items.length,
+    groupCount: groups.length,
+    page,
+    pageCount,
+    filtered: isFiltered(query),
+  };
 }
 
 /** What the grid renders: one page of items plus everything the surrounding chrome needs. */

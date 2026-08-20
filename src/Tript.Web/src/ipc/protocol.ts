@@ -156,6 +156,12 @@ export interface DisplayFallbackWarning {
 export interface RecordingState {
   recording: boolean;
   game?: GameInfo | null;
+  /**
+   * When the current recording started, in unix SECONDS, or null when nothing is recording. Present
+   * so a UI that connects mid-session shows a true elapsed time rather than counting from the
+   * moment it connected — which for an 8-hour recording is a confidently wrong number.
+   */
+  startedAt?: number | null;
   /** Audio routing status per track, when multi-track recording is active. */
   audioTracks?: { id: string; device: string; muted: boolean; volume: number }[];
   [key: string]: unknown;

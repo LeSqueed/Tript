@@ -113,10 +113,12 @@ describe('App shell', () => {
     return { ...result, factory };
   }
 
-  it('renders the recorder bar and shows connecting before the backend answers', () => {
+  it('says only that it is not connected before the backend answers', () => {
     renderApp();
-    expect(screen.getByText('Stopped')).toBeTruthy();
-    expect(screen.getByTestId('connection-state').textContent).toBe('Connecting…');
+    // Nothing else on the bar is actionable yet, so nothing else is offered.
+    expect(screen.getByText(/not connected/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Record' })).toBeNull();
+    expect(screen.queryByText('Stopped')).toBeNull();
   });
 
   /** Open the socket so ListContent reaches the mock backend and its `content` push comes back. */
@@ -141,21 +143,33 @@ describe('App shell', () => {
     expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
 
     fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
-    expect(screen.getByTestId('library-grid')).toBeTruthy();
+    expect(screen.getByTestId('library-groups')).toBeTruthy();
   });
 
-  it('the nav no longer offers Player or Clips as routes', () => {
+  it('puts navigation in the topbar and does not repeat the route name below it', () => {
+    renderApp();
+    connect();
+    // No rail: the nav sits in the topbar beside the brand.
+    expect(document.querySelector('.app-rail')).toBeNull();
+    const topbar = document.querySelector('.app-topbar') as HTMLElement;
+    expect(topbar).not.toBeNull();
+    expect(within(topbar).getByRole('navigation', { name: 'Primary' })).toBeTruthy();
+    // The active nav item names the screen, so no heading says it a second time.
+    expect(screen.queryByRole('heading', { level: 1, name: 'Library' })).toBeNull();
+  });
+
+  it('offers two destinations, with Clips and Trash as library filters', () => {
     renderApp();
     connect();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
-    // These are the user-facing routes; Player and Clips were folded into the library.
+    // Player, Clips and Trash all folded into the library, leaving two places to be.
     expect(within(nav).getByRole('button', { name: 'Library' })).toBeTruthy();
-    expect(within(nav).getByRole('button', { name: 'Trash' })).toBeTruthy();
     expect(within(nav).getByRole('button', { name: 'Settings' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Player' })).toBeNull();
-    expect(within(nav).queryByRole('radio', { name: 'Clips' })).toBeNull();
-    // "Clips" survives as a type FILTER inside the library, which is where it went.
+    expect(within(nav).queryByRole('button', { name: /Trash/ })).toBeNull();
+    // Both survive as type FILTERS inside the library, which is where they went.
     expect(screen.getByRole('radio', { name: 'Clips', checked: false })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Trash', checked: false })).toBeTruthy();
   });
 
   it('opens the player as a route at desktop width, keeping the library mounted', () => {
@@ -171,58 +185,47 @@ describe('App shell', () => {
     const library = document.querySelector('.library-view');
     expect(library).not.toBeNull();
     expect(library?.closest('[hidden]')).not.toBeNull();
-    // The topbar names the item and offers the way back.
-    expect(screen.getByRole('button', { name: '← Library' })).toBeTruthy();
+    // The player remains inside the shell: primary navigation stays visible and Library is active.
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(nav).getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe('page');
+    expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
   });
 
   it('returns from the player route to the library', () => {
     renderApp();
     connect();
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: '← Library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
 
     expect(document.querySelector('.player-view')).toBeNull();
     expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
   });
 
-  it('opens the player as an overlay over the library and closes it with Escape', () => {
+  it('keeps the player inside the shell at compact width', () => {
     compactWindow();
     renderApp();
     connect();
 
-    const card = screen.getByRole('button', { name: 'Open Session 1' });
-    // A real browser focuses a button on click; fireEvent does not, and the overlay's focus restore is
-    // defined against whatever was focused when it opened — so focus the card the way a click would.
-    card.focus();
-    fireEvent.click(card);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
 
-    const overlay = screen.getByRole('dialog', { name: 'Player — Session 1' });
-    expect(overlay).toBeTruthy();
-    // The real PlayerView is inside the overlay, playing the item that was clicked.
-    expect(within(overlay).getByTestId('player-overlay-title').textContent).toBe('Session 1');
-    // Focus moved into the overlay rather than staying on a card the overlay is covering.
-    expect(overlay.contains(document.activeElement)).toBe(true);
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Player — Session 1' })).toBeNull();
-    // Back on the library, with focus returned to the card that opened the player.
-    expect(screen.getByTestId('library-grid')).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.queryByTestId('player-overlay')).toBeNull();
+    expect(document.querySelector('.player-view')).not.toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeTruthy();
   });
 
-  it('closes the overlay with its close affordance', () => {
+  it('returns from the compact player through primary navigation', () => {
     compactWindow();
     renderApp();
     connect();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
-    expect(screen.getByRole('dialog', { name: 'Player — Nice shot' })).toBeTruthy();
+    expect(document.querySelector('.player-view')).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close player' }));
-    expect(screen.queryByTestId('player-overlay')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect(document.querySelector('.player-view')).toBeNull();
   });
 
-  it('raises the overlay on the shell\'s single content source, without re-asking the backend', () => {
+  it('uses the shell\'s single content source, without re-asking the backend', () => {
     compactWindow();
     renderApp();
     connect();
@@ -234,11 +237,11 @@ describe('App shell', () => {
 
     // The player is handed the shell's source, so it must not create a second IPC source of its own —
     // which would double-ask the backend for the whole content list every time a card is clicked.
-    expect(screen.getByTestId('player-overlay')).toBeTruthy();
+    expect(document.querySelector('.player-view')).not.toBeNull();
     expect(listContents()).toBe(before);
   });
 
-  it('returns to the same filter and page state after the overlay closes', () => {
+  it('returns to the same filter and page state after the player closes', () => {
     compactWindow();
     renderApp();
     connect();
@@ -249,7 +252,7 @@ describe('App shell', () => {
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
-    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
 
     // The library was covered, not unmounted: its query is untouched.
     expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
@@ -258,7 +261,7 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Open Nice shot' })).toBeTruthy();
   });
 
-  it('asks the backend for the trash and shows what comes back on its own route', () => {
+  it('asks the backend for the trash and shows what comes back behind its filter', () => {
     renderApp();
     connect();
     const ws = activeSocket();
@@ -286,11 +289,9 @@ describe('App shell', () => {
       );
     });
 
-    // The count is visible from the nav, not only once you are already looking at the trash.
-    expect(screen.getByTestId('nav-trash-count').textContent).toBe('1');
-
-    const nav = screen.getByRole('navigation', { name: 'Primary' });
-    fireEvent.click(within(nav).getByRole('button', { name: /Trash/ }));
+    // The count rides on the filter, so a full trash is visible without going there first.
+    const trashFilter = screen.getByRole('radio', { name: 'Trash (1)' });
+    fireEvent.click(trashFilter);
     expect(screen.getByTestId('trash-list')).toBeTruthy();
     expect(screen.getByTestId('trash-retention').textContent).toContain('3 days');
   });
@@ -309,14 +310,17 @@ describe('App shell', () => {
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('for the next 3 days');
   });
 
-  it('shows Connected when the mock backend opens the socket', () => {
+  it('shows no connection badge once connected, only what can be done', () => {
     renderApp();
     const ws = activeSocket();
     expect(ws).toBeDefined();
     act(() => {
       ws.serverOpen();
     });
-    expect(screen.getByTestId('connection-state').textContent).toBe('Connected');
+    // A "Connected" badge is only information when it is false, so it is not rendered when true.
+    expect(screen.queryByTestId('connection-state')).toBeNull();
+    expect(screen.queryByText(/not connected/i)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Record' })).toBeTruthy();
   });
 
   it('shows an error banner for an error push and dismisses it', () => {
@@ -356,9 +360,11 @@ describe('App shell', () => {
     // Scoped to the recorder bar: the detected game is now legitimately on screen twice, since the
     // library shows the same game on a card and in its game filter. Asserting document-wide would
     // pass or fail on the library's content, which is not what this test is about.
-    const bar = within(screen.getByRole('banner'));
-    expect(bar.getByText('Recording')).toBeTruthy();
+    const bar = within(screen.getByTestId('recorder-bar'));
+    // Elapsed time is the headline, not the word "Recording".
+    expect(bar.getByTestId('recording-elapsed')).toBeTruthy();
     expect(bar.getByText('Counter-Strike 2')).toBeTruthy();
+    expect(bar.getByRole('button', { name: 'Stop' })).toBeTruthy();
   });
 });
 

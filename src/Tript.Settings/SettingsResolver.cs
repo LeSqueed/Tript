@@ -38,7 +38,7 @@ public sealed class SettingsResolver
             BufferDuration = settings.Buffer.Duration,
             BufferMaxSizeBytes = settings.Buffer.MaxSizeBytes,
 
-            CaptureMethod = settings.Capture.Method,
+            CaptureMethod = game?.CaptureMethodOverride?.Method ?? settings.Capture.Method,
             Display = settings.Capture.Display,
 
             // The capture policy is global: which layers the scene has, and how long a game-only

@@ -13,22 +13,18 @@ import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
 import { LibraryView } from '../components/LibraryView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
-import { TrashView } from '../components/TrashView';
 import { useTrash } from '../components/trash/useTrash';
-import { PlayerOverlay } from '../components/library/PlayerOverlay';
 import { itemLabel } from '../components/library/libraryModel';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
-import { useCompactLayout } from './useCompactLayout';
 import { TripwireMark } from '../components/TripwireMark';
 import { Icon } from '../components/ui/Icon';
-import { Button } from '../components/ui/controls';
 import './app.css';
 
-export type Route = 'library' | 'trash' | 'settings' | 'player';
+export type Route = 'library' | 'settings' | 'player';
 
 export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // Without the launch token every listener refuses this page: the socket, the videos, the
@@ -62,11 +58,6 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // there empty.
   const reachability = useHostReachability(connectionState);
   const [route, setRoute] = useState<Route>('library');
-  const compact = useCompactLayout();
-  // Which presentation the open item uses. Decided when it is opened and left alone: promoting a
-  // live overlay into a route on a resize would move focus and restart playback.
-  const [playerPresentation, setPlayerPresentation] = useState<'route' | 'overlay'>('route');
-  // The item the player overlay is showing, or null when the overlay is down.
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
@@ -80,10 +71,8 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // `retentionHours`, and it must be right the first time a user deletes anything.
   const trash = useTrash(client);
 
-  // The scrolling content column. The DOM keeps a mounted subtree's scroll offset by itself, but the
-  // column is switched to `overflow: hidden` while the overlay is up (see app.css) so the library
-  // cannot be scrolled behind it — hence the offset is captured on open and written back on close,
-  // rather than being trusted to survive that switch in every browser.
+  // The scrolling content column. Save its position while the library remains mounted under the
+  // player route so returning to Library restores the user's place.
   const contentRef = useRef<HTMLDivElement>(null);
   const savedScrollTop = useRef(0);
   const overlayWasOpen = useRef(false);
@@ -94,14 +83,9 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       setPlayerItem(item);
       setPlayerTitle(itemLabel(item));
       setPlayerNavigation(resultItems);
-      if (compact) {
-        setPlayerPresentation('overlay');
-      } else {
-        setPlayerPresentation('route');
-        setRoute('player');
-      }
+      setRoute('player');
     },
-    [compact],
+    [],
   );
 
   const closePlayer = useCallback(() => {
@@ -110,6 +94,20 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPlayerNavigation([]);
     setRoute((current) => (current === 'player' ? 'library' : current));
   }, []);
+
+  useEffect(() => {
+    if (route !== 'player') {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePlayer();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [route, closePlayer]);
 
   useLayoutEffect(() => {
     if (playerItem !== null) {
@@ -145,123 +143,76 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPlayerItem(null);
   }, []);
   const showLibrary = useCallback(() => leaveFor('library'), [leaveFor]);
-  const showTrash = useCallback(() => leaveFor('trash'), [leaveFor]);
   const showSettings = useCallback(() => leaveFor('settings'), [leaveFor]);
 
-  const overlayOpen = playerItem !== null && playerPresentation === 'overlay';
-  const routeTitle =
-    route === 'library'
-      ? 'Library'
-      : route === 'trash'
-        ? 'Trash'
-        : route === 'settings'
-          ? 'Settings'
-          : playerTitle;
-
   return (
-    <div className={overlayOpen ? 'app-shell player-open' : 'app-shell'}>
-      <div className="app-frame">
-        <aside className="app-rail">
-          <div className="app-brand" aria-label="Tript">
-            <TripwireMark size={26} />
-            <strong>Tript</strong>
-          </div>
-          <nav className="app-nav" aria-label="Primary">
-            <button
-              type="button"
-              className={route === 'library' ? 'nav-item active' : 'nav-item'}
-              onClick={showLibrary}
-            >
-              <Icon name="library" className="nav-glyph" />
-              <span>Library</span>
-            </button>
-            <button
-              type="button"
-              className={route === 'trash' ? 'nav-item active' : 'nav-item'}
-              onClick={showTrash}
-            >
-              <Icon name="trash" className="nav-glyph" />
-              <span>Trash</span>
-              {trash.entries.length > 0 && (
-                <span className="nav-badge" data-testid="nav-trash-count">
-                  {trash.entries.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              className={route === 'settings' ? 'nav-item active' : 'nav-item'}
-              onClick={showSettings}
-            >
-              <Icon name="settings" className="nav-glyph" />
-              <span>Settings</span>
-            </button>
-          </nav>
-        </aside>
-        <main className="app-main">
-          <div className="app-topbar">
-            {route === 'player' ? (
-              <div className="app-topbar-back">
-                <Button variant="ghost" size="small" onClick={closePlayer}>
-                  ← Library
-                </Button>
-                <h1>{routeTitle}</h1>
-              </div>
-            ) : (
-              <h1>{routeTitle}</h1>
-            )}
-            <RecorderBar client={client} connectionState={connectionState} />
-          </div>
-          <ConnectionBanner reachability={reachability} />
-          <ErrorBanner client={client} />
-          <WarningBanner client={client} />
-          <DisplayFallbackBanner client={client} />
-          <div
-            className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
-            ref={contentRef}
+    <div className="app-shell">
+      <header className="app-topbar">
+        <div className="app-brand">
+          <TripwireMark size={22} />
+          <strong>Tript</strong>
+        </div>
+        {/* The player is a workspace inside Tript, so primary navigation stays available while reviewing. */}
+        <nav className="app-nav" aria-label="Primary">
+          <button
+            type="button"
+            className={route === 'library' || route === 'player' ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'library' || route === 'player' ? 'page' : undefined}
+            onClick={showLibrary}
           >
-            {(route === 'library' || route === 'player') && (
-              // Mounted but hidden while the player route is up. Unmounting would lose the user's
-              // filters, sort, page and scroll — the reason the player was an overlay to begin with.
-              <div hidden={route === 'player'}>
-                <LibraryView
-                  client={client}
-                  items={items}
-                  connectionState={connectionState}
-                  contentLoaded={loaded}
-                  onOpen={openInPlayer}
-                  retentionHours={trash.retentionHours}
-                />
-              </div>
-            )}
-            {route === 'player' && playerItem && (
-              <PlayerView
+            <Icon name="library" className="nav-glyph" />
+            <span>Library</span>
+          </button>
+          <button
+            type="button"
+            className={route === 'settings' ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'settings' ? 'page' : undefined}
+            onClick={showSettings}
+          >
+            <Icon name="settings" className="nav-glyph" />
+            <span>Settings</span>
+          </button>
+        </nav>
+        {route === 'player' && <span className="app-topbar-context">{playerTitle}</span>}
+        <RecorderBar client={client} connectionState={connectionState} />
+      </header>
+      <main className="app-main">
+        <ConnectionBanner reachability={reachability} />
+        <ErrorBanner client={client} />
+        <WarningBanner client={client} />
+        <DisplayFallbackBanner client={client} />
+        <div
+          className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
+          ref={contentRef}
+        >
+          {(route === 'library' || route === 'player') && (
+            // Mounted but hidden while the player route is up. Unmounting would lose the user's
+            // filters, sort, page and scroll while the player is open.
+            <div hidden={route === 'player'}>
+              <LibraryView
                 client={client}
-                source={source}
-                item={playerItem}
-                navigationItems={playerNavigation}
-                onItemChange={(item) => setPlayerTitle(itemLabel(item))}
+                items={items}
+                connectionState={connectionState}
+                contentLoaded={loaded}
+                onOpen={openInPlayer}
+                retentionHours={trash.retentionHours}
+                trash={trash}
               />
-            )}
-            {route === 'trash' && <TrashView trash={trash} />}
-            {route === 'settings' && <SettingsView client={client} />}
-          </div>
-        </main>
-      </div>
-      {playerItem && playerPresentation === 'overlay' && (
-        // Rendered as a sibling of the content column, not inside it: the overlay is full-bleed over
-        // the whole shell (nav and recorder bar included), so nothing behind it is clickable while it
-        // is up. `PlayerView` goes in unchanged — the overlay is chrome, not a second player.
-        <PlayerOverlay title={playerTitle} onClose={closePlayer}>
-          <PlayerView
-            client={client}
-            source={source}
-            item={playerItem}
-            navigationItems={playerNavigation}
-            onItemChange={(item) => setPlayerTitle(itemLabel(item))}
-          />
-        </PlayerOverlay>
-      )}
+            </div>
+          )}
+          {route === 'player' && playerItem && (
+            <PlayerView
+              client={client}
+              source={source}
+              item={playerItem}
+              navigationItems={playerNavigation}
+              onBack={showLibrary}
+              onItemChange={(item) => setPlayerTitle(itemLabel(item))}
+            />
+          )}
+          {route === 'settings' && <SettingsView client={client} />}
+        </div>
+      </main>
     </div>
   );
 }

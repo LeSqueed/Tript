@@ -109,13 +109,17 @@ export function PlayerOverlay({
       ref={containerRef}
     >
       <div className="player-overlay-bar">
-        <Button variant="ghost"
+        {/* A close, not a back: this is a dialog over the library, and the library's own nav item
+          * is still on screen behind it. Giving both the same chevron-and-"Library" treatment would
+          * put two identically named buttons in front of the user at compact width. */}
+        <Button
+          variant="ghost"
+          size="small"
           ref={closeRef}
-          
+          icon="close"
           onClick={onClose}
-          aria-label="Close player">
-          ← Back to library
-        </Button>
+          aria-label="Close player"
+        />
         <span className="player-overlay-title" data-testid="player-overlay-title">
           {title}
         </span>

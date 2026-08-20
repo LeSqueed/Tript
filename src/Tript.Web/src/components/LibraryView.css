@@ -1,28 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* Shared primitives. They live in this file for historical reasons (it was the first view) and are
- * used across the shell — .panel by the settings pages, .muted/.small/.btn everywhere. */
-
-.panel {
-  background: var(--color-base-200);
-  border: var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-4);
-  max-width: 760px;
-}
-
-.panel h2 {
-  margin-top: 0;
-}
-
-.muted {
-  opacity: 0.7;
-}
-
-.small {
-  font-size: 12px;
-}
-
 /* ------------------------------------------------------------------ */
 /* The library page                                                    */
 /* ------------------------------------------------------------------ */
@@ -38,7 +15,6 @@
   margin: 0 auto;
 }
 
-
 /* ------------------------------------------------------------------ */
 /* Toolbar: type segments + filters                                    */
 /* ------------------------------------------------------------------ */
@@ -47,35 +23,54 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-4);
-  padding: 16px;
+  gap: 12px;
+  padding: 12px;
   background: var(--color-panel);
   border: var(--border);
   border-radius: var(--radius-panel);
 }
 
+.library-toolbar > .segmented {
+  flex: 0 0 auto;
+}
+
 /* A segmented control, styled like the shell's nav so "All / Sessions / Clips" reads as the same kind
  * of choice the nav offers — which is what it is, now that the clips tab is one of these. */
 
-.library-filters {
+.library-filters,
+.library-trash-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-3);
+  gap: 10px;
+  flex: 1 1 600px;
+  min-width: 0;
+}
+
+.library-toolbar--trash {
+  align-items: center;
 }
 
 /* The filters reuse the settings form primitives (.field / .input), so a select in
  * the library and a select in settings are the same control. Only the widths are library-specific. */
 
-.library-filters .field {
-  min-width: 150px;
+.library-filters .field,
+.library-trash-filters .field {
+  min-width: 136px;
 }
 
-.library-filters .input {
+.library-filters .field:nth-child(4),
+.library-trash-filters .field:nth-child(4) {
+  flex: 1 1 190px;
+}
+
+.library-filters .input,
+.library-trash-filters .input {
   padding: var(--space-1) var(--space-2);
 }
 
-.library-filters .select {
+.library-filters .select,
+.library-trash-filters .select {
   padding-right: var(--space-6);
 }
 
@@ -89,6 +84,120 @@
 
 /* auto-fill with a 240px floor: the column count follows the window, and every column is at least
  * wide enough for a 16:9 thumbnail to be worth looking at. */
+
+/* ------------------------------------------------------------------ */
+/* Groups — a recording and the clips cut from it                      */
+/* ------------------------------------------------------------------ */
+
+.library-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 38px;
+}
+
+.library-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: 14px;
+}
+
+.library-section-heading h2 {
+  margin: 0;
+  font-size: var(--text-h2);
+}
+
+.library-section-kicker {
+  color: var(--color-muted-strong);
+  font-size: 12px;
+}
+
+.library-recent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.library-recent {
+  padding: 18px;
+  background: var(--color-panel);
+  border: var(--border);
+  border-radius: var(--radius-panel);
+}
+
+.library-archive {
+  padding-top: 2px;
+}
+
+.library-groups-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 18px;
+}
+
+.recording-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.recording-group--recent {
+  min-width: 0;
+}
+
+.recording-group--recent .content-card-action {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.recording-review-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, #fff 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #080a0e 66%, transparent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 2px #000;
+}
+
+.recording-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* ------------------------------------------------------------------ */
+/* The hero — the newest recording, where you land after playing       */
+/* ------------------------------------------------------------------ */
+
+.library-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* The rule separates the hero from the recordings under it. With nothing under it, it separates
+ * nothing and reads as an unfinished edge. */
+
+.library-hero:not(:last-child) {
+  padding-bottom: 30px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.library-hero .content-card-shell--wide {
+  max-width: 780px;
+}
 
 .library-grid {
   list-style: none;
@@ -109,6 +218,7 @@
   border: var(--border);
   border-radius: var(--radius-panel);
   overflow: hidden;
+  height: 100%;
   color: var(--color-base-content);
   cursor: pointer;
   text-align: left;
@@ -146,6 +256,17 @@
   background: var(--color-panel-raised);
 }
 
+.content-card-overlay {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 42px 12px 11px;
+  background: linear-gradient(transparent, rgba(6, 9, 13, 0.92));
+  color: #fff;
+}
+
 .content-card-image {
   display: block;
   width: 100%;
@@ -179,14 +300,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.content-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 15px 16px;
-  min-width: 0;
-}
-
 .content-card-title {
   font-weight: 600;
   font-size: 14px;
@@ -203,37 +316,39 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  opacity: 0.84;
+  opacity: 0.92;
 }
 
+/* Not accented. The accent marks where you are and what to press; spending it on a chip that says
+ * "Clip" on every card made the least important text on the screen the loudest. The chip is still
+ * distinguishable from its neighbours — it keeps full-strength text where they are dimmed. */
+
 .content-card-type {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  color: var(--color-accent);
+  border-color: var(--color-neutral);
+}
+
+.content-card-overlay .pill-muted {
+  color: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(6, 9, 13, 0.42);
 }
 
 /* ------------------------------------------------------------------ */
 /* Empty states + pagination                                           */
 /* ------------------------------------------------------------------ */
 
-.library-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-4);
-  background: var(--color-base-200);
-  border: var(--border);
-  border-radius: var(--radius);
-}
-
-/* Both sit on the thumbnail, in opposite corners. They used to share the top-right one, and since
- * delete is hidden until hover it appeared directly on top of the favourite at the moment the user
- * reached for it. */
+/* Both sit ON THE THUMBNAIL, in opposite top corners.
+ *
+ * They shared the top-right corner once, and since delete is hidden until hover it appeared
+ * directly on top of the favourite at the moment the user reached for it. Moving delete to the
+ * bottom then put it over the chips instead, because these are positioned against the card SHELL,
+ * not the thumbnail — `bottom` measured from the bottom of the whole card. Top corners keep both on
+ * the picture, where neither can land on text. */
 
 .content-card-favorite,
 .content-card-delete {
   position: absolute;
-  right: var(--space-2);
+  top: var(--space-2);
   z-index: 1;
   display: grid;
   place-items: center;
@@ -252,12 +367,36 @@
 }
 
 .content-card-favorite {
-  top: var(--space-2);
+  right: var(--space-2);
 }
 
 .content-card-favorite.active {
   color: var(--color-accent);
   border-color: var(--color-accent-line);
+}
+
+@media (max-width: 1100px) {
+  .library-toolbar {
+    align-items: stretch;
+  }
+
+  .library-filters,
+  .library-trash-filters {
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .library-filters .field,
+  .library-trash-filters .field {
+    min-width: 0;
+  }
+
+  .library-recent-grid,
+  .library-groups-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
 }
 
 @media (max-width: 760px) {
@@ -269,10 +408,15 @@
   .library-toolbar {
     padding: 12px;
   }
-}
 
-.library-empty p {
-  margin: 0;
+  .library-filters,
+  .library-trash-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-recent {
+    padding: 12px;
+  }
 }
 
 .library-pagination {
@@ -347,10 +491,14 @@
  * and the delete button as SIBLINGS — a button inside a button is invalid, and browsers disagree
  * about which one a click activates. */
 
+/* The grid item stretches to its row; without this the shell and the card inside it did not, so
+ * cards in the same row ended at different heights for no reason a reader can see. */
+
 .content-card-shell {
   position: relative;
   display: block;
   min-width: 0;
+  height: 100%;
 }
 
 .content-card-shell.selected .content-card {
@@ -374,7 +522,7 @@
  * into a minefield, but it must never be reachable by mouse only. */
 
 .content-card-delete {
-  bottom: var(--space-2);
+  left: var(--space-2);
   opacity: 0;
 }
 
@@ -397,7 +545,7 @@
 }
 
 .library-range {
-  margin-left: auto;
+  margin-left: 2px;
 }
 
 .library-selection {
@@ -486,4 +634,84 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* The wide card — the library's hero                                  */
+/* ------------------------------------------------------------------ */
+
+/* Last in the file on purpose. Every rule here overrides one of the card's own at the same
+ * specificity, so source order is the whole mechanism: `.content-card`'s column flex and
+ * `.content-card-shell`'s `display: block` are declared in two different places above, and a wide
+ * rule placed before either of them silently does nothing. */
+
+.content-card--wide {
+  display: grid;
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+/* The shell mirrors the card's columns so the overlay actions can be *placed* over the picture
+ * rather than offset to it by arithmetic. They are siblings of the card button, not children — a
+ * button inside a button is invalid — so without this they anchor to the shell's top-right, which in
+ * the wide variant is the middle of an empty body panel. */
+
+.content-card-shell--wide {
+  display: grid;
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+}
+
+.content-card-shell--wide > .content-card {
+  grid-area: 1 / 1 / 2 / 3;
+}
+
+.content-card-shell--wide > .content-card-favorite,
+.content-card-shell--wide > .content-card-delete,
+.content-card-shell--wide > .content-card-select {
+  position: static;
+  grid-area: 1 / 1 / 2 / 2;
+  align-self: start;
+  margin: var(--space-2);
+}
+
+.content-card-shell--wide > .content-card-favorite {
+  justify-self: end;
+}
+
+/* The review label sits on the picture, while the card itself remains the clickable control. */
+
+.content-card-shell--wide > .content-card-action {
+  grid-area: 1 / 1 / 2 / 2;
+  align-self: center;
+  justify-self: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.content-card--wide .content-card-thumb {
+  height: 100%;
+}
+
+.content-card--wide .content-card-body {
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 20px 22px;
+}
+
+.content-card--wide .content-card-title {
+  font-size: var(--text-h2);
+  white-space: normal;
+}
+
+@media (max-width: 760px) {
+  .content-card--wide,
+  .content-card-shell--wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-recent-grid,
+  .library-groups-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

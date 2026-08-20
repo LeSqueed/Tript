@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { BookmarkItem, ContentItem, RecordingState } from '../ipc/protocol';
-import { contentUrl } from '../ipc/endpoints';
+import { contentUrl, thumbnailUrl } from '../ipc/endpoints';
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
 import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
 import type { TimelineRegion } from './player/clipSeam';
@@ -47,6 +47,7 @@ export interface PlayerViewProps {
   /** The complete filtered/sorted library result set used for previous/next navigation. */
   navigationItems?: ContentItem[];
   onItemChange?(item: ContentItem): void;
+  onBack?(): void;
   /**
    * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns the
    * region list; a caller can alternatively supply regions for a read-only region view.
@@ -62,6 +63,7 @@ export function PlayerView({
   item: requestedItem,
   navigationItems,
   onItemChange,
+  onBack,
   regions: externalRegions,
   selectedRegionId: externalSelectedRegionId,
   onRegionSelect: externalOnRegionSelect,
@@ -126,6 +128,11 @@ export function PlayerView({
   const fallbackDuration = declaredDuration ?? DEFAULT_SESSION_SECONDS;
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
+  const [hasStartedPlayback, setHasStartedPlayback] = useState(false);
+
+  useEffect(() => {
+    setHasStartedPlayback(false);
+  }, [item?.filePath]);
 
   // The bound every marked segment lives inside — the media's own duration, and nothing else.
   // MEASURED BUG (this is the hole this resolution closes): `duration` above starts at
@@ -287,6 +294,15 @@ export function PlayerView({
 
   const toggleFullscreen = useCallback(() => {
     client.send('ToggleFullscreen', { enabled: true });
+    const player = playerRootRef.current;
+    if (!player || !document.fullscreenEnabled) {
+      return;
+    }
+    if (document.fullscreenElement === player) {
+      void document.exitFullscreen();
+    } else {
+      void player.requestFullscreen();
+    }
   }, [client]);
 
   const openClipDialog = useCallback(() => {
@@ -300,6 +316,14 @@ export function PlayerView({
   // marked until the out point lands.
   const [markInTime, setMarkInTime] = useState<number | null>(null);
   const canAdjustRegions = externalRegions === undefined;
+  const playerRootRef = useRef<HTMLElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(document.fullscreenElement === playerRootRef.current);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
 
   useEffect(() => {
     setMarkInTime(null);
@@ -471,7 +495,7 @@ export function PlayerView({
   if (!item) {
     return (
       <section className="player-view">
-        <p className="muted">No sessions.</p>
+        <p className="muted">No recordings.</p>
       </section>
     );
   }
@@ -479,7 +503,13 @@ export function PlayerView({
   const videoSrc = contentUrl(item.filePath);
 
   return (
-    <section className="player-view">
+    <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
+      <div className="player-header">
+        <Button variant="ghost" size="small" icon="chevronLeft" onClick={onBack}>
+          Back to library
+        </Button>
+        <span className="player-header-title">{item.title?.trim() || item.fileName}</span>
+      </div>
       <div className="video-frame">
         <video
           ref={videoRef}
@@ -487,23 +517,40 @@ export function PlayerView({
           // No `controls`: the browser paints those over the picture. The transport row below the
           // video is the control surface. tabIndex keeps the element keyboard-reachable, which
           // `controls` used to provide — the overlay's focus trap matches it by tabindex.
-          tabIndex={0}
-          aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
-          src={videoSrc}
-          onClick={playback.togglePlayPause}
+           tabIndex={0}
+           aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
+           src={videoSrc}
+           poster={thumbnailUrl(item.filePath)}
+           onClick={playback.togglePlayPause}
           onTimeUpdate={(event) => playback.onVideoTimeUpdate(event.currentTarget.currentTime)}
-          onDurationChange={(event) => playback.onVideoDuration(event.currentTarget.duration)}
-          onPlay={() => {
-            playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
+           onDurationChange={(event) => playback.onVideoDuration(event.currentTarget.duration)}
+           onPlay={() => {
+             setHasStartedPlayback(true);
+             playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
             playback.onVideoPlay();
           }}
           onPause={() => {
             playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
             playback.onVideoPause();
           }}
-          onEnded={playback.onVideoEnded}
-        />
-      </div>
+           onEnded={playback.onVideoEnded}
+           onError={() => setHasStartedPlayback(false)}
+         />
+         {!hasStartedPlayback && !playing && (
+           <button
+             type="button"
+             className="player-start-overlay"
+             aria-label="Play recording"
+              onClick={(event) => {
+                event.stopPropagation();
+                playback.togglePlayPause();
+              }}
+           >
+             <span className="player-start-icon" aria-hidden="true">&#9654;</span>
+             <span>Play recording</span>
+           </button>
+         )}
+       </div>
 
       {/* The console does not name the item: whatever is holding the player already does — the
           overlay's header, or the route's topbar heading. */}
@@ -539,58 +586,56 @@ export function PlayerView({
           timeline commits through `updateRegionBounds` → `dialog.updateRegion`, which clamps against
           the clippable duration, so no gesture here can produce a segment outside the media.
         */}
-        <ZoomedTimeline
-          currentTime={currentTime}
-          duration={duration}
-          window={clampWindow(viewWindow, duration)}
-          bookmarks={bookmarks}
-          regions={regions}
-          selectedRegionId={selectedRegionId}
-          markInTime={canAdjustRegions ? markInTime : null}
-          onWindowChange={setViewWindow}
-          onSeek={seek}
-          onRegionSelect={onRegionSelect}
-          onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
-        />
+        {!isFullscreen && (
+          <ZoomedTimeline
+            currentTime={currentTime}
+            duration={duration}
+            window={clampWindow(viewWindow, duration)}
+            bookmarks={bookmarks}
+            regions={regions}
+            selectedRegionId={selectedRegionId}
+            markInTime={canAdjustRegions ? markInTime : null}
+            onWindowChange={setViewWindow}
+            onSeek={seek}
+            onRegionSelect={onRegionSelect}
+            onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
+          />
+        )}
         </div>
-      </div>
-
-      <div className="player-clip-tools">
+        <div className="player-clip-tools">
         {canAdjustRegions && (
         <div className="player-clip-bar">
           <div className="player-clip-actions">
-          <span className="player-clip-bar-label">Segments</span>
+          <Button variant="primary" size="small"
+            onClick={markSegmentAtPlayhead}
+            disabled={!canMark}
+            aria-label={`Make a ${DEFAULT_REGION_SECONDS}-second clip around where you are`}
+            title={`A ${DEFAULT_REGION_SECONDS}s clip around where you are (M)`}>
+            Quick clip (M)
+          </Button>
           <Button variant="ghost" size="small"
             
             onClick={markIn}
             disabled={!canMark}
-            aria-label="Mark segment in point"
-            title="Set the segment's in point at the playhead (I)">
-            Mark in (I)
+            aria-label="Set the clip start"
+            title="Start a clip where you are (I)">
+            Set start (I)
           </Button>
           <Button variant="ghost" size="small"
             
             onClick={markOut}
             disabled={!canMark || markInTime === null}
-            aria-label="Mark segment out point"
-            title="Close the segment at the playhead (O)">
-            Mark out (O)
-          </Button>
-          <Button variant="ghost" size="small"
-            
-            onClick={markSegmentAtPlayhead}
-            disabled={!canMark}
-            aria-label="Mark segment around the playhead"
-            title={`Mark a ${DEFAULT_REGION_SECONDS}s segment around the playhead (M)`}>
-            Mark {DEFAULT_REGION_SECONDS}s (M)
+            aria-label="Set the clip end"
+            title="End the clip where you are (O)">
+            Set end (O)
           </Button>
           {markInTime !== null && (
             <Button variant="ghost" size="small"
               
               onClick={() => setMarkInTime(null)}
-              aria-label="Clear the in point"
+              aria-label="Clear the clip start"
             >
-              Clear in
+              Clear start
             </Button>
           )}
           </div>
@@ -600,21 +645,20 @@ export function PlayerView({
                 // marked against a length nobody has measured — the placeholder constant, or the
                 // content record's declared length, which has been seen overstating the file by 91s.
                 // The wait lasts as long as the video element takes to read the file's header.
-                'Waiting for the video length — segments can only be marked once the media reports how long it is.'
+                'Waiting for the video length — clips can only be set once the media reports how long it is.'
               : markInTime !== null
-              ? `In point at ${formatTime(markInTime)} — press O (or Mark out) at the playhead to close the segment.`
+              ? `Start at ${formatTime(markInTime)} — press O (or Set end) where you want the clip to end.`
               : regions.length === 0
-                ? 'No segments marked yet — press I at the in point, then O at the out point.'
-                : `${regions.length} segment${regions.length === 1 ? '' : 's'} marked — drag a segment or its edges on the timeline to adjust, then Create clip.`}
+                 ? 'Quick clip marks the moment, or press I to set a start, then O to set an end.'
+                 : `${regions.length} clip${regions.length === 1 ? '' : 's'} ready — drag one or its edges on the timeline to adjust.`}
           </span>
         </div>
         )}
 
-        <div className="player-footer">
+        {regions.length > 0 && <div className="player-footer">
         {/* Appears exactly when creating becomes possible, so the action group arrives as a unit.
             Its one home is here, beside the action it modifies — the clip dialog used to carry a
             second copy of the same setting under a different name. */}
-        {regions.length > 0 && (
           <div className="player-clip-mode" role="radiogroup" aria-label="Create as">
             <span className="player-clip-mode-label">Create as</span>
             <RadioOption
@@ -632,15 +676,14 @@ export function PlayerView({
               label="Separate clips"
             />
           </div>
-        )}
         <Button variant="primary" size="small"
           
           onClick={dialog.create}
           disabled={regions.length === 0 || clipInFlight}
-          title={regions.length === 0 ? 'Mark at least one segment first' : 'Create clips from marked segments'}
+          title={regions.length === 0 ? 'Set at least one clip first' : 'Create clips from the ones you set'}
           aria-describedby="player-clip-hint"
           aria-label="Create clips">
-          {clipInFlight ? 'Creating clips…' : 'Create Clips'}
+          {clipInFlight ? 'Creating clips…' : 'Create clips'}
         </Button>
         <Button variant="ghost" size="small"
           
@@ -649,11 +692,8 @@ export function PlayerView({
           aria-label="Open clip dialog">
           Adjust details
         </Button>
-        {bookmarks.length > 0 && (
-          <span className="player-footer-meta muted small">
-            {bookmarks.length} bookmark{bookmarks.length === 1 ? '' : 's'}
-          </span>
-        )}
+        </div>
+        }
         </div>
       </div>
 

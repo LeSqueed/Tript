@@ -173,4 +173,36 @@ public class SettingsResolverTests
         Assert.Null(resolved.Display);
         Assert.Equal(TimeSpan.FromSeconds(10), resolved.GameCaptureTimeout);
     }
+
+    // A game may capture differently from the rest: a title that will not hook wants the display
+    // layer even when the global asks for game capture only, and vice versa.
+    [Fact]
+    public void CaptureMethod_PerGameOverride_WinsOverTheGlobal()
+    {
+        var settings = new Settings();
+        settings.Capture.Method = DisplayCaptureMethod.Game;
+        settings.Game.GameList =
+        [
+            new GameSetting
+            {
+                Id = "Overwatch",
+                Name = "Overwatch",
+                CaptureMethodOverride = new GameCaptureMethodOverride { Method = DisplayCaptureMethod.Display },
+            },
+        ];
+
+        Assert.Equal(DisplayCaptureMethod.Display, SettingsResolver.Resolve(settings, "Overwatch").CaptureMethod);
+    }
+
+    [Fact]
+    public void CaptureMethod_WithoutAnOverride_InheritsTheGlobal()
+    {
+        var settings = new Settings();
+        settings.Capture.Method = DisplayCaptureMethod.Game;
+        settings.Game.GameList = [new GameSetting { Id = "Overwatch", Name = "Overwatch" }];
+
+        Assert.Equal(DisplayCaptureMethod.Game, SettingsResolver.Resolve(settings, "Overwatch").CaptureMethod);
+        // And a game nothing knows about still gets the global.
+        Assert.Equal(DisplayCaptureMethod.Game, SettingsResolver.Resolve(settings, "Unknown").CaptureMethod);
+    }
 }

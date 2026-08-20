@@ -75,12 +75,12 @@ export function BufferPage({
           onChange={(enabled) => update(page, { enabled })}
         />
       </label>
+      {/* Unconditional, because the old copy told the truth in one state and not the other: the
+        * disabled line said "nothing is kept in memory until you turn it on", which implies that
+        * turning it on would keep something. The recorder does not read these settings at all. */}
       <p className="settings-page-note">
-        {settings.enabled ? (
-          <>The buffer is enabled. It is a first-class setting surface; the alpha recorder does not act on it yet.</>
-        ) : (
-          <>The buffer is disabled — nothing is kept in memory until you turn it on.</>
-        )}
+        The rolling buffer is not implemented yet — the recorder does not read these settings. They
+        are stored, so what you set here holds until it does.
       </p>
 
       <Field label="Buffer duration" hint="How far back the rolling buffer reaches, in seconds.">

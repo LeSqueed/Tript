@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import './theme/theme.css';
+import './theme/utilities.css';
 import './app/app.css';
 import './components/ui/controls.css';
 import './components/ui/ui.css';
@@ -13,7 +14,7 @@ import './components/RecorderBar.css';
 import './components/LibraryView.css';
 import './components/PlayerView.css';
 import './components/player/clipDialog.css';
-import './components/TrashView.css';
+import './components/trash/trashList.css';
 import './components/SettingsView.css';
 import './components/ErrorBanner.css';
 

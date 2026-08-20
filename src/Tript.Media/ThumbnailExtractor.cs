@@ -23,6 +23,7 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
     // first present, and libobs renders the scene's clear colour until a frame arrives), and titles
     // fade in over the first moments.
     private static readonly TimeSpan SeekOffset = TimeSpan.FromSeconds(1);
+    private static readonly int[] PercentageOffsets = [5, 15, 30, 50];
 
     // The frame's width; the height follows the source's aspect ratio. 480 is a card in the
     // library grid at 2x, and keeps a JPEG in the tens of kilobytes. A source narrower than this is
@@ -35,28 +36,62 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     private readonly string _ffmpegPath;
+    private readonly string? _ffprobePath;
+    private readonly Lazy<MediaProbe?> _probe;
 
-    public FfmpegThumbnailExtractor(string ffmpegPath)
+    public FfmpegThumbnailExtractor(string ffmpegPath, string? ffprobePath = null)
     {
         _ffmpegPath = ffmpegPath;
+        _ffprobePath = ffprobePath;
+        _probe = new Lazy<MediaProbe?>(
+            () => _ffprobePath is null ? null : new MediaProbe(_ffprobePath),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public bool TryExtract(string sourcePath, string destinationPath)
     {
-        // A recording shorter than the seek offset produces no image, and the retry at frame 0 is
-        // what covers it — a two-second recording is a real thing a user can produce, and a half-
-        // second one is possible if they stop instantly. Measured on ffmpeg 8.x (a 0.5s H.264 file,
-        // -ss 1): the seek lands past the end, the filter graph passes no frame on, and the *exit
-        // code depends on the argument shape* — 234 for this command ("Nothing was written into
-        // output file, because at least one of its streams received no packets"), and 0 with an
-        // empty stderr if the pixel format is pinned instead.
-        if (TryExtractAt(sourcePath, destinationPath, SeekOffset))
-            return true;
+        var candidates = CandidateOffsets(sourcePath).ToList();
+        var fallback = candidates[^1];
 
-        return TryExtractAt(sourcePath, destinationPath, TimeSpan.Zero);
+        foreach (var offset in candidates)
+        {
+            // Frame zero is the deterministic fallback. Even an all-black recording still gets a
+            // thumbnail rather than a blank card.
+            if (TryExtractAt(sourcePath, destinationPath, offset, offset != fallback))
+                return true;
+        }
+
+        return false;
     }
 
-    private bool TryExtractAt(string sourcePath, string destinationPath, TimeSpan offset)
+    private IEnumerable<TimeSpan> CandidateOffsets(string sourcePath)
+    {
+        var candidates = new List<TimeSpan> { SeekOffset };
+        try
+        {
+            var duration = _probe.Value?.Probe(sourcePath).DurationSeconds;
+            if (duration is > 0 and var seconds && double.IsFinite(seconds))
+            {
+                candidates.AddRange(PercentageOffsets.Select(
+                    percentage => TimeSpan.FromSeconds(seconds * percentage / 100.0)));
+            }
+        }
+        catch (Exception)
+        {
+            // Fixed offsets below still cover files being written or files ffprobe cannot read yet.
+        }
+
+        candidates.Add(TimeSpan.Zero);
+        var seen = new HashSet<long>();
+        foreach (var candidate in candidates)
+        {
+            if (candidate < TimeSpan.Zero || !seen.Add(candidate.Ticks))
+                continue;
+            yield return candidate;
+        }
+    }
+
+    private bool TryExtractAt(string sourcePath, string destinationPath, TimeSpan offset, bool rejectBlack)
     {
         var arguments = new List<string>
         {
@@ -64,7 +99,9 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
             // inherited stdin can otherwise block it.
             "-nostdin",
             "-y",
-            "-loglevel", "error",
+            // blackframe reports the percentage of black pixels at info level. It is only a
+            // conservative rejection signal; the JPEG remains the source of truth.
+            "-loglevel", "info",
         };
 
         if (offset > TimeSpan.Zero)
@@ -85,7 +122,7 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
             "-an", "-sn", "-dn",
             // -2 keeps the aspect ratio and rounds the height to an even number, which the JPEG
             // encoder's chroma subsampling requires.
-            "-vf", $"scale={Width}:-2",
+            "-vf", $"blackframe=amount=98:threshold=32,scale={Width}:-2",
             // -update: image2 writes an image sequence by default and warns that the file name
             // carries no "%03d" pattern; -update tells it this is deliberately one file.
             "-f", "image2", "-update", "1",
@@ -103,7 +140,8 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
 
         // The output file is the authority, not the exit code (see above). A zero-length file is
         // also a failure: it is what a killed ffmpeg leaves behind.
-        if (outcome.Succeeded && HasContent(destinationPath))
+        if (outcome.Succeeded && HasContent(destinationPath)
+            && (!rejectBlack || !outcome.StandardError.Contains("blackframe", StringComparison.OrdinalIgnoreCase)))
             return true;
 
         // A failed attempt must not leave a partial file where the caller might publish it.

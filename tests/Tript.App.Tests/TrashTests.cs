@@ -69,7 +69,7 @@ public sealed class TrashTests : IDisposable
         Assert.Equal("Overwatch", entry.Game);
         Assert.True(entry.FileSizeBytes > 0);
         Assert.True(entry.DeletedAt > 0);
-        Assert.Equal(entry.DeletedAt + 24 * 3600, entry.PurgeAt);
+        Assert.Equal(entry.DeletedAt + 168 * 3600, entry.PurgeAt);
 
         // The mirror under files/ is what a restore reads: everything sits at the path it came from.
         var files = Path.Combine(EntryDirectory(entry.Id), "files");
@@ -225,7 +225,7 @@ public sealed class TrashTests : IDisposable
         _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/fresh.mp4" });
 
         var old = _host.TrashEntries().Single(entry => entry.FileName == "old.mp4");
-        BackdateEntry(old.Id, TimeSpan.FromHours(30));
+        BackdateEntry(old.Id, TimeSpan.FromHours(169));
 
         _host.PurgeExpiredTrash();
 

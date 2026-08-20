@@ -30,6 +30,7 @@ namespace Tript.App.Content;
 // "drop the whole cache" a single directory delete.
 internal sealed class ThumbnailStore
 {
+    private const string CacheVersion = "2";
     // A first render of a full page of cards arrives as a burst of concurrent requests, each a
     // cache miss. Unbounded, that is one ffmpeg per card at once, which on a recording machine
     // competes with the encoder for the same cores.
@@ -144,6 +145,7 @@ internal sealed class ThumbnailStore
                 return null;
 
             File.Move(temporary, cached, overwrite: true);
+            File.WriteAllText(VersionPath(cached), CacheVersion);
             return cached;
         }
         finally
@@ -164,6 +166,7 @@ internal sealed class ThumbnailStore
         try
         {
             File.Delete(PathFor(videoFileName));
+            File.Delete(VersionPath(PathFor(videoFileName)));
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -184,6 +187,10 @@ internal sealed class ThumbnailStore
             if (!image.Exists || image.Length == 0)
                 return false;
 
+            if (!File.Exists(VersionPath(cached))
+                || !string.Equals(File.ReadAllText(VersionPath(cached)), CacheVersion, StringComparison.Ordinal))
+                return false;
+
             var video = new FileInfo(videoPath);
             return !video.Exists || image.LastWriteTimeUtc >= video.LastWriteTimeUtc;
         }
@@ -192,6 +199,8 @@ internal sealed class ThumbnailStore
             return false;
         }
     }
+
+    private static string VersionPath(string cached) => $"{cached}.version";
 
     private object LockFor(string fileName)
     {

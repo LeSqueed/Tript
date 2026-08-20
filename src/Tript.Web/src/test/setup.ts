@@ -15,3 +15,8 @@ window.matchMedia = ((query: string): MediaQueryList => ({
   removeListener: () => {},
   dispatchEvent: () => false,
 })) as typeof window.matchMedia;
+
+// jsdom does not implement media playback, but player tests exercise pause transitions as part of
+// normal UI behavior. Keep the test output focused on real failures instead of repeating jsdom's
+// "Not implemented" warning for every player render.
+HTMLMediaElement.prototype.pause = () => {};

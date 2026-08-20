@@ -46,6 +46,39 @@ public sealed class ThumbnailExtractionTests
     }
 
     [Fact]
+    public void TryExtract_SkipsBlackCandidates_WhenALaterFrameIsUsable()
+    {
+        var source = CreateBlackThenColorSource("thumbnail-black-first.mp4");
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-black-first.jpg");
+        var extractor = new FfmpegThumbnailExtractor(MediaTestFixture.Binaries.Ffmpeg, MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+
+        var diagnostics = MediaTestFixture.Run(MediaTestFixture.Binaries.Ffmpeg,
+        [
+            "-hide_banner", "-i", destination, "-map", "0:v:0",
+            "-vf", "blackframe=amount=98:threshold=32", "-frames:v", "1", "-an", "-f", "null", "-",
+        ]);
+        Assert.DoesNotContain("blackframe", diagnostics, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryExtract_UsesTheFirstFrame_WhenEveryCandidateIsBlack()
+    {
+        var source = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-all-black.mp4");
+        MediaTestFixture.Run(MediaTestFixture.Binaries.Ffmpeg,
+        [
+            "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:size=320x240:rate=30:duration=2",
+            "-c:v", "libx264", "-g", "30", source,
+        ]);
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-all-black.jpg");
+        var extractor = new FfmpegThumbnailExtractor(MediaTestFixture.Binaries.Ffmpeg, MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+        Assert.True(new FileInfo(destination).Length > 0);
+    }
+
+    [Fact]
     public void TryExtract_ReturnsFalse_AndLeavesNoFile_ForASourceThatIsNotAVideo()
     {
         var source = Path.Combine(MediaTestFixture.ScratchRoot, "not-a-video.mp4");
@@ -117,5 +150,19 @@ public sealed class ThumbnailExtractionTests
         // -loglevel error on a clean run says nothing; the point is that the stderr read completed
         // rather than being left dangling by the wait.
         Assert.Equal(string.Empty, outcome.StandardError.Trim());
+    }
+
+    private static string CreateBlackThenColorSource(string name)
+    {
+        var path = Path.Combine(MediaTestFixture.ScratchRoot, name);
+        MediaTestFixture.Run(MediaTestFixture.Binaries.Ffmpeg,
+        [
+            "-hide_banner", "-y",
+            "-f", "lavfi", "-i", "color=c=black:size=320x240:rate=30:duration=1",
+            "-f", "lavfi", "-i", "color=c=red:size=320x240:rate=30:duration=4",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map", "[v]", "-c:v", "libx264", "-g", "30", "-pix_fmt", "yuv420p", path,
+        ]);
+        return path;
     }
 }

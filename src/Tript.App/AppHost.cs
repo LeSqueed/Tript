@@ -243,7 +243,7 @@ internal sealed class AppHost : IDisposable
     private IThumbnailExtractor? CreateThumbnailExtractor()
     {
         var tools = _libraryTools.Value;
-        return tools is null ? null : new FfmpegThumbnailExtractor(tools.Value.Ffmpeg);
+        return tools is null ? null : new FfmpegThumbnailExtractor(tools.Value.Ffmpeg, tools.Value.Ffprobe);
     }
 
     // ---- lifetime ----
@@ -821,6 +821,11 @@ internal sealed class AppHost : IDisposable
             {
                 recording,
                 game,
+                // When the current recording started, in unix seconds like every other time on this
+                // wire. Without it a UI that connects mid-session can only count from the moment it
+                // connected, which for an 8-hour recording is a confidently wrong number — worse
+                // than showing none.
+                startedAt = recording ? DateTimeToUnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
             },
         }, Wire.Options));
     }

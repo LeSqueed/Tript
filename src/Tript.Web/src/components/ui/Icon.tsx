@@ -61,8 +61,9 @@ const PATHS: Record<IconName, React.ReactNode> = {
   chevronRight: <path d="M9.5 6.5L15 12l-5.5 5.5" />,
   settings: (
     <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.6v2.6M12 18.8v2.6M4.9 6.8l2.2 1.3M16.9 15.9l2.2 1.3M4.9 17.2l2.2-1.3M16.9 8.1l2.2-1.3" />
+      <path d="M3.5 8.5h8M15.7 8.5h4.8M3.5 15.5h4M11.7 15.5h8.8" />
+      <circle cx="13.5" cy="8.5" r="2.2" />
+      <circle cx="9.5" cy="15.5" r="2.2" />
     </>
   ),
   library: (

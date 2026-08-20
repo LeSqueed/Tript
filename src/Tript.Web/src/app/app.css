@@ -1,31 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+/* A column with a definite height. The deleted .app-frame used to supply this; without it
+ * .app-content's `overflow: auto` has no height to scroll inside, so the document grows instead and
+ * the topbar scrolls off the top of the screen. */
+
 .app-shell {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   background: var(--color-base-100);
 }
 
-.app-frame {
-  display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-  height: 100%;
-}
-
-.app-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 12px 8px;
-  background: var(--color-rail);
-  border-right: 1px solid var(--color-line);
-}
+/* In the topbar now, not above a rail. */
 
 .app-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 14px;
+  flex: none;
+  position: absolute;
+  left: max(20px, calc((100vw - 1500px) / 2));
   color: var(--color-base-content);
 }
 
@@ -37,15 +31,15 @@
 
 .app-nav {
   display: flex;
-  flex-direction: column;
   gap: 2px;
+  margin-left: 100px;
+  margin-right: auto;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
   min-height: 32px;
   padding: 0 8px;
   background: transparent;
@@ -60,7 +54,7 @@
 }
 
 .nav-item:hover {
-  background: var(--color-rail-hover);
+  background: var(--color-nav-hover);
   color: var(--color-base-content);
 }
 
@@ -83,20 +77,10 @@
   color: var(--color-muted-strong);
 }
 
-.nav-badge {
-  margin-left: auto;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--color-base-300);
-  color: var(--color-muted-strong);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
 .app-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   background: var(--color-base-100);
@@ -105,34 +89,21 @@
 .app-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  position: relative;
+  gap: 20px;
   min-height: 52px;
-  padding: 8px 20px;
+  padding: 8px max(20px, calc((100vw - 1500px) / 2));
   background: var(--color-base-100);
   border-bottom: 1px solid var(--color-line);
 }
 
-.app-topbar h1 {
-  margin: 0;
+.app-topbar-context {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-base-content);
-  font-family: var(--font-sans);
-  font-size: var(--text-h1);
+  font-size: var(--text-body);
   font-weight: 600;
   letter-spacing: -0.01em;
-}
-
-/* The back affordance and the item's name are one line, not two. */
-
-.app-topbar-back {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.app-topbar-back h1 {
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -154,12 +125,9 @@
   padding-bottom: 20px;
 }
 
-/* While the player overlay is up, the library underneath stays mounted (that is how the user's
- * filters, sort, page and scroll position survive) but must not scroll behind the overlay. The shell
- * captures the offset on open and writes it back on close — see App.tsx. */
-
-.app-shell.player-open .app-content {
-  overflow: hidden;
+.app-content-player > .player-view {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* The token-less screen (see App.tsx). Not part of the shell grid — there is no shell. */
@@ -176,26 +144,13 @@
 }
 
 @media (max-width: 760px) {
-  .app-frame {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .app-rail {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    gap: 18px;
-    padding: 12px 14px;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-line);
-  }
-
   .app-brand {
+    position: static;
     padding: 0;
   }
 
   .app-nav {
+    margin-left: 8px;
     flex-direction: row;
     justify-content: flex-end;
     flex-wrap: wrap;

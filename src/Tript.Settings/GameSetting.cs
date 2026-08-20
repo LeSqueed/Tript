@@ -41,9 +41,20 @@ public sealed class GameSetting
     // A per-game override of the global quality settings (resolution, fps, encoder, quality).
     public GameQualityOverride? QualityOverride { get; set; }
 
+    // Per-game capture method: null means "inherit the global capture setting". A title that will
+    // not hook wants the display layer even when the global asks for game capture only, and a title
+    // whose window must never leak the desktop wants the opposite.
+    public GameCaptureMethodOverride? CaptureMethodOverride { get; set; }
+
     // Per-game telemetry integration toggles. Game telemetry is externally dictated — ports,
     // config formats — and each integration is gated by a per-game Enabled toggle.
     public GameIntegrationSettings Integrations { get; set; } = new();
+}
+
+// Per-game capture method: null means "inherit the global setting".
+public sealed class GameCaptureMethodOverride
+{
+    public DisplayCaptureMethod Method { get; set; }
 }
 
 // Per-game recording mode: null means "inherit the global setting".

@@ -57,7 +57,6 @@ export function SettingsView({ client }: { client: IpcClient }) {
           ))}
         </div>
         <div className="settings-body" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${page}`} tabIndex={0}>
-          <h2>{PAGES.find((p) => p.id === page)?.label}</h2>
           {!controller.hasSettings && (
             <p className="muted small">
               Waiting for the backend to push settings. The forms stay editable; changes are sent

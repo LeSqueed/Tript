@@ -72,20 +72,20 @@ function currentReadout(): string {
   return screen.getByTestId('transport-current').textContent ?? '';
 }
 
-/** Open the clip dialog through the real player's "Create clip" footer button. */
+/** Open the clip dialog through the real player's creation controls. */
 function openClipDialog(): void {
-  const button = screen.getByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement;
-  if (button.disabled) {
+  const button = screen.queryByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement | null;
+  if (!button || button.disabled) {
     const video = document.querySelector('video') as HTMLVideoElement | null;
     if (video && Number.isFinite(video.duration) && video.duration > 0) {
       act(() => {
-        fireEvent.click(screen.getByRole('button', { name: 'Mark segment around the playhead' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' }));
       });
     }
   }
   act(() => {
-    const current = screen.getByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement;
-    if (!current.disabled) {
+    const current = screen.queryByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement | null;
+    if (current && !current.disabled) {
       fireEvent.click(current);
     }
   });
@@ -169,7 +169,7 @@ function dragRegion(
 /** Mark a 10s segment around the playhead through the player's own control. */
 function markDefaultSegment(): void {
   act(() => {
-    fireEvent.click(screen.getByRole('button', { name: 'Mark segment around the playhead' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' }));
   });
 }
 
@@ -191,7 +191,7 @@ describe('clip dialog — default region from the playbar', () => {
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     expect(dialog).toBeTruthy();
-    const row = within(dialog).getByRole('button', { name: /Deselect region 1/ });
+    const row = within(dialog).getByRole('button', { name: /Deselect clip 1/ });
     // Default 10s centred on 42 → [37, 47].
     expect(row.textContent).toContain('0:37 – 0:47');
   });
@@ -201,7 +201,7 @@ describe('clip dialog — default region from the playbar', () => {
     seekTo(container, 98);
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    const row = within(dialog).getByRole('button', { name: /Deselect region 1/ });
+    const row = within(dialog).getByRole('button', { name: /Deselect clip 1/ });
     // Cursor 98, default 10s, clamped to the session → [90, 100] → "1:30 – 1:40".
     expect(row.textContent).toContain('1:30 – 1:40');
   });
@@ -221,11 +221,11 @@ describe('clip dialog — region list in the player', () => {
     renderPlayer();
     openClipDialog();
     let dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    expect(within(dialog).getAllByRole('button', { name: /(Select|Deselect) region 1/ }).length).toBe(1);
+    expect(within(dialog).getAllByRole('button', { name: /(Select|Deselect) clip 1/ }).length).toBe(1);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove region 1' }));
     dialog = screen.getByRole('dialog', { name: 'Create clip' });
     expect(within(dialog).queryByRole('button', { name: /(Select|Deselect) region/ })).toBeNull();
-    expect(within(dialog).getByText(/No regions yet/)).toBeTruthy();
+    expect(within(dialog).getByText(/No clips yet/)).toBeTruthy();
   });
 
   it('the region list shows each region with start/end', () => {
@@ -236,7 +236,7 @@ describe('clip dialog — region list in the player', () => {
     fireEvent.pointerUp(bar, { clientX: 42, pointerId: 1 });
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    expect(within(dialog).getByRole('button', { name: /Deselect region 1/ }).textContent).toContain(
+    expect(within(dialog).getByRole('button', { name: /Deselect clip 1/ }).textContent).toContain(
       '0:37 – 0:47',
     );
   });
@@ -299,34 +299,34 @@ describe('marking segments from the player (in/out points)', () => {
     expect(hint).toMatch(/press I/);
     expect(hint).toMatch(/then O/);
     // Out has nothing to close yet.
-    expect(screen.getByRole('button', { name: 'Mark segment out point' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', true);
   });
 
   it('the in/out buttons mark a segment between the two playhead positions', () => {
     const container = renderPlayer();
     seekTo(container, 20);
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Mark segment in point' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set the clip start' }));
     });
     // The half-finished mark is visible on the timeline, and Out is now available.
     expect(screen.getByTestId('timeline-mark-in')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Mark segment out point' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', false);
     seekTo(container, 40);
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Mark segment out point' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set the clip end' }));
     });
     expect(regionLabels(container)).toEqual(['Region 0:20–0:40']);
     // The in point is spent, and the hint now talks about adjusting.
     expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
-    expect(screen.getByTestId('player-clip-hint').textContent).toMatch(/1 segment marked/);
+    expect(screen.getByTestId('player-clip-hint').textContent).toMatch(/1 clip ready/);
   });
 
   it('closing a segment on the same frame marks nothing and keeps the in point standing', () => {
     const container = renderPlayer();
     seekTo(container, 20);
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Mark segment in point' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Mark segment out point' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set the clip start' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set the clip end' }));
     });
     expect(regionLabels(container)).toEqual([]);
     expect(screen.getByTestId('timeline-mark-in')).toBeTruthy();
@@ -384,8 +384,8 @@ describe('marking segments from the player (in/out points)', () => {
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     // The dialog reviews the marks; it does not restart from its own proposal.
-    expect(within(dialog).getAllByRole('button', { name: /(Select|Deselect) region \d/ })).toHaveLength(2);
-    expect(within(dialog).getByRole('button', { name: /(Select|Deselect) region 1/ }).textContent).toContain(
+    expect(within(dialog).getAllByRole('button', { name: /(Select|Deselect) clip \d/ })).toHaveLength(2);
+    expect(within(dialog).getByRole('button', { name: /(Select|Deselect) clip 1/ }).textContent).toContain(
       '0:15 – 0:25',
     );
   });
@@ -548,7 +548,7 @@ describe('adjusting a marked segment with the mouse', () => {
     dragRegion(container, 'end', 58, 70);
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    const endField = within(dialog).getByLabelText('Region 1 end, seconds') as HTMLInputElement;
+    const endField = within(dialog).getByLabelText('Clip 1 end, seconds') as HTMLInputElement;
     expect(Number(endField.value)).toBe(54);
     // Typing the same number is a no-op, which is the point: one seam, one result.
     fireEvent.change(endField, { target: { value: '54' } });
@@ -616,14 +616,14 @@ describe('segment looping in the player', () => {
     openClipDialog();
     // The proposed region is selected by default (the row reads "Deselect").
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    expect(within(dialog).getByRole('button', { name: /Deselect region 1/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Deselect clip 1/ })).toBeTruthy();
     // Clicking the region on the timeline deselects it.
     const regionButton = container.querySelector('.timeline-region') as HTMLElement;
     expect(regionButton).not.toBeNull();
     act(() => {
       fireEvent.click(regionButton);
     });
-    expect(within(dialog).queryByRole('button', { name: /Deselect region 1/ })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /Deselect clip 1/ })).toBeNull();
   });
 
   it('clicking a segment moves the playhead to its start; clicking again to deselect does not', () => {
@@ -799,13 +799,13 @@ describe('importProgress result surface in the player', () => {
 
 function markInAtPlayhead(): void {
   act(() => {
-    fireEvent.click(screen.getByRole('button', { name: 'Mark segment in point' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set the clip start' }));
   });
 }
 
 function markOutAtPlayhead(): void {
   act(() => {
-    fireEvent.click(screen.getByRole('button', { name: 'Mark segment out point' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set the clip end' }));
   });
 }
 
@@ -864,9 +864,8 @@ describe('segments stay inside the real media length', () => {
 
   it('does not open clip creation before a segment is marked', () => {
     renderPlayer(mockClient(), 3);
-    fireEvent.click(screen.getByRole('button', { name: 'Open clip dialog' }));
     expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Open clip dialog' })).toBeNull();
   });
 
   it('an out-of-bounds segment cannot be typed in the dialog either', () => {
@@ -874,7 +873,7 @@ describe('segments stay inside the real media length', () => {
     markDefaultSegment();
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    const endField = within(dialog).getByLabelText('Region 1 end, seconds') as HTMLInputElement;
+    const endField = within(dialog).getByLabelText('Clip 1 end, seconds') as HTMLInputElement;
     fireEvent.change(endField, { target: { value: '95' } });
     fireEvent.blur(endField);
     expect(regionLabels(container)).toEqual(['Region 0:00–0:08']);
@@ -905,9 +904,9 @@ describe('segments stay inside the real media length', () => {
 
     // All three gestures are refused — the buttons are disabled, and the keys (which bypass the
     // buttons) are refused by the model itself.
-    expect(screen.getByRole('button', { name: 'Mark segment in point' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Mark segment out point' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Mark segment around the playhead' })).toHaveProperty(
+    expect(screen.getByRole('button', { name: 'Set the clip start' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' })).toHaveProperty(
       'disabled',
       true,
     );
@@ -925,7 +924,7 @@ describe('segments stay inside the real media length', () => {
     // Nor can the declared length be smuggled to the backend by creating before the media loads.
     openClipDialog();
     expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Open clip dialog' })).toBeNull();
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
 
     // The media reports the real length. Now the same gestures work, against 9.13s.
@@ -957,8 +956,8 @@ describe('segments stay inside the real media length', () => {
     };
     const client = mockClient();
     const { container } = render(<PlayerView client={client} source={noLength} />);
-    expect(screen.getByRole('button', { name: 'Mark segment in point' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Mark segment around the playhead' })).toHaveProperty(
+    expect(screen.getByRole('button', { name: 'Set the clip start' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' })).toHaveProperty(
       'disabled',
       true,
     );
@@ -971,12 +970,12 @@ describe('segments stay inside the real media length', () => {
     // Clip creation stays closed until the media has a usable duration and a segment exists.
     openClipDialog();
     expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Open clip dialog' })).toBeNull();
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
 
     // Once the media reports its length, marking works against it.
     setVideoDuration(container, 12);
-    expect(screen.getByRole('button', { name: 'Mark segment around the playhead' })).toHaveProperty(
+    expect(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' })).toHaveProperty(
       'disabled',
       false,
     );

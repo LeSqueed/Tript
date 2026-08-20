@@ -49,7 +49,7 @@ public class SettingsRoundTripTests : IDisposable
         settings.Capture.Method = DisplayCaptureMethod.Display;
         settings.Capture.Display = "DP-1";
         settings.Capture.DisplayLabel = "Screen DP-1";
-        settings.Game.CaptureMode = GameCaptureMode.GameOnly;
+        settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
         _store.Save();
 
         var reloaded = new SettingsStore(_provider).Load();
@@ -66,15 +66,15 @@ public class SettingsRoundTripTests : IDisposable
         // The label only exists so a warning can name a monitor that is no longer attached, which
         // means it has to outlive the monitor being unplugged.
         Assert.Equal("Screen DP-1", reloaded.Capture.DisplayLabel);
-        Assert.Equal(GameCaptureMode.GameOnly, reloaded.Game.CaptureMode);
+        Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
     }
 
     // The trash retention is a stored setting with no UI yet, so the round trip is the only thing
-    // holding it: a default of 24 hours on a fresh model, and whatever the user set after a reload.
+    // holding it: a default of a week on a fresh model, and whatever the user set after a reload.
     [Fact]
     public void SaveThenLoad_RoundTripsTheTrashRetention()
     {
-        Assert.Equal(24, _store.Load().Recording.TrashRetentionHours);
+        Assert.Equal(168, _store.Load().Recording.TrashRetentionHours);
 
         _store.Load().Recording.TrashRetentionHours = 72;
         _store.Save();

@@ -88,7 +88,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
 
         <div className="clip-regions">
           <div className="clip-regions-header">
-            <span className="settings-subheading">Regions</span>
+            <span className="subheading">Clips</span>
             <span className="clip-regions-hint">
               {dialog.mode === 'combine'
                 ? `${dialog.regions.length} region${dialog.regions.length === 1 ? '' : 's'} → one video`
@@ -98,21 +98,21 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
               <Button variant="ghost" size="small"
                 
                 onClick={dialog.clearRegions}
-                aria-label="Clear all regions">
+                aria-label="Clear all clips">
                 Clear all
               </Button>
             )}
           </div>
           {dialog.regions.length === 0 ? (
             <p className="muted small">
-              No regions yet — mark a segment in the player: press I at the in point, then O at the out
-              point (or M for a {DEFAULT_REGION_SECONDS}s segment around the playhead). Close this
-              dialog to reach the timeline; marked segments stay put.
+              No clips yet — set one in the player: press I where it should start, then O where it
+              should end (or M for a {DEFAULT_REGION_SECONDS}s clip around where you are). Close this
+              dialog to reach the timeline; the clips you set stay put.
             </p>
           ) : (
             <p className="muted small">
-              Adjust a segment by typing its bounds, snapping them to the playhead, or dragging the
-              segment (or its edges) on the timeline. Marking more: I / O in the player.
+              Adjust a clip by typing its bounds, snapping them to where you are, or dragging the
+              clip (or its edges) on the timeline. More clips: I / O in the player.
             </p>
           )}
           <ul className="clip-region-list">
@@ -134,7 +134,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
 
         {dialog.audio.tracks.length > 0 && (
           <div className="clip-audio">
-            <span className="settings-subheading">Audio tracks</span>
+            <span className="subheading">Audio tracks</span>
             <p className="clip-field-hint">
               The recording carried {dialog.audio.tracks.length} track
               {dialog.audio.tracks.length === 1 ? '' : 's'} — adjust per-track volume or mute.
@@ -265,8 +265,8 @@ function RegionRow({
           type="button"
           className="clip-region-select"
           onClick={() => dialog.selectRegion(dialog.selectedRegionId === region.id ? null : region.id)}
-          aria-label={dialog.selectedRegionId === region.id ? `Deselect region ${index + 1}` : `Select region ${index + 1}`}
-          title="Select on timeline to loop while the playhead is inside it"
+          aria-label={dialog.selectedRegionId === region.id ? `Deselect clip ${index + 1}` : `Select clip ${index + 1}`}
+          title="Select on the timeline to loop it while you are inside it"
         >
           <span className="clip-region-index">{index + 1}</span>
           <span className="clip-region-times">
@@ -294,7 +294,7 @@ function RegionRow({
             max={Math.max(0, duration)}
             step={0.1}
             value={startField}
-            aria-label={`Region ${index + 1} start, seconds`}
+            aria-label={`Clip ${index + 1} start, seconds`}
             onChange={(event) => setDraft({ start: event.target.value, end: endField })}
             onBlur={commitDraft}
             onKeyDown={(event) => {
@@ -308,8 +308,8 @@ function RegionRow({
         <Button variant="ghost" size="small"
           
           onClick={() => snapTo('start')}
-          aria-label={`Set region ${index + 1} start to the playhead`}
-          title={`Set the start to the playhead (${formatTime(currentTime)})`}
+          aria-label={`Start clip ${index + 1} where you are`}
+          title={`Start it where you are (${formatTime(currentTime)})`}
         >
           Start ← {formatTime(currentTime)}
         </Button>
@@ -322,7 +322,7 @@ function RegionRow({
             max={Math.max(0, duration)}
             step={0.1}
             value={endField}
-            aria-label={`Region ${index + 1} end, seconds`}
+            aria-label={`Clip ${index + 1} end, seconds`}
             onChange={(event) => setDraft({ start: startField, end: event.target.value })}
             onBlur={commitDraft}
             onKeyDown={(event) => {
@@ -336,8 +336,8 @@ function RegionRow({
         <Button variant="ghost" size="small"
           
           onClick={() => snapTo('end')}
-          aria-label={`Set region ${index + 1} end to the playhead`}
-          title={`Set the end to the playhead (${formatTime(currentTime)})`}
+          aria-label={`End clip ${index + 1} where you are`}
+          title={`End it where you are (${formatTime(currentTime)})`}
         >
           End ← {formatTime(currentTime)}
         </Button>

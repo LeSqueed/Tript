@@ -13,7 +13,11 @@
 //     component ever has to remember that.
 
 import type { TrashEntry } from '../../ipc/protocol';
-import { formatBytes } from '../library/libraryModel';
+import {
+  DATE_RANGE_SECONDS,
+  formatBytes,
+  type LibraryQuery,
+} from '../library/libraryModel';
 import { formatTime } from '../player/timelineModel';
 
 /** What the backend defaults to, used until the first `trash` push says otherwise. */
@@ -70,6 +74,37 @@ export function sortTrashEntries(entries: readonly TrashEntry[]): TrashEntry[] {
   });
 }
 
+/** Apply the Library's useful catalogue dimensions to deleted entries too. */
+export function filterTrashEntries(
+  entries: readonly TrashEntry[],
+  query: LibraryQuery,
+  nowSeconds: number,
+): TrashEntry[] {
+  const window = DATE_RANGE_SECONDS[query.range];
+  const search = query.search.trim().toLowerCase();
+  return [...entries]
+    .filter((entry) => {
+      if (query.type === 'clips' && entry.contentType !== 'clip') return false;
+      if (query.type === 'sessions' && entry.contentType === 'clip') return false;
+      if (query.game !== '__any_game__') {
+        const game = typeof entry.game === 'string' && entry.game.trim().length > 0 ? entry.game.trim() : null;
+        if (query.game === '__no_game__' ? game !== null : game?.toLowerCase() !== query.game.toLowerCase()) {
+          return false;
+        }
+      }
+      if (window !== null && (entry.deletedAt <= 0 || entry.deletedAt < nowSeconds - window)) return false;
+      if (search.length > 0 && ![entry.title, entry.fileName, entry.game].filter(Boolean).join(' ').toLowerCase().includes(search)) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (query.sort === 'oldest') return (a.deletedAt ?? 0) - (b.deletedAt ?? 0);
+      if (query.sort === 'game') return (a.game ?? '').localeCompare(b.game ?? '') || (b.deletedAt ?? 0) - (a.deletedAt ?? 0);
+      return (b.deletedAt ?? 0) - (a.deletedAt ?? 0);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Reading an entry
 // ---------------------------------------------------------------------------
@@ -90,7 +125,7 @@ export function trashTypeLabel(entry: TrashEntry): string {
     case 'buffer':
       return 'Buffer';
     default:
-      return 'Session';
+      return 'Recording';
   }
 }
 

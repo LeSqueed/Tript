@@ -95,7 +95,7 @@ describe('clip dialog — default region', () => {
     act(() => dialog().openDialog(session, 42));
     expect(dialog().regions).toHaveLength(1);
     expect(dialog().regions[0]).toMatchObject({ start: 37, end: 47 });
-    const rows = screen.getAllByRole('button', { name: /(Select|Deselect) region 1/ });
+    const rows = screen.getAllByRole('button', { name: /(Select|Deselect) clip 1/ });
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain('0:37 – 0:47');
   });
@@ -104,7 +104,7 @@ describe('clip dialog — default region', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
     expect(dialog().selectedRegionId).toBe(dialog().regions[0].id);
-    const row = screen.getByRole('button', { name: /Deselect region 1/ });
+    const row = screen.getByRole('button', { name: /Deselect clip 1/ });
     expect(row).toBeTruthy();
   });
 });
@@ -201,7 +201,7 @@ describe('clip dialog — marking segments (the in/out path from the player)', (
     expect(dialog().regions).toHaveLength(1);
     act(() => dialog().openDialog(session, 10));
     expect(dialog().regions).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Clear all regions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all clips' }));
     expect(dialog().regions).toHaveLength(0);
     expect(dialog().selectedRegionId).toBeNull();
   });
@@ -218,10 +218,10 @@ describe('clip dialog — marking segments (the in/out path from the player)', (
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
     act(() => dialog().removeRegion(dialog().regions[0].id));
-    const empty = screen.getByText(/No regions yet/).textContent ?? '';
+    const empty = screen.getByText(/No clips yet/).textContent ?? '';
     expect(empty).toMatch(/press I/);
     expect(empty).toMatch(/then O/);
-    expect(empty).toMatch(/M for a 10s segment/);
+    expect(empty).toMatch(/M for a 10s clip/);
   });
 });
 
@@ -229,61 +229,61 @@ describe('clip dialog — adjusting a region', () => {
   it('typed bounds change the region, including the seeded default', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
-    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '30' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
-    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '52.5' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 start, seconds'), { target: { value: '30' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 end, seconds'), { target: { value: '52.5' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 end, seconds'));
     expect(dialog().regions[0]).toMatchObject({ start: 30, end: 52.5 });
-    expect(screen.getByRole('button', { name: /Deselect region 1/ }).textContent).toContain('0:30 – 0:52');
+    expect(screen.getByRole('button', { name: /Deselect clip 1/ }).textContent).toContain('0:30 – 0:52');
   });
 
   it('an end typed before the start parks against it instead of inverting the region', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
-    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '10' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 end, seconds'), { target: { value: '10' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 end, seconds'));
     expect(dialog().regions[0]).toMatchObject({ start: 37, end: 37 + MIN_REGION_SECONDS });
   });
 
   it('bounds beyond the session are clamped to it', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
-    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '500' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
-    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '-20' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 end, seconds'), { target: { value: '500' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 start, seconds'), { target: { value: '-20' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 start, seconds'));
     expect(dialog().regions[0]).toMatchObject({ start: 0, end: 100 });
   });
 
   it('a blank or unparsable field leaves the region alone', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
-    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 start, seconds'), { target: { value: '' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 start, seconds'));
     expect(dialog().regions[0]).toMatchObject({ start: 37, end: 47 });
   });
 
   it('snapping the start to the playhead moves only the start', () => {
     const { dialog } = probe(undefined, 40);
     act(() => dialog().openDialog(session, 42));
-    fireEvent.click(screen.getByRole('button', { name: 'Set region 1 start to the playhead' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start clip 1 where you are' }));
     expect(dialog().regions[0]).toMatchObject({ start: 40, end: 47 });
   });
 
   it('snapping the end to the playhead moves only the end', () => {
     const { dialog } = probe(undefined, 40);
     act(() => dialog().openDialog(session, 42));
-    fireEvent.click(screen.getByRole('button', { name: 'Set region 1 end to the playhead' }));
+    fireEvent.click(screen.getByRole('button', { name: 'End clip 1 where you are' }));
     expect(dialog().regions[0]).toMatchObject({ start: 37, end: 40 });
   });
 
   it('an adjusted region reaches CreateClip with the corrected bounds', () => {
     const { dialog, sent } = probe();
     act(() => dialog().openDialog(session, 42));
-    fireEvent.change(screen.getByLabelText('Region 1 start, seconds'), { target: { value: '20' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 start, seconds'));
-    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '30' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 start, seconds'), { target: { value: '20' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 start, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 end, seconds'), { target: { value: '30' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 end, seconds'));
     act(() => dialog().create());
     const payload = sent[0].params as Record<string, unknown>;
     expect(payload.segments).toEqual([{ startTime: 20, endTime: 30 }]);
@@ -537,8 +537,8 @@ describe('clip dialog — the clippable duration', () => {
   it('clamps a typed bound to the media length, not the declared one', () => {
     const { dialog } = boundedProbe(8);
     act(() => dialog().openDialog(session, 4));
-    fireEvent.change(screen.getByLabelText('Region 1 end, seconds'), { target: { value: '95' } });
-    fireEvent.blur(screen.getByLabelText('Region 1 end, seconds'));
+    fireEvent.change(screen.getByLabelText('Clip 1 end, seconds'), { target: { value: '95' } });
+    fireEvent.blur(screen.getByLabelText('Clip 1 end, seconds'));
     expect(dialog().regions[0]).toMatchObject({ end: 8 });
     expect(dialog().regions[0].start).toBeGreaterThanOrEqual(0);
   });

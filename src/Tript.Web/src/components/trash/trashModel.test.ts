@@ -92,7 +92,7 @@ describe('reading an entry', () => {
   });
 
   it('labels what the entry was', () => {
-    expect(trashTypeLabel(entry({ id: 'a' }))).toBe('Session');
+    expect(trashTypeLabel(entry({ id: 'a' }))).toBe('Recording');
     expect(trashTypeLabel(entry({ id: 'a', contentType: 'clip' }))).toBe('Clip');
     expect(trashTypeLabel(entry({ id: 'a', contentType: 'buffer' }))).toBe('Buffer');
   });

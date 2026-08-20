@@ -6,10 +6,13 @@
 //
 //   cd src/Tript.Web && npm run shots
 //
-// Needs a built app in dist/<config>: `make shell` (or `make linux`) first.
+// Needs a built app host in dist/<config>: `make shell` (or `make linux`) first. The *frontend* is
+// rebuilt and staged here on every run, because the host serves it from dist/<config>/dist — a
+// capture taken against a stale bundle shows the previous design and reads exactly like proof that
+// the current one is fine.
 
-import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
 
@@ -17,12 +20,40 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const CONFIG = process.env.CONFIG ?? 'Debug';
 const HOST_DIR = join(ROOT, 'dist', CONFIG);
 const OUT = join(ROOT, 'docs', 'shots');
+/**
+ * A settings file of this run's own, deleted first so every capture is of a *fresh install*.
+ *
+ * Without it the host reads the developer's own settings, and the settings file stores every
+ * property — so the defaults in force the first time anyone launched are frozen into it. A trash
+ * screen read "kept for 1 day" through a whole review after the default became a week, because the
+ * file still held the old value and the capture was of that install, not of the product.
+ */
+const SETTINGS = join(ROOT, 'docs', 'shots-settings.json');
 const VIEWPORT = { width: 1440, height: 900 };
 /** The width below which the player uses the overlay rather than the full-size route. */
 const COMPACT = { width: 1000, height: 800 };
+const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const HOST = process.platform === 'win32' ? 'Tript.App.exe' : './Tript.App';
+
+/** Build the frontend and stage it where the host serves it from. */
+function buildFrontend(): void {
+  const web = join(import.meta.dirname, '..');
+  const built = spawnSync(NPM, ['run', 'build'], {
+    cwd: web,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (built.status !== 0) {
+    throw new Error('frontend build failed — captures would show the previous bundle');
+  }
+  const served = join(HOST_DIR, 'dist');
+  rmSync(served, { recursive: true, force: true });
+  cpSync(join(web, 'dist'), served, { recursive: true });
+}
 
 function startHost(): Promise<{ url: string; stop: () => void }> {
-  const child = spawn('./Tript.App', ['--fake-recorder'], {
+  rmSync(SETTINGS, { force: true });
+  const child = spawn(HOST, ['--fake-recorder', '--settings-path', SETTINGS], {
     cwd: HOST_DIR,
     env: { ...process.env, DOTNET_ROOT: process.env.DOTNET_ROOT ?? `${process.env.HOME}/.dotnet` },
   });
@@ -59,6 +90,7 @@ async function main(): Promise<void> {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
 
+  buildFrontend();
   const host = await startHost();
   console.log(`host up: ${host.url.replace(/k=.*/, 'k=<key>')}`);
   const browser = await chromium.launch();
@@ -83,14 +115,21 @@ async function main(): Promise<void> {
         await markButton.click();
         await shoot(page, 'player-with-segment');
       }
-      await page.keyboard.press('Escape');
+      // At this width the player is a route, so Escape does not close it — take the way back the
+      // topbar offers.
+      await page.getByRole('button', { name: 'Library', exact: true }).click();
       await page.waitForTimeout(300);
     } else {
       console.log('  (no content — put an .mp4 in ~/Videos/Tript/sessions to capture the player)');
     }
 
-    await byName(page, 'Trash').click();
-    await shoot(page, 'trash');
+    // Trash is a library filter now, not a destination.
+    const trashFilter = page.getByRole('radio', { name: /^Trash/ });
+    if (await trashFilter.count()) {
+      await trashFilter.click();
+      await shoot(page, 'trash');
+      await page.getByRole('radio', { name: 'All' }).click();
+    }
     await byName(page, 'Settings').click();
     await shoot(page, 'settings');
     await page.close();
@@ -98,13 +137,13 @@ async function main(): Promise<void> {
     const compact = await browser.newPage({ viewport: COMPACT, deviceScaleFactor: 2 });
     await compact.goto(host.url, { waitUntil: 'networkidle' });
     await shoot(compact, 'library-compact');
-    // Below the breakpoint the player is the overlay rather than the route — the presentation that
-    // differs most, and the one no capture used to cover.
+    // Below the breakpoint the player remains inside the shell too; capture the compact layout where
+    // the transport and clip actions have the least room.
     const compactCard = compact.locator('.content-card').first();
     if (await compactCard.count()) {
       await compactCard.click();
       await compact.waitForTimeout(600);
-      await shoot(compact, 'player-compact-overlay');
+      await shoot(compact, 'player-compact');
     }
     await compact.close();
   } finally {

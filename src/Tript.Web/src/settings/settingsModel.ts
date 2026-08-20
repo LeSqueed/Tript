@@ -4,7 +4,8 @@
 // camelCase-serialized). The `settings` message carries this whole object; `UpdateSettings` carries
 // a partial.
 
-/** Recording mode — Session, Buffer, or Hybrid (both at once). Hybrid is the default. */
+/** Recording mode — Session, Buffer, or Hybrid (both at once). Session is the default, and
+ * the only one the recorder implements today. */
 export type RecordingMode = 'Session' | 'Buffer' | 'Hybrid';
 
 /**
@@ -148,7 +149,11 @@ export interface CaptureSettings {
 }
 
 /** How the game-capture source behaves. GameOnly selects game capture on the detected process. */
-export type GameCaptureMode = 'Auto' | 'GameOnly';
+
+/** Per-game capture method; absent means "inherit the global Capture setting". */
+export interface GameCaptureMethodOverride {
+  method: DisplayCaptureMethod;
+}
 
 export interface GameRecordingModeOverride {
   mode: RecordingMode;
@@ -179,13 +184,13 @@ export interface GameSetting {
   executable?: string | null;
   iconId?: string | null;
   recordingModeOverride?: GameRecordingModeOverride | null;
+  captureMethodOverride?: GameCaptureMethodOverride | null;
   qualityOverride?: GameQualityOverride | null;
   integrations: GameIntegrationSettings;
   [key: string]: unknown;
 }
 
 export interface GameSettings {
-  captureMode: GameCaptureMode;
   /** How long game capture waits for the game's window before falling back, in seconds. */
   gameCaptureTimeout: number;
   gameList: GameSetting[];

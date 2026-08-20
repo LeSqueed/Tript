@@ -8,16 +8,6 @@
   margin: 0 auto;
 }
 
-.trash-header {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-}
-
-.trash-header h2 {
-  margin: 0;
-}
-
 .trash-retention {
   margin-left: auto;
 }

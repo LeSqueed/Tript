@@ -98,6 +98,14 @@ async function main(): Promise<void> {
     const compact = await browser.newPage({ viewport: COMPACT, deviceScaleFactor: 2 });
     await compact.goto(host.url, { waitUntil: 'networkidle' });
     await shoot(compact, 'library-compact');
+    // Below the breakpoint the player is the overlay rather than the route — the presentation that
+    // differs most, and the one no capture used to cover.
+    const compactCard = compact.locator('.content-card').first();
+    if (await compactCard.count()) {
+      await compactCard.click();
+      await compact.waitForTimeout(600);
+      await shoot(compact, 'player-compact-overlay');
+    }
     await compact.close();
   } finally {
     await browser.close();

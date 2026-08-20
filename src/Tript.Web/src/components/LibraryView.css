@@ -325,7 +325,7 @@
 }
 
 .player-overlay-body {
-  overflow: auto;
+  overflow: hidden;
   padding: var(--space-4);
 }
 

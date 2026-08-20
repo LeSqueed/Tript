@@ -119,12 +119,6 @@
   gap: var(--space-3);
 }
 
-.settings-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-accent);
-}
-
 /* ------------------------------------------------------------------ */
 /* Actions                                                             */
 /* ------------------------------------------------------------------ */
@@ -222,11 +216,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.settings-range {
-  width: 120px;
-  accent-color: var(--color-accent);
 }
 
 .audio-source-volume-value {

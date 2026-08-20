@@ -1,10 +1,23 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+/* A column, not a stack: the console and the clip tools take the height they need and the picture
+ * takes what is left, so the controls can never be pushed off screen no matter what is added to
+ * them. This replaces a `max-height: calc(100vh - 365px)` whose subtrahend was measured by hand and
+ * would drift the moment a row changed. */
+
 .player-view {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   max-width: 1180px;
+  min-height: 0;
+  height: 100%;
   margin: 0 auto;
+}
+
+.player-console,
+.player-clip-tools {
+  flex: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -22,27 +35,29 @@
   border-radius: 10px;
 }
 
-.player-nav {
-  display: flex;
-  gap: var(--space-2);
-  justify-content: flex-end;
-}
-
 .video-frame {
+  flex: 1 1 auto;
+  /* A flex item will not shrink below its content's natural size without this. */
+  min-height: 0;
   background: #000;
   border: var(--border);
   border-radius: 10px;
   overflow: hidden;
 }
 
+/* Both containers hand the player a definite height, which is what lets the picture flex. */
+
+.app-content-player,
+.player-overlay-body {
+  display: flex;
+  min-height: 0;
+}
+
 .video-element {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  /* Capped against the viewport so the console AND the clip actions below it stay on screen. The
-   * subtracted height is the chrome around the picture: overlay header, both gaps, the console and
-   * the clip tools. Uncapped, a 16:9 picture is 664px at 1440x900 and buries all of it. */
-  max-height: calc(100vh - 365px);
+  height: 100%;
+  /* The frame decides the height; the picture keeps its own ratio inside it. */
   object-fit: contain;
   background: #000;
   cursor: pointer;
@@ -76,23 +91,6 @@
 
 /* A native select, deliberately: a hand-built menu here would be decoration, and this one is
  * keyboard- and screen-reader-correct for free. */
-
-.transport-speed {
-  padding: 4px 6px;
-  background: var(--color-base-300);
-  color: var(--color-base-content);
-  border: var(--border);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-
-.transport-speed:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
 
 .transport-time {
   font-family: var(--font-mono);

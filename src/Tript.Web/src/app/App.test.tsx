@@ -10,6 +10,23 @@ import { App } from './App';
 import { MockWebSocket } from '../ipc/test/mockWebSocket';
 import { captureSessionToken } from '../ipc/sessionToken';
 
+/**
+ * Make this test's window narrow. The setup stub reports "not compact", so a player opened at
+ * desktop width is the full-size route; the overlay is what narrow windows get. Call before render.
+ */
+function compactWindow(): void {
+  window.matchMedia = ((query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
 /** Stands in for the 256-bit token the host mints per launch. */
 const TOKEN = 'f00dcafe1234567890';
 
@@ -141,7 +158,35 @@ describe('App shell', () => {
     expect(screen.getByRole('radio', { name: 'Clips', checked: false })).toBeTruthy();
   });
 
+  it('opens the player as a route at desktop width, keeping the library mounted', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+
+    // The player is on the page...
+    expect(document.querySelector('.player-view')).not.toBeNull();
+    // ...as a route, not as the overlay layer.
+    expect(screen.queryByTestId('player-overlay')).toBeNull();
+    // ...and the library is still mounted underneath, merely hidden, so its state survives.
+    const library = document.querySelector('.library-view');
+    expect(library).not.toBeNull();
+    expect(library?.closest('[hidden]')).not.toBeNull();
+    // The topbar names the item and offers the way back.
+    expect(screen.getByRole('button', { name: '← Library' })).toBeTruthy();
+  });
+
+  it('returns from the player route to the library', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '← Library' }));
+
+    expect(document.querySelector('.player-view')).toBeNull();
+    expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
+  });
+
   it('opens the player as an overlay over the library and closes it with Escape', () => {
+    compactWindow();
     renderApp();
     connect();
 
@@ -166,6 +211,7 @@ describe('App shell', () => {
   });
 
   it('closes the overlay with its close affordance', () => {
+    compactWindow();
     renderApp();
     connect();
 
@@ -177,6 +223,7 @@ describe('App shell', () => {
   });
 
   it('raises the overlay on the shell\'s single content source, without re-asking the backend', () => {
+    compactWindow();
     renderApp();
     connect();
     const ws = activeSocket();
@@ -192,6 +239,7 @@ describe('App shell', () => {
   });
 
   it('returns to the same filter and page state after the overlay closes', () => {
+    compactWindow();
     renderApp();
     connect();
 

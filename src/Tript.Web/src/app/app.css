@@ -122,11 +122,33 @@
   letter-spacing: -0.01em;
 }
 
+/* The back affordance and the item's name are one line, not two. */
+
+.app-topbar-back {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-topbar-back h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .app-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding: 20px 20px 32px;
+}
+
+/* The player route sizes itself to the column rather than scrolling inside it. */
+
+.app-content-player {
+  overflow: hidden;
+  padding-bottom: 20px;
 }
 
 /* While the player overlay is up, the library underneath stays mounted (that is how the user's

@@ -43,27 +43,35 @@
   --color-error: #f87171;
 
   /* Structure */
-  --radius: 8px;
+  --radius: 6px;
   --radius-sm: 4px;
-  --border: 1px solid #242e3b;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --border: 1px solid var(--color-line);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-  --motion-fast: 120ms;
-  --motion-standard: 180ms;
+
+  /* Motion — functional feedback for state and hover. The one ambient exception is the mark's
+   * snap below, which is the logo's identity rather than UI decoration. */
+  --motion-fast: 100ms;
+  --motion-standard: 160ms;
+  --motion-ease-out: cubic-bezier(0.2, 0, 0, 1);
   --motion-snap: 1800ms;
 
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  font-size: 14px;
+  /* Typography — one sans stack for everything; the mono stack is reserved for timecodes, where
+   * digits must not jitter as the playhead moves. No serif ships. */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --text-h1: 19px;
+  --text-h2: 15px;
+  --text-body: 14px;
+
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 

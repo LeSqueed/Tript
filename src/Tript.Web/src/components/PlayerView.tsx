@@ -226,6 +226,7 @@ export function PlayerView({
   // src change — but the control needs the value to render, so this is the source of truth.
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   // Where to return to on unmute. Dragging the slider to zero is a mute, and without a remembered
   // level unmuting from there leaves the button claiming sound while nothing plays.
   const lastAudibleVolume = useRef(1);
@@ -237,7 +238,11 @@ export function PlayerView({
     }
     video.volume = volume;
     video.muted = muted;
-  }, [volume, muted]);
+    video.playbackRate = playbackRate;
+    // Loading a source resets playbackRate to defaultPlaybackRate, so writing only the former
+    // would drop back to 1x on the next session. Volume needs no such care — it persists.
+    video.defaultPlaybackRate = playbackRate;
+  }, [volume, muted, playbackRate, item]);
 
   const changeVolume = useCallback((next: number) => {
     setVolume(next);
@@ -510,8 +515,10 @@ export function PlayerView({
         muted={muted}
         onTogglePlayPause={playback.togglePlayPause}
         onToggleFullscreen={toggleFullscreen}
+        playbackRate={playbackRate}
         onVolumeChange={changeVolume}
         onToggleMute={toggleMute}
+        onPlaybackRateChange={setPlaybackRate}
       />
 
       <div className="timeline-stack">

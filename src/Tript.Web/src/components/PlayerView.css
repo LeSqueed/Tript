@@ -79,6 +79,26 @@
   accent-color: var(--color-accent);
 }
 
+/* A native select, deliberately: a hand-built menu here would be decoration, and this one is
+ * keyboard- and screen-reader-correct for free. */
+
+.transport-speed {
+  padding: 4px 6px;
+  background: var(--color-base-300);
+  color: var(--color-base-content);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.transport-speed:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 .transport-time {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

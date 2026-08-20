@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { TransportBar, type TransportBarProps } from './TransportBar';
+import { PLAYBACK_RATES, TransportBar, type TransportBarProps } from './TransportBar';
 
 afterEach(cleanup);
 
@@ -16,10 +16,12 @@ function renderBar(overrides: Partial<TransportBarProps> = {}) {
     duration: 100,
     volume: 1,
     muted: false,
+    playbackRate: 1,
     onTogglePlayPause: vi.fn(),
     onToggleFullscreen: vi.fn(),
     onVolumeChange: vi.fn(),
     onToggleMute: vi.fn(),
+    onPlaybackRateChange: vi.fn(),
     ...overrides,
   };
   render(<TransportBar {...props} />);
@@ -47,6 +49,28 @@ describe('TransportBar', () => {
   it('shows the slider at zero while muted', () => {
     renderBar({ muted: true, volume: 0.8 });
     expect((screen.getByLabelText('Volume') as HTMLInputElement).value).toBe('0');
+  });
+
+  it('offers speeds either side of normal', () => {
+    renderBar();
+    const speeds = [...(screen.getByLabelText('Playback speed') as HTMLSelectElement).options].map(
+      (option) => Number(option.value),
+    );
+    expect(speeds).toEqual([...PLAYBACK_RATES]);
+    expect(speeds.some((rate) => rate < 1)).toBe(true);
+    expect(speeds.some((rate) => rate > 1)).toBe(true);
+    expect(speeds).toContain(1);
+  });
+
+  it('reports a chosen speed', () => {
+    const props = renderBar();
+    fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '0.5' } });
+    expect(props.onPlaybackRateChange).toHaveBeenCalledWith(0.5);
+  });
+
+  it('shows the speed currently in effect', () => {
+    renderBar({ playbackRate: 2 });
+    expect((screen.getByLabelText('Playback speed') as HTMLSelectElement).value).toBe('2');
   });
 
   it('still carries play/pause and the time readout', () => {

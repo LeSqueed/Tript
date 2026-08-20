@@ -419,6 +419,29 @@ describe('region selection seam (T9)', () => {
     expect(video.volume).toBeCloseTo(0.7);
   });
 
+  it('applies a chosen playback speed to the media element', () => {
+    renderPlayer();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '0.5' } });
+    });
+    expect((document.querySelector('video') as HTMLVideoElement).playbackRate).toBeCloseTo(0.5);
+  });
+
+  it('keeps the chosen speed when moving to another session', () => {
+    // playbackRate resets to defaultPlaybackRate whenever a source loads, so unlike volume it is
+    // not enough to set it once — both have to be written or the speed silently returns to 1x.
+    renderPlayer();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '2' } });
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    });
+    const video = document.querySelector('video') as HTMLVideoElement;
+    expect(video.defaultPlaybackRate).toBeCloseTo(2);
+    expect(video.playbackRate).toBeCloseTo(2);
+  });
+
   it('names the video so a keyboard user landing on it knows what it is', () => {
     renderPlayer();
     expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('play or pause');

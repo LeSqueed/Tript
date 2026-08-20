@@ -221,11 +221,15 @@ export function PlayerView({
     [navigation.length],
   );
 
-  // Volume lives here rather than in the transport row so it survives moving between sessions: the
-  // video element is remounted per source, the preference is not. Muted keeps the level rather than
-  // zeroing it, so unmuting returns to where the user left it.
+  // Volume lives here rather than in the transport row so it survives moving between sessions. The
+  // element itself would keep it too — `volume` and `muted` are properties that persist across a
+  // src change — but the control needs the value to render, so this is the source of truth.
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  // Where to return to on unmute. Dragging the slider to zero is a mute, and without a remembered
+  // level unmuting from there leaves the button claiming sound while nothing plays.
+  const lastAudibleVolume = useRef(1);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) {
@@ -233,7 +237,26 @@ export function PlayerView({
     }
     video.volume = volume;
     video.muted = muted;
-  }, [volume, muted, item]);
+  }, [volume, muted]);
+
+  const changeVolume = useCallback((next: number) => {
+    setVolume(next);
+    setMuted(next === 0);
+    if (next > 0) {
+      lastAudibleVolume.current = next;
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    if (!muted) {
+      setMuted(true);
+      return;
+    }
+    if (volume === 0) {
+      setVolume(lastAudibleVolume.current || 1);
+    }
+    setMuted(false);
+  }, [muted, volume]);
 
   const toggleFullscreen = useCallback(() => {
     client.send('ToggleFullscreen', { enabled: true });
@@ -462,6 +485,7 @@ export function PlayerView({
           // video is the control surface. tabIndex keeps the element keyboard-reachable, which
           // `controls` used to provide — the overlay's focus trap matches it by tabindex.
           tabIndex={0}
+          aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
           src={videoSrc}
           onClick={playback.togglePlayPause}
           onTimeUpdate={(event) => playback.onVideoTimeUpdate(event.currentTarget.currentTime)}
@@ -486,12 +510,8 @@ export function PlayerView({
         muted={muted}
         onTogglePlayPause={playback.togglePlayPause}
         onToggleFullscreen={toggleFullscreen}
-        onVolumeChange={(next) => {
-          setVolume(next);
-          // Dragging the slider off zero is an unmute in every player anyone has used.
-          setMuted(next === 0);
-        }}
-        onToggleMute={() => setMuted((previous) => !previous)}
+        onVolumeChange={changeVolume}
+        onToggleMute={toggleMute}
       />
 
       <div className="timeline-stack">

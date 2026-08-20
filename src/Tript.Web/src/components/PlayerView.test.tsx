@@ -399,6 +399,31 @@ describe('region selection seam (T9)', () => {
     expect((document.querySelector('video') as HTMLVideoElement).volume).toBeCloseTo(0.25);
   });
 
+  it('recovers sound after the slider is dragged to zero and then unmuted', () => {
+    // Dragging to zero mutes. Unmuting from there used to leave volume at zero: the button read
+    // "Mute" again, the slider sat at zero, and nothing played.
+    renderPlayer();
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.7' } });
+    });
+    act(() => {
+      fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0' } });
+    });
+    expect(screen.getByRole('button', { name: 'Unmute' })).toBeTruthy();
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Unmute' }));
+    });
+    const video = document.querySelector('video') as HTMLVideoElement;
+    expect(video.muted).toBe(false);
+    expect(video.volume).toBeGreaterThan(0);
+    expect(video.volume).toBeCloseTo(0.7);
+  });
+
+  it('names the video so a keyboard user landing on it knows what it is', () => {
+    renderPlayer();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('play or pause');
+  });
+
   it('mutes and unmutes the media element, restoring the chosen level', () => {
     renderPlayer();
     act(() => {

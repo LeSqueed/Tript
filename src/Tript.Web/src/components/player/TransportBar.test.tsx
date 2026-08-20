@@ -44,11 +44,9 @@ describe('TransportBar', () => {
     expect(screen.getByRole('button', { name: 'Unmute' })).toBeTruthy();
   });
 
-  it('shows the slider at zero while muted, without losing the stored volume', () => {
-    const props = renderBar({ muted: true, volume: 0.8 });
+  it('shows the slider at zero while muted', () => {
+    renderBar({ muted: true, volume: 0.8 });
     expect((screen.getByLabelText('Volume') as HTMLInputElement).value).toBe('0');
-    // The level is still the caller's to restore — the bar never rewrites it.
-    expect(props.volume).toBe(0.8);
   });
 
   it('still carries play/pause and the time readout', () => {

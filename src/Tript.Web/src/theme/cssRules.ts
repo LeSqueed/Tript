@@ -18,8 +18,8 @@ export interface CssRule {
   context: string[];
   /** 1-based line the selector starts on, so a failure can point somewhere. */
   line: number;
-  /** Property names this rule declares, in source order. */
-  properties: string[];
+  /** Declarations this rule makes, in source order. */
+  declarations: { property: string; value: string }[];
 }
 
 export function normaliseSelector(raw: string): string {
@@ -40,7 +40,10 @@ export function parseRules(css: string): CssRule[] {
     const noteDeclaration = (text: string) => {
       const colon = text.indexOf(':');
       if (owner && colon > 0) {
-        owner.properties.push(text.slice(0, colon).trim().toLowerCase());
+        owner.declarations.push({
+          property: text.slice(0, colon).trim().toLowerCase(),
+          value: text.slice(colon + 1).trim().replace(/\s+/g, ' '),
+        });
       }
     };
     let prelude = '';
@@ -116,7 +119,7 @@ export function parseRules(css: string): CssRule[] {
           scanBlock([...context, text]);
         } else if (text.length > 0) {
           const selector = normaliseSelector(text);
-          const rule: CssRule = { selector, context, line: preludeLine, properties: [] };
+          const rule: CssRule = { selector, context, line: preludeLine, declarations: [] };
           rules.push(rule);
           // Nested rules belong to this one, so a repeat inside it is still a repeat.
           scanBlock([...context, selector], rule);
@@ -216,7 +219,7 @@ export function shadowedRules(css: string): string[] {
   const dead: string[] = [];
 
   for (const [position, rule] of rules.entries()) {
-    if (rule.properties.length === 0) {
+    if (rule.declarations.length === 0) {
       continue;
     }
     const scope = rule.context.join(' > ');
@@ -224,8 +227,8 @@ export function shadowedRules(css: string): string[] {
       const laterProperties = rules
         .slice(position + 1)
         .filter((other) => other.context.join(' > ') === scope && partsOf(other.selector).includes(part))
-        .flatMap((other) => other.properties);
-      return rule.properties.every((property) => isCovered(property, laterProperties));
+        .flatMap((other) => other.declarations.map((declaration) => declaration.property));
+      return rule.declarations.every(({ property }) => isCovered(property, laterProperties));
     });
     if (everyPartShadowed) {
       dead.push(`${rule.selector} @ ${rule.line} (every declaration overridden later)`);

@@ -11,7 +11,7 @@ export interface TransportBarProps {
   playing: boolean;
   currentTime: number;
   duration: number;
-  /** 0..1. Kept while muted so unmuting restores the level the user chose. */
+  /** 0..1. Shown as zero while muted; restoring a level on unmute is the caller's job. */
   volume: number;
   muted: boolean;
   onTogglePlayPause(): void;
@@ -56,7 +56,8 @@ export function TransportBar({
           min={0}
           max={1}
           step={0.01}
-          // Muted reads as zero, but `volume` is left alone so unmuting restores the level.
+          // Muted reads as zero. Touching the slider then reports the displayed position, so the
+          // caller is what remembers where to come back to.
           value={muted ? 0 : volume}
           aria-label="Volume"
           onChange={(event) => onVolumeChange(Number(event.currentTarget.value))}

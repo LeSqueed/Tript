@@ -86,27 +86,6 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
           </span>
         </div>
 
-        <div className="clip-mode-selector" role="radiogroup" aria-label="Clipping mode">
-          <label className={`clip-mode ${dialog.mode === 'combine' ? 'active' : ''}`}>
-            <input className="radio" type="radio" name="clip-mode"
-              value="combine"
-              checked={dialog.mode === 'combine'}
-              onChange={() => dialog.setMode('combine')}
-            />
-            <span className="clip-mode-title">Combine</span>
-            <span className="clip-mode-note">Regions joined into one video</span>
-          </label>
-          <label className={`clip-mode ${dialog.mode === 'separate' ? 'active' : ''}`}>
-            <input className="radio" type="radio" name="clip-mode"
-              value="separate"
-              checked={dialog.mode === 'separate'}
-              onChange={() => dialog.setMode('separate')}
-            />
-            <span className="clip-mode-title">Separate</span>
-            <span className="clip-mode-note">Each region its own clip</span>
-          </label>
-        </div>
-
         <div className="clip-regions">
           <div className="clip-regions-header">
             <span className="settings-subheading">Regions</span>

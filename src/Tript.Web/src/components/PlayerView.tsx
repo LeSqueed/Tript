@@ -488,20 +488,23 @@ export function PlayerView({
           overlay's header, or the route's topbar heading. */}
       <div className="player-console">
         <TransportBar
-        playing={playing}
-        currentTime={currentTime}
-        duration={duration}
-        volume={volume}
-        muted={muted}
-        onTogglePlayPause={playback.togglePlayPause}
-        onToggleFullscreen={toggleFullscreen}
-        playbackRate={playbackRate}
-        onVolumeChange={changeVolume}
-        onToggleMute={toggleMute}
-        onPlaybackRateChange={setPlaybackRate}
+          playing={playing}
+          currentTime={currentTime}
+          duration={duration}
+          volume={volume}
+          muted={muted}
+          onTogglePlayPause={playback.togglePlayPause}
+          onToggleFullscreen={toggleFullscreen}
+          playbackRate={playbackRate}
+          onVolumeChange={changeVolume}
+          onToggleMute={toggleMute}
+          onPlaybackRateChange={setPlaybackRate}
+          onPrevious={() => navigate(-1)}
+          onNext={() => navigate(1)}
+          canNavigate={navigation.length > 1}
         />
 
-      <div className="timeline-stack">
+        <div className="timeline-stack">
         <FullSessionBar
           currentTime={currentTime}
           duration={duration}
@@ -529,30 +532,12 @@ export function PlayerView({
           onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
         />
         </div>
-        <div className="player-nav">
-          <Button
-            variant="ghost"
-            size="small"
-            onClick={() => navigate(-1)}
-            disabled={navigation.length <= 1}
-            aria-label="Previous session"
-          >
-            ← Prev
-          </Button>
-          <Button
-            variant="ghost"
-            size="small"
-            onClick={() => navigate(1)}
-            disabled={navigation.length <= 1}
-            aria-label="Next session"
-          >
-            Next →
-          </Button>
-        </div>
       </div>
 
-      {canAdjustRegions && (
+      <div className="player-clip-tools">
+        {canAdjustRegions && (
         <div className="player-clip-bar">
+          <div className="player-clip-actions">
           <span className="player-clip-bar-label">Segments</span>
           <Button variant="ghost" size="small"
             
@@ -587,6 +572,7 @@ export function PlayerView({
               Clear in
             </Button>
           )}
+          </div>
           <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ? // Honest about why the controls are dead: the alternative was to let segments be
@@ -601,27 +587,32 @@ export function PlayerView({
                 : `${regions.length} segment${regions.length === 1 ? '' : 's'} marked — drag a segment or its edges on the timeline to adjust, then Create clip.`}
           </span>
         </div>
-      )}
+        )}
 
-      <div className="player-footer">
-        <div className="player-clip-mode" role="radiogroup" aria-label="Clip creation mode">
-          <span className="player-clip-mode-label">Create as</span>
-          <RadioOption
-            name="player-clip-mode"
-            value="combine"
-            checked={dialog.mode === 'combine'}
-            onChange={() => dialog.setMode('combine')}
-            label="Combine"
-          />
-          <RadioOption
-            name="player-clip-mode"
-            value="separate"
-            checked={dialog.mode === 'separate'}
-            onChange={() => dialog.setMode('separate')}
-            label="Separate"
-          />
-        </div>
-        <Button variant="primary"
+        <div className="player-footer">
+        {/* Appears exactly when creating becomes possible, so the action group arrives as a unit.
+            Its one home is here, beside the action it modifies — the clip dialog used to carry a
+            second copy of the same setting under a different name. */}
+        {regions.length > 0 && (
+          <div className="player-clip-mode" role="radiogroup" aria-label="Clip creation mode">
+            <span className="player-clip-mode-label">Create as</span>
+            <RadioOption
+              name="player-clip-mode"
+              value="combine"
+              checked={dialog.mode === 'combine'}
+              onChange={() => dialog.setMode('combine')}
+              label="One clip"
+            />
+            <RadioOption
+              name="player-clip-mode"
+              value="separate"
+              checked={dialog.mode === 'separate'}
+              onChange={() => dialog.setMode('separate')}
+              label="One per segment"
+            />
+          </div>
+        )}
+        <Button variant="primary" size="small"
           
           onClick={dialog.create}
           disabled={regions.length === 0 || clipInFlight}
@@ -637,12 +628,12 @@ export function PlayerView({
           aria-label="Open clip dialog">
           Adjust details
         </Button>
-        <span className="muted small">
-          Bookmarks: {bookmarks.length}
-        </span>
-        <span className="muted small">
-          Zoom window: {viewWindow.seconds.toFixed(1)}s
-        </span>
+        {bookmarks.length > 0 && (
+          <span className="player-footer-meta muted small">
+            {bookmarks.length} bookmark{bookmarks.length === 1 ? '' : 's'}
+          </span>
+        )}
+        </div>
       </div>
 
       {Object.keys(dialog.progress).length > 0 && (

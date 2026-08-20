@@ -39,9 +39,10 @@
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  /* Capped against the viewport: at 1440x900 an uncapped 16:9 picture is 664px tall, which pushed
-   * the transport below the fold and the clip tools off screen entirely. */
-  max-height: calc(100vh - 320px);
+  /* Capped against the viewport so the console AND the clip actions below it stay on screen. The
+   * subtracted height is the chrome around the picture: overlay header, both gaps, the console and
+   * the clip tools. Uncapped, a 16:9 picture is 664px at 1440x900 and buries all of it. */
+  max-height: calc(100vh - 365px);
   object-fit: contain;
   background: #000;
   cursor: pointer;
@@ -170,6 +171,14 @@
 
 /* The zoomed precision timeline. */
 
+.timeline-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* No box of its own: it sits inside the console, and its padding used to inset the track by 11px so
  * the scrub bar above it and this track below were showing the same seconds at different x. */
 
@@ -219,8 +228,8 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid var(--color-accent-line);
   border-radius: var(--radius-sm);
   cursor: pointer;
   z-index: 1;
@@ -230,7 +239,7 @@
 
 .timeline-region.selected {
   border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 /* A region the caller lets us change is draggable: the body slides the segment, the edges trim it.
@@ -312,46 +321,68 @@
   z-index: 5;
 }
 
-.timeline-scale {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  opacity: 0.6;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------------------------------------------------------------------------
  * Segment marking row (in/out points)
  * ------------------------------------------------------------------------- */
 
+/* One container for both rows, sharing the console's horizontal inset — the clip row used to start
+ * 12px to the left of the transport above it — and one gap between them rather than two paddings. */
+
+.player-clip-tools {
+  display: grid;
+  gap: 10px;
+  padding: 14px 14px 0;
+  border-top: var(--border);
+}
+
 .player-clip-bar {
+  display: grid;
+  gap: 6px;
+}
+
+.player-clip-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  padding: 14px 2px 0;
-  border-top: var(--border);
 }
 
-.player-clip-bar-label {
+/* The two clip rows are labelled the same way, so they read as one area rather than two. */
+
+.player-clip-bar-label,
+.player-clip-mode-label {
+  color: var(--color-muted-strong);
+  font-size: 12px;
   font-weight: 600;
-  font-size: 13px;
 }
+
+/* Never had a rule: the old markup relied on whitespace between raw elements for its spacing, which
+ * JSX strips once they are components — the label ended up touching the first radio. */
+
+.player-clip-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Directly under the buttons it describes. Right-aligned, it sat a thousand pixels from them. */
 
 .player-clip-hint {
-  flex: 1;
   min-width: 12ch;
-  text-align: right;
 }
 
 .player-footer {
   display: flex;
-  justify-content: flex-start;
-  gap: var(--space-3);
   align-items: center;
+  gap: var(--space-3);
   min-width: 0;
   flex-wrap: wrap;
-  padding: 0 2px;
+}
+
+/* Pushed to the end so the actions stay grouped on the left at every width. */
+
+.player-footer-meta {
+  margin-left: auto;
 }
 
 .player-footer .btn {

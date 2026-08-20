@@ -271,7 +271,7 @@ describe('clip dialog — combine vs separate payloads through the player', () =
     const container = renderPlayer(client);
     seekTo(container, 42);
     openClipDialog();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create clip' })).getByRole('radio', { name: /Separate/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'One per segment' }));
     fireEvent.click(createButton());
     const creates = client.sent.filter((c) => c.method === 'CreateClip');
     expect(creates).toHaveLength(1);
@@ -431,7 +431,10 @@ describe('marking segments from the player (in/out points)', () => {
     seekTo(container, 60);
     markDefaultSegment();
     openClipDialog();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create clip' })).getByRole('radio', { name: /Separate/ }));
+    // The mode control lives beside Create Clips, not in the dialog — one home for one setting.
+    act(() => {
+      fireEvent.click(screen.getByRole('radio', { name: 'One per segment' }));
+    });
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create 2 clips/ }));
     const creates = client.sent.filter((c) => c.method === 'CreateClip');

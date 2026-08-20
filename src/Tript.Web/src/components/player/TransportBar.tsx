@@ -31,6 +31,10 @@ export interface TransportBarProps {
   onVolumeChange(volume: number): void;
   onToggleMute(): void;
   onPlaybackRateChange(rate: number): void;
+  /** Session navigation. Absent when there is only one thing to play. */
+  onPrevious?(): void;
+  onNext?(): void;
+  canNavigate?: boolean;
 }
 
 export function TransportBar({
@@ -45,9 +49,22 @@ export function TransportBar({
   onVolumeChange,
   onToggleMute,
   onPlaybackRateChange,
+  onPrevious,
+  onNext,
+  canNavigate = false,
 }: TransportBarProps) {
   return (
     <div className="transport-bar">
+      {onPrevious && (
+        <Button
+          variant="ghost"
+          size="icon"
+          icon="chevronLeft"
+          onClick={onPrevious}
+          disabled={!canNavigate}
+          aria-label="Previous session"
+        />
+      )}
       <Button
         variant="ghost"
         size="icon"
@@ -57,6 +74,16 @@ export function TransportBar({
         // thing carrying that state now the button has no text.
         aria-label={playing ? 'Pause' : 'Play'}
       />
+      {onNext && (
+        <Button
+          variant="ghost"
+          size="icon"
+          icon="chevronRight"
+          onClick={onNext}
+          disabled={!canNavigate}
+          aria-label="Next session"
+        />
+      )}
       <span className="transport-time">
         <span data-testid="transport-current">{formatTime(currentTime)}</span>
         <span className="transport-sep"> / </span>

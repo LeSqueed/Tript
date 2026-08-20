@@ -56,6 +56,19 @@ function renderPlayer() {
   return render(<PlayerView client={mockClient()} source={source} />);
 }
 
+/**
+ * The zoom window's width in seconds, derived from the scale row the timeline shows while zoomed.
+ * The player used to print "Zoom window: 48.0s" in its footer, which read as debug output on screen.
+ */
+function zoomWindowSeconds(container: Element): number {
+  const scale = container.querySelector('.timeline-scale');
+  const [start, end] = [...(scale?.querySelectorAll('span') ?? [])].map((span) => {
+    const [minutes, seconds] = (span.textContent ?? '0:00').split(':');
+    return Number(minutes) * 60 + Number(seconds);
+  });
+  return end - start;
+}
+
 /** Which item the player is showing, read off the video's accessible name. */
 function playingItem(): string {
   return (document.querySelector('video')?.getAttribute('aria-label') ?? '').split(' — ')[0];
@@ -265,7 +278,7 @@ describe('zoom model', () => {
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
     // 60s × 0.8 = 48s window.
-    expect(screen.getByText(/Zoom window: 48\.0s/)).toBeTruthy();
+    expect(zoomWindowSeconds(container)).toBe(48);
   });
 
   it('a wheel zoom-out grows the visible window back', () => {
@@ -275,7 +288,7 @@ describe('zoom model', () => {
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: 100 });
     // 48s × 1.25 = 60s window.
-    expect(screen.getByText(/Zoom window: 60\.0s/)).toBeTruthy();
+    expect(zoomWindowSeconds(container)).toBe(60);
   });
 
   it('a full-session bar seek recentres the zoom window on the playhead', () => {

@@ -38,10 +38,6 @@
   margin: 0 auto;
 }
 
-.library-range {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
 
 /* ------------------------------------------------------------------ */
 /* Toolbar: type segments + filters                                    */
@@ -395,6 +391,10 @@
   .content-card-delete {
     opacity: 1;
   }
+}
+
+.library-range {
+  margin-left: auto;
 }
 
 .library-selection {

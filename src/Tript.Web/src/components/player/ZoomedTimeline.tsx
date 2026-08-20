@@ -344,10 +344,15 @@ export function ZoomedTimeline({
         <div className="timeline-playhead" style={{ left: playheadLeft }} />
       </div>
 
-      <div className="timeline-scale">
-        <span>{formatTime(window.start)}</span>
-        <span>{formatTime(Math.min(window.start + window.seconds, duration))}</span>
-      </div>
+      {/* Only while zoomed in. At full extent the window's edges are the ruler's first and last
+          tick, so the row said the same times twice. */}
+      {window.seconds < duration - 0.01 && (
+        <div className="timeline-scale">
+          <span>{formatTime(window.start)}</span>
+          <span>{formatTime(Math.min(window.start + window.seconds, duration))}</span>
+        </div>
+      )}
+
     </div>
   );
 }

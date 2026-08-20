@@ -17,6 +17,8 @@ export type IconName =
   | 'trash'
   | 'check'
   | 'chevronDown'
+  | 'chevronLeft'
+  | 'chevronRight'
   | 'settings'
   | 'library'
   | 'clip'
@@ -55,6 +57,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   check: <path d="M4.5 12.5l5 5 10-11" />,
   chevronDown: <path d="M6.5 9.5l5.5 5.5 5.5-5.5" />,
+  chevronLeft: <path d="M14.5 6.5L9 12l5.5 5.5" />,
+  chevronRight: <path d="M9.5 6.5L15 12l-5.5 5.5" />,
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />

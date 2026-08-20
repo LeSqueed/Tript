@@ -104,8 +104,13 @@ public enum AudioSourceKind
 // device; one track may carry several merged sources.
 public sealed class AudioTrack
 {
-    // A stable identifier so a track survives reordering in the UI and stays referable in
-    // recording metadata.
+    // A stable identifier so a track survives reordering in the settings UI.
+    //
+    // It is NOT persisted per recording: RecordingMetadata's AudioTrackLayout carries Index, Name
+    // and Sources, so nothing downstream can resolve this Guid against a file that already exists.
+    // Anything keyed to a recording's tracks — the clip engine's adjustments, the library's
+    // ContentItem.AudioTracks — uses the track's position in the file instead, which every
+    // recording already has. Persist the Id here too before relying on it outside settings.
     public Guid Id { get; set; } = Guid.NewGuid();
 
     public string Name { get; set; } = string.Empty;

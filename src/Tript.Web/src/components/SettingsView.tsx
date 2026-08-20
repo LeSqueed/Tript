@@ -12,7 +12,6 @@ import { BufferPage } from '../settings/pages/BufferPage';
 import { AudioPage } from '../settings/pages/AudioPage';
 import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
-import { WorkspaceIntro } from './ui/Ui';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'recording', label: 'Recording' },
@@ -28,10 +27,6 @@ export function SettingsView({ client }: { client: IpcClient }) {
 
   return (
     <section className="settings-view">
-      <WorkspaceIntro
-        title="Settings"
-        description="Shape how Tript captures, routes, and preserves your sessions."
-      />
       <div className="settings-layout">
         <div className="settings-tabs" role="tablist" aria-label="Settings sections">
           {PAGES.map((p) => (
@@ -62,7 +57,7 @@ export function SettingsView({ client }: { client: IpcClient }) {
           ))}
         </div>
         <div className="settings-body" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${page}`} tabIndex={0}>
-          <h3>{PAGES.find((p) => p.id === page)?.label}</h3>
+          <h2>{PAGES.find((p) => p.id === page)?.label}</h2>
           {!controller.hasSettings && (
             <p className="muted small">
               Waiting for the backend to push settings. The forms stay editable; changes are sent

@@ -2,24 +2,14 @@
 
 import type { ReactNode } from 'react';
 
-export function WorkspaceIntro({
-  title,
-  description,
-  aside,
-}: {
-  title: string;
-  description?: string;
-  aside?: ReactNode;
-}) {
-  return (
-    <div className="workspace-intro">
-      <div>
-        <h2>{title}</h2>
-        {description && <p>{description}</p>}
-      </div>
-      {aside && <div className="workspace-intro-aside">{aside}</div>}
-    </div>
-  );
+/**
+ * The meta strip above a workspace surface — a range, a count, a retention notice.
+ *
+ * There is deliberately no heading in here. The shell's topbar already names the route, so a second
+ * copy of the same word as an h2 with a tagline under it said nothing twice.
+ */
+export function WorkspaceMeta({ children }: { children: ReactNode }) {
+  return <div className="workspace-meta">{children}</div>;
 }
 
 export function StatusDot({ tone = 'success' }: { tone?: 'success' | 'warning' | 'error' | 'neutral' }) {
@@ -37,7 +27,7 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      <h3>{title}</h3>
+      <h2>{title}</h2>
       <p>{description}</p>
       {action && <div className="empty-state-action">{action}</div>}
     </div>

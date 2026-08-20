@@ -25,7 +25,7 @@ import {
   trashTypeLabel,
 } from './trash/trashModel';
 import type { TrashController } from './trash/useTrash';
-import { WorkspaceIntro, EmptyState } from './ui/Ui';
+import { WorkspaceMeta, EmptyState } from './ui/Ui';
 
 /** What a confirmed action does once the modal says yes. */
 type PendingPurge = { entries: TrashEntry[]; whole: boolean };
@@ -111,22 +111,18 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
 
   return (
     <section className="trash-view">
-      <WorkspaceIntro
-        title="Trash"
-        description="Deleted recordings stay recoverable until their retention window expires."
-        aside={
-          <div className="trash-intro-meta">
-            {entries.length > 0 && (
-              <span className="muted small" data-testid="trash-count">
-                {entries.length} item{entries.length === 1 ? '' : 's'}
-              </span>
-            )}
-            <span className="trash-retention muted small" data-testid="trash-retention">
-              {retentionNotice(retentionHours)}
+      <WorkspaceMeta>
+        <div className="trash-intro-meta">
+          {entries.length > 0 && (
+            <span className="muted small" data-testid="trash-count">
+              {entries.length} item{entries.length === 1 ? '' : 's'}
             </span>
-          </div>
-        }
-      />
+          )}
+          <span className="trash-retention muted small" data-testid="trash-retention">
+            {retentionNotice(retentionHours)}
+          </span>
+        </div>
+      </WorkspaceMeta>
 
       {!loaded ? (
         <div className="trash-empty" data-testid="trash-loading">

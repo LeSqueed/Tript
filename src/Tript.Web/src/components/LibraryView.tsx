@@ -21,7 +21,7 @@ import {
   type SelectionKey,
 } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
-import { EmptyState, WorkspaceIntro } from './ui/Ui';
+import { EmptyState, WorkspaceMeta } from './ui/Ui';
 import {
   ANY_GAME,
   availableGames,
@@ -221,19 +221,15 @@ export function LibraryView({
     <section className="library-view">
       {/* A plain div, not a <header>: the shell's recorder bar is the page's banner landmark, and a
           second header element muddies that (some accessibility mappings promote any <header> to
-          banner) for a row that is only a heading and a count. */}
-      <WorkspaceIntro
-        title="Library"
-        description="Find the moments worth keeping, then open them in the review workspace."
-        aside={
-          view.matchCount > 0 ? (
-            <span className="library-range muted small" data-testid="library-range">
-              Showing {view.firstIndex}–{view.lastIndex} of {view.matchCount}
-              {view.filtered && view.totalCount !== view.matchCount ? ` · ${view.totalCount} total` : ''}
-            </span>
-          ) : undefined
-        }
-      />
+          banner) for a row that is only a count. */}
+      {view.matchCount > 0 && (
+        <WorkspaceMeta>
+          <span className="library-range muted small" data-testid="library-range">
+            Showing {view.firstIndex}–{view.lastIndex} of {view.matchCount}
+            {view.filtered && view.totalCount !== view.matchCount ? ` · ${view.totalCount} total` : ''}
+          </span>
+        </WorkspaceMeta>
+      )}
 
       <div className="library-toolbar">
         <div className="library-types" role="group" aria-label="Content type">

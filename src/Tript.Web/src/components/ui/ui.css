@@ -1,35 +1,18 @@
 /* Shared primitives. Workspace styles may compose these, but do not redefine their roles. */
 
-.workspace-intro {
+.workspace-meta {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 20px;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
-.workspace-intro h2,
-.empty-state h3 {
+.empty-state h2 {
   margin: 0;
   color: var(--color-base-content);
   font-family: var(--font-sans);
+  font-size: var(--text-h1);
   font-weight: 600;
   letter-spacing: -0.01em;
-}
-
-.workspace-intro h2 {
-  font-size: var(--text-h1);
-}
-
-.workspace-intro p {
-  max-width: 52ch;
-  margin: 8px 0 0;
-  color: var(--color-muted-strong);
-  font-size: 13px;
-}
-
-.workspace-intro-aside {
-  flex: 0 0 auto;
 }
 
 .status-dot {
@@ -57,10 +40,6 @@
   text-align: center;
 }
 
-.empty-state h3 {
-  font-size: var(--text-h1);
-}
-
 .empty-state p {
   max-width: 38ch;
   margin: 10px 0 0;
@@ -71,12 +50,4 @@
 
 .empty-state-action {
   margin-top: 22px;
-}
-
-@media (max-width: 760px) {
-  .workspace-intro {
-    align-items: start;
-    flex-direction: column;
-    gap: 16px;
-  }
 }

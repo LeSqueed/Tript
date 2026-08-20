@@ -40,10 +40,6 @@
 }
 
 .settings-body h2 {
-  margin-top: 0;
-}
-
-.settings-body h3 {
   margin: 0 0 14px;
   color: var(--color-base-content);
   font-family: var(--font-sans);

@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "shots": "node --experimental-strip-types scripts/shots.ts"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -23,6 +24,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.0",
     "jsdom": "^30.0.0",
+    "playwright": "^1.62.1",
     "typescript": "^5.9.3",
     "vite": "^8.2.0",
     "vitest": "^4.1.0"

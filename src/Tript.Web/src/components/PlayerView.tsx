@@ -202,15 +202,36 @@ export function PlayerView({
     });
   }, [dialog, client]);
 
+  // The item's own layout, when the library knows it — which is the normal case for anything opened
+  // from the library, and the only case for a recording made before this session started. Keyed by
+  // the track's position in the file, because that is what the clip engine adjusts by; the settings
+  // Guid is a settings concern and is not persisted per recording.
+  const itemAudioTracks = item?.audioTracks;
+  useEffect(() => {
+    if (!itemAudioTracks || itemAudioTracks.length === 0) {
+      return;
+    }
+    dialog.setAudioTracks(
+      itemAudioTracks.map((track) => ({
+        id: String(track.index),
+        device: track.name.trim() === '' ? `Track ${track.index + 1}` : track.name,
+        muted: false,
+        volume: 1,
+      })),
+    );
+  }, [itemAudioTracks, dialog]);
+
+  // The live recorder's routing, for a session being captured right now — it has no metadata record
+  // yet. Never overrides the item's own layout.
   useEffect(() => {
     return client.on('state', (content) => {
       const message = content as { state?: RecordingState };
       const tracks = message?.state?.audioTracks;
-      if (Array.isArray(tracks) && tracks.length > 0) {
+      if (!itemAudioTracks?.length && Array.isArray(tracks) && tracks.length > 0) {
         dialog.setAudioTracks(tracks);
       }
     });
-  }, [client, dialog]);
+  }, [client, dialog, itemAudioTracks]);
 
   const navigate = useCallback(
     (delta: number) => {

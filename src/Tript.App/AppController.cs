@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Tript.App.Content;
@@ -196,12 +197,53 @@ internal sealed class AppController
             Regions = regions,
             Mode = mode,
             OutputPath = outputPath,
-            AudioTrackAdjustments = [],
+            AudioTrackAdjustments = BuildAudioAdjustments(parsed),
             EncoderFamily = "libx264",
             Title = parsed.Title,
             Progress = null,
         };
     }
+
+    // The per-track volume and mute the user set in the clip dialog, mapped onto the engine's
+    // track indices.
+    //
+    // The wire keys tracks by string; the frontend sends the track's position in the file, which is
+    // exactly what AudioTrackAdjustment.SourceTrackIndex means (see ContentItem.AudioTracks). A key
+    // that is not a track position is dropped rather than defaulted: a default adjustment carries
+    // Volume 0, and treating an unknown key as one is how every clip came out silent.
+    internal static IReadOnlyList<AudioTrackAdjustment> BuildAudioAdjustments(CreateClipParameters parsed)
+    {
+        var muted = new HashSet<int>();
+        foreach (var key in parsed.MutedAudioTracks ?? [])
+        {
+            if (TryTrackIndex(key, out var index))
+                muted.Add(index);
+        }
+
+        var volumes = new Dictionary<int, double>();
+        foreach (var (key, volume) in parsed.AudioTrackVolumes ?? [])
+        {
+            // A volume that is not a real number in 0..1 says nothing about intent, so it is ignored
+            // rather than clamped into a value the user never chose.
+            if (TryTrackIndex(key, out var index) && double.IsFinite(volume) && volume >= 0 && volume <= 1)
+                volumes[index] = volume;
+        }
+
+        if (muted.Count == 0 && volumes.Count == 0)
+            return [];
+
+        return muted
+            .Union(volumes.Keys)
+            .OrderBy(index => index)
+            .Select(index => new AudioTrackAdjustment(
+                index,
+                volumes.TryGetValue(index, out var volume) ? volume : 1.0,
+                Muted: muted.Contains(index)))
+            .ToList();
+    }
+
+    private static bool TryTrackIndex(string? key, out int index) =>
+        int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out index) && index >= 0;
 
     // Where a clip is written. Clips live in a single top-level clips/ directory under the
     // recording root.

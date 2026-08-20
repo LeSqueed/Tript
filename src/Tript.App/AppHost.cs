@@ -987,6 +987,7 @@ internal sealed class AppHost : IDisposable
 
         // Recording base name -> game, used to give the clips a game after the loop.
         var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
+        var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
         var clips = new List<ContentItem>();
         var probeBudget = DurationProbeBudget;
 
@@ -1029,9 +1030,13 @@ internal sealed class AppHost : IDisposable
                     item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
                     item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
                     item.DurationSeconds = metadata.DurationSeconds;
+                    item.AudioTracks = ToAudioTrackInfo(metadata);
 
+                    var baseName = Path.GetFileNameWithoutExtension(file.Name);
                     if (item.Game is not null)
-                        gamesByRecording[Path.GetFileNameWithoutExtension(file.Name)] = item.Game;
+                        gamesByRecording[baseName] = item.Game;
+                    if (item.AudioTracks is not null)
+                        tracksByRecording[baseName] = item.AudioTracks;
                 }
                 else
                 {
@@ -1068,7 +1073,11 @@ internal sealed class AppHost : IDisposable
         }
 
         foreach (var clip in clips)
+        {
             clip.Game = InheritedGame(clip.FileName, gamesByRecording);
+            // A clip keeps every audio track of the session it was cut from, so it keeps the names.
+            clip.AudioTracks = InheritedFrom(clip.FileName, tracksByRecording);
+        }
 
         // The relative path is the tiebreak so the order is total: List.Sort is unstable, and two files
         // written in the same second would otherwise shuffle a paginated grid under the user.
@@ -1085,12 +1094,20 @@ internal sealed class AppHost : IDisposable
     // its own and nothing on the wire carries the game into CreateClip's output, so the file name
     // is the link: both naming paths start the name with the source session's base name.
     private static string? InheritedGame(string clipFileName, Dictionary<string, string> gamesByRecording)
+        => InheritedFrom(clipFileName, gamesByRecording);
+
+    // What a clip inherits from the session it was cut from. A clip has no metadata record of its
+    // own and nothing on the wire carries this into CreateClip's output, so the file name is the
+    // link: both naming paths start the name with the source session's base name. The longest
+    // matching session wins, so a session whose name is a prefix of another cannot claim its clips.
+    private static TValue? InheritedFrom<TValue>(string clipFileName, Dictionary<string, TValue> bySession)
+        where TValue : class
     {
         var clipBaseName = Path.GetFileNameWithoutExtension(clipFileName);
-        string? game = null;
+        TValue? inherited = null;
         var matched = 0;
 
-        foreach (var (recording, recordingGame) in gamesByRecording)
+        foreach (var (recording, value) in bySession)
         {
             if (recording.Length <= matched)
                 continue;
@@ -1099,11 +1116,24 @@ internal sealed class AppHost : IDisposable
             if (clipBaseName.Length != recording.Length && clipBaseName[recording.Length] != '-')
                 continue;
 
-            game = recordingGame;
+            inherited = value;
             matched = recording.Length;
         }
 
-        return game;
+        return inherited;
+    }
+
+    // The layout a recording's metadata declares, in stream order. Null rather than empty when the
+    // record names no tracks, so "unknown" and "no audio" stay distinguishable on the wire.
+    private static List<AudioTrackInfo>? ToAudioTrackInfo(RecordingMetadata metadata)
+    {
+        if (metadata.AudioTracks.Count == 0)
+            return null;
+
+        return metadata.AudioTracks
+            .OrderBy(track => track.Index)
+            .Select(track => new AudioTrackInfo { Index = track.Index, Name = track.Name })
+            .ToList();
     }
 
     // Reads a file's duration and persists it, so it is read once per file and served from the

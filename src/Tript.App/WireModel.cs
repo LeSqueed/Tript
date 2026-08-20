@@ -15,6 +15,17 @@ internal static class Wire
     };
 }
 
+// One audio track of a piece of content, as the library reports it.
+internal sealed class AudioTrackInfo
+{
+    // Position in the file's audio stream order. This — not the settings Guid — is what the clip
+    // engine keys adjustments by, and what the content server would select on.
+    public int Index { get; set; }
+
+    // The name from settings, e.g. "Game" or "Discord". Empty when the layout named nothing.
+    public string Name { get; set; } = string.Empty;
+}
+
 internal sealed class ContentItem
 {
     public string ContentType { get; set; } = "recording";
@@ -40,6 +51,12 @@ internal sealed class ContentItem
     // populates it today, and the player already prefers the media's own measured duration over it.
     // The library's duration is DurationSeconds, not this.
     public double? EndTime { get; set; }
+
+    // The audio tracks the file carries, in stream order, with the names the user gave them in
+    // settings. Populated from the recording's metadata record; a clip inherits its source
+    // session's layout, since a clip keeps every track of the session it was cut from. Null when
+    // nothing knows — an imported file, or a session recorded before a layout was written.
+    public List<AudioTrackInfo>? AudioTracks { get; set; }
 
     // The content's playing length in seconds, or null when it is not known yet. Persisted (the
     // recording's metadata record, the clip's own record) rather than measured per list, so the

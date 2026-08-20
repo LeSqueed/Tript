@@ -69,6 +69,13 @@ export interface ContentItem {
    */
   game?: string | null;
   /**
+   * The audio tracks the file carries, in stream order, named as the user named them in settings.
+   * Absent when nothing knows the layout — an imported file, or a session recorded before one was
+   * written. `index` is the position in the file, which is what the clip engine keys adjustments by;
+   * the settings Guid is deliberately not on the wire, because it is not persisted per recording.
+   */
+  audioTracks?: { index: number; name: string }[];
+  /**
    * The item's length in seconds, from its metadata record. A DECLARED length: good enough for a
    * chip on a card, never good enough to bound a clip segment — see player/clipModel.ts, which
    * documents a record declaring 100s in front of a 9.13s file.

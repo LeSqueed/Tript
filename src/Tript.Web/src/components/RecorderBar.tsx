@@ -35,6 +35,7 @@ export function RecorderBar({
   }, [client]);
 
   const recording = recordingState?.recording ?? false;
+  const canControl = connectionState === 'connected';
   const gameName = recordingState?.game?.name ?? recordingState?.game?.id ?? 'Unknown game';
 
   return (
@@ -53,6 +54,29 @@ export function RecorderBar({
           </span>
         </>
       )}
+      <div className="rec-actions" aria-label="Recording controls">
+        {!recording ? (
+          <button
+            type="button"
+            className="rec-action rec-action-primary"
+            onClick={() => client.send('StartRecording')}
+            disabled={!canControl}
+            title={canControl ? 'Start recording' : 'Waiting for the capture host'}
+          >
+            Start capture
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rec-action rec-action-stop"
+            onClick={() => client.send('StopRecording')}
+            disabled={!canControl}
+            title={canControl ? 'Stop recording' : 'Waiting for the capture host'}
+          >
+            Stop capture
+          </button>
+        )}
+      </div>
       <span className="rec-connection">
         <ConnectionBadge state={connectionState} />
       </span>

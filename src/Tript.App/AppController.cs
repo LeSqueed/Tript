@@ -44,6 +44,7 @@ internal sealed class AppController
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
                 parameters.Deserialize<DeleteMultipleContentParameters>()),
             ["RenameContent"] = (parameters, _) => _host.RenameContent(parameters.Deserialize<RenameContentParameters>()),
+            ["ToggleFavorite"] = (parameters, _) => _host.ToggleFavorite(parameters.Deserialize<ToggleFavoriteParameters>()),
             ["ListTrash"] = (_, _) => _host.PushTrash(),
             ["RestoreTrash"] = (parameters, _) => _host.RestoreTrash(parameters.Deserialize<RestoreTrashParameters>()),
             // Parameterless PurgeTrash empties the whole bin, so the absent-parameters case has to
@@ -123,7 +124,7 @@ internal sealed class AppController
             // or its segment times were not real times at all. The refusal rides the importProgress
             // "error" the engine's own failures already use, so the clip dialog surfaces it exactly
             // like a bad source file instead of the command dying silently.
-            _host.PushClipError(refusal
+            _host.PushClipError(parsed.Id, refusal
                 ?? $"That clip's source is not inside the recording folder, so it was not read: '{parsed.FilePath}'.");
             return;
         }
@@ -190,6 +191,7 @@ internal sealed class AppController
 
         return new ClipRequest
         {
+            OperationId = parsed.Id,
             SourcePath = sourcePath,
             Regions = regions,
             Mode = mode,

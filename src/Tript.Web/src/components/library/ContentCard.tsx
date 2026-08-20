@@ -26,6 +26,7 @@ export function ContentCard({
   item,
   onOpen,
   onDelete,
+  onToggleFavorite,
   selectable = false,
   selected = false,
   onToggleSelected,
@@ -35,6 +36,7 @@ export function ContentCard({
   onOpen?: (item: ContentItem) => void;
   /** The library's delete seam. Absent means the card offers no delete at all. */
   onDelete?: (item: ContentItem) => void;
+  onToggleFavorite?: (item: ContentItem) => void;
   /** Whether the grid is in selection mode — the checkbox only exists then. */
   selectable?: boolean;
   selected?: boolean;
@@ -116,6 +118,18 @@ export function ContentCard({
           aria-label={`Delete ${label}`}
         >
           <span aria-hidden="true">🗑</span>
+        </button>
+      )}
+
+      {onToggleFavorite && (
+        <button
+          type="button"
+          className={item.favorite ? 'content-card-favorite active' : 'content-card-favorite'}
+          onClick={() => onToggleFavorite(item)}
+          aria-label={`${item.favorite ? 'Remove' : 'Add'} ${label} ${item.favorite ? 'from' : 'to'} favorites`}
+          aria-pressed={item.favorite === true}
+        >
+          <span aria-hidden="true">{item.favorite ? '★' : '☆'}</span>
         </button>
       )}
     </div>

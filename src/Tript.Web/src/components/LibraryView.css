@@ -50,16 +50,6 @@
   gap: var(--space-4);
 }
 
-.library-header {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-}
-
-.library-header h2 {
-  margin: 0;
-}
-
 .library-range {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -262,6 +252,95 @@
   border-radius: var(--radius);
 }
 
+/* Replacement presentation: the library uses a quiet canvas and lets media thumbnails carry the
+ * visual weight. These rules intentionally override the alpha card treatment above while the
+ * remaining interaction selectors are migrated. */
+.library-view {
+  gap: 26px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.library-toolbar {
+  padding: 16px;
+  background: var(--color-panel);
+  border-color: var(--color-line);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.12);
+}
+
+.library-grid {
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 22px;
+}
+
+.content-card-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.content-card-favorite {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  background: rgba(10, 11, 15, 0.78);
+  color: #fff;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.content-card-favorite.active {
+  color: var(--color-accent);
+}
+
+.content-card {
+  background: var(--color-panel);
+  border-color: var(--color-line);
+  border-radius: 11px;
+  transition: transform var(--motion-standard), border-color var(--motion-standard), box-shadow var(--motion-standard);
+}
+
+.content-card:hover {
+  border-color: var(--color-accent-line);
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18);
+  transform: translateY(-3px);
+}
+
+.content-card-thumb {
+  background: var(--color-panel-raised);
+}
+
+.content-card-body {
+  gap: 10px;
+  padding: 14px 15px 16px;
+}
+
+.content-card-title {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.content-card-chips {
+  opacity: 0.84;
+}
+
+@media (max-width: 760px) {
+  .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+  }
+
+  .library-toolbar {
+    padding: 12px;
+  }
+}
+
 .library-empty p {
   margin: 0;
 }
@@ -276,30 +355,6 @@
 .library-page-indicator {
   font-variant-numeric: tabular-nums;
   opacity: 0.8;
-}
-
-/* ------------------------------------------------------------------ */
-/* The connection probe (collapsed; the shell's only start/stop)        */
-/* ------------------------------------------------------------------ */
-
-.live-probe {
-  margin-top: auto;
-  padding: var(--space-3);
-  background: var(--color-base-200);
-  border: var(--border);
-  border-radius: var(--radius);
-}
-
-.live-probe summary {
-  cursor: pointer;
-  opacity: 0.75;
-}
-
-.probe-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin: var(--space-3) 0;
 }
 
 /* ------------------------------------------------------------------ */

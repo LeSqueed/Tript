@@ -8,6 +8,8 @@ namespace Tript.Media;
 // onto this and hands it over.
 public sealed class ClipRequest
 {
+    public string OperationId { get; init; } = string.Empty;
+
     // The finished recording being clipped.
     public required string SourcePath { get; init; }
 

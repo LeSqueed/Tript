@@ -2,10 +2,8 @@
  *
  * The Tript theme — one theme block, activated by data-theme="tript" on the document root.
  *
- * Dark modern theme. The accent is a light teal on a dark primary, so the contrast trap from the
- * reference theme (dark text on primary) is avoided by construction: text on the accent is always
- * dark (#04252b), and text on the dark ground is light. A contrast check in the unit suite guards
- * this — see theme/contrast.test.ts.
+ * Dark modern theme. The identity is a warm coral against quiet graphite surfaces. A contrast check
+ * in the unit suite guards the text directions — see theme/contrast.test.ts.
  */
 
 :root,
@@ -13,19 +11,30 @@
   color-scheme: dark;
 
   /* Identity */
-  --color-accent: #22d3ee; /* light teal — the identity colour */
-  --color-accent-content: #04252b; /* dark text, legible on the accent */
-  --color-primary: #1a2029; /* dark primary surface */
+  --color-accent: #f08a72; /* warm coral — the identity colour */
+  --color-accent-content: #25110d; /* dark text, legible on the accent */
+  --color-primary: #1b1d24; /* dark primary surface */
   --color-primary-content: #ffffff;
 
   /* Surfaces (dark) */
-  --color-base-100: #0b0f14; /* page ground */
-  --color-base-200: #121821; /* raised surface */
-  --color-base-300: #171f2a; /* deepest surface */
-  --color-neutral: #10161f;
+  --color-base-100: #101116; /* page ground */
+  --color-base-200: #181a21; /* raised surface */
+  --color-base-300: #22252e; /* deepest surface */
+  --color-neutral: #15171d;
 
   /* Text */
-  --color-base-content: #e6edf3;
+  --color-base-content: #eee9e4;
+  --color-accent-muted: #b66d60;
+  --color-cyber-secondary: #a79be3;
+  --color-rail: #0b0c10;
+  --color-rail-hover: #171920;
+  --color-panel: #17191f;
+  --color-panel-raised: #1d2028;
+  --color-line: #292c35;
+  --color-accent-soft: rgba(240, 138, 114, 0.12);
+  --color-accent-line: rgba(240, 138, 114, 0.34);
+  --color-muted: #777b87;
+  --color-muted-strong: #b4b1b0;
 
   /* Semantic */
   --color-info: #4aa8ff;
@@ -44,6 +53,9 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --motion-fast: 120ms;
+  --motion-standard: 180ms;
+  --motion-snap: 1800ms;
 
   font-family:
     system-ui,
@@ -77,4 +89,69 @@ button {
 
 a {
   color: var(--color-accent);
+}
+
+.tripwire-mark {
+  display: block;
+  color: var(--color-accent);
+  overflow: visible;
+}
+
+.tripwire-anchor {
+  fill: currentColor;
+}
+
+.tripwire-line,
+.tripwire-spark {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 4;
+}
+
+.tripwire-line-left {
+  transform-origin: 31px 32px;
+  animation: tripwire-snap-left var(--motion-snap) ease-in-out infinite;
+}
+
+.tripwire-line-right {
+  transform-origin: 33px 32px;
+  animation: tripwire-snap-right var(--motion-snap) ease-in-out infinite;
+}
+
+.tripwire-spark {
+  opacity: 0;
+  transform-origin: 32px 32px;
+  animation: tripwire-spark var(--motion-snap) ease-out infinite;
+}
+
+@keyframes tripwire-snap-left {
+  0%,
+  68%,
+  100% { transform: rotate(0deg); }
+  76%,
+  86% { transform: rotate(-7deg); }
+}
+
+@keyframes tripwire-snap-right {
+  0%,
+  68%,
+  100% { transform: rotate(0deg); }
+  76%,
+  86% { transform: rotate(7deg); }
+}
+
+@keyframes tripwire-spark {
+  0%,
+  68%,
+  100% { opacity: 0; transform: scale(0.7); }
+  76% { opacity: 0.65; transform: scale(1); }
+  88% { opacity: 0; transform: scale(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tripwire-line-left,
+  .tripwire-line-right,
+  .tripwire-spark { animation: none; }
+  .tripwire-spark { opacity: 0; }
 }

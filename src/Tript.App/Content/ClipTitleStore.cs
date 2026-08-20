@@ -14,6 +14,8 @@ internal sealed class ClipTitleStore
     // See ContentServer._contentRoot: written on the IPC thread, read from the library and clip
     // threads.
     private volatile string _metadataRoot;
+    private readonly object _writeGate = new();
+    internal object WriteGate => _writeGate;
 
     internal ClipTitleStore(string metadataRoot)
     {
@@ -48,8 +50,15 @@ internal sealed class ClipTitleStore
 
         try
         {
-            var record = JsonSerializer.Deserialize<ClipTitleRecord>(File.ReadAllText(path),
-                SettingsSerialization.Options);
+            string json;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream))
+            {
+                json = reader.ReadToEnd();
+            }
+
+            var record = JsonSerializer.Deserialize<ClipTitleRecord>(json, SettingsSerialization.Options);
             return record is null
                 ? StoredRecord<ClipTitleRecord>.Unreadable
                 : new StoredRecord<ClipTitleRecord>(StoredRecordState.Loaded, record);
@@ -73,40 +82,57 @@ internal sealed class ClipTitleStore
     // read).
     internal bool Save(string clipFileName, string title)
     {
-        // Read-modify-write, not overwrite: the record holds more than the title now, and a rename
-        // must not drop a duration that was already discovered (or the other way round).
-        var existing = Read(clipFileName);
-        if (existing.MustNotBeOverwritten)
+        lock (_writeGate)
         {
-            Console.Error.WriteLine(
-                $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
-                $"({existing.Failure}); its title is not written, so the record is left as it is.");
-            return false;
-        }
+            // Read-modify-write, not overwrite: the record holds more than the title now, and a rename
+            // must not drop a duration or favorite that was already discovered.
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Console.Error.WriteLine(
+                    $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
+                    $"({existing.Failure}); its title is not written, so the record is left as it is.");
+                return false;
+            }
 
-        var record = existing.Record ?? new ClipTitleRecord();
-        record.Title = title;
-        return Write(clipFileName, record);
+            var record = existing.Record ?? new ClipTitleRecord();
+            record.Title = title;
+            return Write(clipFileName, record);
+        }
+    }
+
+    internal bool SaveFavorite(string clipFileName, bool favorite)
+    {
+        lock (_writeGate)
+        {
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten)
+                return false;
+
+            var record = existing.Record ?? new ClipTitleRecord();
+            record.Favorite = favorite;
+            return Write(clipFileName, record);
+        }
     }
 
     // Persists a clip's duration, leaving any title it already has alone.
     internal bool SaveDuration(string clipFileName, double durationSeconds)
     {
-        var existing = Read(clipFileName);
-        if (existing.MustNotBeOverwritten)
+        lock (_writeGate)
         {
-            // The duration is the cheap half of this record and the title is the irreplaceable
-            // half: re-probing costs one ffprobe, a lost title cannot be recovered at all. So the
-            // unreadable record stands and the duration is simply not persisted this time.
-            Console.Error.WriteLine(
-                $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
-                $"({existing.Failure}); the duration is not persisted, so the record is left as it is.");
-            return false;
-        }
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Console.Error.WriteLine(
+                    $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
+                    $"({existing.Failure}); the duration is not persisted, so the record is left as it is.");
+                return false;
+            }
 
-        var record = existing.Record ?? new ClipTitleRecord();
-        record.DurationSeconds = durationSeconds;
-        return Write(clipFileName, record);
+            var record = existing.Record ?? new ClipTitleRecord();
+            record.DurationSeconds = durationSeconds;
+            return Write(clipFileName, record);
+        }
     }
 
     private bool Write(string clipFileName, ClipTitleRecord record)
@@ -130,15 +156,18 @@ internal sealed class ClipTitleStore
     // gone.
     internal bool Delete(string clipFileName)
     {
-        try
+        lock (_writeGate)
         {
-            File.Delete(PathFor(clipFileName));
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not delete clip record: {exception.Message}");
-            return false;
+            try
+            {
+                File.Delete(PathFor(clipFileName));
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Tript.App: could not delete clip record: {exception.Message}");
+                return false;
+            }
         }
     }
 
@@ -151,6 +180,8 @@ internal sealed class ClipTitleStore
 internal sealed class ClipTitleRecord
 {
     public string Title { get; set; } = string.Empty;
+
+    public bool Favorite { get; set; }
 
     // The clip's playing length in seconds, as the container reports it, or null when it has not
     // been read yet. Null is serialized away (SettingsSerialization ignores nulls), so a record

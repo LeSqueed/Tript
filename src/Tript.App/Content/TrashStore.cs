@@ -59,16 +59,38 @@ internal sealed class TrashStore
         var id = NewId();
         var entryDirectory = Path.Combine(Root, id);
         var filesRoot = Path.Combine(entryDirectory, FilesDirectoryName);
+        var moved = new List<(string Source, string Destination)>();
 
         try
         {
             Directory.CreateDirectory(filesRoot);
             foreach (var file in files)
-                MoveFile(file.SourcePath, Path.Combine(filesRoot, ToPlatformPath(file.RelativePath)));
+            {
+                var destination = Path.Combine(filesRoot, ToPlatformPath(file.RelativePath));
+                MoveFile(file.SourcePath, destination);
+                moved.Add((file.SourcePath, destination));
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            failure = exception.Message;
+            var rollbackFailures = new List<string>();
+            for (var index = moved.Count - 1; index >= 0; index--)
+            {
+                try
+                {
+                    MoveFile(moved[index].Destination, moved[index].Source);
+                }
+                catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
+                {
+                    rollbackFailures.Add(rollbackException.Message);
+                }
+            }
+
+            failure = rollbackFailures.Count == 0
+                ? exception.Message
+                : $"{exception.Message}; rollback also failed: {string.Join("; ", rollbackFailures)}";
+            if (rollbackFailures.Count == 0)
+                DeleteDirectory(entryDirectory);
             return null;
         }
 
@@ -166,6 +188,7 @@ internal sealed class TrashStore
             return TrashRestoreResult.Failed(entryId, "no free name could be found for the restored file");
 
         var kept = 0;
+        var moved = new List<(string Source, string Destination)>();
         try
         {
             foreach (var file in stored)
@@ -191,11 +214,30 @@ internal sealed class TrashStore
                 }
 
                 MoveFile(file, target);
+                moved.Add((file, target));
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return TrashRestoreResult.Failed(entryId, exception.Message);
+            var rollbackFailures = new List<string>();
+            for (var index = moved.Count - 1; index >= 0; index--)
+            {
+                try
+                {
+                    MoveFile(moved[index].Destination, moved[index].Source);
+                }
+                catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
+                {
+                    rollbackFailures.Add(rollbackException.Message);
+                }
+            }
+
+            var failure = rollbackFailures.Count == 0
+                ? exception.Message
+                : $"{exception.Message}; rollback also failed: {string.Join("; ", rollbackFailures)}";
+            if (rollbackFailures.Count == 0)
+                DeleteDirectory(entryDirectory);
+            return TrashRestoreResult.Failed(entryId, failure);
         }
 
         // Only when the entry is genuinely empty of anything worth keeping. Deleting it whenever the
@@ -370,7 +412,15 @@ internal sealed class TrashStore
             // A recording root on another volume than its trash cannot be renamed into place; the
             // copy is the slow path, and the source only goes once the copy is on disk.
             File.Copy(source, destination, overwrite: false);
-            File.Delete(source);
+            try
+            {
+                File.Delete(source);
+            }
+            catch
+            {
+                try { File.Delete(destination); } catch { /* preserve the original failure */ }
+                throw;
+            }
         }
     }
 

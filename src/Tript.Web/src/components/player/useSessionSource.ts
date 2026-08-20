@@ -22,6 +22,8 @@ export interface SessionList {
    * concatenation is a fallback and not the definition).
    */
   items: ContentItem[];
+  /** Whether at least one content push has been received from an IPC source. */
+  loaded: boolean;
 }
 
 /**
@@ -70,5 +72,5 @@ export function useSessionSource(source: SessionSource | null): SessionList {
     [source, version, sessions, clips],
   );
 
-  return { sessions, clips, items };
+  return { sessions, clips, items, loaded: source ? (source.getVersion?.() ?? 0) > 0 : false };
 }

@@ -36,6 +36,7 @@ export function useTrash(client: IpcClient): TrashController {
     });
     client.send('ListTrash');
     const unsubscribeState = client.onStateChange((connection) => {
+      setLoaded(false);
       if (connection === 'connected') {
         client.send('ListTrash');
       }

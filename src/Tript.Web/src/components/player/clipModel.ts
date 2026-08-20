@@ -335,12 +335,11 @@ export function removeRegion(regions: TimelineRegion[], id: string): TimelineReg
   return regions.filter((region) => region.id !== id);
 }
 
-/** The marked spans in seconds order — the raw combine segments. The last gate before the wire. */
+/** The marked spans in insertion order — the raw combine segments. The last gate before the wire. */
 export function regionsToSegments(regions: TimelineRegion[], duration: number): ClipSegment[] {
   return regions
     .map((region) => reconcileRegion(region, duration))
     .filter((region): region is TimelineRegion => region !== null)
-    .sort((a, b) => a.start - b.start)
     .map(({ start, end }) => ({ startTime: start, endTime: end }));
 }
 

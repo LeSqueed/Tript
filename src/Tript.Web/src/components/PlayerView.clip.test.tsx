@@ -74,8 +74,20 @@ function currentReadout(): string {
 
 /** Open the clip dialog through the real player's "Create clip" footer button. */
 function openClipDialog(): void {
+  const button = screen.getByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement;
+  if (button.disabled) {
+    const video = document.querySelector('video') as HTMLVideoElement | null;
+    if (video && Number.isFinite(video.duration) && video.duration > 0) {
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: 'Mark segment around the playhead' }));
+      });
+    }
+  }
   act(() => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open clip dialog' }));
+    const current = screen.getByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement;
+    if (!current.disabled) {
+      fireEvent.click(current);
+    }
   });
 }
 
@@ -259,7 +271,7 @@ describe('clip dialog — combine vs separate payloads through the player', () =
     const container = renderPlayer(client);
     seekTo(container, 42);
     openClipDialog();
-    fireEvent.click(screen.getByRole('radio', { name: /Separate/ }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create clip' })).getByRole('radio', { name: /Separate/ }));
     fireEvent.click(createButton());
     const creates = client.sent.filter((c) => c.method === 'CreateClip');
     expect(creates).toHaveLength(1);
@@ -419,7 +431,7 @@ describe('marking segments from the player (in/out points)', () => {
     seekTo(container, 60);
     markDefaultSegment();
     openClipDialog();
-    fireEvent.click(screen.getByRole('radio', { name: /Separate/ }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create clip' })).getByRole('radio', { name: /Separate/ }));
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create 2 clips/ }));
     const creates = client.sent.filter((c) => c.method === 'CreateClip');
@@ -732,11 +744,13 @@ describe('importProgress result surface in the player', () => {
   it('the dialog renders the backend importProgress result', () => {
     const client = mockClient();
     renderPlayer(client);
+    markDefaultSegment();
     openClipDialog();
     fireEvent.click(createButton());
     expect(screen.getByTestId('clip-progress-importing')).toBeTruthy();
+    const id = (client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string }).id;
     act(() => {
-      client.emit('importProgress', { status: 'done', content: {} });
+      client.emit('importProgress', { id, status: 'done', content: {} });
     });
     expect(screen.getByTestId('clip-progress-done')).toBeTruthy();
   });
@@ -744,10 +758,12 @@ describe('importProgress result surface in the player', () => {
   it('an error surfaces the message', () => {
     const client = mockClient();
     renderPlayer(client);
+    markDefaultSegment();
     openClipDialog();
     fireEvent.click(createButton());
+    const id = (client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string }).id;
     act(() => {
-      client.emit('importProgress', { status: 'error', error: 'encoder failed' });
+      client.emit('importProgress', { id, status: 'error', error: 'encoder failed' });
     });
     expect(screen.getByTestId('clip-progress-error').textContent).toContain('encoder failed');
   });
@@ -763,6 +779,7 @@ describe('importProgress result surface in the player', () => {
         },
       });
     });
+    markDefaultSegment();
     openClipDialog();
     expect(screen.getByText('Game audio')).toBeTruthy();
     expect(screen.getByLabelText('Game audio volume')).toBeTruthy();
@@ -842,13 +859,11 @@ describe('segments stay inside the real media length', () => {
     expect(params.segments).toEqual([{ startTime: 0, endTime: 3 }]);
   });
 
-  it('the dialog proposes a default region inside the real media, not the declared length', () => {
+  it('does not open clip creation before a segment is marked', () => {
     renderPlayer(mockClient(), 3);
-    openClipDialog();
-    const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    expect(within(dialog).getByRole('button', { name: /Deselect region 1/ }).textContent).toContain(
-      '0:00 – 0:03',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open clip dialog' }));
+    expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
   });
 
   it('an out-of-bounds segment cannot be typed in the dialog either', () => {
@@ -906,11 +921,9 @@ describe('segments stay inside the real media length', () => {
 
     // Nor can the declared length be smuggled to the backend by creating before the media loads.
     openClipDialog();
-    expect(screen.getByText(/No regions yet/)).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Close clip dialog' }));
-    });
 
     // The media reports the real length. Now the same gestures work, against 9.13s.
     setVideoDuration(container, realSeconds);
@@ -952,15 +965,13 @@ describe('segments stay inside the real media length', () => {
       fireEvent.keyDown(window, { key: 'm' });
     });
     expect(regionLabels(container)).toEqual([]);
-    // Opening the dialog proposes nothing rather than a fabricated span.
+    // Clip creation stays closed until the media has a usable duration and a segment exists.
     openClipDialog();
-    expect(screen.getByText(/No regions yet/)).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open clip dialog' })).toHaveProperty('disabled', true);
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
 
     // Once the media reports its length, marking works against it.
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Close clip dialog' }));
-    });
     setVideoDuration(container, 12);
     expect(screen.getByRole('button', { name: 'Mark segment around the playhead' })).toHaveProperty(
       'disabled',

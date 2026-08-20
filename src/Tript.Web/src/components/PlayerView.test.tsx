@@ -140,6 +140,21 @@ describe('PlayerView', () => {
     expect(screen.getByTestId('player-title').textContent).toBe('Session 2');
     expect(currentReadout()).toBe('0:00');
   });
+
+  it('navigates the library result set when one is provided', () => {
+    const clip = { ...session(9, 'clips/result.mp4'), contentType: 'clip' as const, title: 'Result clip' };
+    render(
+      <PlayerView
+        client={mockClient()}
+        source={source}
+        item={clip}
+        navigationItems={[clip, session(2, 'sessions/b.mp4')]}
+      />,
+    );
+    expect(screen.getByTestId('player-title').textContent).toBe('Result clip');
+    fireEvent.click(screen.getByRole('button', { name: 'Next session' }));
+    expect(screen.getByTestId('player-title').textContent).toBe('Session 2');
+  });
 });
 
 describe('dual timeline sync', () => {

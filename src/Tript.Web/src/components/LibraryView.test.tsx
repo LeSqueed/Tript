@@ -61,7 +61,7 @@ const clip = item({
 /** No metadata record at all: the shape an un-post-processed recording arrives in. */
 const bare = item({ fileName: 'session-bare.mp4' });
 
-function renderLibrary(items: ContentItem[], onOpen?: (item: ContentItem) => void) {
+function renderLibrary(items: ContentItem[], onOpen?: (item: ContentItem, resultItems: ContentItem[]) => void) {
   return render(
     <LibraryView client={mockClient()} items={items} onOpen={onOpen} nowSeconds={NOW} />,
   );
@@ -76,6 +76,20 @@ function cardTitles(): string[] {
 afterEach(cleanup);
 
 describe('LibraryView grid', () => {
+  it('exposes favorite state and sends the favorite command from a card', () => {
+    const client = { ...mockClient(), send: vi.fn() } as unknown as IpcClient;
+    render(<LibraryView client={client} items={[session]} nowSeconds={NOW} />);
+
+    const favorite = screen.getByRole('button', { name: 'Add Ranked win to favorites' });
+    expect(favorite.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(favorite);
+    expect(client.send).toHaveBeenCalledWith('ToggleFavorite', {
+      contentType: 'recording',
+      filePath: 'sessions/cs2.mp4',
+      favorite: true,
+    });
+  });
+
   it('renders one card per item, with the chips it can fill in', () => {
     renderLibrary([session, clip]);
     expect(screen.getAllByTestId('content-card')).toHaveLength(2);
@@ -131,7 +145,7 @@ describe('LibraryView grid', () => {
     const onOpen = vi.fn();
     renderLibrary([session, clip], onOpen);
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
-    expect(onOpen).toHaveBeenCalledWith(clip);
+    expect(onOpen).toHaveBeenCalledWith(clip, [session, clip]);
   });
 });
 

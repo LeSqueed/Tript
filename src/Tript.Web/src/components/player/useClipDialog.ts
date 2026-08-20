@@ -52,14 +52,14 @@ import type { ContentItem, CreateClipParameters } from '../../ipc/protocol';
 import type { TimelineRegion } from './clipSeam';
 import {
   addRegion,
-  buildCombineClipPayload,
   buildDefaultRegion,
+  buildCombineClipPayload,
   buildRegionClipPayload,
   clampTime,
-  MIN_REGION_SECONDS,
   newClipId,
   newRegionId,
   normalizeRegionBounds,
+  MIN_REGION_SECONDS,
   reconcileRegions,
   removeRegion,
 } from './clipModel';
@@ -67,6 +67,7 @@ import type { ClipMode } from './clipModel';
 
 /** The `importProgress` message content on the wire. */
 export interface ImportProgressContent {
+  id: string;
   status: 'importing' | 'done' | 'error';
   content?: ContentItem;
   error?: string;
@@ -174,10 +175,12 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
   // The attached session, mirrored in a ref so marking (which happens with the dialog closed) can
   // clamp to the session duration from a callback with no state dependencies.
   const sessionRef = useRef<ContentItem | null>(null);
+  // Legacy dialog-only proposal. The player does not open this dialog without explicit segments;
+  // this compatibility path is removed with the dialog during inline clip creation migration.
+  const proposalIdRef = useRef<string | null>(null);
   // The id of the *proposed* default region, while it is still untouched. Null once the user has
   // marked, edited or removed it — a proposal only gets replaced silently while it is still a
   // proposal.
-  const proposalIdRef = useRef<string | null>(null);
   // The caller's duration, mirrored in a ref for the same reason the session is: marking runs from
   // the player's keyboard handler with no state dependencies. Assigned during render rather than in
   // an effect so a mark can never be clamped against the previous render's duration.
@@ -207,22 +210,14 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       sessionRef.current = sessionItem;
       setSession(sessionItem);
       if (marked.length > 0) {
-        // Marks made in the player are the user's work — opening the dialog reviews them, it does
-        // not restart from a proposal.
         setRegions(marked);
       } else {
-        // The proposal is built against the resolved clip duration, not the session's declared
-        // length: on a session with no declared length the latter is 0, which used to propose the
-        // empty region [0, 0], and on a session whose real media is shorter than its metadata claims
-        // it would propose a span past the end of the file.
         const region = buildDefaultRegion(cursorTime, markDuration(), newRegionId());
         if (region.end - region.start >= MIN_REGION_SECONDS) {
           proposalIdRef.current = region.id;
           setRegions([region]);
           setSelectedRegionId(region.id);
         } else {
-          // Nothing measured yet (or media too short to hold a region): propose nothing rather than
-          // a span that is not inside the media.
           proposalIdRef.current = null;
           setRegions([]);
           setSelectedRegionId(null);
@@ -236,7 +231,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       setAudio((current) => ({ ...current, volumes: {}, muted: [] }));
       setOpen(true);
     },
-    [regions],
+     [regions],
   );
 
   // Closing the dialog only closes the panel: the marks stay on the timeline so the user can keep
@@ -264,8 +259,6 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       return;
     }
     const id = newRegionId();
-    // Read the proposal id *now*: the updater below runs during the next render, by which time the
-    // ref has already been cleared.
     const proposalId = proposalIdRef.current;
     proposalIdRef.current = null;
     setRegions((current) => {
@@ -373,8 +366,14 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
     let built: (CreateClipParameters | null)[];
     if (mode === 'separate') {
       // Each marked region becomes its own clip file: one CreateClip per region.
-      built = regions.map((region) =>
-        buildRegionClipPayload({ ...common, region, id: newClipId(), outputMode: mode }),
+      built = regions.map((region, index) =>
+        buildRegionClipPayload({
+          ...common,
+          title: `${common.title} - ${String(index + 1).padStart(2, '0')}`,
+          region,
+          id: newClipId(),
+          outputMode: mode,
+        }),
       );
     } else {
       // Combine: all marked regions joined into one clip — one CreateClip with all the segments.
@@ -408,11 +407,10 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       return;
     }
     setProgress((current) => {
-      // The message carries no clip id,
-      // so the result is correlated by convention: the most recent in-flight clip. A done/error
-      // with nothing in flight is dropped rather than misattributed.
-      const inFlightId = Object.keys(current).find((id) => current[id]?.status === 'importing');
-      const clipId = inFlightId;
+       const clipId = content.id;
+       if (!clipId) {
+         return current;
+       }
       if (!clipId) {
         return current;
       }
@@ -457,7 +455,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
     setRegions((current) => reconcileRegions(current, duration));
   }, [duration]);
 
-  // A region the reconciliation dropped cannot stay the loop target or the pending proposal.
+  // A region the reconciliation dropped cannot stay the loop target or proposal.
   useEffect(() => {
     if (proposalIdRef.current && !regions.some((region) => region.id === proposalIdRef.current)) {
       proposalIdRef.current = null;

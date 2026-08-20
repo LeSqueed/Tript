@@ -5,6 +5,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
+import type { ConnectionState } from '../ipc/websocketClient';
 import type { ContentItem, DeleteContentParameters } from '../ipc/protocol';
 import { Field, SelectField, TextField, type SelectOption } from '../settings/form';
 import { ContentCard } from './library/ContentCard';
@@ -20,6 +21,7 @@ import {
   type SelectionKey,
 } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
+import { EmptyState, WorkspaceIntro } from './ui/Ui';
 import {
   ANY_GAME,
   availableGames,
@@ -58,8 +60,10 @@ export interface LibraryViewProps {
   client: IpcClient;
   /** Everything the backend has, in its own order (newest-first), reactive via the shell's source. */
   items: ContentItem[];
+  connectionState?: ConnectionState;
+  contentLoaded?: boolean;
   /** The shell's player seam: called with the item the user opened. */
-  onOpen?: (item: ContentItem) => void;
+  onOpen?: (item: ContentItem, resultItems: ContentItem[]) => void;
   /**
    * The clock the date filter measures its trailing window against, in epoch seconds. Injectable so
    * a test can put "now" somewhere fixed relative to its fixtures instead of racing the real clock.
@@ -71,10 +75,11 @@ export interface LibraryViewProps {
    */
   retentionHours?: number;
 }
-
 export function LibraryView({
   client,
   items,
+  connectionState,
+  contentLoaded = true,
   onOpen,
   nowSeconds,
   retentionHours = DEFAULT_RETENTION_HOURS,
@@ -146,6 +151,14 @@ export function LibraryView({
     }
   }, [items, selection]);
 
+  const toggleFavorite = useCallback((item: ContentItem) => {
+    client.send('ToggleFavorite', {
+      contentType: item.contentType,
+      filePath: item.filePath,
+      favorite: item.favorite !== true,
+    });
+  }, [client]);
+
   const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const confirmDelete = useCallback(
@@ -209,17 +222,19 @@ export function LibraryView({
       {/* A plain div, not a <header>: the shell's recorder bar is the page's banner landmark, and a
           second header element muddies that (some accessibility mappings promote any <header> to
           banner) for a row that is only a heading and a count. */}
-      <div className="library-header">
-        <h2>Library</h2>
-        {view.matchCount > 0 && (
-          <span className="library-range muted small" data-testid="library-range">
-            Showing {view.firstIndex}–{view.lastIndex} of {view.matchCount}
-            {/* How much is being hidden is worth stating: it is the difference between "I have 3
-                recordings" and "my filter is hiding 22 of them". */}
-            {view.filtered && view.totalCount !== view.matchCount ? ` · ${view.totalCount} total` : ''}
-          </span>
-        )}
-      </div>
+      <WorkspaceIntro
+        eyebrow="Your capture archive"
+        title="Library"
+        description="Find the moments worth keeping, then open them in the review workspace."
+        aside={
+          view.matchCount > 0 ? (
+            <span className="library-range muted small" data-testid="library-range">
+              Showing {view.firstIndex}–{view.lastIndex} of {view.matchCount}
+              {view.filtered && view.totalCount !== view.matchCount ? ` · ${view.totalCount} total` : ''}
+            </span>
+          ) : undefined
+        }
+      />
 
       <div className="library-toolbar">
         <div className="library-types" role="group" aria-label="Content type">
@@ -234,6 +249,14 @@ export function LibraryView({
               {filter.label}
             </button>
           ))}
+          <button
+            type="button"
+            className={query.favoriteOnly ? 'library-type active' : 'library-type'}
+            aria-pressed={query.favoriteOnly}
+            onClick={() => updateQuery({ favoriteOnly: !query.favoriteOnly })}
+          >
+            Favorites
+          </button>
         </div>
 
         <div className="library-filters">
@@ -308,24 +331,48 @@ export function LibraryView({
         </div>
       )}
 
-      {view.totalCount === 0 ? (
+      {view.totalCount === 0 && connectionState === 'disconnected' ? (
+        <div data-testid="library-unavailable">
+          <EmptyState
+            eyebrow="Connection interrupted"
+            title="Library unavailable"
+            description="Tript cannot reach the capture host right now. Reconnect to load your archive."
+          />
+        </div>
+      ) : view.totalCount === 0 && (!contentLoaded || connectionState === 'connecting') ? (
+        <div data-testid="library-loading">
+          <EmptyState
+            eyebrow="Connecting"
+            title="Loading your archive"
+            description="Tript is asking the capture host for your recordings and clips."
+          />
+        </div>
+      ) : view.totalCount === 0 ? (
         // No content at all. Deliberately worded as an expectation rather than as an error: a fresh
         // install and a backend that is not answering look identical here, and the connection badge in
         // the recorder bar is what tells those apart.
-        <p className="library-empty muted" data-testid="library-empty">
-          Your recordings and clips will appear here.
-        </p>
+        <div data-testid="library-empty">
+          <EmptyState
+            eyebrow="Nothing captured yet"
+            title="Your archive starts here"
+            description="Your recordings and clips will appear here. Record a session and Tript will keep the source material ready for review."
+          />
+        </div>
       ) : view.matchCount === 0 ? (
         // Content exists but the filters hide all of it. This is the state that MUST be distinguishable
         // from the one above: without the distinction, a too-narrow filter is indistinguishable from a
         // broken backend, and the user's next move (clear the filters) is invisible.
-        <div className="library-empty" data-testid="library-empty-filtered">
-          <p className="muted">
-            None of your {view.totalCount} item{view.totalCount === 1 ? '' : 's'} matches these filters.
-          </p>
-          <button type="button" className="btn" onClick={clearFilters}>
-            Clear filters
-          </button>
+        <div data-testid="library-empty-filtered">
+          <EmptyState
+            eyebrow="No matches"
+            title="Nothing fits this view"
+            description={`None of your ${view.totalCount} item${view.totalCount === 1 ? '' : 's'} matches these filters.`}
+            action={
+              <button type="button" className="btn" onClick={clearFilters}>
+                Clear filters
+              </button>
+            }
+          />
         </div>
       ) : (
         <ul className="library-grid" data-testid="library-grid">
@@ -333,8 +380,9 @@ export function LibraryView({
             <li key={selectionKey(item)}>
               <ContentCard
                 item={item}
-                onOpen={onOpen}
+                onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}
+                onToggleFavorite={toggleFavorite}
                 selectable={selectionMode}
                 selected={selection.includes(selectionKey(item))}
                 onToggleSelected={toggleItem}
@@ -370,8 +418,6 @@ export function LibraryView({
         </nav>
       )}
 
-      <LiveIpcProbe client={client} />
-
       {confirmation && (
         <ConfirmDeleteDialog
           confirmation={confirmation}
@@ -380,34 +426,5 @@ export function LibraryView({
         />
       )}
     </section>
-  );
-}
-
-/**
- * Live IPC round-trip proof: sends commands on the control socket and the state push appears in the
- * recorder bar. Collapsed into a `<details>` so the grid owns the page — but kept, and kept here,
- * because these are still the only Start/Stop recording affordances in the shell: a cleaner library
- * must not be a library you can no longer record from.
- */
-function LiveIpcProbe({ client }: { client: IpcClient }) {
-  return (
-    <details className="live-probe">
-      <summary>Connection probe</summary>
-      <div className="probe-actions">
-        <button type="button" className="btn" onClick={() => client.send('StartRecording')}>
-          Start recording
-        </button>
-        <button type="button" className="btn" onClick={() => client.send('StopRecording')}>
-          Stop recording
-        </button>
-        <button type="button" className="btn" onClick={() => client.send('CheckForUpdates')}>
-          Check for updates
-        </button>
-      </div>
-      <p className="muted small">
-        If the backend is running, these send commands on the control socket and the state push appears
-        in the recorder bar.
-      </p>
-    </details>
   );
 }

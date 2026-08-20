@@ -68,6 +68,7 @@ export interface LibraryQuery {
   /** 1-based. May be out of range; `deriveLibrary` clamps it rather than trusting it. */
   page: number;
   pageSize: number;
+  favoriteOnly: boolean;
 }
 
 export const DEFAULT_LIBRARY_QUERY: LibraryQuery = {
@@ -78,6 +79,7 @@ export const DEFAULT_LIBRARY_QUERY: LibraryQuery = {
   sort: 'newest',
   page: 1,
   pageSize: DEFAULT_PAGE_SIZE,
+  favoriteOnly: false,
 };
 
 /** The trailing window each date filter means, in seconds. `null` is "no window at all". */
@@ -272,6 +274,7 @@ export function filterItems(
       matchesType(item, query.type) &&
       matchesGame(item, query.game) &&
       matchesDate(item, query.range, nowSeconds) &&
+      (!query.favoriteOnly || item.favorite === true) &&
       matchesSearch(item, query.search),
   );
 }
@@ -286,6 +289,7 @@ export function isFiltered(query: LibraryQuery): boolean {
     query.game !== ANY_GAME ||
     query.range !== 'any' ||
     query.search.trim().length > 0
+    || query.favoriteOnly
   );
 }
 
@@ -402,6 +406,8 @@ function normalizePageSize(pageSize: number): number {
 export interface LibraryPage {
   /** The items on the resolved page, in sort order. */
   items: ContentItem[];
+  /** The complete filtered and sorted result set, used by player navigation. */
+  resultItems: ContentItem[];
   /** How many items matched the filters, before pagination. */
   matchCount: number;
   /** How many items exist at all — `0` is "no content", not "nothing matches". */
@@ -434,6 +440,7 @@ export function deriveLibrary(
   const pageItems = matched.slice(start, start + pageSize);
   return {
     items: pageItems,
+    resultItems: matched,
     matchCount: matched.length,
     totalCount: items.length,
     page,

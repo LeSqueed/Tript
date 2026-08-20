@@ -12,6 +12,7 @@ import { BufferPage } from '../settings/pages/BufferPage';
 import { AudioPage } from '../settings/pages/AudioPage';
 import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
+import { WorkspaceIntro } from './ui/Ui';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'recording', label: 'Recording' },
@@ -27,29 +28,49 @@ export function SettingsView({ client }: { client: IpcClient }) {
 
   return (
     <section className="settings-view">
-      <div className="settings-tabs" role="tablist">
-        {PAGES.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            role="tab"
-            aria-selected={page === p.id}
-            className={page === p.id ? 'settings-tab active' : 'settings-tab'}
-            onClick={() => setPage(p.id)}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-      <div className="settings-body">
-        <h2>{PAGES.find((p) => p.id === page)?.label}</h2>
-        {!controller.hasSettings && (
-          <p className="muted small">
-            Waiting for the backend to push settings. The forms stay editable; changes are sent
-            when the connection is live.
-          </p>
-        )}
-        {page === 'recording' && (
+      <WorkspaceIntro
+        eyebrow="Capture configuration"
+        title="Settings"
+        description="Shape how Tript captures, routes, and preserves your sessions."
+      />
+      <div className="settings-layout">
+        <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+          {PAGES.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="tab"
+              id={`settings-tab-${p.id}`}
+              aria-controls="settings-panel"
+              aria-selected={page === p.id}
+              tabIndex={page === p.id ? 0 : -1}
+              className={page === p.id ? 'settings-tab active' : 'settings-tab'}
+              onClick={() => setPage(p.id)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') {
+                  return;
+                }
+                event.preventDefault();
+                const current = PAGES.findIndex((candidate) => candidate.id === page);
+                const direction = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
+                const next = PAGES[(current + direction + PAGES.length) % PAGES.length];
+                setPage(next.id);
+                requestAnimationFrame(() => document.getElementById(`settings-tab-${next.id}`)?.focus());
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="settings-body" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${page}`} tabIndex={0}>
+          <h3>{PAGES.find((p) => p.id === page)?.label}</h3>
+          {!controller.hasSettings && (
+            <p className="muted small">
+              Waiting for the backend to push settings. The forms stay editable; changes are sent
+              when the connection is live.
+            </p>
+          )}
+          {page === 'recording' && (
           <RecordingPage
             settings={controller.settings.recording}
             update={controller.update}
@@ -59,34 +80,35 @@ export function SettingsView({ client }: { client: IpcClient }) {
             displayResolution={controller.displayResolution}
             onBrowse={() => client.send('SetVideoLocation')}
           />
-        )}
-        {page === 'buffer' && (
+          )}
+          {page === 'buffer' && (
           <BufferPage
             settings={controller.settings.buffer}
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
           />
-        )}
-        {page === 'audio' && (
+          )}
+          {page === 'audio' && (
           <AudioPage settings={controller.settings.audio} update={controller.update} page={page} />
-        )}
-        {page === 'capture' && (
+          )}
+          {page === 'capture' && (
           <CapturePage
             settings={controller.settings.capture}
             update={controller.update}
             page={page}
             availableDisplays={controller.availableDisplays}
           />
-        )}
-        {page === 'game' && (
+          )}
+          {page === 'game' && (
           <GamePage
             settings={controller.settings.game}
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
           />
-        )}
+          )}
+        </div>
       </div>
     </section>
   );

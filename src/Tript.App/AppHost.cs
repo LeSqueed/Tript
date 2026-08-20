@@ -482,18 +482,19 @@ internal sealed class AppHost : IDisposable
             .Replace(Path.DirectorySeparatorChar, '/');
         metadata.VideoPath = relative;
 
-        // The one write allowed to replace whatever is on disk, because here the in-memory record
-        // is the authoritative one: this process just made the recording. Anything already at this
-        // key belongs to a file that no longer exists (the name carries a millisecond timestamp) or
-        // is the stub the duration probe wrote while the recording ran.
-        if (metadata.DurationSeconds is null)
+        lock (_metadata.WriteGate)
         {
-            var existing = _metadata.Read(Path.GetFileName(_activeOutputPath));
-            if (existing.State == StoredRecordState.Loaded)
-                metadata.DurationSeconds = existing.Record!.DurationSeconds;
-        }
+            // The one write allowed to replace whatever is on disk, because here the in-memory record
+            // is the authoritative one: this process just made the recording.
+            if (metadata.DurationSeconds is null)
+            {
+                var existing = _metadata.Read(Path.GetFileName(_activeOutputPath));
+                if (existing.State == StoredRecordState.Loaded)
+                    metadata.DurationSeconds = existing.Record!.DurationSeconds;
+            }
 
-        _metadata.Save(metadata);
+            _metadata.Save(metadata);
+        }
         PushContent();
     }
 
@@ -1024,6 +1025,7 @@ internal sealed class AppHost : IDisposable
                         })
                         .ToList();
                     item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
+                    item.Favorite = metadata.Favorite;
                     item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
                     item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
                     item.DurationSeconds = metadata.DurationSeconds;
@@ -1043,6 +1045,7 @@ internal sealed class AppHost : IDisposable
                 var record = _clipTitles.LoadRecord(file.Name);
                 if (!string.IsNullOrWhiteSpace(record?.Title))
                     item.Title = record.Title;
+                item.Favorite = record?.Favorite ?? false;
                 item.DurationSeconds = record?.DurationSeconds;
 
                 // Resolved after the loop: the source session may be listed after its clip.
@@ -1137,20 +1140,7 @@ internal sealed class AppHost : IDisposable
         // difference is the whole point.
         if (isRecording)
         {
-            var existing = _metadata.Read(file.Name);
-            if (existing.MustNotBeOverwritten)
-            {
-                Console.Error.WriteLine(
-                    $"Tript.App: '{relativePath}' has a metadata record that could not be read " +
-                    $"({existing.Failure}); its duration is not persisted, so the record — the game, " +
-                    "the title and the bookmarks in it — is left untouched.");
-            }
-            else
-            {
-                var metadata = existing.Record ?? new RecordingMetadata { VideoPath = relativePath };
-                metadata.DurationSeconds = seconds;
-                _metadata.Save(metadata);
-            }
+            _metadata.SaveDuration(file.Name, relativePath, seconds);
         }
         else
         {
@@ -1319,9 +1309,15 @@ internal sealed class AppHost : IDisposable
             // Cascade delete, so the metadata/ tree never keeps an orphaned record. The cached thumbnail goes
             // too: an image left behind would both leak the deleted recording's contents and be inherited by
             // the next recording to reuse the name.
-            _metadata.Delete(fileName);
-            _clipTitles.Delete(fileName);
-            _thumbnails.Delete(fileName);
+            var metadataDeleted = _metadata.Delete(fileName);
+            var clipRecordDeleted = _clipTitles.Delete(fileName);
+            var thumbnailDeleted = _thumbnails.Delete(fileName);
+            if (!metadataDeleted || !clipRecordDeleted || !thumbnailDeleted)
+            {
+                PushError(
+                    $"'{fileName}' was deleted, but one or more associated records could not be removed. " +
+                    "Check the metadata and thumbnail folders before reusing the name.");
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -1402,8 +1398,10 @@ internal sealed class AppHost : IDisposable
             {
                 // The name changed, so the metadata record's own link back to the video has to change
                 // with it — and the user has to be told which name to look for.
-                RelinkRestoredMetadata(result.RestoredAs!);
-                PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+                if (RelinkRestoredMetadata(result.FileName!, result.RestoredAs!))
+                    PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+                else
+                    PushError($"'{result.FileName}' was restored as '{result.RestoredAs}', but its metadata link could not be updated. Check the metadata folder.");
             }
 
             if (result.KeptInTrash > 0)
@@ -1421,18 +1419,23 @@ internal sealed class AppHost : IDisposable
     // Points a restored recording's metadata record back at the file it came back as. The record
     // has already moved to the new key; only the videoPath inside it is stale. An unreadable record
     // is left exactly as it is — a rewritten one would cost the game and the bookmarks.
-    private void RelinkRestoredMetadata(string restoredFileName)
+    private bool RelinkRestoredMetadata(string originalFileName, string restoredFileName)
     {
+        lock (_metadata.WriteGate)
+        {
         var existing = _metadata.Read(restoredFileName);
         if (existing.State != StoredRecordState.Loaded)
-            return;
+            return existing.State == StoredRecordState.Absent;
 
         var record = existing.Record!;
+        if (!string.Equals(Path.GetFileName(record.VideoPath), originalFileName, StringComparison.OrdinalIgnoreCase))
+            return false;
         var separator = record.VideoPath.LastIndexOf('/');
         record.VideoPath = separator < 0
             ? restoredFileName
             : $"{record.VideoPath[..separator]}/{restoredFileName}";
-        _metadata.Save(record);
+        return _metadata.Save(record);
+        }
     }
 
     internal void PurgeTrash(PurgeTrashParameters? parameters)
@@ -1517,6 +1520,8 @@ internal sealed class AppHost : IDisposable
         // The title is stored on the video's metadata record; a video with no record yet gets one.
         // A record that exists but could not be READ is not a record to replace — writing a fresh
         // one would trade the recording's game and bookmarks for a title.
+        lock (_metadata.WriteGate)
+        {
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
         {
@@ -1542,10 +1547,13 @@ internal sealed class AppHost : IDisposable
             return;
         }
         PushContent();
+        }
     }
 
     private void RenameClip(string fileName, string title)
     {
+        lock (_clipTitles.WriteGate)
+        {
         // Same discipline as the recording path: a record that exists and could not be read is left
         // alone rather than replaced, because the record also carries the clip's measured duration.
         var existing = _clipTitles.Read(fileName);
@@ -1563,6 +1571,38 @@ internal sealed class AppHost : IDisposable
         {
             PushError("The clip title could not be saved — check the recording folder is writable.");
             return;
+        }
+
+        PushContent();
+        }
+    }
+
+    internal void ToggleFavorite(ToggleFavoriteParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.FilePath))
+            return;
+
+        var target = ResolveContentFile(parameters.FilePath);
+        if (target is null)
+            return;
+
+        var fileName = Path.GetFileName(target);
+        var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
+        if (TopLevelDirectory(relative).Equals("clips", StringComparison.Ordinal))
+        {
+            if (!_clipTitles.SaveFavorite(fileName, parameters.Favorite))
+            {
+                PushError("The favorite could not be saved — check the recording folder is writable.");
+                return;
+            }
+        }
+        else
+        {
+            if (!_metadata.SaveFavorite(fileName, relative, parameters.Favorite))
+            {
+                PushError("The favorite could not be saved — check the recording folder is writable.");
+                return;
+            }
         }
 
         PushContent();
@@ -1616,6 +1656,8 @@ internal sealed class AppHost : IDisposable
         // As in RenameContent, an unreadable record is preserved rather than replaced: a blank record with
         // one bookmark in it would cost the recording's game, title and every bookmark already on it.
         var fileName = Path.GetFileName(target);
+        lock (_metadata.WriteGate)
+        {
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
         {
@@ -1644,6 +1686,7 @@ internal sealed class AppHost : IDisposable
             // The frontend needs to know the add failed so it does not keep the bookmark in the UI.
             PushError("The bookmark could not be saved — check the recording folder is writable.");
         }
+        }
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
@@ -1658,6 +1701,8 @@ internal sealed class AppHost : IDisposable
         // Nothing to delete is silence; a record that could not be READ is an error the frontend must see.
         // Conflating the two made a delete look like it worked and the bookmark came back on the next list.
         var fileName = Path.GetFileName(target);
+        lock (_metadata.WriteGate)
+        {
         var existing = _metadata.Read(fileName);
         if (existing.MustNotBeOverwritten)
         {
@@ -1679,6 +1724,7 @@ internal sealed class AppHost : IDisposable
         {
             // A bookmark whose removal could not be persisted must not silently reappear on the next list.
             PushError("The bookmark could not be removed — check the recording folder is writable.");
+        }
         }
     }
 
@@ -1753,10 +1799,11 @@ internal sealed class AppHost : IDisposable
     // Reports a clip that could not even be started — a source path that does not resolve inside the
     // recording root. It reuses the importProgress "error" frame the engine's own failures use, which
     // is what the clip dialog renders its failure state from.
-    internal void PushClipError(string message)
+    internal void PushClipError(string operationId, string message)
     {
         _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
         {
+            id = operationId,
             status = "error",
             error = message,
         }, Wire.Options));
@@ -1774,6 +1821,7 @@ internal sealed class AppHost : IDisposable
             {
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
                 {
+                    id = request.OperationId,
                     status = "importing",
                 }, Wire.Options));
 
@@ -1789,6 +1837,7 @@ internal sealed class AppHost : IDisposable
 
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
                 {
+                    id = request.OperationId,
                     status = "done",
                     content = new ContentItem
                     {
@@ -1806,6 +1855,7 @@ internal sealed class AppHost : IDisposable
             {
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
                 {
+                    id = request.OperationId,
                     status = "error",
                     error = exception.Message,
                 }, Wire.Options));

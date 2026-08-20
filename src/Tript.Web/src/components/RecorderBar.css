@@ -7,6 +7,8 @@
   padding: var(--space-2) var(--space-4);
   background: var(--color-base-200);
   border-bottom: var(--border);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .rec-dot {
@@ -41,10 +43,45 @@
 
 .rec-game {
   opacity: 0.85;
+  min-width: 0;
+  max-width: min(28vw, 240px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rec-connection {
   margin-left: auto;
+}
+
+.rec-actions {
+  display: flex;
+  margin-left: 8px;
+}
+
+.rec-action {
+  padding: 5px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rec-action:hover {
+  border-color: var(--color-accent-line);
+  color: var(--color-accent);
+}
+
+.rec-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.rec-action-stop {
+  color: var(--color-error);
 }
 
 .conn-badge {

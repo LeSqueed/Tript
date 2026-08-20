@@ -56,6 +56,7 @@ export interface ContentItem {
   fileName: string;
   filePath: string;
   title?: string;
+  favorite?: boolean;
   /**
    * When the recording started, in Unix epoch SECONDS (not milliseconds). Absent when the item has
    * no metadata record.
@@ -163,6 +164,7 @@ export interface StateMessage {
 // ---------------------------------------------------------------------------
 
 export interface ImportProgressMessage {
+  id: string;
   status: 'importing' | 'done' | 'error';
   content?: ContentItem;
   error?: string;
@@ -291,6 +293,12 @@ export interface RenameContentParameters {
   title: string;
 }
 
+export interface ToggleFavoriteParameters {
+  contentType: ContentType;
+  filePath: string;
+  favorite: boolean;
+}
+
 export interface AddBookmarkParameters {
   contentType: ContentType;
   filePath: string;
@@ -362,6 +370,7 @@ export type CommandParameters =
   | RestoreTrashParameters
   | PurgeTrashParameters
   | RenameContentParameters
+  | ToggleFavoriteParameters
   | AddBookmarkParameters
   | DeleteBookmarkParameters
   | ApplyVideoPresetParameters
@@ -403,6 +412,7 @@ export type CommandName =
   | 'RestoreTrash'
   | 'PurgeTrash'
   | 'RenameContent'
+  | 'ToggleFavorite'
   | 'ImportFile'
   | 'AddBookmark'
   | 'DeleteBookmark'

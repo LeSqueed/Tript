@@ -313,8 +313,72 @@
   justify-content: space-between;
   gap: var(--space-2);
   align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .player-footer .btn {
   align-self: flex-start;
+}
+
+@media (max-width: 760px) {
+  .player-footer {
+    align-items: stretch;
+  }
+
+  .player-clip-mode,
+  .player-footer > .muted {
+    flex: 1 1 100%;
+  }
+}
+
+/* Replacement player treatment: media is the primary surface, while transport and marking controls
+ * read as one instrument panel instead of a stack of generic cards. */
+.player-view {
+  max-width: 1180px;
+  gap: 18px;
+  margin: 0 auto;
+}
+
+.player-controls-row {
+  padding: 0 2px;
+}
+
+.player-title {
+  color: var(--color-base-content);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.video-frame {
+  border-color: var(--color-line);
+  border-radius: 12px;
+  box-shadow: 0 24px 52px rgba(0, 0, 0, 0.24);
+}
+
+.transport-bar,
+.timeline-zoomed,
+.timeline-bar {
+  background: var(--color-panel);
+  border-color: var(--color-line);
+}
+
+.transport-bar {
+  padding: 10px 12px;
+  border-radius: 9px;
+}
+
+.timeline-zoomed {
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.player-clip-bar,
+.player-footer {
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-panel);
 }

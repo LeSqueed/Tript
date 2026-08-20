@@ -1,42 +1,189 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
 .app-shell {
-  display: grid;
-  grid-template-rows: auto auto 1fr;
   height: 100%;
+  background: var(--color-base-100);
+}
+
+.app-frame {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  height: 100%;
+}
+
+.app-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 22px 14px 16px;
+  background: var(--color-rail);
+  border-right: 1px solid var(--color-line);
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 28px;
+  color: var(--color-base-content);
+}
+
+.app-brand strong,
+.app-brand span,
+.rail-footer-label,
+.nav-section-label,
+.app-eyebrow {
+  display: block;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.app-brand strong {
+  font-size: 15px;
+  letter-spacing: 0.22em;
+}
+
+.app-brand div span {
+  margin-top: 2px;
+  color: var(--color-muted);
+  font-size: 8px;
+  font-weight: 700;
 }
 
 .app-nav {
   display: flex;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-base-200);
-  border-bottom: var(--border);
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nav-section-label {
+  padding: 0 12px 8px;
+  color: var(--color-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.nav-section-lower {
+  margin-top: 22px;
 }
 
 .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
   background: transparent;
-  color: var(--color-base-content);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--color-muted-strong);
   cursor: pointer;
-  opacity: 0.75;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
 }
 
 .nav-item:hover {
-  opacity: 1;
+  background: var(--color-rail-hover);
+  color: var(--color-base-content);
 }
 
 .nav-item.active {
-  background: var(--color-base-300);
-  color: var(--color-primary-content);
-  opacity: 1;
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-line);
+  color: var(--color-accent);
+}
+
+.nav-glyph {
+  width: 18px;
+  color: currentColor;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+}
+
+.nav-badge {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-content);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.rail-footer {
+  display: grid;
+  gap: 7px;
+  margin-top: auto;
+  padding: 14px 12px 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.rail-footer-label {
+  color: var(--color-muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.rail-footer-value {
+  color: var(--color-muted-strong);
+  font-size: 11px;
+}
+
+.rail-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(54, 211, 153, 0.12);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-base-100);
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 86px;
+  padding: 18px 34px 16px;
+  background: var(--color-base-100);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.app-eyebrow {
+  margin-bottom: 5px;
+  color: var(--color-accent-muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.app-context h1 {
+  margin: 0;
+  color: var(--color-base-content);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
 
 .app-content {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: var(--space-4);
+  padding: 30px 34px 48px;
 }
 
 /* While the player overlay is up, the library underneath stays mounted (that is how the user's
@@ -45,20 +192,6 @@
 
 .app-shell.player-open .app-content {
   overflow: hidden;
-}
-
-/* The nav's trash counter. Inline in the button, so the route reads "Trash 3" — a count that is only
- * on the trash screen is a count nobody sees until they go looking. */
-
-.nav-badge {
-  display: inline-block;
-  margin-left: var(--space-2);
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--color-base-300);
-  border: var(--border);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 /* The token-less screen (see App.tsx). Not part of the shell grid — there is no shell. */
@@ -72,4 +205,59 @@
 
 .missing-key .panel {
   max-width: 42ch;
+}
+
+@media (max-width: 760px) {
+  .app-frame {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .app-rail {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 18px;
+    padding: 12px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .app-brand {
+    padding: 0;
+  }
+
+  .app-nav {
+    flex-direction: row;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .nav-section-label,
+  .rail-footer,
+  .nav-glyph {
+    display: none;
+  }
+
+  .nav-item {
+    width: auto;
+    min-height: 34px;
+    padding: 0 9px;
+  }
+
+  .app-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 18px 16px;
+  }
+
+  .recorder-bar {
+    width: 100%;
+  }
+
+  .app-content {
+    padding: 20px 16px 36px;
+  }
 }

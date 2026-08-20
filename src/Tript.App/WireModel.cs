@@ -25,6 +25,8 @@ internal sealed class ContentItem
 
     public string? Title { get; set; }
 
+    public bool Favorite { get; set; }
+
     // The game this content belongs to, or null when nothing associated one with it. The library
     // filters and groups by this, so it is populated for clips too — inherited from the source
     // session, since a clip has no metadata record of its own (see AppHost.InheritedGame).
@@ -180,6 +182,15 @@ internal sealed class RenameContentParameters
     public string FileName { get; set; } = string.Empty;
 
     public string Title { get; set; } = string.Empty;
+}
+
+internal sealed class ToggleFavoriteParameters
+{
+    public string ContentType { get; set; } = "recording";
+
+    public string FilePath { get; set; } = string.Empty;
+
+    public bool Favorite { get; set; }
 }
 
 internal sealed class AddBookmarkParameters

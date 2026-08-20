@@ -81,6 +81,7 @@ public sealed class ContentCatalogueTests : IDisposable
         {
             VideoPath = "sessions/session-20260817-083000.mp4",
             Game = "Overwatch",
+            Favorite = true,
             Bookmarks = { new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(12) } },
         });
 
@@ -94,6 +95,7 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.NotNull(loaded);
         Assert.Equal("sessions/session-20260817-083000.mp4", loaded!.VideoPath);
         Assert.Equal("Overwatch", loaded.Game);
+        Assert.True(loaded.Favorite);
         var bookmark = Assert.Single(loaded.Bookmarks);
         Assert.Equal(BookmarkType.Kill, bookmark.Type);
         Assert.Equal(TimeSpan.FromSeconds(12), bookmark.Time);
@@ -144,6 +146,8 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_contentRoot, "clips"));
         await File.WriteAllTextAsync(Path.Combine(_contentRoot, "sessions", "session-1.mp4"), "session");
         await File.WriteAllTextAsync(Path.Combine(_contentRoot, "clips", "session-1-clip-x.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveFavorite("session-1-clip-x.mp4", true));
 
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
@@ -164,6 +168,7 @@ public sealed class ContentCatalogueTests : IDisposable
         var clip = items.Single(i => i.GetProperty("contentType").GetString() == "clip");
         Assert.Equal("clips/session-1-clip-x.mp4", clip.GetProperty("filePath").GetString());
         Assert.Equal("session-1-clip-x", clip.GetProperty("title").GetString());
+        Assert.True(clip.GetProperty("favorite").GetBoolean());
         Assert.False(clip.TryGetProperty("bookmarks", out var _clipBookmarks), "clips never carry bookmarks");
 
         await host.ShutdownAsync();

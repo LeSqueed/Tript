@@ -43,6 +43,9 @@ export interface PlayerViewProps {
    * its index within the session list becomes the navigation base. Absent, the first session plays.
    */
   item?: ContentItem;
+  /** The complete filtered/sorted library result set used for previous/next navigation. */
+  navigationItems?: ContentItem[];
+  onItemChange?(item: ContentItem): void;
   /**
    * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns the
    * region list; a caller can alternatively supply regions for a read-only region view.
@@ -56,6 +59,8 @@ export function PlayerView({
   client,
   source: injectedSource,
   item: requestedItem,
+  navigationItems,
+  onItemChange,
   regions: externalRegions,
   selectedRegionId: externalSelectedRegionId,
   onRegionSelect: externalOnRegionSelect,
@@ -65,21 +70,27 @@ export function PlayerView({
   const ipcSource = useIpcSessionSource(client, injectedSource === undefined);
   const source = injectedSource ?? ipcSource;
   const { sessions } = useSessionSource(source);
-  const [itemIndex, setItemIndex] = useState(0);
+  const navigation = navigationItems ?? sessions;
+  const [itemIndex, setItemIndex] = useState(() => {
+    const initialIndex = requestedItem
+      ? navigation.findIndex((candidate) => candidate.filePath === requestedItem.filePath)
+      : -1;
+    return initialIndex >= 0 ? initialIndex : 0;
+  });
 
   // Keep the selection in range when the content list changes (a `content` push can remove or
   // reorder sessions): clamp back to the first session, matching the fallback below.
   useEffect(() => {
-    if (itemIndex >= sessions.length) {
+    if (itemIndex >= navigation.length) {
       setItemIndex(0);
     }
-  }, [itemIndex, sessions.length]);
+  }, [itemIndex, navigation.length]);
 
   // The requested item's position in the session list, when it is one of the sessions. Once it is,
   // it becomes the navigation base; navigating away moves within the list as usual.
   const requestedIndex = useMemo(
-    () => (requestedItem ? sessions.findIndex((s) => s.filePath === requestedItem.filePath) : -1),
-    [requestedItem, sessions],
+    () => (requestedItem ? navigation.findIndex((s) => s.filePath === requestedItem.filePath) : -1),
+    [requestedItem, navigation],
   );
   useEffect(() => {
     if (requestedIndex >= 0) {
@@ -90,7 +101,17 @@ export function PlayerView({
   // Priority: the requested item (it may be a clip — the player plays whatever path it carries),
   // then the session list at the navigation index, then the first session, then nothing.
   const item: ContentItem | undefined =
-    requestedIndex >= 0 ? sessions[requestedIndex] : (requestedItem ?? sessions[itemIndex] ?? sessions[0]);
+    requestedIndex >= 0 && itemIndex === requestedIndex
+      ? navigation[requestedIndex]
+      : requestedIndex < 0
+        ? (requestedItem ?? navigation[itemIndex] ?? navigation[0])
+        : (navigation[itemIndex] ?? navigation[0]);
+
+  useEffect(() => {
+    if (item) {
+      onItemChange?.(item);
+    }
+  }, [item, onItemChange]);
   // The IPC source is created in an effect, so `source` is null on the first render — the short
   // circuit keeps bookmarks at [] until the source exists (and `item` is undefined then anyway).
   const bookmarks = useMemo(() => (item && source ? source.getBookmarks(item) : []), [source, item]);
@@ -162,6 +183,7 @@ export function PlayerView({
     },
     [externalOnRegionSelect, dialog, seek, duration],
   );
+  const clipInFlight = Object.values(dialog.progress).some((entry) => entry.status === 'importing');
 
   // The dialog wires itself into the IPC surface. The owner of the connection does the sending:
   // `addImportHandler` fires for every CreateClip payload the dialog builds, and `create()` is
@@ -191,12 +213,12 @@ export function PlayerView({
 
   const navigate = useCallback(
     (delta: number) => {
-      if (sessions.length === 0) {
+      if (navigation.length === 0) {
         return;
       }
-      setItemIndex((index) => (index + delta + sessions.length) % sessions.length);
+      setItemIndex((index) => (index + delta + navigation.length) % navigation.length);
     },
-    [sessions.length],
+    [navigation.length],
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -204,16 +226,20 @@ export function PlayerView({
   }, [client]);
 
   const openClipDialog = useCallback(() => {
-    if (item) {
+    if (item && regions.length > 0) {
       dialog.openDialog(item, currentTime);
     }
-  }, [item, currentTime, dialog]);
+  }, [item, currentTime, dialog, regions.length]);
 
   // The pending in point: set at the playhead by I, closed into a segment by O. It lives here rather
   // than in the controller because it is a transport gesture, not part of the clip — nothing is
   // marked until the out point lands.
   const [markInTime, setMarkInTime] = useState<number | null>(null);
   const canAdjustRegions = externalRegions === undefined;
+
+  useEffect(() => {
+    setMarkInTime(null);
+  }, [item?.filePath]);
 
   // The three marking gestures clamp against `clipDuration`, not the timeline's display duration:
   // an in point, an out point and a default-length segment must all land inside the media, and only
@@ -233,6 +259,9 @@ export function PlayerView({
       return;
     }
     const out = clampTime(currentTime, clipDuration);
+    if (out <= markInTime) {
+      return;
+    }
     dialog.markRegion(markInTime, out);
     // markRegion refuses a span shorter than MIN_REGION_SECONDS (both points on the same frame).
     // The in point then stays standing, so the user moves the playhead and presses O again rather
@@ -392,7 +421,7 @@ export function PlayerView({
           type="button"
           className="btn ghost"
           onClick={() => navigate(-1)}
-          disabled={sessions.length <= 1}
+          disabled={navigation.length <= 1}
           aria-label="Previous session"
         >
           ← Prev
@@ -404,7 +433,7 @@ export function PlayerView({
           type="button"
           className="btn ghost"
           onClick={() => navigate(1)}
-          disabled={sessions.length <= 1}
+          disabled={navigation.length <= 1}
           aria-label="Next session"
         >
           Next →
@@ -511,7 +540,7 @@ export function PlayerView({
               Clear in
             </button>
           )}
-          <span className="player-clip-hint muted small" data-testid="player-clip-hint">
+          <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ? // Honest about why the controls are dead: the alternative was to let segments be
                 // marked against a length nobody has measured — the placeholder constant, or the
@@ -528,8 +557,48 @@ export function PlayerView({
       )}
 
       <div className="player-footer">
-        <button type="button" className="btn" onClick={openClipDialog} aria-label="Open clip dialog">
-          Create clip
+        <div className="player-clip-mode" role="radiogroup" aria-label="Clip creation mode">
+          <span className="player-clip-mode-label">Create as</span>
+          <label className={dialog.mode === 'combine' ? 'active' : ''}>
+            <input
+              type="radio"
+              name="player-clip-mode"
+              value="combine"
+              checked={dialog.mode === 'combine'}
+              onChange={() => dialog.setMode('combine')}
+            />
+            Combine
+          </label>
+          <label className={dialog.mode === 'separate' ? 'active' : ''}>
+            <input
+              type="radio"
+              name="player-clip-mode"
+              value="separate"
+              checked={dialog.mode === 'separate'}
+              onChange={() => dialog.setMode('separate')}
+            />
+            Separate
+          </label>
+        </div>
+        <button
+          type="button"
+          className="btn"
+          onClick={dialog.create}
+          disabled={regions.length === 0 || clipInFlight}
+          title={regions.length === 0 ? 'Mark at least one segment first' : 'Create clips from marked segments'}
+          aria-describedby="player-clip-hint"
+          aria-label="Create clips"
+        >
+          {clipInFlight ? 'Creating clips…' : 'Create Clips'}
+        </button>
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={openClipDialog}
+          disabled={regions.length === 0}
+          aria-label="Open clip dialog"
+        >
+          Adjust details
         </button>
         <span className="muted small">
           Bookmarks: {bookmarks.length}
@@ -538,6 +607,23 @@ export function PlayerView({
           Zoom window: {viewWindow.seconds.toFixed(1)}s
         </span>
       </div>
+
+      {Object.keys(dialog.progress).length > 0 && (
+        <ul className="player-clip-progress" aria-live="polite">
+          {Object.values(dialog.progress).map((entry) => (
+            <li key={entry.clipId} className={`player-clip-progress-${entry.status}`}>
+              <span>{entry.label}</span>
+              <span>
+                {entry.status === 'importing'
+                  ? 'Creating…'
+                  : entry.status === 'done'
+                    ? 'Created'
+                    : entry.error}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <ClipDialog client={client} dialog={dialog} currentTime={currentTime} />
     </section>

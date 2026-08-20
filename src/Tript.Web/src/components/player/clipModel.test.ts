@@ -191,11 +191,11 @@ describe('normalizeRegionBounds — the gate every edit goes through', () => {
 });
 
 describe('regionsToSegments', () => {
-  it('orders regions by start time into segments in seconds', () => {
+  it('preserves insertion order in segments', () => {
     const list = [region('a', 40, 50), region('b', 10, 20)];
     expect(regionsToSegments(list, 100)).toEqual([
-      { startTime: 10, endTime: 20 },
       { startTime: 40, endTime: 50 },
+      { startTime: 10, endTime: 20 },
     ]);
   });
 });

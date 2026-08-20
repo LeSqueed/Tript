@@ -30,6 +30,8 @@ public sealed class RecordingMetadata
     // means the file-name-without-extension is the title.
     public string? Title { get; set; }
 
+    public bool Favorite { get; set; }
+
     // The recording's playing length in seconds, as the container reports it. Null on a record
     // written before the length was known; the library then shows no length for that item until it
     // is filled in.

@@ -25,6 +25,7 @@ import {
   trashTypeLabel,
 } from './trash/trashModel';
 import type { TrashController } from './trash/useTrash';
+import { WorkspaceIntro, EmptyState } from './ui/Ui';
 
 /** What a confirmed action does once the modal says yes. */
 type PendingPurge = { entries: TrashEntry[]; whole: boolean };
@@ -36,7 +37,7 @@ export interface TrashViewProps {
 }
 
 export function TrashView({ trash, nowSeconds }: TrashViewProps) {
-  const { entries, retentionHours } = trash;
+  const { entries, retentionHours, loaded } = trash;
   const now = nowSeconds ?? Date.now() / 1000;
 
   const [selected, setSelected] = useState<SelectionKey[]>([]);
@@ -110,26 +111,43 @@ export function TrashView({ trash, nowSeconds }: TrashViewProps) {
 
   return (
     <section className="trash-view">
-      <div className="trash-header">
-        <h2>Trash</h2>
-        {entries.length > 0 && (
-          <span className="muted small" data-testid="trash-count">
-            {entries.length} item{entries.length === 1 ? '' : 's'}
-          </span>
-        )}
-        <span className="trash-retention muted small" data-testid="trash-retention">
-          {retentionNotice(retentionHours)}
-        </span>
-      </div>
+      <WorkspaceIntro
+        eyebrow="Recovery archive"
+        title="Trash"
+        description="Deleted recordings stay recoverable until their retention window expires."
+        aside={
+          <div className="trash-intro-meta">
+            {entries.length > 0 && (
+              <span className="muted small" data-testid="trash-count">
+                {entries.length} item{entries.length === 1 ? '' : 's'}
+              </span>
+            )}
+            <span className="trash-retention muted small" data-testid="trash-retention">
+              {retentionNotice(retentionHours)}
+            </span>
+          </div>
+        }
+      />
 
-      {entries.length === 0 ? (
+      {!loaded ? (
+        <div className="trash-empty" data-testid="trash-loading">
+          <EmptyState
+            eyebrow="Checking recovery archive"
+            title="Loading trash"
+            description="Tript is checking which recordings and clips are still recoverable."
+          />
+        </div>
+      ) : entries.length === 0 ? (
         // "Nothing here" is the good state for a trash, so it is worded as reassurance rather than as
         // an absence — and it says what would put something here, which is the only thing a user
         // arriving at an empty trash by accident actually wants to know.
-        <p className="trash-empty muted" data-testid="trash-empty">
-          The trash is empty. Recordings and clips you delete land here first, so you can put them
-          back.
-        </p>
+        <div className="trash-empty" data-testid="trash-empty">
+          <EmptyState
+            eyebrow="Nothing to recover"
+            title="Trash is empty"
+            description="The trash is empty. Recordings and clips you delete land here first, so you can put them back before the retention window closes."
+          />
+        </div>
       ) : (
         <>
           <div className="trash-toolbar" data-testid="trash-toolbar">

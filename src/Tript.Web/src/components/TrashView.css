@@ -28,6 +28,31 @@
   border-radius: var(--radius);
 }
 
+.trash-view {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.trash-intro-meta {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  text-align: right;
+}
+
+.trash-empty {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.trash-toolbar,
+.trash-row {
+  background: var(--color-panel);
+  border-color: var(--color-line);
+  border-radius: 11px;
+}
+
 .trash-toolbar {
   display: flex;
   flex-wrap: wrap;

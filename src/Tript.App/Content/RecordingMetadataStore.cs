@@ -14,6 +14,8 @@ internal sealed class RecordingMetadataStore
     // See ContentServer._contentRoot: written on the IPC thread, read from the library and clip
     // threads.
     private volatile string _metadataRoot;
+    private readonly object _writeGate = new();
+    internal object WriteGate => _writeGate;
 
     internal RecordingMetadataStore(string metadataRoot)
     {
@@ -84,28 +86,56 @@ internal sealed class RecordingMetadataStore
     // failed (read-only media, disk full, permissions).
     internal bool Save(RecordingMetadata metadata)
     {
-        var videoFileName = metadata.VideoFileName();
-        if (string.IsNullOrWhiteSpace(videoFileName))
+        lock (_writeGate)
         {
-            // The record's own link key is its file name. A record with no VideoPath would be
-            // written as "<metadataRoot>/.metadata.json", a file no video can ever be matched to,
-            // so it is refused rather than left as litter in the metadata tree.
-            Console.Error.WriteLine(
-                "Tript.App: refusing to write a metadata record with no videoPath — it would not belong to any video.");
-            return false;
-        }
+            var videoFileName = metadata.VideoFileName();
+            if (string.IsNullOrWhiteSpace(videoFileName))
+            {
+                Console.Error.WriteLine(
+                    "Tript.App: refusing to write a metadata record with no videoPath — it would not belong to any video.");
+                return false;
+            }
 
-        try
-        {
-            Directory.CreateDirectory(_metadataRoot);
-            RecordFile.WriteAtomically(PathFor(videoFileName),
-                JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
-            return true;
+            try
+            {
+                Directory.CreateDirectory(_metadataRoot);
+                RecordFile.WriteAtomically(PathFor(videoFileName),
+                    JsonSerializer.Serialize(metadata, SettingsSerialization.Options));
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Tript.App: could not write metadata record: {exception.Message}");
+                return false;
+            }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+    }
+
+    internal bool SaveFavorite(string videoFileName, string videoPath, bool favorite)
+    {
+        lock (_writeGate)
         {
-            Console.Error.WriteLine($"Tript.App: could not write metadata record: {exception.Message}");
-            return false;
+            var existing = Read(videoFileName);
+            if (existing.MustNotBeOverwritten)
+                return false;
+            var metadata = existing.Record ?? new RecordingMetadata { VideoPath = videoPath };
+            metadata.VideoPath = videoPath;
+            metadata.Favorite = favorite;
+            return Save(metadata);
+        }
+    }
+
+    internal bool SaveDuration(string videoFileName, string videoPath, double durationSeconds)
+    {
+        lock (_writeGate)
+        {
+            var existing = Read(videoFileName);
+            if (existing.MustNotBeOverwritten)
+                return false;
+            var metadata = existing.Record ?? new RecordingMetadata { VideoPath = videoPath };
+            metadata.VideoPath = videoPath;
+            metadata.DurationSeconds = durationSeconds;
+            return Save(metadata);
         }
     }
 
@@ -114,15 +144,18 @@ internal sealed class RecordingMetadataStore
     // that is gone.
     internal bool Delete(string videoFileName)
     {
-        try
+        lock (_writeGate)
         {
-            File.Delete(PathFor(videoFileName));
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not delete metadata record: {exception.Message}");
-            return false;
+            try
+            {
+                File.Delete(PathFor(videoFileName));
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Tript.App: could not delete metadata record: {exception.Message}");
+                return false;
+            }
         }
     }
 

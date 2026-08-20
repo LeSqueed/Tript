@@ -376,6 +376,19 @@ describe('deriveLibrary', () => {
     expect(noMatch).toMatchObject({ totalCount: 4, matchCount: 0, filtered: true });
   });
 
+  it('filters to persisted favorites without changing the sort order', () => {
+    const favorites = deriveLibrary(
+      [
+        item({ fileName: 'unmarked.mp4', title: 'Unmarked', startTime: NOW - HOUR }),
+        item({ fileName: 'favorite.mp4', title: 'Favorite', favorite: true, startTime: NOW }),
+      ],
+      query({ favoriteOnly: true }),
+      NOW,
+    );
+    expect(favorites.items.map(itemLabel)).toEqual(['Favorite']);
+    expect(favorites.filtered).toBe(true);
+  });
+
   it('falls back to the default page size when handed a nonsensical one', () => {
     expect(deriveLibrary(many, query({ pageSize: 0 }), NOW).pageCount).toBe(3);
     expect(deriveLibrary(many, query({ pageSize: Number.NaN }), NOW).pageCount).toBe(3);

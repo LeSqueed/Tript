@@ -336,6 +336,7 @@ describe('clip dialog — create payloads', () => {
       expect(payload.outputMode).toBe('separate');
       expect(payload.segments as { startTime: number }[]).toHaveLength(1);
     }
+    expect(payloads.map((payload) => payload.title)).toEqual(['Session 1 - 01', 'Session 1 - 02']);
     const starts = (payloads.map((p) => (p.segments as { startTime: number }[])[0].startTime)).sort(
       (a, b) => a - b,
     );
@@ -353,8 +354,8 @@ describe('clip dialog — create payloads', () => {
     const payload = sent[0].params as Record<string, unknown>;
     expect(payload.outputMode).toBe('combine');
     expect(payload.segments).toEqual([
-      { startTime: 10, endTime: 20 },
       { startTime: 60, endTime: 70 },
+      { startTime: 10, endTime: 20 },
     ]);
   });
 
@@ -388,7 +389,8 @@ describe('clip dialog — importProgress surface', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
     act(() => dialog().create());
-    act(() => dialog().applyImportProgress({ status: 'done', content: session }));
+    const id = Object.keys(dialog().progress)[0];
+    act(() => dialog().applyImportProgress({ id, status: 'done', content: session }));
     const states = Object.values(dialog().progress);
     expect(states[0]).toMatchObject({ status: 'done' });
   });
@@ -397,7 +399,8 @@ describe('clip dialog — importProgress surface', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
     act(() => dialog().create());
-    act(() => dialog().applyImportProgress({ status: 'error', error: 'encoder failed' }));
+    const id = Object.keys(dialog().progress)[0];
+    act(() => dialog().applyImportProgress({ id, status: 'error', error: 'encoder failed' }));
     const states = Object.values(dialog().progress);
     expect(states[0]).toMatchObject({ status: 'error', error: 'encoder failed' });
   });
@@ -406,13 +409,14 @@ describe('clip dialog — importProgress surface', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
     act(() => dialog().create());
-    act(() => dialog().applyImportProgress({ status: 'error', error: 'boom' }));
+    const id = Object.keys(dialog().progress)[0];
+    act(() => dialog().applyImportProgress({ id, status: 'error', error: 'boom' }));
     expect(screen.getByTestId('clip-progress-error').textContent).toContain('boom');
   });
 
   it('a done/error with nothing in flight is dropped, not misattributed', () => {
     const { dialog } = probe();
-    act(() => dialog().applyImportProgress({ status: 'done', content: session }));
+    act(() => dialog().applyImportProgress({ id: 'missing', status: 'done', content: session }));
     expect(dialog().progress).toEqual({});
   });
 });

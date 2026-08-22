@@ -56,6 +56,19 @@ function makeSettings(): SettingsMessageContent['settings'] {
     },
     capture: { method: 'Auto', display: null },
     game: { captureMode: 'Auto', gameCaptureTimeout: 10, gameList: [] },
+    general: {
+      startWithWindows: false,
+      startupVisibility: 'Window',
+      minimizeBehavior: 'Taskbar',
+      closeBehavior: 'Exit',
+      notifications: {
+        enabled: true,
+        recordingStarted: true,
+        recordingStopped: true,
+        errors: true,
+        recovery: true,
+      },
+    },
   };
 }
 
@@ -92,7 +105,7 @@ function pushSettings(
   });
 }
 
-function renderSettings() {
+function renderSettings(initialPage: 'recording' | 'general' = 'recording') {
   const { factory } = createMockSocketFactory();
   const client = createIpcClient({ createSocket: factory });
   const result = render(<SettingsView client={client} />);
@@ -102,6 +115,7 @@ function renderSettings() {
     ws.serverOpen();
   });
   pushSettings(ws);
+  fireEvent.click(screen.getByRole('tab', { name: initialPage === 'general' ? 'General' : 'Recording' }));
   return { ...result, client, ws };
 }
 
@@ -129,13 +143,16 @@ afterEach(() => {
 });
 
 describe('SettingsView', () => {
-  it('renders the five tabs and the recording page controls', () => {
-    renderSettings();
+  it('renders the six tabs and the recording page controls', () => {
+    renderSettings('general');
     expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Buffer' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Audio' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Capture' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Game' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     expect(screen.getByLabelText(/^Recording mode/)).toBeTruthy();
     expect(screen.getByLabelText(/^Resolution/)).toBeTruthy();
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
@@ -146,6 +163,67 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
   });
 
+  it('renders General settings and sends page-scoped updates', () => {
+    const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+
+    expect(screen.getByLabelText('Start with Windows')).toBeTruthy();
+    expect(screen.getByLabelText(/^Startup visibility/)).toBeTruthy();
+    expect(screen.getByLabelText(/^When closing Tript/)).toBeTruthy();
+    expect(screen.getByLabelText('Enable desktop notifications')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Startup destination/)).toBeNull();
+    expect(screen.queryByLabelText(/^Close while recording/)).toBeNull();
+    expect(screen.getByLabelText('Unfinished recording found')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Start with Windows'));
+    expect(sentUpdates(ws).at(-1)).toEqual({ general: { startWithWindows: true } });
+
+    fireEvent.change(screen.getByLabelText(/^Startup visibility/), { target: { value: 'Tray' } });
+    expect(sentUpdates(ws).at(-1)).toEqual({ general: { startupVisibility: 'Tray' } });
+  });
+
+  it('sends notification updates as a nested general patch', () => {
+    const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    fireEvent.click(screen.getByLabelText('Errors'));
+
+    expect(sentUpdates(ws).at(-1)).toEqual({
+      general: {
+        notifications: {
+          errors: false,
+        },
+      },
+    });
+  });
+
+  it('disables notification-specific options when notifications are disabled', () => {
+    const { ws } = renderSettings('general');
+    fireEvent.click(screen.getByLabelText('Enable desktop notifications'));
+    const disabled = makeSettings();
+    disabled.general.notifications.enabled = false;
+    pushSettings(ws, disabled);
+
+    for (const label of [
+      'Recording started',
+      'Recording stopped',
+      'Errors',
+      'Unfinished recording found',
+    ]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+    }
+  });
+
+  it('fills General defaults when an older backend omits the page', () => {
+    const { ws } = renderSettings();
+    const older = makeSettings();
+    delete (older as Partial<typeof older>).general;
+    pushSettings(ws, older, 'older-backend');
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+
+    expect((screen.getByLabelText(/^Startup visibility/) as HTMLSelectElement).value).toBe('Window');
+    expect((screen.getByLabelText('Start with Windows') as HTMLInputElement).checked).toBe(false);
+  });
+
   // The shipped default, before any push. It has to be the mode the recorder actually runs: Buffer
   // and Hybrid are not implemented and a resolved Hybrid is flattened to Session at the host, so a
   // Hybrid default routed every automatic recording through that silent flattening.
@@ -153,6 +231,7 @@ describe('SettingsView', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
     render(<SettingsView client={client} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Session');
   });
 
@@ -759,11 +838,13 @@ describe('SettingsView', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
     render(<SettingsView client={client} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     client.connect();
     const ws = activeSocket();
     act(() => {
       ws.serverOpen();
     });
+    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     // No settings push yet — the page still renders with defaults and is editable.
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     changeInput(/^Frame rate/, '144');

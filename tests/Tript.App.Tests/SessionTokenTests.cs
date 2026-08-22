@@ -93,6 +93,17 @@ public sealed class SessionTokenTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, assetStatus);
         Assert.Contains("export const ok", assetBody, StringComparison.Ordinal);
 
+        var (referrerStatus, referrerBody, _) = await GetWithCookieAsync(
+            $"http://localhost:{TestPorts.Ui}/app.js", cookie: null,
+            referrer: host.UiUrl + "#library");
+        Assert.Equal(HttpStatusCode.OK, referrerStatus);
+        Assert.Contains("export const ok", referrerBody, StringComparison.Ordinal);
+
+        var (foreignReferrerStatus, _, _) = await GetWithCookieAsync(
+            $"http://localhost:{TestPorts.Ui}/app.js", cookie: null,
+            referrer: $"https://evil.example/?k={host.Token}");
+        Assert.Equal(HttpStatusCode.Forbidden, foreignReferrerStatus);
+
         await host.ShutdownAsync();
     }
 
@@ -240,7 +251,7 @@ public sealed class SessionTokenTests : IDisposable
     // A raw socket rather than HttpClient: the tests care about the exact status and the Set-Cookie
     // header, and HttpClient's cookie container would quietly re-send a cookie between cases.
     private static async Task<(HttpStatusCode Status, string Body, string? SetCookie)> GetWithCookieAsync(
-        string url, string? cookie)
+        string url, string? cookie, string? referrer = null)
     {
         var uri = new Uri(url);
         using var client = new TcpClient();
@@ -252,6 +263,8 @@ public sealed class SessionTokenTests : IDisposable
             .Append($"Host: {uri.Host}:{uri.Port}\r\n");
         if (cookie is not null)
             request.Append($"Cookie: {cookie}\r\n");
+        if (referrer is not null)
+            request.Append($"Referer: {referrer}\r\n");
         request.Append("Connection: close\r\n\r\n");
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request.ToString()));
 

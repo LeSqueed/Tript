@@ -51,7 +51,7 @@ OBS_ARCHIVE := third_party/obs-studio-$(OBS_VERSION).zip
 OBS_DIR := third_party/obs-studio-$(OBS_VERSION)
 OBS_EXTRACTED := third_party/obs-studio-$(OBS_VERSION)-x64
 
-.PHONY: all dev release linux windows obs-fetch test test-dotnet test-web test-integration test-all
+.PHONY: all dev release linux windows obs-fetch restore-windows test test-dotnet test-web test-integration test-all
 .PHONY: run clean shell publish-shell
 .PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows
 
@@ -76,10 +76,11 @@ publish-linux: web
 	cp -r data/models/* $(PUBLISH_DIR)/data/models/ 2>/dev/null || true
 
 # Windows: self-contained publish + bundled OBS.
-publish-windows:
+publish-windows: restore-windows
 	$(MAKE) web
 	$(MAKE) obs-fetch
 	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r win-x64 --self-contained true \
+		-p:RestoreLockedMode=true \
 		-o $(WIN_PUBLISH_DIR)
 	# Publish the desktop shell (Photino window) next to the app host so the folder is a launchable app.
 	$(MAKE) publish-shell-win
@@ -175,9 +176,19 @@ publish-shell:
 # the app host) so dist/<config>-win is a complete desktop app. Photino.Native 4.0.22 ships its
 # win-x64 payload (Photino.Native.dll + WebView2Loader.dll) via runtimes/win-x64/native, which
 # self-contained win-x64 publish lands automatically.
-publish-shell-win:
+publish-shell-win: restore-windows
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r win-x64 \
-		--self-contained true -o $(WIN_PUBLISH_DIR)
+		--self-contained true -p:RestoreLockedMode=true -o $(WIN_PUBLISH_DIR)
+	# Keep the Windows publish self-contained too; dotnet publish does not build or copy the Vite UI.
+	mkdir -p $(WIN_PUBLISH_DIR)/dist
+	cp -r $(WEB_SRC)/dist/* $(WIN_PUBLISH_DIR)/dist/
+
+# The per-project lock files carry the ordinary framework graph in source control. Windows publishing
+# needs the additional RID graph for Photino.Native and OBS assets, so materialize it deliberately before
+# the locked publish rather than letting an ordinary test restore rewrite it implicitly.
+restore-windows:
+	dotnet restore src/Tript.App/Tript.App.csproj -p:RuntimeIdentifier=win-x64 -p:RestoreForceEvaluate=true --nologo
+	dotnet restore src/Tript.Shell/Tript.Shell.csproj -p:RuntimeIdentifier=win-x64 -p:RestoreForceEvaluate=true --nologo
 
 shell: web publish-shell
 	@echo "Shell built at: $(PUBLISH_DIR)/Tript.Shell"

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-// The settings model and its persistence, structured around the five logical pages the settings
-// UI is split into: recording, buffer/replay, audio, capture and game.
+// The settings model and its persistence, structured around the six logical pages the settings
+// UI is split into: general, recording, buffer/replay, audio, capture and game.
 // The shape — a typed object with typed page sub-objects, unknown keys preserved on round-trip —
 // is what lets a new property slot into the page it belongs to rather than growing a parallel
 // structure.
@@ -30,10 +30,11 @@ public enum SettingsPage
     Buffer,
     Audio,
     Capture,
-    Game
+    Game,
+    General
 }
 
-// The top-level settings object: five page objects plus the per-game override collection. The
+// The top-level settings object: six page objects plus the per-game override collection. The
 // three game-side types (quality override, recording-mode override, integration settings) live
 // under each GameSetting, because a game's settings address the game, not a page.
 public sealed class Settings
@@ -62,4 +63,6 @@ public sealed class Settings
     public CaptureSettings Capture { get; set; } = new();
 
     public GameSettings Game { get; set; } = new();
+
+    public GeneralSettings General { get; set; } = new();
 }

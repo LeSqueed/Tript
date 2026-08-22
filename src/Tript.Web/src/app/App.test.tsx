@@ -104,6 +104,7 @@ describe('App shell', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    window.location.hash = '';
     captureSessionToken('');
   });
 
@@ -144,6 +145,55 @@ describe('App shell', () => {
 
     fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
     expect(screen.getByTestId('library-groups')).toBeTruthy();
+  });
+
+  it('honours a settings startup fragment without changing normal navigation', () => {
+    window.location.hash = '#settings';
+    renderApp();
+    connect();
+
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
+    expect(screen.queryByTestId('library-groups')).toBeNull();
+  });
+
+  it('follows a settings fragment changed by the desktop shell', () => {
+    renderApp();
+    connect();
+
+    act(() => {
+      window.location.hash = '#settings';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
+    expect(screen.queryByTestId('library-groups')).toBeNull();
+  });
+
+  it('recognizes a unique settings fragment from repeated shell navigation', () => {
+    window.location.hash = '#settings-unique-request';
+    renderApp();
+    connect();
+
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
+    expect(screen.queryByTestId('library-groups')).toBeNull();
+  });
+
+  it('can reopen settings after navigating back to the library', () => {
+    renderApp();
+    connect();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(window.location.hash).toBe('#settings');
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect(window.location.hash).toBe('#library');
+
+    act(() => {
+      window.location.hash = '#settings';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
   });
 
   it('puts navigation in the topbar and does not repeat the route name below it', () => {

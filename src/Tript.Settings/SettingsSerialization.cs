@@ -30,17 +30,37 @@ public static class SettingsSerialization
             NumberHandling = JsonNumberHandling.AllowReadingFromString,
         };
 
-        // The specific converter must precede the generic enum converter: options.Converters is
+        // The specific converter must precede the tolerant generic enum converter: options.Converters is
         // walked in order and the first converter that can handle the type wins, so a generic
         // string-enum converter registered first would swallow ContentType and its unknown-name
         // tolerance would never run.
         options.Converters.Add(new ContentTypeConverter());
         options.Converters.Add(new TolerantDateTimeConverter());
-        options.Converters.Add(new JsonStringEnumConverter());
+        options.Converters.Add(new TolerantEnumConverterFactory());
         return options;
     }
 
     public static string Serialize(Settings settings) => JsonSerializer.Serialize(settings, Options);
 
-    public static Settings? Deserialize(string json) => JsonSerializer.Deserialize<Settings>(json, Options);
+    public static Settings? Deserialize(string json)
+    {
+        var settings = JsonSerializer.Deserialize<Settings>(json, Options);
+        if (settings is null)
+            return null;
+
+        RemoveRemovedGeneralProperties(settings.General);
+
+        return settings;
+    }
+
+    public static void RemoveRemovedGeneralProperties(GeneralSettings general)
+    {
+        foreach (var key in general.UnknownProperties.Keys
+                     .Where(key => key.Equals("startupWindow", StringComparison.OrdinalIgnoreCase)
+                                || key.Equals("closeButtonAction", StringComparison.OrdinalIgnoreCase))
+                     .ToArray())
+        {
+            general.UnknownProperties.Remove(key);
+        }
+    }
 }

@@ -23,3 +23,14 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Photino uses this bridge to tell the native shell that the document and React tree actually ran.
+// The shell waits for this before hiding/minimizing a tray launch; hiding the native window earlier
+// can prevent WebView2 from creating its renderer and leaves a white window on later restore.
+type PhotinoWindow = Window & {
+  external?: {
+    sendMessage?: (message: string) => void;
+  };
+};
+
+(window as PhotinoWindow).external?.sendMessage?.('tript:ready');

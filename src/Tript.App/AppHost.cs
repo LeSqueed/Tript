@@ -16,6 +16,14 @@ using SettingsModel = Tript.Settings.Settings;
 
 namespace Tript.App;
 
+public enum NotificationKind
+{
+    RecordingStarted,
+    RecordingStopped,
+    Error,
+    Recovery,
+}
+
 // Assembles every component into the running app and owns the process lifetime: the settings store
 // and session tracker, the recorder plus its game detector and detection host, the three local IPC
 // channels (control socket, content server, UI host), the content catalogue, and the clip pipeline.
@@ -132,6 +140,12 @@ internal sealed class AppHost : IDisposable
     internal AppOptions Options => _options;
 
     internal SettingsStore SettingsStore => _settingsStore;
+
+    internal event Action<SettingsModel>? SettingsChanged;
+
+    internal event Action<bool, string?>? StateChanged;
+
+    internal event Action<NotificationKind, string, string>? NotificationRequested;
 
     internal ObsRuntime? Runtime => _runtime;
 
@@ -413,6 +427,8 @@ internal sealed class AppHost : IDisposable
         StartDetection(effectiveGameId);
 
         PushState(recording: true, effectiveGameId);
+        RequestNotification(NotificationKind.RecordingStarted, "Recording started",
+            string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
         return true;
     }
 
@@ -467,6 +483,7 @@ internal sealed class AppHost : IDisposable
         _currentGameId = null;
 
         PushState(recording: false, null);
+        RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
         return true;
     }
 
@@ -716,6 +733,7 @@ internal sealed class AppHost : IDisposable
             Directory.CreateDirectory(effectiveRoot);
         }
 
+        SettingsChanged?.Invoke(settings);
         PushSettings();
         return true;
     }
@@ -744,6 +762,9 @@ internal sealed class AppHost : IDisposable
                 case "game" when property.Value.ValueKind == JsonValueKind.Object:
                     ApplyObjectPatch(settings.Game, property.Value);
                     break;
+                case "general" when property.Value.ValueKind == JsonValueKind.Object:
+                    ApplyObjectPatch(settings.General, property.Value);
+                    break;
             }
         }
     }
@@ -763,6 +784,9 @@ internal sealed class AppHost : IDisposable
             var value = clone.GetType().GetProperty(property.Name)?.GetValue(clone);
             property.SetValue(page, value);
         }
+
+        if (page is GeneralSettings general)
+            SettingsSerialization.RemoveRemovedGeneralProperties(general);
     }
 
     private static string MergeObjects(JsonElement baseObject, JsonElement patch)
@@ -770,15 +794,40 @@ internal sealed class AppHost : IDisposable
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
-            writer.WriteStartObject();
-            foreach (var property in baseObject.EnumerateObject())
-                property.WriteTo(writer);
-            foreach (var property in patch.EnumerateObject())
-                property.WriteTo(writer);
-            writer.WriteEndObject();
+            WriteMergedObject(writer, baseObject, patch);
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteMergedObject(Utf8JsonWriter writer, JsonElement baseObject, JsonElement patch)
+    {
+        writer.WriteStartObject();
+
+        foreach (var property in baseObject.EnumerateObject())
+        {
+            if (!patch.TryGetProperty(property.Name, out var replacement))
+            {
+                property.WriteTo(writer);
+                continue;
+            }
+
+            writer.WritePropertyName(property.Name);
+            if (property.Value.ValueKind == JsonValueKind.Object && replacement.ValueKind == JsonValueKind.Object)
+                WriteMergedObject(writer, property.Value, replacement);
+            else
+                replacement.WriteTo(writer);
+        }
+
+        foreach (var property in patch.EnumerateObject())
+        {
+            if (baseObject.TryGetProperty(property.Name, out _))
+                continue;
+
+            property.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
     }
 
     // ---- game list ----
@@ -828,6 +877,7 @@ internal sealed class AppHost : IDisposable
                 startedAt = recording ? DateTimeToUnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
             },
         }, Wire.Options));
+        StateChanged?.Invoke(recording, gameId);
     }
 
     // The machine's active WASAPI endpoints, inputs first then outputs. Each entry carries its
@@ -968,7 +1018,11 @@ internal sealed class AppHost : IDisposable
         {
             message,
         }, Wire.Options));
+        RequestNotification(NotificationKind.Error, "Tript error", message);
     }
+
+    private void RequestNotification(NotificationKind kind, string title, string body) =>
+        NotificationRequested?.Invoke(kind, title, body);
 
     private void PushWarning(string? message)
     {
@@ -1791,6 +1845,8 @@ internal sealed class AppHost : IDisposable
                 typeLabel = Path.GetFileName(file),
             }),
         }, Wire.Options));
+        RequestNotification(NotificationKind.Recovery, "Unfinished recording found",
+            $"Tript found {orphans.Count} recording file{(orphans.Count == 1 ? "" : "s")} to recover.");
     }
 
     private List<string> FindOrphanFiles()

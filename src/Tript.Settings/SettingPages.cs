@@ -162,3 +162,38 @@ public sealed class GameSettings
     // this default only applies when a settings file is absent or has no gameList key.
     public List<GameSetting> GameList { get; set; } = [new() { Id = "Overwatch", Name = "Overwatch" }];
 }
+
+// The general page owns desktop-shell preferences rather than recorder configuration. The headless
+// host persists and exposes these values too, while the desktop shell is responsible for applying
+// the platform-specific effects.
+public sealed class GeneralSettings
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
+
+    public bool StartWithWindows { get; set; }
+
+    public StartupVisibility StartupVisibility { get; set; } = StartupVisibility.Window;
+
+    public MinimizeBehavior MinimizeBehavior { get; set; } = MinimizeBehavior.Taskbar;
+
+    public CloseBehavior CloseBehavior { get; set; } = CloseBehavior.Exit;
+
+    public NotificationSettings Notifications { get; set; } = new();
+}
+
+public sealed class NotificationSettings
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
+
+    public bool Enabled { get; set; } = true;
+
+    public bool RecordingStarted { get; set; } = true;
+
+    public bool RecordingStopped { get; set; } = true;
+
+    public bool Errors { get; set; } = true;
+
+    public bool Recovery { get; set; } = true;
+}

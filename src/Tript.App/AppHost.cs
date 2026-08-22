@@ -85,11 +85,13 @@ internal sealed class AppHost : IDisposable
     // A stop can hold this for up to its 10s settle, and a start that waits behind it is correct:
     // there is one recorder.
     private readonly object _recorderGate = new();
+    private readonly TimeSpan _recorderStopTimeout;
     private bool _shuttingDown;
 
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
     private ObsSource? _colourSource;
+    private bool _stopFinalizationPending;
     private ProcessNameGameDetector? _detector;
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
@@ -114,13 +116,15 @@ internal sealed class AppHost : IDisposable
 
     // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
-        RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null)
+        RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
+        TimeSpan? recorderStopTimeout = null)
     {
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
+        _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
 
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
@@ -323,17 +327,37 @@ internal sealed class AppHost : IDisposable
             Console.Error.WriteLine($"Tript.App: recording cleanup failed during shutdown: {exception.Message}");
         }
 
+        RecorderStateMachine? recorder;
+        IRecorderSession? recorderSession;
+        ObsSource? colourSource;
+        ObsRuntime? runtime;
         lock (_recorderGate)
         {
-            _recorder?.Dispose();
-            _recorderSession?.Dispose();
-            _colourSource?.Dispose();
+            recorder = _recorder;
+            recorderSession = _recorderSession;
+            colourSource = _colourSource;
+            runtime = _runtime;
+            _recorder = null;
+            _recorderSession = null;
+            _colourSource = null;
+        }
+
+        if (recorder?.Snapshot.State == RecorderState.Stopping)
+        {
+            // A native muxer can remain stopped-but-unacknowledged indefinitely. Keep the native
+            // session alive and finish this disposal after its callback instead of blocking app exit
+            // or releasing the runtime underneath the callback.
+            ThreadPool.QueueUserWorkItem(_ => DisposeRecorderResources(
+                recorder, recorderSession, colourSource, runtime));
+        }
+        else
+        {
+            DisposeRecorderResources(recorder, recorderSession, colourSource, runtime);
         }
 
         _ipc.Dispose();
         _content.Dispose();
         _ui.Dispose();
-        _runtime?.Dispose();
     }
 
     // ---- recorder wiring ----
@@ -349,7 +373,12 @@ internal sealed class AppHost : IDisposable
     internal void StopRecordingOrReport()
     {
         if (!StopRecording())
-            PushError("There was no recording to stop.");
+        {
+            var state = _recorder?.Snapshot.State;
+            PushError(state == RecorderState.Stopping
+                ? "The recording is still stopping; it will remain active until the output finishes."
+                : "There was no recording to stop.");
+        }
     }
 
     internal bool StartRecording(string? gameId)
@@ -362,9 +391,12 @@ internal sealed class AppHost : IDisposable
     {
         var effectiveGameId = gameId ?? StartupGameId;
 
-        // The detector's handlers can still fire once after teardown began: its Dispose no longer
-        // blocks behind an in-flight callback, deliberately.
+        // Detector teardown owns the callback barrier; do not admit new recording starts while it is
+        // being dismantled.
         if (_shuttingDown)
+            return false;
+
+        if (_stopFinalizationPending)
             return false;
 
         if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
@@ -414,8 +446,8 @@ internal sealed class AppHost : IDisposable
                 _captureWaitCancellation = null;
                 PushWarning(null);
                 capture.ClearSourceFromChannel();
+                waitCancellation.Dispose();
             }
-            waitCancellation.Dispose();
         }
 
         if (!_recorder!.Start(resolved))
@@ -469,14 +501,52 @@ internal sealed class AppHost : IDisposable
 
         // The recorder marshals the transition onto the thread it was created on; the IPC thread is that
         // thread for the real recorder, and the fake raises the signal synchronously inside Stop.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + _recorderStopTimeout;
         while (_recorder.Snapshot.State != RecorderState.Idle)
         {
             if (DateTime.UtcNow > deadline)
-                break;
+            {
+                _stopFinalizationPending = true;
+                var recorder = _recorder;
+                ThreadPool.QueueUserWorkItem(_ => CompletePendingStop(recorder!));
+                Log.Warning("AppHost: recording output did not finish stopping within {Timeout}; leaving the recording in Stopping state until its callback arrives",
+                    _recorderStopTimeout);
+                return false;
+            }
             Thread.Sleep(20);
         }
 
+        FinalizeStoppedRecordingLocked();
+        return true;
+    }
+
+    private void CompletePendingStop(RecorderStateMachine recorder)
+    {
+        while (true)
+        {
+            lock (_recorderGate)
+            {
+                if (_disposed || !ReferenceEquals(_recorder, recorder))
+                {
+                    _stopFinalizationPending = false;
+                    return;
+                }
+
+                if (recorder.Snapshot.State == RecorderState.Idle)
+                {
+                    _stopFinalizationPending = false;
+                    FinalizeStoppedRecordingLocked();
+                    return;
+                }
+            }
+
+            Thread.Sleep(20);
+        }
+    }
+
+    private void FinalizeStoppedRecordingLocked()
+    {
+        _recorder!.DrainCompletedOutput();
         StopDetection();
 
         var session = _sessionTracker.Stop();
@@ -492,7 +562,22 @@ internal sealed class AppHost : IDisposable
 
         PushState(recording: false, null);
         RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
-        return true;
+    }
+
+    private static void DisposeRecorderResources(RecorderStateMachine? recorder,
+        IRecorderSession? recorderSession, ObsSource? colourSource, ObsRuntime? runtime)
+    {
+        try { recorder?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred recorder disposal failed"); }
+
+        try { recorderSession?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred recorder session disposal failed"); }
+
+        try { colourSource?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred colour source disposal failed"); }
+
+        try { runtime?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred OBS runtime disposal failed"); }
     }
 
     // Persists the recording's metadata — game, start time, content type, audio tracks, the

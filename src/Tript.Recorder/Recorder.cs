@@ -22,9 +22,8 @@ namespace Tript.Recorder;
 //     output refused, a failure it reported when it stopped, and an unsupported mode all become a
 //     RecorderStopReason on the snapshot.
 //
-// Threading: Start and Stop are the control plane and may be called from any thread; the stop
-// transition marshals onto the thread the recorder was created on, because the output's stop signal
-// can arrive on a libobs thread and the recording must not be torn down underneath that handler.
+// Threading: Start and Stop are the control plane and may be called from any thread. Native stop
+// completion is asynchronous, so output ownership remains deferred until its callback is quiescent.
 public sealed class Recorder : IDisposable
 {
     private readonly IRecorderSession _session;
@@ -39,6 +38,8 @@ public sealed class Recorder : IDisposable
     private ObsOutputStopCode? _lastStopCode;
     private string? _lastError;
     private bool _disposed;
+    private bool _disposing;
+    private bool _sourcePlaced;
 
     public Recorder(IRecorderSession session, ResolvedRecorderSettings settings)
     {
@@ -83,9 +84,17 @@ public sealed class Recorder : IDisposable
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(settings.AudioTracks);
 
+        IRecorderOutput? cleanupOutput = null;
+        var cleanupOutputStop = false;
+        var clearSource = false;
+        var started = false;
+
         lock (_gate)
         {
             ThrowIfDisposed();
+
+            if (_disposing)
+                return false;
 
             if (_state != RecorderState.Idle)
                 return false;
@@ -104,53 +113,91 @@ public sealed class Recorder : IDisposable
 
             _settings = settings.Clone();
 
-            IRecorderOutput output;
+            IRecorderOutput? output = null;
+            EventHandler<ObsOutputStopEvent>? handler = null;
             try
             {
                 output = _session.CreateOutput(_settings);
+                _output = output;
+
+                // The stop signal is subscribed before Start, not at stop time: the output can end on
+                // its own and that signal would be missed by a handler attached only when Stop is called.
+                handler = new EventHandler<ObsOutputStopEvent>(OnStopped);
+                _stopHandler = handler;
+                output.Stopped += handler;
+
+                if (!output.Start())
+                {
+                    output.Stopped -= handler;
+                    _stopHandler = null;
+                    _output = null;
+                    cleanupOutput = output;
+                    _lastStopReason = RecorderStopReason.StartRefused;
+                    _lastStopCode = null;
+                    _lastError = string.IsNullOrEmpty(output.LastError) ? null : output.LastError;
+                }
+                else
+                {
+                    // A native output can report an immediate stop while Start is returning. Do not
+                    // place the source or publish Recording after that callback has completed.
+                    if (!ReferenceEquals(_output, output) || _state != RecorderState.Idle)
+                        throw new ObsException("The output stopped while it was starting.");
+
+                    _sourcePlaced = true;
+                    _session.PlaceSourceOnChannel();
+                    _lastStopReason = null;
+                    _lastStopCode = null;
+                    _lastError = null;
+                    _state = RecorderState.Recording;
+                    started = true;
+                }
             }
-            catch (ObsException exception)
+            catch (Exception exception)
             {
-                // A wiring failure refuses the start, synchronously, with the exception's message
-                // as the reason. The recorder is back to Idle, owning nothing.
+                if (handler is not null && ReferenceEquals(_stopHandler, handler))
+                {
+                    output!.Stopped -= handler;
+                    _stopHandler = null;
+                }
+
+                if (_sourcePlaced)
+                {
+                    _sourcePlaced = false;
+                    clearSource = true;
+                }
+
+                if (output is not null)
+                {
+                    if (ReferenceEquals(_output, output))
+                        _output = null;
+                    if (ReferenceEquals(_pendingDispose, output))
+                        _pendingDispose = null;
+                    cleanupOutput = output;
+                    cleanupOutputStop = true;
+                }
+
                 _lastStopReason = RecorderStopReason.StartRefused;
                 _lastStopCode = null;
                 _lastError = exception.Message;
-                return false;
             }
-
-            _output = output;
-
-            // The stop signal is subscribed before Start, not at stop time: the output can end on
-            // its own (a muxer failure mid-recording) and that signal would be missed by a handler
-            // attached only when Stop is called.
-            var handler = new EventHandler<ObsOutputStopEvent>(OnStopped);
-            _stopHandler = handler;
-            output.Stopped += handler;
-
-            if (!output.Start())
-            {
-                output.Stopped -= handler;
-                _stopHandler = null;
-
-                var error = output.LastError;
-                _lastStopReason = RecorderStopReason.StartRefused;
-                _lastStopCode = null;
-                _lastError = string.IsNullOrEmpty(error) ? null : error;
-
-                _output = null;
-                output.Dispose();
-                return false;
-            }
-
-            _session.PlaceSourceOnChannel();
-
-            _lastStopReason = null;
-            _lastStopCode = null;
-            _lastError = null;
-            _state = RecorderState.Recording;
-            return true;
         }
+
+        if (clearSource)
+            _session.ClearSourceFromChannel();
+
+        if (cleanupOutput is not null)
+        {
+            if (cleanupOutputStop)
+            {
+                if (!cleanupOutput.WaitForStop(TimeSpan.Zero))
+                    cleanupOutput.Stop();
+                cleanupOutput.WaitForStop(Timeout.InfiniteTimeSpan);
+            }
+
+            cleanupOutput.Dispose();
+        }
+
+        return started;
     }
 
     // Stops the recording in flight, if any. A no-op from Idle. The stop signal is what completes
@@ -207,47 +254,85 @@ public sealed class Recorder : IDisposable
 
     public void Dispose()
     {
-        IRecorderOutput? toDispose;
+        IRecorderOutput? stopping;
         lock (_gate)
         {
-            if (_disposed)
+            if (_disposed || _disposing)
                 return;
+
+            _disposing = true;
 
             if (_state != RecorderState.Idle)
             {
-                // Told to stop without waiting: at process shutdown nothing may block on the muxer
-                // helper, and obs_shutdown releases every object regardless.
-                // Set before the call, as in Stop: a synchronous stop signal reads the reason on
-                // its way through RecordStop.
+                // Set before the call, as in Stop: a synchronous stop signal reads the reason on its
+                // way through RecordStop. The callback must complete before native ownership is
+                // released.
                 _lastStopReason = RecorderStopReason.Disposed;
                 _state = RecorderState.Stopping;
-
-                try
-                {
-                    _output?.Stop();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
+                stopping = _output;
             }
+            else
+            {
+                stopping = null;
+            }
+        }
 
+        if (stopping is not null)
+        {
+            try
+            {
+                stopping.Stop();
+                stopping.WaitForStop(Timeout.InfiniteTimeSpan);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        IRecorderOutput? toDispose;
+        var clearSource = false;
+        lock (_gate)
+        {
             _disposed = true;
+            _disposing = false;
 
-            // The live output, when there is one, and any output deferred off a stop callback both
-            // go here. A live output is disposed outside the gate below; the deferred one is drained
-            // here, synchronously, so a caller that disposes the recorder before obs_shutdown knows
-            // every output is gone.
+            clearSource = _sourcePlaced;
+            _sourcePlaced = false;
+
+            // The callback, if any, has completed before this point. The live output and any output
+            // deferred by that callback can now be released on the control-plane thread.
             toDispose = _pendingDispose ?? _output;
             _pendingDispose = null;
             _output = null;
         }
 
-        // No one touches the output after the gate; tearing it down outside is safe.
+        if (clearSource)
+            _session.ClearSourceFromChannel();
+
         toDispose?.Dispose();
     }
 
-    // The output's stop signal. The binding (ObsOutput) already marshals the stop event onto the
-    // thread that subscribed, so this handler runs on the recorder thread.
+    internal void DrainCompletedOutput()
+    {
+        IRecorderOutput? toDispose;
+        lock (_gate)
+        {
+            if (_state != RecorderState.Idle)
+                return;
+
+            toDispose = _pendingDispose;
+            _pendingDispose = null;
+        }
+
+        if (toDispose is not null)
+        {
+            toDispose.WaitForStop(Timeout.InfiniteTimeSpan);
+            toDispose.Dispose();
+        }
+    }
+
+    // The output's stop signal. The handler may run on a libobs thread or be posted to the captured
+    // synchronization context; it never releases the output inline.
     private void OnStopped(object? sender, ObsOutputStopEvent stop) => RecordStop(stop);
 
     private void RecordStop(ObsOutputStopEvent stop)
@@ -284,7 +369,11 @@ public sealed class Recorder : IDisposable
 
             // The source was borrowed; it goes back to the app. The channel is cleared so nothing
             // keeps rendering a source that is no longer being recorded.
-            _session.ClearSourceFromChannel();
+            if (_sourcePlaced)
+            {
+                _sourcePlaced = false;
+                _session.ClearSourceFromChannel();
+            }
         }
     }
 

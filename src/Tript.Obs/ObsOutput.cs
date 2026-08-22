@@ -35,6 +35,7 @@ public sealed class ObsOutput : IDisposable
     private readonly ObsOutputHandle _handle;
     private readonly object _stopGate = new();
     private ObsOutputStopSubscription? _stopEvent;
+    private int _disposeRequested;
 
     private ObsOutput(nint pointer) => _handle = new ObsOutputHandle(pointer);
 
@@ -78,10 +79,23 @@ public sealed class ObsOutput : IDisposable
 
     public void Dispose()
     {
-        if (_handle.IsClosed)
+        if (Interlocked.Exchange(ref _disposeRequested, 1) != 0)
             return;
 
-        StopListeningForStop();
+        var stopEvent = StopListeningForStop();
+        if (stopEvent?.IsCurrentCallback == true)
+        {
+            // The native signal handler is still executing on this thread. Releasing the output from
+            // inside its own callback can deadlock libobs, so let the callback unwind first.
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                stopEvent.WaitForCallbacks(Timeout.InfiniteTimeSpan);
+                _handle.Dispose();
+            });
+            return;
+        }
+
+        stopEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
         _handle.Dispose();
     }
 
@@ -240,7 +254,13 @@ public sealed class ObsOutput : IDisposable
     // Starts the output. The synchronous failure channel: false means the output refused to start,
     // and LastError carries the plugin's reason if it set one — measured: a bad recording path sets
     // one, a missing encoder does not.
-    public bool Start() => ObsNative.obs_output_start(Pointer);
+    public bool Start()
+    {
+        lock (_stopGate)
+            _stopEvent?.PrepareForStart();
+
+        return ObsNative.obs_output_start(Pointer);
+    }
 
     // Asks the output to stop and waits for the muxed file to be finalised. The asynchronous stop
     // signal arrives with code OBS_OUTPUT_SUCCESS for a clean end. This call returns immediately;
@@ -295,9 +315,9 @@ public sealed class ObsOutput : IDisposable
                 if (_stopEvent is null)
                 {
                     _stopEvent = new ObsOutputStopSubscription(this);
-                    _stopEvent.Connect();
                 }
 
+                _stopEvent.Connect();
                 _stopEvent.Add(value);
             }
         }
@@ -312,18 +332,28 @@ public sealed class ObsOutput : IDisposable
                 if (_stopEvent.IsEmpty)
                 {
                     _stopEvent.Disconnect();
-                    _stopEvent = null;
                 }
             }
         }
     }
 
-    private void StopListeningForStop()
+    internal bool WaitForStop(TimeSpan timeout)
+    {
+        ObsOutputStopSubscription? stopEvent;
+        lock (_stopGate)
+            stopEvent = _stopEvent;
+
+        return stopEvent?.WaitForStop(timeout) ?? true;
+    }
+
+    private ObsOutputStopSubscription? StopListeningForStop()
     {
         lock (_stopGate)
         {
-            _stopEvent?.Disconnect();
+            var stopEvent = _stopEvent;
+            stopEvent?.Disconnect();
             _stopEvent = null;
+            return stopEvent;
         }
     }
 
@@ -400,8 +430,14 @@ internal sealed class ObsOutputStopSubscription
     private readonly ObsOutput _output;
     private readonly List<EventHandler<ObsOutputStopEvent>> _handlers = [];
     private readonly SynchronizationContext? _context;
+    private readonly object _handlerGate = new();
+    private readonly object _callbackGate = new();
+    private readonly ManualResetEventSlim _stopped = new(false);
+    private readonly ThreadLocal<int> _callbackDepth = new();
     private GCHandle _pinned;
     private bool _connected;
+    private bool _disconnectRequested;
+    private int _callbacksInFlight;
 
     internal ObsOutputStopSubscription(ObsOutput output)
     {
@@ -409,81 +445,184 @@ internal sealed class ObsOutputStopSubscription
         _context = SynchronizationContext.Current;
     }
 
-    internal bool IsEmpty => _handlers.Count == 0;
+    internal bool IsEmpty
+    {
+        get
+        {
+            lock (_handlerGate)
+                return _handlers.Count == 0;
+        }
+    }
+
+    internal bool IsCurrentCallback => _callbackDepth.Value > 0;
 
     // Registers the native callback on the output's signal handler. The GCHandle pins this object for
     // the whole connection, and the callback pointer is a static method with this object as its
     // parameter, so nothing can be collected out from under libobs.
     internal void Connect()
     {
-        if (_connected)
-            return;
-
-        _pinned = GCHandle.Alloc(this);
-        unsafe
+        lock (_callbackGate)
         {
-            ObsNative.signal_handler_connect(
-                ObsNative.obs_output_get_signal_handler(_output.Pointer), "stop",
-                &ObsOutput.OnStop, GCHandle.ToIntPtr(_pinned));
-        }
+            if (_connected)
+                return;
 
-        _connected = true;
+            _disconnectRequested = false;
+            _pinned = GCHandle.Alloc(this);
+            unsafe
+            {
+                ObsNative.signal_handler_connect(
+                    ObsNative.obs_output_get_signal_handler(_output.Pointer), "stop",
+                    &ObsOutput.OnStop, GCHandle.ToIntPtr(_pinned));
+            }
+
+            _connected = true;
+        }
     }
 
-    // Removes the native callback and frees the pin. Only ever runs against a live output: the caller
-    // disposes the output (which calls Disconnect) before libobs shuts down, so the signal handler
-    // pointer is still valid here.
+    // Removes the native callback. The pin is released immediately when no callback is active, or by
+    // the callback's finally block when disconnect races delivery.
     internal void Disconnect()
     {
-        if (!_connected)
-            return;
-
-        unsafe
+        lock (_callbackGate)
         {
-            ObsNative.signal_handler_disconnect(
-                ObsNative.obs_output_get_signal_handler(_output.Pointer), "stop",
-                &ObsOutput.OnStop, GCHandle.ToIntPtr(_pinned));
-        }
+            if (!_connected)
+                return;
 
-        _pinned.Free();
-        _connected = false;
+            unsafe
+            {
+                ObsNative.signal_handler_disconnect(
+                    ObsNative.obs_output_get_signal_handler(_output.Pointer), "stop",
+                    &ObsOutput.OnStop, GCHandle.ToIntPtr(_pinned));
+            }
+
+            _connected = false;
+            _disconnectRequested = true;
+            ReleasePinIfIdleLocked();
+        }
+    }
+
+    internal void PrepareForStart() => _stopped.Reset();
+
+    internal bool WaitForStop(TimeSpan timeout)
+    {
+        if (!_stopped.Wait(timeout))
+            return false;
+
+        return WaitForCallbacks(timeout);
+    }
+
+    internal bool WaitForCallbacks(TimeSpan timeout)
+    {
+        var deadline = timeout == Timeout.InfiniteTimeSpan
+            ? long.MaxValue
+            : Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+
+        lock (_callbackGate)
+        {
+            var ownCallbacks = _callbackDepth.Value;
+            while (_callbacksInFlight != 0)
+            {
+                if (_callbacksInFlight <= ownCallbacks)
+                    break;
+
+                var remaining = timeout == Timeout.InfiniteTimeSpan
+                    ? Timeout.Infinite
+                    : (int)Math.Clamp(deadline - Environment.TickCount64, 0, int.MaxValue);
+                if (remaining == 0 || !Monitor.Wait(_callbackGate, remaining))
+                    return false;
+            }
+
+            ReleasePinIfIdleLocked();
+            return true;
+        }
     }
 
     internal void Add(EventHandler<ObsOutputStopEvent> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
-        _handlers.Add(handler);
+        lock (_handlerGate)
+            _handlers.Add(handler);
     }
 
-    internal void Remove(EventHandler<ObsOutputStopEvent> handler) => _handlers.Remove(handler);
+    internal void Remove(EventHandler<ObsOutputStopEvent> handler)
+    {
+        lock (_handlerGate)
+            _handlers.Remove(handler);
+    }
 
     // Called from the native stop signal, on a libobs thread. Reads code and last_error from the
     // calldata — the whole point, because obs_output_get_last_error may already be reset — then
     // raises the managed event on the thread that subscribed.
     internal unsafe void OnNativeStop(nint calldata)
     {
-        // calldata ints are long long [calldata.h]; reading into a 32-bit int reads half of it.
-        long code = 0;
-        ObsNative.calldata_get_data(calldata, "code", &code, sizeof(long));
+        if (!TryEnterCallback())
+            return;
 
-        string? lastError = null;
-        nint errorPointer;
-        if (ObsNative.calldata_get_string(calldata, "last_error", &errorPointer))
-            lastError = Utf8Marshal.ReadBorrowed(errorPointer);
+        try
+        {
+            _callbackDepth.Value++;
+            // calldata ints are long long [calldata.h]; reading into a 32-bit int reads half of it.
+            long code = 0;
+            ObsNative.calldata_get_data(calldata, "code", &code, sizeof(long));
 
-        var stop = new ObsOutputStopEvent((ObsOutputStopCode)code, lastError);
-        if (_context is null)
-        {
-            foreach (var handler in _handlers.ToArray())
-                handler(_output, stop);
-        }
-        else
-        {
-            foreach (var handler in _handlers.ToArray())
+            string? lastError = null;
+            nint errorPointer;
+            if (ObsNative.calldata_get_string(calldata, "last_error", &errorPointer))
+                lastError = Utf8Marshal.ReadBorrowed(errorPointer);
+
+            var stop = new ObsOutputStopEvent((ObsOutputStopCode)code, lastError);
+            _stopped.Set();
+            EventHandler<ObsOutputStopEvent>[] handlers;
+            lock (_handlerGate)
+                handlers = _handlers.ToArray();
+
+            if (_context is null)
             {
-                var captured = handler;
-                _context.Post(_ => captured(_output, stop), null);
+                foreach (var handler in handlers)
+                    handler(_output, stop);
+            }
+            else
+            {
+                foreach (var handler in handlers)
+                {
+                    var captured = handler;
+                    _context.Post(_ => captured(_output, stop), null);
+                }
             }
         }
+        finally
+        {
+            _callbackDepth.Value--;
+            ExitCallback();
+        }
+    }
+
+    private bool TryEnterCallback()
+    {
+        lock (_callbackGate)
+        {
+            if (!_connected)
+                return false;
+
+            _callbacksInFlight++;
+            return true;
+        }
+    }
+
+    private void ExitCallback()
+    {
+        lock (_callbackGate)
+        {
+            _callbacksInFlight--;
+            ReleasePinIfIdleLocked();
+            if (_callbacksInFlight == 0)
+                Monitor.PulseAll(_callbackGate);
+        }
+    }
+
+    private void ReleasePinIfIdleLocked()
+    {
+        if (_disconnectRequested && _callbacksInFlight == 0 && _pinned.IsAllocated)
+            _pinned.Free();
     }
 }

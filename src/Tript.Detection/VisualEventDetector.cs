@@ -30,9 +30,6 @@ public class VisualEventDetector : IDisposable
     // Past this, the loop is assumed to still be inside session.Run.
     private const int StopJoinTimeoutSeconds = 3;
 
-    // Past this, a frame callback is assumed never to finish, and teardown stops waiting for it.
-    private const int FrameCallbackQuiesceTimeoutMs = 1000;
-
     // A YOLO detect head emits 4 box rows (cx, cy, w, h) before the per-class score rows.
     private const int YoloBoxChannels = 4;
 
@@ -42,6 +39,7 @@ public class VisualEventDetector : IDisposable
         new(@"(?<id>\d+)\s*:\s*(?:'(?<name>[^']*)'|""(?<name>[^""]*)"")", RegexOptions.CultureInvariant);
 
     private readonly int _detectionIntervalMs;
+    private readonly object _lifecycleGate = new();
     private IFrameSubscription? _subscription;
     private CancellationTokenSource? _cts;
     private Thread? _detectionThread;
@@ -65,6 +63,8 @@ public class VisualEventDetector : IDisposable
     private List<RegionGroup> _regionGroups = new();
     private GrayscaleStrategy _grayscaleStrategy = GrayscaleStrategy.PerGroupCrop;
     private int _numClasses;
+    private bool _disposed;
+    private bool _quarantined;
 
     public event Action<List<DetectionResult>>? DetectionsAvailable;
 
@@ -106,41 +106,141 @@ public class VisualEventDetector : IDisposable
 
     public void Start(string gameId)
     {
-        _gameId = gameId;
-        _session = ModelService.LoadModel(gameId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
 
-        // Reused across every region of every cycle: a fresh float[640*640*3] per inference is
-        // 4.9 MB straight to the LOH.
-        _inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
-        _inputTensor = new DenseTensor<float>(
-            _inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
-        _inputContainer = new List<NamedOnnxValue>
+        lock (_lifecycleGate)
         {
-            NamedOnnxValue.CreateFromTensor(_session.InputNames[0], _inputTensor)
-        };
-        _outputNames = _session.OutputMetadata.Keys.ToList();
-        _runOptions = new RunOptions();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_detectionThread is not null || _quarantined)
+                throw new InvalidOperationException("VisualEventDetector is already running or is still quiescing.");
 
-        var definitions = ModelService.LoadEventDefinitions(gameId);
-        _numClasses = ResolveClassCount(_session, _outputNames[0], definitions, gameId);
-        _regionGroups = BuildRegionGroups(definitions);
-        _grayscaleStrategy = SelectGrayscaleStrategy(_regionGroups);
+            InferenceSession? session = null;
+            IFrameSubscription? subscription = null;
+            CancellationTokenSource? cts = null;
+            RunOptions? runOptions = null;
 
-        var divisor = ComputeFrameRateDivisor(GetConfiguredOutputFps());
+            try
+            {
+                session = ModelService.LoadModel(gameId);
 
-        _subscription = FrameSourceRegistry.Current.Subscribe(
-            FramePixelFormat.Bgra,
-            width: ObsSubscribeWidth,
-            height: ObsSubscribeHeight,
-            callback: OnFrame,
-            frameRateDivisor: (uint)divisor);
+                // Reused across every region of every cycle: a fresh float[640*640*3] per inference is
+                // 4.9 MB straight to the LOH.
+                var inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
+                var inputTensor = new DenseTensor<float>(
+                    inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
+                var outputNames = session.OutputMetadata.Keys.ToList();
+                var inputContainer = new List<NamedOnnxValue>
+                {
+                    NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor)
+                };
 
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
+                var definitions = ModelService.LoadEventDefinitions(gameId);
+                var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
+                var regionGroups = BuildRegionGroups(definitions);
+                var grayscaleStrategy = SelectGrayscaleStrategy(regionGroups);
+                var divisor = ComputeFrameRateDivisor(GetConfiguredOutputFps());
 
-        // An exception escaping the loop would tear down the process on a dedicated thread,
-        // where Task.Run merely parked it in a Task nobody awaited.
-        _detectionThread = new Thread(() =>
+                cts = new CancellationTokenSource();
+                subscription = FrameSourceRegistry.Current.Subscribe(
+                    FramePixelFormat.Bgra,
+                    width: ObsSubscribeWidth,
+                    height: ObsSubscribeHeight,
+                    callback: OnFrame,
+                    frameRateDivisor: (uint)divisor);
+                runOptions = new RunOptions();
+
+                _gameId = gameId;
+                _session = session;
+                _inputBuffer = inputBuffer;
+                _inputTensor = inputTensor;
+                _inputContainer = inputContainer;
+                _outputNames = outputNames;
+                _runOptions = runOptions;
+                _regionGroups = regionGroups;
+                _grayscaleStrategy = grayscaleStrategy;
+                _numClasses = numClasses;
+                _subscription = subscription;
+                _cts = cts;
+
+                var token = cts.Token;
+                var thread = new Thread(() => RunDetectionThread(
+                    token, session, gameId, runOptions, cts))
+                {
+                    IsBackground = true,
+                    Name = "Tript.VisualEventDetector",
+                    Priority = ThreadPriority.BelowNormal,
+                };
+                _detectionThread = thread;
+                thread.Start();
+
+                Log.Information("VisualEventDetector: Started for game {GameId} with {RegionGroupCount} region groups",
+                    gameId, _regionGroups.Count);
+            }
+            catch
+            {
+                _subscription = null;
+                _cts = null;
+                _runOptions = null;
+                _detectionThread = null;
+                _session = null;
+                _gameId = null;
+                _quarantined = false;
+
+                subscription?.Dispose();
+                DrainFrameQueue();
+                runOptions?.Dispose();
+                cts?.Dispose();
+                if (session is not null)
+                    ModelService.UnloadModel(gameId);
+                throw;
+            }
+        }
+    }
+
+    public void Stop()
+    {
+        Thread? thread;
+        IFrameSubscription? subscription;
+
+        lock (_lifecycleGate)
+        {
+            _cts?.Cancel();
+            subscription = Interlocked.Exchange(ref _subscription, null);
+            thread = _detectionThread;
+        }
+
+        subscription?.Dispose();
+
+        if (thread is not null && !thread.Join(TimeSpan.FromSeconds(StopJoinTimeoutSeconds)))
+        {
+            lock (_lifecycleGate)
+                _quarantined = true;
+
+            Log.Error("VisualEventDetector: detection loop for {GameId} did not exit within {TimeoutSeconds}s; keeping the run owned and refusing restart until it exits",
+                _gameId, StopJoinTimeoutSeconds);
+            return;
+        }
+
+        DrainFrameQueue();
+
+        // A test or a failed setup can leave a cancellation source without a thread. Dispose that
+        // state here; a started run releases all of its resources from RunDetectionThread.
+        lock (_lifecycleGate)
+        {
+            if (thread is null && _detectionThread is null)
+            {
+                _cts?.Dispose();
+                _cts = null;
+            }
+        }
+
+        Log.Information("VisualEventDetector: Stopped");
+    }
+
+    private void RunDetectionThread(CancellationToken token, InferenceSession session,
+        string gameId, RunOptions runOptions, CancellationTokenSource cts)
+    {
+        try
         {
             try
             {
@@ -151,93 +251,54 @@ public class VisualEventDetector : IDisposable
             {
                 Log.Error(ex, "VisualEventDetector: detection loop terminated unexpectedly");
             }
-        })
+        }
+        finally
         {
-            IsBackground = true,
-            Name = "Tript.VisualEventDetector",
-            Priority = ThreadPriority.BelowNormal,
-        };
-        _detectionThread.Start();
+            // Stop may have timed out while this thread was inside native inference. Once the loop
+            // finally exits, no consumer can touch queued frames, so return every remaining buffer
+            // before releasing the run's native resources.
+            while (_frameQueue.Reader.TryRead(out var stale))
+                stale.ReturnBuffer();
 
-        Log.Information("VisualEventDetector: Started for game {GameId} with {RegionGroupCount} region groups",
-            gameId, _regionGroups.Count);
+            var ownsRun = false;
+            IFrameSubscription? orphanedSubscription = null;
+            lock (_lifecycleGate)
+            {
+                if (ReferenceEquals(_session, session))
+                {
+                    ownsRun = true;
+                    orphanedSubscription = _subscription;
+                    _detectionThread = null;
+                    _subscription = null;
+                    _cts = null;
+                    _runOptions = null;
+                    _inputContainer = null;
+                    _inputTensor = null;
+                    _inputBuffer = null;
+                    _outputNames = null;
+                    _session = null;
+                    _gameId = null;
+                }
+            }
+
+            if (ownsRun)
+            {
+                orphanedSubscription?.Dispose();
+                DrainFrameQueue();
+                ModelService.UnloadModel(gameId);
+                runOptions.Dispose();
+                cts.Dispose();
+
+                lock (_lifecycleGate)
+                    _quarantined = false;
+            }
+        }
     }
 
-    public void Stop()
+    private void DrainFrameQueue()
     {
-        _cts?.Cancel();
-
-        var sub = Interlocked.Exchange(ref _subscription, null);
-        sub?.Dispose();
-
-        // Disposing the subscription stops new callbacks; it does not wait for one already in
-        // flight, which will still finish its copy and queue the buffer it rented. Draining before
-        // that write leaves ~8 MB of pooled buffer sitting in a channel nothing reads again until
-        // the next Start.
-        WaitForFrameCallbackToFinish();
-
-        // A never-started detector has no loop to wait for, so it is trivially "out of Run".
-        var loopExited = true;
-        if (_detectionThread != null)
-        {
-            loopExited = _detectionThread.Join(TimeSpan.FromSeconds(StopJoinTimeoutSeconds));
-            if (!loopExited)
-            {
-                Log.Error("VisualEventDetector: detection loop for {GameId} did not exit within {TimeoutSeconds}s; leaking its ONNX session and run options rather than freeing native memory it may still be reading",
-                    _gameId, StopJoinTimeoutSeconds);
-            }
-            _detectionThread = null;
-        }
-
         while (_frameQueue.Reader.TryRead(out var stale))
             stale.ReturnBuffer();
-
-        // Only once the loop is provably outside session.Run: freeing native memory mid-inference
-        // crashes the process, and a leaked session is the cheaper failure.
-        if (loopExited)
-        {
-            if (_gameId != null)
-            {
-                ModelService.UnloadModel(_gameId);
-            }
-            _runOptions?.Dispose();
-
-            // Same condition as the run options, for the same reason: the loop waits on
-            // _cts.Token.WaitHandle, and disposing the source under it throws on that thread.
-            _cts?.Dispose();
-        }
-
-        _cts = null;
-        _runOptions = null;
-        _inputContainer = null;
-        _inputTensor = null;
-        _inputBuffer = null;
-        _outputNames = null;
-
-        _session = null;
-        _gameId = null;
-
-        Log.Information("VisualEventDetector: Stopped");
-    }
-
-    // OnFrame holds _isProcessing for its whole copy-and-queue, so zero here means no callback is
-    // holding a rented buffer. Bounded: a callback that never clears the flag must not hold
-    // teardown open for good.
-    private void WaitForFrameCallbackToFinish()
-    {
-        var deadline = Environment.TickCount64 + FrameCallbackQuiesceTimeoutMs;
-
-        while (Volatile.Read(ref _isProcessing) != 0)
-        {
-            if (Environment.TickCount64 >= deadline)
-            {
-                Log.Warning("VisualEventDetector: a frame callback was still running {TimeoutMs}ms after the subscription was dropped; its frame buffer may stay queued until the next Start",
-                    FrameCallbackQuiesceTimeoutMs);
-                return;
-            }
-
-            Thread.Sleep(1);
-        }
     }
 
     // ParseYoloOutput strides the tensor by (4 + numClasses), so a count disagreeing with the
@@ -967,6 +1028,14 @@ public class VisualEventDetector : IDisposable
 
     public void Dispose()
     {
+        lock (_lifecycleGate)
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+        }
+
         Stop();
         GC.SuppressFinalize(this);
     }

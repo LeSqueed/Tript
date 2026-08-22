@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Reflection;
 using Tript.Settings;
+using Tript.Recorder;
 using Xunit;
+using RecorderStateMachine = Tript.Recorder.Recorder;
 
 namespace Tript.App.Tests;
 
@@ -26,7 +29,8 @@ public sealed class RecorderLifecycleTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker());
+        }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker(),
+            recorderStopTimeout: TimeSpan.FromMilliseconds(20));
     }
 
     public void Dispose()
@@ -140,5 +144,76 @@ public sealed class RecorderLifecycleTests : IDisposable
         // Whatever it settled on, the two views of "is a recording running" must agree.
         _host.StopRecording();
         Assert.False(_host.IsRecording);
+    }
+
+    [Fact]
+    public void StopTimeout_LeavesTheHostRecordingAndDoesNotFinalizeMetadata()
+    {
+        var session = new FakeRecorderSession();
+        session.CompleteStopSynchronously = false;
+        var recorder = new RecorderStateMachine(session, new ResolvedRecorderSettings
+        {
+            Mode = RecordingMode.Session,
+            OutputPath = Path.Combine(_root, "timeout.mp4"),
+            ResolutionWidth = 1920,
+            ResolutionHeight = 1080,
+            Fps = 60,
+            Encoder = "x264",
+            AudioTracks = []
+        });
+        Assert.True(recorder.Start(new ResolvedRecorderSettings
+        {
+            Mode = RecordingMode.Session,
+            OutputPath = Path.Combine(_root, "timeout.mp4"),
+            ResolutionWidth = 1920,
+            ResolutionHeight = 1080,
+            Fps = 60,
+            Encoder = "x264",
+            AudioTracks = []
+        }));
+
+        var field = typeof(AppHost).GetField("_recorder", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        field.SetValue(_host, recorder);
+
+        Assert.False(_host.StopRecording());
+        Assert.Equal(RecorderState.Stopping, recorder.Snapshot.State);
+        Assert.True(_host.IsRecording);
+    }
+
+    [Fact]
+    public void StopCompletionAfterTimeout_FinalizesTheHost()
+    {
+        var session = new FakeRecorderSession
+        {
+            CompleteStopSynchronously = false
+        };
+        var recorder = new RecorderStateMachine(session, new ResolvedRecorderSettings
+        {
+            Mode = RecordingMode.Session,
+            OutputPath = Path.Combine(_root, "late-stop.mp4"),
+            ResolutionWidth = 1920,
+            ResolutionHeight = 1080,
+            Fps = 60,
+            Encoder = "x264",
+            AudioTracks = []
+        });
+        Assert.True(recorder.Start(new ResolvedRecorderSettings
+        {
+            Mode = RecordingMode.Session,
+            OutputPath = Path.Combine(_root, "late-stop.mp4"),
+            ResolutionWidth = 1920,
+            ResolutionHeight = 1080,
+            Fps = 60,
+            Encoder = "x264",
+            AudioTracks = []
+        }));
+
+        typeof(AppHost).GetField("_recorder", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(_host, recorder);
+
+        Assert.False(_host.StopRecording());
+        session.CompleteStop();
+
+        Assert.True(SpinWait.SpinUntil(() => !_host.IsRecording, TimeSpan.FromSeconds(2)));
     }
 }

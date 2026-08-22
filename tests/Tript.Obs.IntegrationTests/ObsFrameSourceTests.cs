@@ -171,9 +171,7 @@ public sealed class ObsFrameSourceDeliveryTests : IClassFixture<FrameDeliveryFix
     [SkippableFact]
     public void DisposingASubscription_WhileFramesAreArriving_DoesNotRace()
     {
-        // Loop subscribe/run/dispose so a dispose that raced an in-flight callback would land
-        // somewhere in the loop rather than once at the end. The callback target is swapped out
-        // before the disconnect, so a callback already inside OnFrame observes null and returns.
+        // Repeat teardown while delivery is active to exercise the callback ownership barrier.
         for (var iteration = 0; iteration < 40; iteration++)
         {
             using var probe = new FirstDeliveryProbe();

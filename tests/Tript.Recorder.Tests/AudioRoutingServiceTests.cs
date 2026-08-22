@@ -233,6 +233,51 @@ public sealed class AudioRoutingServiceTests
         Assert.All(sink.CreatedSources, source => Assert.Equal(1, source.DisposeCount));
     }
 
+    [Fact]
+    public void WiringFailure_RollsBackSourcesCreatedBeforeTheFailure()
+    {
+        var sink = new FakeSink { FailOnCreateSource = 2 };
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game", Kind = AudioSourceKind.Output, Volume = 1f },
+                new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1f },
+            } }
+        });
+
+        Assert.Throws<InvalidOperationException>(() => new AudioRoutingService(sink).Wire(plan));
+
+        Assert.Single(sink.CreatedSources);
+        Assert.True(sink.CreatedSources[0].Disposed);
+        Assert.Single(sink.Deactivated);
+    }
+
+    [Fact]
+    public void WiringFailure_RollsBackEncodersAndSourcesCreatedBeforeAssignmentFails()
+    {
+        var sink = new FakeSink { FailOnAssign = 2 };
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game", Kind = AudioSourceKind.Output, Volume = 1f }
+            } },
+            new() { Name = "Mic", Sources =
+            {
+                new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1f }
+            } }
+        });
+
+        Assert.Throws<InvalidOperationException>(() => new AudioRoutingService(sink).Wire(plan));
+
+        Assert.Equal(2, sink.CreatedSources.Count);
+        Assert.All(sink.CreatedSources, source => Assert.True(source.Disposed));
+        Assert.Equal(2, sink.Deactivated.Count);
+        Assert.Equal(2, sink.CreatedEncoders.Count);
+        Assert.All(sink.CreatedEncoders, entry => Assert.True(entry.Encoder.Disposed));
+    }
+
     // ---- the fake sink ----
 
     private sealed class FakeSink : IAudioRoutingSink
@@ -251,8 +296,19 @@ public sealed class AudioRoutingServiceTests
 
         internal List<(FakeEncoder Encoder, int OutputSlot)> Assigned { get; } = [];
 
+        internal int? FailOnCreateSource { get; init; }
+
+        internal int? FailOnAssign { get; init; }
+
+        private int _createSourceCalls;
+
+        private int _assignCalls;
+
         public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId)
         {
+            if (++_createSourceCalls == FailOnCreateSource)
+                throw new InvalidOperationException("capture source creation failed");
+
             var source = new FakeSource(name, deviceId);
             CreatedSources.Add(source);
             return source;
@@ -280,8 +336,13 @@ public sealed class AudioRoutingServiceTests
             return encoder;
         }
 
-        public void AssignEncoderToSlot(IAudioTrackEncoder encoder, int outputSlot) =>
+        public void AssignEncoderToSlot(IAudioTrackEncoder encoder, int outputSlot)
+        {
+            if (++_assignCalls == FailOnAssign)
+                throw new InvalidOperationException("encoder assignment failed");
+
             Assigned.Add(((FakeEncoder)encoder, outputSlot));
+        }
     }
 
     private sealed class FakeSource(string name, string? deviceId) : IAudioRoutedSource, IDisposable

@@ -6,6 +6,7 @@ using Tript.Detection;
 using Tript.Obs;
 using Tript.Recorder;
 using Xunit;
+using System.Threading.Tasks;
 
 namespace Tript.Recorder.Tests;
 
@@ -433,6 +434,31 @@ public sealed class DetectionHostTests
         Assert.Equal(1, detector.StopCount);
     }
 
+    [Fact]
+    public async Task Stop_WaitsForAnInFlightDetectionBeforeReturning()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0)],
+        });
+        var recording = new FakeRecordingSession { BlockBookmark = true };
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            var detection = Task.Run(() => detector.RaiseDetections(Box(0)));
+            Assert.True(recording.BookmarkEntered.Wait(TimeSpan.FromSeconds(5)));
+
+            var stopping = Task.Run(host.Stop);
+            Assert.NotSame(stopping, await Task.WhenAny(stopping, Task.Delay(100)));
+
+            recording.ReleaseBookmark.Set();
+            await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+            await detection.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     // ---- the fakes ----
 
     private sealed class FakeDetector : IVisualEventDetector
@@ -498,7 +524,22 @@ public sealed class DetectionHostTests
 
         public List<Bookmark> Bookmarks { get; } = [];
 
-        public void AddBookmark(Bookmark bookmark) => Bookmarks.Add(bookmark);
+        internal bool BlockBookmark { get; init; }
+
+        internal ManualResetEventSlim BookmarkEntered { get; } = new(false);
+
+        internal ManualResetEventSlim ReleaseBookmark { get; } = new(false);
+
+        public void AddBookmark(Bookmark bookmark)
+        {
+            if (BlockBookmark)
+            {
+                BookmarkEntered.Set();
+                ReleaseBookmark.Wait();
+            }
+
+            Bookmarks.Add(bookmark);
+        }
     }
 
     private sealed class FakeFrameSource : IFrameSource

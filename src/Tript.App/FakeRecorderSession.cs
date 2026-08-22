@@ -10,15 +10,18 @@ namespace Tript.App;
 // The seam-level recorder session: no libobs anywhere, so the IPC and protocol layers run without a
 // display server, the OBS modules, or the muxer helper. It mirrors the fakes in
 // Tript.Recorder.Tests: CreateOutput returns a fake output whose start always succeeds, the wiring
-// calls are no-ops, and the stop signal is raised synchronously by Stop so the recorder's Idle ->
-// Recording -> Stopping -> Idle round-trip completes without a muxer.
+// calls are no-ops, and the stop signal is synchronous by default. Tests can disable completion to
+// exercise the host's stopping timeout without a muxer.
 internal sealed class FakeRecorderSession : IRecorderSession
 {
     private readonly FakeOutput _output = new();
 
+    internal bool CompleteStopSynchronously { get; set; } = true;
+
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
     {
         _output.LastSettings = settings;
+        _output.CompleteStopSynchronously = CompleteStopSynchronously;
         return _output;
     }
 
@@ -34,6 +37,8 @@ internal sealed class FakeRecorderSession : IRecorderSession
     {
     }
 
+    internal void CompleteStop() => _output.CompleteStop();
+
     internal sealed class FakeOutput : IRecorderOutput
     {
         public ResolvedRecorderSettings? LastSettings { get; set; }
@@ -43,6 +48,8 @@ internal sealed class FakeRecorderSession : IRecorderSession
         public string? LastError => null;
 
         public event EventHandler<ObsOutputStopEvent>? Stopped;
+
+        internal bool CompleteStopSynchronously { get; set; } = true;
 
         public bool Start()
         {
@@ -55,9 +62,21 @@ internal sealed class FakeRecorderSession : IRecorderSession
             if (!IsActive)
                 return;
             IsActive = false;
+            if (!CompleteStopSynchronously)
+                return;
             // The recorder subscribes to the stop signal and expects it to complete the transition
             // back to Idle. The fake raises it synchronously, so a Stop returns with the recorder
             // already Idle.
+            Stopped?.Invoke(this, new ObsOutputStopEvent(ObsOutputStopCode.Success, null));
+        }
+
+        public bool WaitForStop(TimeSpan timeout) => !IsActive;
+
+        internal void CompleteStop()
+        {
+            if (IsActive)
+                return;
+
             Stopped?.Invoke(this, new ObsOutputStopEvent(ObsOutputStopCode.Success, null));
         }
 

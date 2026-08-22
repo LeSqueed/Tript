@@ -199,6 +199,7 @@ public sealed class DetectionHost : IDisposable
             return null;
         }
 
+        run.BeginStop();
         _run = null;
         _detector.DetectionsAvailable -= run.OnDetections;
 
@@ -207,6 +208,7 @@ public sealed class DetectionHost : IDisposable
         cleanup?.Cancel();
 
         _detector.Stop();
+        run.WaitForCallbacks();
 
         Log.Information("DetectionHost: detection stopped for {GameId}", run.GameId);
         return cleanup;
@@ -297,6 +299,9 @@ public sealed class DetectionHost : IDisposable
         internal CooldownTracker Tracker { get; }
 
         private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsByClass;
+        private readonly object _callbackGate = new();
+        private int _callbacksInFlight;
+        private bool _stopping;
 
         internal DetectionRun(string gameId, IReadOnlyDictionary<int, EventDefinition> definitionsByClass)
         {
@@ -307,41 +312,76 @@ public sealed class DetectionHost : IDisposable
 
         internal void OnDetections(List<DetectionResult> detections)
         {
-            if (detections == null || detections.Count == 0)
-                return;
-
-            var now = DateTime.Now;
-            Log.Information("DetectionHost: received {Count} detection(s) for {GameId}: classes {Classes}",
-                detections.Count, GameId, string.Join(",", detections.Select(d => d.ClassId).Distinct()));
-
-            var resolved = new List<(DetectionResult Detection, EventDefinition Definition)>();
-            foreach (var detection in detections)
+            lock (_callbackGate)
             {
-                if (!_definitionsByClass.TryGetValue(detection.ClassId, out var definition))
+                if (_stopping)
+                    return;
+
+                _callbacksInFlight++;
+            }
+
+            try
+            {
+                if (detections == null || detections.Count == 0)
+                    return;
+
+                var now = DateTime.Now;
+                Log.Information("DetectionHost: received {Count} detection(s) for {GameId}: classes {Classes}",
+                    detections.Count, GameId, string.Join(",", detections.Select(d => d.ClassId).Distinct()));
+
+                var resolved = new List<(DetectionResult Detection, EventDefinition Definition)>();
+                foreach (var detection in detections)
                 {
-                    Log.Warning("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping",
-                        detection.ClassId, GameId);
-                    continue;
+                    if (!_definitionsByClass.TryGetValue(detection.ClassId, out var definition))
+                    {
+                        Log.Warning("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping",
+                            detection.ClassId, GameId);
+                        continue;
+                    }
+
+                    resolved.Add((detection, definition));
                 }
 
-                resolved.Add((detection, definition));
-            }
+                // Exclusions are modelled as vetoes for the complete inference cycle: a kill-feed icon
+                // seen alongside a kill-cam/death-spectating icon is ambiguous and must not create a
+                // bookmark. Do this before the cooldown tracker so suppressed triggers do not leave
+                // active instances that could affect a later, unexcluded cycle.
+                if (resolved.Any(item => item.Definition.Type == EventType.Exclusion))
+                {
+                    Log.Information("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
+                        GameId, resolved.Count);
+                    return;
+                }
 
-            // Exclusions are modelled as vetoes for the complete inference cycle: a kill-feed icon
-            // seen alongside a kill-cam/death-spectating icon is ambiguous and must not create a
-            // bookmark. Do this before the cooldown tracker so suppressed triggers do not leave
-            // active instances that could affect a later, unexcluded cycle.
-            if (resolved.Any(item => item.Definition.Type == EventType.Exclusion))
-            {
-                Log.Information("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
-                    GameId, resolved.Count);
-                return;
+                foreach (var (detection, definition) in resolved)
+                {
+                    if (definition.Type == EventType.Trigger)
+                        Tracker.ProcessDetection(detection, definition, now);
+                }
             }
-
-            foreach (var (detection, definition) in resolved)
+            finally
             {
-                if (definition.Type == EventType.Trigger)
-                    Tracker.ProcessDetection(detection, definition, now);
+                lock (_callbackGate)
+                {
+                    _callbacksInFlight--;
+                    if (_callbacksInFlight == 0)
+                        Monitor.PulseAll(_callbackGate);
+                }
+            }
+        }
+
+        internal void BeginStop()
+        {
+            lock (_callbackGate)
+                _stopping = true;
+        }
+
+        internal void WaitForCallbacks()
+        {
+            lock (_callbackGate)
+            {
+                while (_callbacksInFlight != 0)
+                    Monitor.Wait(_callbackGate);
             }
         }
     }

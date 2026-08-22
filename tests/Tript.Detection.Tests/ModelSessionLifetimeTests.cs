@@ -150,6 +150,30 @@ public class ModelSessionLifetimeTests
         Assert.Equal(baseline, ModelService.GetSessionRefCount(GameId));
     }
 
+    [Fact]
+    public void MixedCaseLoads_ShareOneSession()
+    {
+        AssertModelIsOnDisk();
+
+        var alternateSpelling = GameId.ToLowerInvariant();
+        var baseline = ModelService.GetSessionRefCount(GameId);
+        var first = ModelService.LoadModel(GameId);
+        var second = ModelService.LoadModel(alternateSpelling);
+
+        try
+        {
+            Assert.Same(first, second);
+            Assert.Equal(baseline + 2, ModelService.GetSessionRefCount(alternateSpelling));
+        }
+        finally
+        {
+            ModelService.UnloadModel(alternateSpelling);
+            ModelService.UnloadModel(GameId);
+        }
+
+        Assert.Equal(baseline, ModelService.GetSessionRefCount(GameId));
+    }
+
     // A construction that throws must leave nothing behind. Lazy caches the exception it produced,
     // so the failed entry has to be evicted along with its reference — otherwise a model that was
     // missing once (mid-download, mid-update) would keep replaying that same exception for the rest

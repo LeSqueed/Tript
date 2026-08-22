@@ -68,9 +68,17 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
             source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}", settings);
         }
 
-        // The item AddSource returns carries a reference of its own; dropping it leaks both the
-        // item and the source it holds, and leaves the source in the scene for the next recording.
-        return new RoutedSource(source, _scene?.AddSource(source));
+        try
+        {
+            // The item AddSource returns carries a reference of its own; dropping it leaks both the
+            // item and the source it holds, and leaves the source in the scene for the next recording.
+            return new RoutedSource(source, _scene?.AddSource(source));
+        }
+        catch
+        {
+            source.Dispose();
+            throw;
+        }
     }
 
     public void RouteSourceToMixer(IAudioRoutedSource source, int mixerIndex) =>

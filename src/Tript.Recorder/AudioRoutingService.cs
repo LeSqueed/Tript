@@ -28,22 +28,70 @@ public sealed class AudioRoutingService
         ArgumentNullException.ThrowIfNull(plan);
 
         var sources = new List<IAudioRoutedSource>(plan.TrackCount);
+        var activeSources = new List<IAudioRoutedSource>(plan.TrackCount);
         var encoders = new List<IAudioTrackEncoder>(plan.TrackCount);
 
-        foreach (var track in plan.Tracks)
+        try
         {
-            foreach (var source in track.Sources)
+            foreach (var track in plan.Tracks)
             {
-                var capture = _sink.CreateCaptureSource(source.Kind, source.Name, source.DeviceId);
-                _sink.RouteSourceToMixer(capture, track.MixerIndex);
-                _sink.SetSourceVolume(capture, source.Volume);
-                _sink.ActivateSource(capture);
-                sources.Add(capture);
+                foreach (var source in track.Sources)
+                {
+                    var capture = _sink.CreateCaptureSource(source.Kind, source.Name, source.DeviceId);
+                    sources.Add(capture);
+                    _sink.RouteSourceToMixer(capture, track.MixerIndex);
+                    _sink.SetSourceVolume(capture, source.Volume);
+                    _sink.ActivateSource(capture);
+                    activeSources.Add(capture);
+                }
+
+                var encoder = _sink.CreateTrackEncoder(track.MixerIndex, track.Name);
+                encoders.Add(encoder);
+                _sink.AssignEncoderToSlot(encoder, track.MixerIndex);
+            }
+        }
+        catch
+        {
+            for (var i = activeSources.Count - 1; i >= 0; i--)
+            {
+                try
+                {
+                    _sink.DeactivateSource(activeSources[i]);
+                }
+                catch
+                {
+                }
             }
 
-            var encoder = _sink.CreateTrackEncoder(track.MixerIndex, track.Name);
-            _sink.AssignEncoderToSlot(encoder, track.MixerIndex);
-            encoders.Add(encoder);
+            for (var i = encoders.Count - 1; i >= 0; i--)
+            {
+                if (encoders[i] is IDisposable disposable)
+                {
+                    try
+                    {
+                        disposable.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            for (var i = sources.Count - 1; i >= 0; i--)
+            {
+                if (sources[i] is IDisposable disposable)
+                {
+                    try
+                    {
+                        disposable.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            throw;
         }
 
         return new AudioRouting(_sink, sources, encoders, BuildMetadata(plan));

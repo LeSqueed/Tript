@@ -40,6 +40,7 @@ internal sealed class AppController
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
             ["CreateClip"] = (parameters, _) => CreateClip(parameters),
             ["ListContent"] = (_, _) => _host.PushContent(),
+            ["ListGames"] = (_, _) => _host.PushGameList(),
             ["CancelClip"] = (_, _) => { /* The engine is not cancellable in the alpha. */ },
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
@@ -66,6 +67,7 @@ internal sealed class AppController
             ["UpdateSettings"] = (parameters, _) => _host.UpdateSettings(
                 parameters.Deserialize<UpdateSettingsParameters>()?.Settings),
             ["SetVideoLocation"] = (_, _) => _host.RequestVideoLocation(),
+            ["BrowseTrainingFolder"] = (_, _) => _host.RequestTrainingFolder(),
             ["SetCacheLocation"] = (_, _) => { /* No native folder picker in the alpha. */ },
             ["SelectGameExecutable"] = (_, client) =>
             {
@@ -79,6 +81,27 @@ internal sealed class AppController
             ["OpenInBrowser"] = (_, _) => { /* No browser integration in the alpha. */ },
             ["StorageWarningConfirm"] = (_, _) => { /* No storage warnings raised. */ },
             ["RecoveryConfirm"] = (parameters, _) => _host.RecoveryConfirm(parameters.Deserialize<RecoveryConfirmParameters>()),
+#if TRIPT_TRAINING
+            ["ListTraining"] = (parameters, _) => _host.PushTraining(
+                parameters.Deserialize<TrainingGameParameters>()?.GameId),
+            ["ImportTrainingAssets"] = (parameters, _) => _host.ImportTrainingAssets(
+                parameters.Deserialize<ImportTrainingParameters>()),
+             ["CaptureTrainingSample"] = (parameters, _) => _host.CaptureTrainingSample(
+                 parameters.Deserialize<CaptureTrainingSampleParameters>()),
+             ["UpdateTrainingEvents"] = (parameters, _) => _host.UpdateTrainingEvents(
+                 parameters.Deserialize<UpdateTrainingEventsParameters>()),
+            ["GetTrainingSample"] = (parameters, _) => _host.GetTrainingSample(
+                parameters.Deserialize<TrainingSampleParameters>()),
+            ["UpdateTrainingSample"] = (parameters, _) => _host.UpdateTrainingSample(
+                parameters.Deserialize<UpdateTrainingSampleParameters>()),
+            ["DeleteTrainingSample"] = (parameters, _) => _host.DeleteTrainingSample(
+                parameters.Deserialize<TrainingSampleParameters>()),
+            ["StartTraining"] = (parameters, _) => _host.StartTraining(
+                parameters.Deserialize<StartTrainingParameters>()),
+            ["CancelTraining"] = (_, _) => _host.CancelTraining(),
+            ["InstallTrainingModel"] = (parameters, _) => _host.InstallTrainingModelCommand(
+                parameters.Deserialize<TrainingGameParameters>()),
+#endif
         };
     }
 

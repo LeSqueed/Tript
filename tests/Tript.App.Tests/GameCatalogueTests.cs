@@ -50,23 +50,23 @@ public sealed class GameCatalogueTests : IDisposable
     [Fact]
     public void AnEmptyCatalogue_IsNotRebuiltByReadingIt()
     {
-        // The user deletes every game entry.
+        // Removing settings entries does not remove the project catalogue.
         Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
         {
             game = new { gameList = Array.Empty<object>() },
         })));
-        Assert.Empty(_host.GameList);
+        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
 
         // A game appears in the settings object behind the host's back. Reading the property must not
         // notice: the read is a read, not a reload of the whole catalogue over the top of whatever
         // another thread is holding.
         _store.Load().Game.GameList.Add(new GameSetting { Id = "Doom", Name = "Doom" });
-        Assert.Empty(_host.GameList);
-        Assert.Empty(_host.GameList);
+        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
+        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
 
-        // An explicit reload is what picks it up.
+        // An explicit reload still replaces the snapshot, but the source remains the project list.
         _host.ReloadGameList();
-        Assert.Equal("Doom", Assert.Single(_host.GameList).Name);
+        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Name);
     }
 
     // The reload the property used to do is still done where it belongs: a settings change is the
@@ -84,7 +84,7 @@ public sealed class GameCatalogueTests : IDisposable
             },
         })));
 
-        Assert.Equal(["Doom", "Quake"], _host.GameList.Select(game => game.Id));
+        Assert.Equal(["Overwatch"], _host.GameList.Select(game => game.Id));
     }
 
     // A reload replaces the list rather than emptying and refilling it, so a reader that already has
@@ -100,7 +100,7 @@ public sealed class GameCatalogueTests : IDisposable
             game = new { gameList = Array.Empty<object>() },
         })));
 
-        Assert.Empty(_host.GameList);
+        Assert.Single(_host.GameList);
         Assert.Single(held);
         Assert.NotSame(held, _host.GameList);
     }

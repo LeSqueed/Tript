@@ -13,6 +13,10 @@ public static class ModelService
     // "models" rather than "training": these are the shipped runtime assets, not a training workspace.
     public static readonly string BasePath = Path.Combine(AppContext.BaseDirectory, "data", "models");
 
+#if TRIPT_TRAINING
+    private static string? _userModelRoot;
+#endif
+
     // An InferenceSession is ~10 MB of native memory shared by every detector on the same game, so
     // it is refcounted rather than owned by whoever asked last. Lazy gives exactly one construction
     // (GetOrAdd's factory could race and drop one undisposed), the count exactly one disposal.
@@ -206,13 +210,19 @@ public static class ModelService
         // Guard rather than let EnumerateDirectories throw: a trimmed or misbuilt package has no
         // data/training at all, and the only production caller runs inside GameIntegrationService's
         // lock on every recording start, where an exception would break recording entirely.
-        if (!Directory.Exists(BasePath))
+        if (!ModelRoots().Any(Directory.Exists))
             return null;
 
-        foreach (var directory in Directory.EnumerateDirectories(BasePath))
+        foreach (var root in ModelRoots())
         {
-            if (Path.GetFileName(directory).Equals(gameId, StringComparison.OrdinalIgnoreCase))
-                return directory;
+            if (!Directory.Exists(root))
+                continue;
+
+            foreach (var directory in Directory.EnumerateDirectories(root))
+            {
+                if (Path.GetFileName(directory).Equals(gameId, StringComparison.OrdinalIgnoreCase))
+                    return directory;
+            }
         }
 
         return null;
@@ -220,10 +230,22 @@ public static class ModelService
 
     private static string[] GetAvailableGameIds()
     {
-        if (!Directory.Exists(BasePath))
-            return Array.Empty<string>();
+        return ModelRoots()
+            .Where(Directory.Exists)
+            .SelectMany(Directory.EnumerateDirectories)
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
 
-        return Directory.EnumerateDirectories(BasePath).Select(Path.GetFileName).OfType<string>().ToArray();
+    private static IEnumerable<string> ModelRoots()
+    {
+#if TRIPT_TRAINING
+        if (_userModelRoot is not null)
+            yield return _userModelRoot;
+#endif
+        yield return BasePath;
     }
 
     public static string GetGamePath(string gameId)
@@ -237,6 +259,37 @@ public static class ModelService
     {
         return Path.Combine(GetGamePath(gameId), "model.onnx");
     }
+
+#if TRIPT_TRAINING
+    public static void ConfigureUserModelRoot(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+            throw new ArgumentException("A user model root is required.", nameof(root));
+
+        _userModelRoot = Path.GetFullPath(root);
+    }
+
+    public static void InvalidateModel(string gameId)
+    {
+        InferenceSession? released = null;
+        lock (_modelsLock)
+        {
+            if (_models.TryGetValue(gameId, out var handle))
+            {
+                if (handle.RefCount > 0)
+                    throw new InvalidOperationException($"The model for {gameId} is still in use.");
+
+                _models.Remove(gameId);
+                if (handle.Session.IsValueCreated)
+                    released = handle.Session.Value;
+            }
+
+            _definitions.TryRemove(gameId, out _);
+        }
+
+        released?.Dispose();
+    }
+#endif
 }
 
 

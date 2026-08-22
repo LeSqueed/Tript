@@ -16,6 +16,8 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 {
     private readonly Process _process;
     private readonly Task _drain;
+    private readonly Task _stderrDrain;
+    private readonly StringBuilder _stderr = new();
     private readonly TaskCompletionSource<string?> _ready = new();
     private ClientWebSocket? _socket;
 
@@ -39,11 +41,8 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         // and so the host's log stays readable if a test fails.
         _drain = Task.Run(async () =>
         {
-            while (!_process.HasExited || _process.StandardOutput.Peek() >= 0)
+            while (await _process.StandardOutput.ReadLineAsync() is { } line)
             {
-                var line = await _process.StandardOutput.ReadLineAsync();
-                if (line is null)
-                    break;
                 if (line.Contains("READY", StringComparison.Ordinal))
                 {
                     UiUrl = line[line.IndexOf("READY", StringComparison.Ordinal)..]
@@ -52,6 +51,12 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
                     _ready.TrySetResult(line);
                 }
             }
+        });
+        _stderrDrain = Task.Run(async () =>
+        {
+            var text = await _process.StandardError.ReadToEndAsync();
+            lock (_stderr)
+                _stderr.Append(text);
         });
     }
 
@@ -105,7 +110,9 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         // host are all reachable once it appears.
         if (!driver.WaitForReady(TimeSpan.FromSeconds(30)))
         {
-            var stderr = process.StandardError.ReadToEnd();
+            string stderr;
+            lock (driver._stderr)
+                stderr = driver._stderr.ToString();
             driver.Dispose();
             throw new InvalidOperationException(
                 $"The app host never printed READY. stderr:\n{stderr}");
@@ -258,6 +265,8 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             }
         }
 
+        _drain.Wait(TimeSpan.FromSeconds(2));
+        _stderrDrain.Wait(TimeSpan.FromSeconds(2));
         _process.Dispose();
     }
 }

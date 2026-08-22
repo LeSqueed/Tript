@@ -22,6 +22,10 @@ public sealed class RecordingMetadata
     // time, and the metadata is not the place to enforce the catalogue.
     public string? Game { get; set; }
 
+    // Stable project game identity. Older records may omit it and continue to use Game as their
+    // display-only attribution.
+    public string? GameId { get; set; }
+
     public ContentType ContentType { get; set; } = ContentType.Recording;
 
     public DateTime StartTime { get; set; }

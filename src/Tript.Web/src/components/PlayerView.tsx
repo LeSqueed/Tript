@@ -6,7 +6,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { BookmarkItem, ContentItem, RecordingState } from '../ipc/protocol';
+import type {
+  BookmarkItem,
+  ContentItem,
+  RecordingState,
+  TrainingEventDefinition,
+  TrainingSampleMessage,
+} from '../ipc/protocol';
 import { contentUrl, thumbnailUrl } from '../ipc/endpoints';
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
 import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
@@ -30,9 +36,11 @@ import {
 } from './player/clipModel';
 import { formatTime } from './player/timelineModel';
 import { Button, RadioOption } from '../components/ui/controls';
+import { TrainingSampleEditor } from './TrainingSampleEditor';
 
 export interface PlayerViewProps {
   client: IpcClient;
+  trainingEnabled?: boolean;
   /**
    * The session source seam. When the App shell passes its shared source, that is used; when the
    * source is null (the shell's source is created in an effect) or absent, the player owns an
@@ -59,6 +67,7 @@ export interface PlayerViewProps {
 
 export function PlayerView({
   client,
+  trainingEnabled = false,
   source: injectedSource,
   item: requestedItem,
   navigationItems,
@@ -249,6 +258,51 @@ export function PlayerView({
     },
     [navigation.length],
   );
+
+  const captureTrainingFrame = useCallback(() => {
+    const video = videoRef.current;
+    const gameId = item.gameId ?? item.game;
+    if (!trainingEnabled || !gameId || !video || video.videoWidth === 0 || video.videoHeight === 0) {
+      return;
+    }
+    client.send('CaptureTrainingSample', {
+      gameId,
+      filePath: item.filePath,
+      timestampSeconds: currentTime,
+      imageWidth: video.videoWidth,
+      imageHeight: video.videoHeight,
+      labels: [],
+    });
+  }, [client, currentTime, item, trainingEnabled]);
+
+  const [trainingEvents, setTrainingEvents] = useState<TrainingEventDefinition[]>([]);
+  const [labelingSample, setLabelingSample] = useState<TrainingSampleMessage | null>(null);
+  const currentGameId = item?.gameId ?? item?.game;
+
+  useEffect(() => {
+    setLabelingSample(null);
+  }, [currentGameId]);
+
+  useEffect(() => {
+    if (!trainingEnabled || !currentGameId) return;
+    const removeTraining = client.on('training', (content) => {
+      const message = (content as { training?: { gameId?: string; events?: TrainingEventDefinition[] } }).training;
+      if (message?.events && (!message.gameId || message.gameId === currentGameId)) {
+        setTrainingEvents(message.events);
+      }
+    });
+    const removeSample = client.on('trainingSample', (content) => {
+      const message = content as TrainingSampleMessage & { gameId?: string };
+      if (!message.gameId || message.gameId === currentGameId) {
+        setLabelingSample(message);
+      }
+    });
+    client.send('ListTraining', { gameId: currentGameId });
+    return () => {
+      removeTraining();
+      removeSample();
+    };
+  }, [client, currentGameId, trainingEnabled]);
 
   // Volume lives here rather than in the transport row so it survives moving between sessions. The
   // element itself would keep it too — `volume` and `muted` are properties that persist across a
@@ -639,6 +693,17 @@ export function PlayerView({
             </Button>
           )}
           </div>
+          {trainingEnabled && (item.gameId ?? item.game) && (
+            <Button
+              variant="ghost"
+              size="small"
+              onClick={captureTrainingFrame}
+              disabled={!durationKnown || !videoRef.current?.videoWidth}
+              title="Save this full frame in the training workspace"
+            >
+              Label frame
+            </Button>
+          )}
           <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ? // Honest about why the controls are dead: the alternative was to let segments be
@@ -715,6 +780,16 @@ export function PlayerView({
       )}
 
       <ClipDialog client={client} dialog={dialog} currentTime={currentTime} />
+      {labelingSample && currentGameId && (
+        <TrainingSampleEditor
+          client={client}
+          gameId={currentGameId}
+          sample={labelingSample}
+          events={trainingEvents}
+          onEventsChange={(events) => client.send('UpdateTrainingEvents', { gameId: currentGameId, events })}
+          onClose={() => setLabelingSample(null)}
+        />
+      )}
     </section>
   );
 }

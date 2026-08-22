@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using Tript.Detection;
+
 namespace Tript.App;
 
 // The IPC wire model. These are the shapes the
@@ -42,6 +44,8 @@ internal sealed class ContentItem
     // filters and groups by this, so it is populated for clips too — inherited from the source
     // session, since a clip has no metadata record of its own (see AppHost.InheritedGame).
     public string? Game { get; set; }
+
+    public string? GameId { get; set; }
 
     // When the content starts, as unix seconds. The metadata record's StartTime when there is one —
     // the authoritative capture time — and the file's last-write time otherwise.
@@ -260,3 +264,89 @@ internal sealed class CancelClipParameters
 {
     public string Id { get; set; } = string.Empty;
 }
+
+#if TRIPT_TRAINING
+
+internal sealed class TrainingGameParameters
+{
+    public string GameId { get; set; } = string.Empty;
+}
+
+internal sealed class ImportTrainingParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public string SourcePath { get; set; } = string.Empty;
+
+    public bool ConfirmOverwrite { get; set; }
+
+    public string? ExpectedRevision { get; set; }
+}
+
+internal sealed class TrainingLabelParameters
+{
+    public int ClassId { get; set; }
+
+    public double CenterX { get; set; }
+
+    public double CenterY { get; set; }
+
+    public double Width { get; set; }
+
+    public double Height { get; set; }
+}
+
+internal sealed class CaptureTrainingSampleParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public string FilePath { get; set; } = string.Empty;
+
+    public double TimestampSeconds { get; set; }
+
+    public int ImageWidth { get; set; }
+
+    public int ImageHeight { get; set; }
+
+    public List<TrainingLabelParameters> Labels { get; set; } = [];
+}
+
+internal sealed class UpdateTrainingSampleParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public string SampleId { get; set; } = string.Empty;
+
+    public List<TrainingLabelParameters> Labels { get; set; } = [];
+}
+
+internal sealed class UpdateTrainingEventsParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public List<EventDefinition> Events { get; set; } = [];
+}
+
+internal sealed class TrainingSampleParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public string SampleId { get; set; } = string.Empty;
+
+    public bool PreviewOnly { get; set; }
+}
+
+internal sealed class StartTrainingParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public int? ImageSize { get; set; }
+
+    public int Epochs { get; set; } = 100;
+
+    public string Device { get; set; } = "auto";
+
+    public string? BaseModel { get; set; }
+}
+
+#endif

@@ -2,6 +2,10 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Runtime.InteropServices;
+#if TRIPT_TRAINING
+using Tript.App.Training;
+#endif
+using Tript.Detection;
 using Tript.App;
 using Tript.Obs;
 using Tript.Settings;
@@ -58,6 +62,10 @@ internal static class Program
         // Before the runtime, so the runtime can be initialised with the resolution and frame rate from
         // the settings — both must affect the mix.
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
+
+#if TRIPT_TRAINING
+        ModelService.ConfigureUserModelRoot(TrainingPaths.InstalledModelsPath);
+#endif
 
         // Detected once per launch: the fresh-install resolution default, and the "(display)" option the
         // settings UI offers. The answer cannot change without a restart anyway — the canvas is fixed at

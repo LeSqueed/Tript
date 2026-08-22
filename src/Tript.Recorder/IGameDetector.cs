@@ -14,9 +14,9 @@ public interface IGameDetector : IDisposable
     // forced it.
     event Action<string>? GameStarted;
 
-    // Fires when a detected game is no longer running. Only a game that was reported started can be
-    // reported stopped.
-    event Action? GameStopped;
+    // Fires when a detected game is no longer running. The normalized process name identifies the
+    // detector transition, so another game's stop cannot end the active recording.
+    event Action<string>? GameStopped;
 
     // Begins watching. May be called once; Start again is a no-op.
     void Start();

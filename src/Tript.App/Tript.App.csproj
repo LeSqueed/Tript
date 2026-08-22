@@ -17,9 +17,21 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="..\..\data\games.json" Link="data\games.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <!-- Explicit rather than inherited through Tript.Detection: the host configures the sink, so it
          depends on Serilog directly. -->
     <PackageReference Include="Serilog" Version="4.4.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(EnableTraining)' == 'true'">
+    <Content Include="Training\Scripts\**\*"
+             Exclude="Training\Scripts\**\__pycache__\**\*;Training\Scripts\**\*.pyc"
+             LinkBase="Training\Scripts">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Tript.Core/Tript.Core.csproj" />

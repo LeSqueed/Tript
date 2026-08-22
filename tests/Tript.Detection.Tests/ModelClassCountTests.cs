@@ -91,6 +91,18 @@ public class ModelClassCountTests
     }
 
     [Fact]
+    public void ParseClassNames_AcceptsJsonObjectAndArrayMetadata()
+    {
+        var objectNames = VisualEventDetector.ParseClassNames("{\"0\":\"Class zero\",\"1\":\"Class one\"}");
+        var arrayNames = VisualEventDetector.ParseClassNames("[\"Class zero\",\"Class one\"]");
+
+        Assert.Equal("Class zero", objectNames![0]);
+        Assert.Equal("Class one", objectNames[1]);
+        Assert.Equal("Class zero", arrayNames![0]);
+        Assert.Equal("Class one", arrayNames[1]);
+    }
+
+    [Fact]
     public void FindClassMapMismatch_AcceptsDefinitionsThatMatchTheModel()
     {
         var names = VisualEventDetector.ParseClassNames(UltralyticsNames);
@@ -171,5 +183,8 @@ public class ModelClassCountTests
         var mismatch = VisualEventDetector.FindClassMapMismatch(definitions, numClasses, names);
         Assert.True(mismatch == null,
             $"data/training/{GameId}/events.json disagrees with model.onnx: {mismatch}");
+
+        var metadata = OnnxModelInspector.Inspect(modelPath);
+        Assert.Null(ModelEventCompatibility.FindMismatch(definitions, metadata));
     }
 }

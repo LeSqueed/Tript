@@ -235,10 +235,3 @@
   gap: 2px;
   min-width: 96px;
 }
-
-.game-add {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  margin-top: var(--space-2);
-}

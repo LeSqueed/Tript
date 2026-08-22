@@ -68,6 +68,7 @@ export interface ContentItem {
    * from a backend that looked and found nothing, absent from one that does not report it.
    */
   game?: string | null;
+  gameId?: string | null;
   /**
    * The audio tracks the file carries, in stream order, named as the user named them in settings.
    * Absent when nothing knows the layout — an imported file, or a session recorded before one was
@@ -224,6 +225,91 @@ export interface WarningMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Model training
+// ---------------------------------------------------------------------------
+
+export interface TrainingEventDefinition {
+  id: number;
+  name: string;
+  type: 'Trigger' | 'Exclusion';
+  classId: number;
+  bookmarkType?: string | null;
+  lifetimeMs?: number | null;
+  screenRegionX?: number | null;
+  screenRegionY?: number | null;
+  screenRegionW?: number | null;
+  screenRegionH?: number | null;
+}
+
+export interface TrainingLabel {
+  classId: number;
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+}
+
+export interface TrainingSample {
+  id: string;
+  imageFile: string;
+  sourcePath: string;
+  timestampSeconds: number;
+  imageWidth: number;
+  imageHeight: number;
+  labels: TrainingLabel[];
+}
+
+export interface TrainingModelInfo {
+  inputWidth?: number | null;
+  inputHeight?: number | null;
+  classCount?: number | null;
+  classNames?: Record<string, string> | null;
+}
+
+export interface TrainingMessage {
+  gameId: string | null;
+  revision?: string;
+  events: TrainingEventDefinition[];
+  samples: TrainingSample[];
+  dataset?: {
+    trainingImages: number;
+    validationImages: number;
+  };
+  model?: TrainingModelInfo | null;
+  trainingActive?: boolean;
+}
+
+export type TrainingProgressStatus =
+  | 'started'
+  | 'progress'
+  | 'imported'
+  | 'sampleSaved'
+  | 'sampleUpdated'
+   | 'sampleDeleted'
+  | 'eventsUpdated'
+  | 'completed'
+  | 'cancelled'
+  | 'error';
+
+export interface TrainingProgressMessage {
+  gameId: string;
+  status: TrainingProgressStatus;
+  message: string;
+}
+
+export interface TrainingSampleMessage {
+  gameId: string;
+  sample: TrainingSample;
+  imageData: string;
+}
+
+export interface TrainingSamplePreviewMessage {
+  gameId: string;
+  sample: TrainingSample;
+  imageData: string;
+}
+
+// ---------------------------------------------------------------------------
 // Trash
 // ---------------------------------------------------------------------------
 
@@ -370,6 +456,51 @@ export interface ToggleFullscreenParameters {
   enabled: boolean;
 }
 
+export interface TrainingGameParameters {
+  gameId: string;
+}
+
+export interface ImportTrainingParameters {
+  gameId: string;
+  sourcePath: string;
+  confirmOverwrite: boolean;
+  expectedRevision?: string;
+}
+
+export interface CaptureTrainingSampleParameters {
+  gameId: string;
+  filePath: string;
+  timestampSeconds: number;
+  imageWidth: number;
+  imageHeight: number;
+  labels: TrainingLabel[];
+}
+
+export interface UpdateTrainingSampleParameters {
+  gameId: string;
+  sampleId: string;
+  labels: TrainingLabel[];
+}
+
+export interface UpdateTrainingEventsParameters {
+  gameId: string;
+  events: TrainingEventDefinition[];
+}
+
+export interface TrainingSampleParameters {
+  gameId: string;
+  sampleId: string;
+  previewOnly?: boolean;
+}
+
+export interface StartTrainingParameters {
+  gameId: string;
+  imageSize?: number;
+  epochs?: number;
+  device?: string;
+  baseModel?: string | null;
+}
+
 /** The protocol version carried on NewConnection. */
 export interface NewConnectionParameters {
   protocolVersion: number;
@@ -395,6 +526,13 @@ export type CommandParameters =
   | StorageWarningConfirmParameters
   | RecoveryConfirmParameters
   | ToggleFullscreenParameters
+  | TrainingGameParameters
+  | ImportTrainingParameters
+  | CaptureTrainingSampleParameters
+  | UpdateTrainingSampleParameters
+  | UpdateTrainingEventsParameters
+  | TrainingSampleParameters
+  | StartTrainingParameters
   | NewConnectionParameters;
 
 // ---------------------------------------------------------------------------
@@ -417,6 +555,8 @@ export type CommandName =
   | 'MigrateContent'
   // Content
   | 'ListContent'
+  | 'ListGames'
+  | 'BrowseTrainingFolder'
   | 'CreateClip'
   | 'CancelClip'
   | 'DeleteContent'
@@ -443,7 +583,18 @@ export type CommandName =
   | 'OpenInBrowser'
   // Confirmations
   | 'StorageWarningConfirm'
-  | 'RecoveryConfirm';
+  | 'RecoveryConfirm'
+  // Model training
+  | 'ListTraining'
+  | 'ImportTrainingAssets'
+  | 'CaptureTrainingSample'
+  | 'GetTrainingSample'
+  | 'UpdateTrainingSample'
+  | 'UpdateTrainingEvents'
+  | 'DeleteTrainingSample'
+  | 'StartTraining'
+  | 'CancelTraining'
+  | 'InstallTrainingModel';
 
 /**
  * Backend → frontend messages, all lowercase. The reference contract split these between lowercase
@@ -465,4 +616,10 @@ export type MessageName =
   | 'selectedGameExecutable'
   | 'gameList'
   | 'error'
-  | 'warning';
+  | 'warning'
+  | 'training'
+  | 'trainingProgress'
+  | 'trainingSample'
+  | 'trainingSamplePreview'
+  | 'trainingFolderSelected'
+  | 'trainingFolderCancelled';

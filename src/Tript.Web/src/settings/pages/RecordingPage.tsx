@@ -69,6 +69,13 @@ const FALLBACK_ENCODER = 'obs_x264';
  */
 const BACKEND_DECIDES_ENCODER = 'x264';
 
+function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
+  const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+  return windows
+    ? { placeholder: String.raw`D:\Recordings`, defaultLabel: String.raw`Videos\Tript` }
+    : { placeholder: '/home/you/Videos/Tript', defaultLabel: 'Videos/Tript' };
+}
+
 /** The encoder families whose key sets — and therefore whose rate-control vocabularies — differ. */
 type EncoderFamily = 'x264' | 'vaapi' | 'nvenc' | 'amf' | 'qsv' | 'unknown';
 
@@ -296,6 +303,7 @@ export function RecordingPage({
   /** Opens the native folder picker. The picked directory arrives as a settings push, like any edit. */
   onBrowse: () => void;
 }) {
+  const directoryExample = nativeDirectoryExample();
   const [bitrate, setBitrate] = useState<string>(String(settings.bitrateKbps ?? ''));
   const [maxBitrate, setMaxBitrate] = useState<string>(String(settings.maxBitrateKbps ?? ''));
 
@@ -457,14 +465,14 @@ export function RecordingPage({
         </Field>
       ) : null}
 
-      <Field label="Output directory" hint="Where recordings are saved. Leave empty for the default (Videos/Tript).">
+      <Field label="Output directory" hint={`Where recordings are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
         <span className="settings-row">
           {/* Explicit aria-label: this is the only field sharing its <label> with a second
               control, so its derived name would otherwise absorb the Browse button's text. */}
           <TextField
             value={settings.outputDirectory ?? ''}
             onChange={(value) => update(page, { outputDirectory: value === '' ? null : value })}
-            placeholder="e.g. D:\Recordings"
+            placeholder={`e.g. ${directoryExample.placeholder}`}
             aria-label="Output directory"
           />
           <Button variant="ghost" onClick={onBrowse} title="Choose the recording folder with a native picker">

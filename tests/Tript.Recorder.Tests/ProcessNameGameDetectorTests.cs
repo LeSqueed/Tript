@@ -22,7 +22,7 @@ public class ProcessNameGameDetectorTests
         var stopped = 0;
         using var detector = new ProcessNameGameDetector(new[] { ownName }, pollInterval: TimeSpan.FromMilliseconds(10));
         detector.GameStarted += name => started.Add(name);
-        detector.GameStopped += () => Interlocked.Increment(ref stopped);
+        detector.GameStopped += _ => Interlocked.Increment(ref stopped);
 
         detector.Start();
 

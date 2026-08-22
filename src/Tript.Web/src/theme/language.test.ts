@@ -12,6 +12,12 @@ import { sourceFiles, moduleFiles } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 const SETTINGS = join(SRC_ROOT, 'settings');
+// Training uses "region" as the documented normalized ONNX contract, not as a general clip term.
+const TRAINING_REGION_SURFACES = new Set([
+  join(SRC_ROOT, 'components', 'TrainingRegionEditor.tsx'),
+  join(SRC_ROOT, 'components', 'TrainingSampleEditor.tsx'),
+  join(SRC_ROOT, 'components', 'TrainingView.tsx'),
+]);
 /** The wire vocabulary. `Session` is a protocol value there, not a word anyone reads. */
 const IPC = join(SRC_ROOT, 'ipc');
 
@@ -78,6 +84,7 @@ describe('plain language outside settings', () => {
     for (const file of scanned) {
       for (const candidate of userFacingStrings(readFileSync(file, 'utf8'))) {
         for (const { word, instead } of RETIRED) {
+          if (word.source.includes('region') && TRAINING_REGION_SURFACES.has(file)) continue;
           if (word.test(candidate)) {
             offenders.push(`${relative(SRC_ROOT, file)}: "${candidate.trim()}" — say ${instead}`);
           }

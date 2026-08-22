@@ -11,6 +11,9 @@ using Tript.Media;
 using Tript.Obs;
 using Tript.Recorder;
 using Tript.Settings;
+#if TRIPT_TRAINING
+using Tript.App.Training;
+#endif
 using RecorderStateMachine = Tript.Recorder.Recorder;
 using SettingsModel = Tript.Settings.Settings;
 
@@ -45,6 +48,7 @@ internal sealed class AppHost : IDisposable
     private readonly ClipTitleStore _clipTitles;
     private readonly ThumbnailStore _thumbnails;
     private readonly TrashStore _trash;
+    private readonly GameCatalog _gameCatalog;
 
     // Located at most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on
     // both binaries, which is four processes, and the answer cannot change while the host runs.
@@ -83,6 +87,7 @@ internal sealed class AppHost : IDisposable
     private IRecorderSession? _recorderSession;
     private ObsSource? _colourSource;
     private ProcessNameGameDetector? _detector;
+    private FullscreenGameDetector? _fullscreenDetector;
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
@@ -104,6 +109,27 @@ internal sealed class AppHost : IDisposable
 
     private bool _disposed;
 
+#if TRIPT_TRAINING
+    private readonly TrainingRunner _trainingRunner = new();
+    private readonly object _trainingGate = new();
+    private readonly SemaphoreSlim _trainingWorkspaceGate = new(1, 1);
+
+    private void WithTrainingWorkspaceLock(Action action)
+    {
+        _trainingWorkspaceGate.Wait();
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _trainingWorkspaceGate.Release();
+        }
+    }
+    private CancellationTokenSource? _trainingCancellation;
+    private string? _trainingGameId;
+#endif
+
     // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null)
@@ -113,6 +139,7 @@ internal sealed class AppHost : IDisposable
         _runtime = runtime;
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
+        _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
 
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
@@ -151,6 +178,7 @@ internal sealed class AppHost : IDisposable
         : null;
 
     private string? _currentGameId;
+    private string? _automaticRecordingOwner;
 
     // The single root everything content lives under: sessions, clips, the metadata tree and the
     // content server's traversal guard all resolve against it. A configured Recording.OutputDirectory
@@ -250,31 +278,39 @@ internal sealed class AppHost : IDisposable
 
     public void Run()
     {
-        _ipc.Start();
-        _content.Start();
-        _ui.Start();
+        using var shutdownRequested = new ManualResetEventSlim(false);
+        Action onShutdown = shutdownRequested.Set;
+        _ipc.ShutdownRequested += onShutdown;
 
-        // Anything already past its retention goes now, and hourly after that.
-        PurgeExpiredTrash();
-        _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
+        try
+        {
+            _ipc.Start();
+            _content.Start();
+            _ui.Start();
 
-        WireAutoStart();
+            // Anything already past its retention goes now, and hourly after that.
+            PurgeExpiredTrash();
+            _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
 
-        // The single-line contract the smoke test waits for. It now carries the UI URL, token and
-        // all: that is how a headless user reaches their own app, and the token dies with the
-        // process. Console, not the log — the log is a file that outlives the launch.
-        Console.WriteLine($"READY {UiUrl}");
-        Console.Out.Flush();
+            WireAutoStart();
 
-        // No browser is opened — the desktop shell renders the UI in its own window.
-        WaitForShutdown();
+            // The single-line contract the smoke test waits for. It now carries the UI URL, token and
+            // all: that is how a headless user reaches their own app, and the token dies with the
+            // process. Console, not the log — the log is a file that outlives the launch.
+            Console.WriteLine($"READY {UiUrl}");
+            Console.Out.Flush();
+
+            // No browser is opened — the desktop shell renders the UI in its own window.
+            WaitForShutdown(shutdownRequested);
+        }
+        finally
+        {
+            _ipc.ShutdownRequested -= onShutdown;
+        }
     }
 
-    private void WaitForShutdown()
+    private static void WaitForShutdown(ManualResetEventSlim shutdownRequested)
     {
-        var shutdownRequested = new ManualResetEventSlim(false);
-        _ipc.ShutdownRequested += shutdownRequested.Set;
-
         while (!shutdownRequested.IsSet)
             Thread.Sleep(100);
 
@@ -290,12 +326,17 @@ internal sealed class AppHost : IDisposable
         // Refuse new starts before anything is torn down. The detector's Dispose deliberately does
         // not block behind an in-flight handler, so a GameStarted can still arrive after it returns.
         _captureWaitCancellation?.Cancel();
+#if TRIPT_TRAINING
+        _trainingRunner.Cancel();
+        _trainingCancellation?.Cancel();
+#endif
         lock (_recorderGate)
             _shuttingDown = true;
 
         _trashPurgeTimer?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
+        _fullscreenDetector?.Dispose();
 
         // A recording still running holds its bookmarks in the session and its metadata record
         // unwritten; quitting mid-recording used to drop both on the floor.
@@ -404,6 +445,7 @@ internal sealed class AppHost : IDisposable
         _pendingMetadata = new RecordingMetadata
         {
             Game = GameList.FirstOrDefault(g => g.Id == effectiveGameId)?.Name ?? effectiveGameId,
+            GameId = effectiveGameId,
             ContentType = ContentType.Recording,
             StartTime = DateTime.Now,
         };
@@ -465,6 +507,7 @@ internal sealed class AppHost : IDisposable
         _pendingMetadata = null;
         _activeOutputPath = null;
         _currentGameId = null;
+        _automaticRecordingOwner = null;
 
         PushState(recording: false, null);
         return true;
@@ -529,6 +572,39 @@ internal sealed class AppHost : IDisposable
     // RequestVideoLocation is a no-op.
     internal Func<string?>? FolderPicker { get; set; }
 
+    // The training picker returns a path to the UI instead of persisting it as a recording setting.
+    internal Func<string?>? TrainingFolderPicker { get; set; }
+
+    internal void RequestTrainingFolder()
+    {
+        var picker = TrainingFolderPicker;
+        if (picker is null)
+        {
+            PushError("Browse is only available in the desktop shell.");
+            return;
+        }
+
+        try
+        {
+            var path = picker();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _ipc.Broadcast("trainingFolderSelected", JsonSerializer.SerializeToElement(
+                    new { path }, Wire.Options));
+            }
+            else
+            {
+                _ipc.Broadcast("trainingFolderCancelled", JsonSerializer.SerializeToElement(
+                    new { }, Wire.Options));
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Tript.App: the training folder picker failed: {exception.Message}");
+            PushError($"The training folder picker could not be opened: {exception.Message}");
+        }
+    }
+
     // Applies the picked directory through the normal settings path, so the field updates exactly as
     // if the user had typed it. Cancelling is a no-op.
     internal void RequestVideoLocation()
@@ -578,8 +654,8 @@ internal sealed class AppHost : IDisposable
         // Executables, not display names: the detector matches the running process list, and a game
         // whose display name differs from its executable ("Counter-Strike 2" / cs2.exe) would never
         // be seen if the name were watched instead.
-        var executables = GameList
-            .Select(ExecutableOf)
+        var executables = _gameCatalog.Entries
+            .Select(entry => entry.Executable)
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -596,13 +672,41 @@ internal sealed class AppHost : IDisposable
             _detectorGameNames.Add(id);
 
         _detector = new ProcessNameGameDetector(executables);
-        _detector.GameStarted += processName => StartRecording(ResolveDetectedGameId(processName));
-        _detector.GameStopped += () =>
-        {
-            _captureWaitCancellation?.Cancel();
-            StopRecording();
-        };
+        _detector.GameStarted += StartAutomaticRecording;
+        _detector.GameStopped += StopAutomaticRecording;
         _detector.Start();
+
+        _fullscreenDetector = new FullscreenGameDetector(executables);
+        _fullscreenDetector.GameStarted += StartAutomaticRecording;
+        _fullscreenDetector.GameStopped += StopAutomaticRecording;
+        _fullscreenDetector.Start();
+    }
+
+    private void StartAutomaticRecording(string processName)
+    {
+        lock (_recorderGate)
+        {
+            if (!StartRecordingLocked(ResolveDetectedGameId(processName)))
+                return;
+
+            _automaticRecordingOwner = ProcessNameGameDetector.NormalizeProcessName(processName);
+        }
+    }
+
+    private void StopAutomaticRecording(string processName)
+    {
+        var owner = ProcessNameGameDetector.NormalizeProcessName(processName);
+        if (!string.Equals(_automaticRecordingOwner, owner, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // This cancellation is intentionally outside the recorder gate: an automatic start may be
+        // waiting for game capture while the detector reports that its owning process has exited.
+        _captureWaitCancellation?.Cancel();
+        lock (_recorderGate)
+        {
+            if (string.Equals(_automaticRecordingOwner, owner, StringComparison.OrdinalIgnoreCase))
+                StopRecordingLocked();
+        }
     }
 
     // The catalogue ids a process watcher could report. Pure and separate from WireAutoStart because
@@ -637,6 +741,26 @@ internal sealed class AppHost : IDisposable
         return processName;
     }
 
+    // Metadata written before stable GameId existed stored the display name only. Recover the
+    // catalogue identity when possible so old recordings participate in per-game training and clips
+    // inherit the same identity as new recordings.
+    private string? ResolveLegacyGameId(string? gameName)
+    {
+        if (string.IsNullOrWhiteSpace(gameName))
+            return null;
+
+        var exact = GameList.FirstOrDefault(game =>
+            string.Equals(game.Id, gameName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(game.Name, gameName, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null)
+            return exact.Id;
+
+        var normalized = ProcessNameGameDetector.NormalizeProcessName(gameName);
+        return GameList.FirstOrDefault(game =>
+            string.Equals(ProcessNameGameDetector.NormalizeProcessName(ExecutableOf(game)), normalized,
+                StringComparison.OrdinalIgnoreCase))?.Id;
+    }
+
     private void StartDetection(string gameId)
     {
         _detectionHost?.Stop();
@@ -664,6 +788,35 @@ internal sealed class AppHost : IDisposable
         _detectionHost = null;
     }
 
+#if TRIPT_TRAINING
+    internal TrainingInstallResult InstallTrainingModel(string gameId, string modelSourcePath)
+    {
+        lock (_recorderGate)
+        {
+            var restart = IsRecording && string.Equals(_currentGameId, gameId, StringComparison.OrdinalIgnoreCase);
+            if (restart)
+                StopDetection();
+
+            try
+            {
+                ModelService.InvalidateModel(gameId);
+                var result = TrainingModelInstaller.Install(TrainingWorkspace.ForGame(gameId), modelSourcePath);
+                if (restart)
+                    StartDetection(gameId);
+                return result;
+            }
+            catch
+            {
+                // The old model files were not touched until the staged install committed. Restore the
+                // running detector if validation or installation failed.
+                if (restart)
+                    StartDetection(gameId);
+                throw;
+            }
+        }
+    }
+#endif
+
     // ---- settings ----
 
     internal bool UpdateSettings(JsonElement? patch)
@@ -676,6 +829,12 @@ internal sealed class AppHost : IDisposable
         try
         {
             ApplyPatch(settings, patch.Value);
+            var catalogueIds = _gameCatalog.Entries
+                .Select(entry => entry.GameId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            settings.Game.GameList = settings.Game.GameList
+                .Where(game => catalogueIds.Contains(game.Id))
+                .ToList();
         }
         catch (JsonException)
         {
@@ -785,7 +944,7 @@ internal sealed class AppHost : IDisposable
 
     internal void ReloadGameList()
     {
-        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _options.GameListJson);
+        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson);
         lock (_gameListGate)
             _catalogueGames = games;
     }
@@ -854,6 +1013,12 @@ internal sealed class AppHost : IDisposable
     internal void PushSettings()
     {
         var settings = _settingsStore.Load();
+        var catalogueIds = _gameCatalog.Entries
+            .Select(entry => entry.GameId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        settings.Game.GameList = settings.Game.GameList
+            .Where(game => catalogueIds.Contains(game.Id))
+            .ToList();
         var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
         // A fact about this machine, not a persisted setting, so it is settled per push and a device
         // unplugged after a save is not stuck in the settings file. Injected into the serialized element
@@ -939,6 +1104,435 @@ internal sealed class AppHost : IDisposable
         _ipc.Broadcast("gameList", element);
     }
 
+#if TRIPT_TRAINING
+    // The training workspace starts from the same event definitions and model the runtime uses. This
+    // keeps a user from maintaining a second copy just to begin annotating a recording.
+    private TrainingWorkspace EnsureTrainingWorkspace(string gameId)
+    {
+        var workspace = TrainingWorkspace.ForGame(gameId);
+        if (File.Exists(workspace.EventsPath))
+            return workspace;
+
+        var runtimeRoot = ModelService.GetGamePath(gameId);
+        var runtimeEvents = Path.Combine(runtimeRoot, "events.json");
+        if (!File.Exists(runtimeEvents))
+            throw new FileNotFoundException($"No event definitions exist for game '{gameId}'.", runtimeEvents);
+
+        workspace.EnsureDirectories();
+        File.Copy(runtimeEvents, workspace.EventsPath, overwrite: true);
+        var runtimeModel = Path.Combine(runtimeRoot, "model.onnx");
+        if (File.Exists(runtimeModel))
+            File.Copy(runtimeModel, workspace.ModelPath, overwrite: true);
+        return workspace;
+    }
+
+    internal void PushTraining(string? requestedGameId)
+    {
+        WithTrainingWorkspaceLock(() => PushTrainingCore(requestedGameId));
+    }
+
+    private void PushTrainingCore(string? requestedGameId)
+    {
+        var gameId = requestedGameId ?? GameList.FirstOrDefault()?.Id;
+        if (string.IsNullOrWhiteSpace(gameId))
+        {
+            _ipc.Broadcast("training", JsonSerializer.SerializeToElement(new
+            {
+                training = new { gameId = (string?)null, events = Array.Empty<object>(), samples = Array.Empty<object>() },
+            }, Wire.Options));
+            return;
+        }
+
+        var workspace = EnsureTrainingWorkspace(gameId);
+        var definitions = workspace.LoadDefinitions();
+        var samples = new TrainingSampleStore(workspace).List();
+        var dataset = new
+        {
+            trainingImages = CountTrainingImages(workspace.DatasetPath, "train"),
+            validationImages = CountTrainingImages(workspace.DatasetPath, "val"),
+        };
+        OnnxModelMetadata? metadata = null;
+        var modelPath = workspace.ModelPath;
+        if (File.Exists(modelPath))
+        {
+            try
+            {
+                metadata = OnnxModelInspector.Inspect(modelPath);
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception, "Training: could not inspect the model for {GameId}", gameId);
+            }
+        }
+
+        _ipc.Broadcast("training", JsonSerializer.SerializeToElement(new
+        {
+            training = new
+            {
+                gameId,
+                revision = workspace.Revision(),
+                events = definitions,
+                samples,
+                dataset,
+                model = metadata is null ? null : new
+                {
+                    inputWidth = metadata.InputWidth,
+                    inputHeight = metadata.InputHeight,
+                    classCount = metadata.ClassCount,
+                    classNames = metadata.ClassNames,
+                },
+                trainingActive = string.Equals(_trainingGameId, gameId, StringComparison.OrdinalIgnoreCase),
+            },
+        }, Wire.Options));
+    }
+
+    internal void ImportTrainingAssets(ImportTrainingParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => ImportTrainingAssetsCore(parameters));
+    }
+
+    private void ImportTrainingAssetsCore(ImportTrainingParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
+            throw new ArgumentException("A game id is required to import training assets.");
+
+        lock (_trainingGate)
+        {
+            if (_trainingCancellation is not null)
+                throw new InvalidOperationException("Stop training before importing a workspace.");
+        }
+
+        var existingWorkspace = TrainingWorkspace.ForGame(parameters.GameId);
+        var currentRevision = existingWorkspace.Revision();
+        if (!string.Equals(parameters.ExpectedRevision ?? string.Empty, currentRevision, StringComparison.Ordinal))
+            throw new InvalidOperationException("The training workspace changed. Refresh it and confirm the import again.");
+        var hasExistingData = Directory.Exists(existingWorkspace.RootPath)
+            && (File.Exists(existingWorkspace.EventsPath)
+                || (Directory.Exists(existingWorkspace.SamplesPath)
+                    && Directory.EnumerateFiles(existingWorkspace.SamplesPath, "*", SearchOption.AllDirectories).Any())
+                || (Directory.Exists(existingWorkspace.DatasetPath)
+                    && Directory.EnumerateFiles(existingWorkspace.DatasetPath, "*", SearchOption.AllDirectories).Any()));
+        if (hasExistingData && !parameters.ConfirmOverwrite)
+            throw new InvalidOperationException("This training workspace already contains data. Confirm overwrite before importing.");
+
+        var result = TrainingAssetImporter.Import(parameters.SourcePath, parameters.GameId);
+        var importMessage = $"Imported {result.EventCount} events and {result.TrainingImageCount + result.ValidationImageCount} dataset images.";
+        if (result.Warnings.Count > 0)
+            importMessage += " Warnings: " + string.Join(" ", result.Warnings);
+        PushTrainingProgress(parameters.GameId, "imported",
+            importMessage);
+        if (result.ModelImported)
+            InstallTrainingModel(parameters.GameId, TrainingWorkspace.ForGame(parameters.GameId).ModelPath);
+        else
+            RemoveInstalledTrainingModel(parameters.GameId);
+        PushTrainingCore(parameters.GameId);
+    }
+
+    private void RemoveInstalledTrainingModel(string gameId)
+    {
+        lock (_recorderGate)
+        {
+            var restart = IsRecording && string.Equals(_currentGameId, gameId, StringComparison.OrdinalIgnoreCase);
+            if (restart)
+                StopDetection();
+            try
+            {
+                ModelService.InvalidateModel(gameId);
+                var installedRoot = TrainingWorkspace.ForGame(gameId, TrainingPaths.InstalledModelsPath).RootPath;
+                if (Directory.Exists(installedRoot))
+                    Directory.Delete(installedRoot, recursive: true);
+                if (restart)
+                    StartDetection(gameId);
+            }
+            catch
+            {
+                if (restart)
+                    StartDetection(gameId);
+                throw;
+            }
+        }
+    }
+
+    internal void CaptureTrainingSample(CaptureTrainingSampleParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => CaptureTrainingSampleCore(parameters));
+    }
+
+    private void CaptureTrainingSampleCore(CaptureTrainingSampleParameters? parameters)
+    {
+        if (parameters is null)
+            throw new ArgumentException("Training sample parameters are required.");
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var sourcePath = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath)
+            ?? throw new InvalidDataException("The sample source is not inside the recording folder.");
+        var tools = _libraryTools.Value
+            ?? throw new InvalidOperationException("FFmpeg and ffprobe are required to capture training samples.");
+        var media = new MediaProbe(tools.Ffprobe).Probe(sourcePath);
+        var definitions = workspace.LoadDefinitions();
+        var labels = parameters.Labels.Select(ToTrainingLabel).ToList();
+        var id = TrainingSampleStore.SampleId(sourcePath, parameters.TimestampSeconds);
+        var temporaryPath = Path.Combine(workspace.SamplesPath, id + ".capture-" + Guid.NewGuid().ToString("N") + ".png");
+        try
+        {
+            var extractor = new FfmpegTrainingFrameExtractor(tools.Ffmpeg);
+            if (!extractor.TryExtract(sourcePath, parameters.TimestampSeconds, temporaryPath))
+                throw new InvalidOperationException(
+                    $"FFmpeg could not extract the selected video frame.{Environment.NewLine}{extractor.LastError}");
+
+            var sample = new TrainingSampleStore(workspace).Save(sourcePath, parameters.TimestampSeconds,
+                media.Width, media.Height, labels, File.ReadAllBytes(temporaryPath), definitions);
+            PushTrainingProgress(parameters.GameId, "sampleSaved", sample.Id);
+            PushTrainingSample(parameters.GameId, workspace, sample);
+            PushTrainingCore(parameters.GameId);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    internal void GetTrainingSample(TrainingSampleParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => GetTrainingSampleCore(parameters));
+    }
+
+    private void GetTrainingSampleCore(TrainingSampleParameters? parameters)
+    {
+        if (parameters is null)
+            throw new ArgumentException("Training sample parameters are required.");
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var sample = new TrainingSampleStore(workspace).LoadById(parameters.SampleId);
+        var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
+        if (!File.Exists(imagePath))
+            throw new FileNotFoundException("The training sample image is missing.", imagePath);
+
+        PushTrainingSample(parameters.GameId, workspace, sample, parameters.PreviewOnly
+            ? "trainingSamplePreview"
+            : "trainingSample");
+    }
+
+    internal void UpdateTrainingEvents(UpdateTrainingEventsParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => UpdateTrainingEventsCore(parameters));
+    }
+
+    private void UpdateTrainingEventsCore(UpdateTrainingEventsParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
+            throw new ArgumentException("A game id is required to update training events.");
+        if (parameters.Events.Count == 0)
+            throw new InvalidDataException("A training workspace requires at least one event.");
+        if (parameters.Events.Any(eventDefinition => string.IsNullOrWhiteSpace(eventDefinition.Name)))
+            throw new InvalidDataException("Every training event requires a name.");
+        if (parameters.Events.Select(eventDefinition => eventDefinition.Id).Distinct().Count()
+            != parameters.Events.Count)
+        {
+            throw new InvalidDataException("Training event ids must be unique.");
+        }
+        if (parameters.Events.Select(eventDefinition => eventDefinition.ClassId).Distinct().Count()
+            != parameters.Events.Count)
+        {
+            throw new InvalidDataException("Training event class ids must be unique.");
+        }
+
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var orderedEvents = parameters.Events.OrderBy(eventDefinition => eventDefinition.ClassId).ToList();
+        var classIdMap = orderedEvents
+            .Select((eventDefinition, index) => new { Old = eventDefinition.ClassId, New = index })
+            .ToDictionary(pair => pair.Old, pair => pair.New);
+        TrainingEventValidator.ValidateRegions(orderedEvents);
+        var sampleStore = new TrainingSampleStore(workspace);
+        var originalMetadata = sampleStore.RemapClassIds(classIdMap);
+        foreach (var eventDefinition in orderedEvents)
+            eventDefinition.ClassId = classIdMap[eventDefinition.ClassId];
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
+        try
+        {
+            TrainingSampleStore.WriteAtomically(workspace.EventsPath,
+                JsonSerializer.SerializeToUtf8Bytes(orderedEvents, options));
+        }
+        catch
+        {
+            sampleStore.RestoreMetadata(originalMetadata);
+            throw;
+        }
+        PushTrainingProgress(parameters.GameId, "eventsUpdated", "Training events updated.");
+        PushTrainingCore(parameters.GameId);
+    }
+
+
+    internal void UpdateTrainingSample(UpdateTrainingSampleParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => UpdateTrainingSampleCore(parameters));
+    }
+
+    private void UpdateTrainingSampleCore(UpdateTrainingSampleParameters? parameters)
+    {
+        if (parameters is null)
+            throw new ArgumentException("Training sample parameters are required.");
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var labels = parameters.Labels.Select(ToTrainingLabel).ToList();
+        var sample = new TrainingSampleStore(workspace).UpdateLabels(parameters.SampleId, labels,
+            workspace.LoadDefinitions());
+        PushTrainingProgress(parameters.GameId, "sampleUpdated", sample.Id);
+        PushTrainingCore(parameters.GameId);
+    }
+
+    internal void DeleteTrainingSample(TrainingSampleParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => DeleteTrainingSampleCore(parameters));
+    }
+
+    private void DeleteTrainingSampleCore(TrainingSampleParameters? parameters)
+    {
+        if (parameters is null)
+            throw new ArgumentException("Training sample parameters are required.");
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        new TrainingSampleStore(workspace).Delete(parameters.SampleId);
+        PushTrainingProgress(parameters.GameId, "sampleDeleted", parameters.SampleId);
+        PushTrainingCore(parameters.GameId);
+    }
+
+    internal void StartTraining(StartTrainingParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => StartTrainingCore(parameters));
+    }
+
+    private void StartTrainingCore(StartTrainingParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
+            throw new ArgumentException("A game id is required to train a model.");
+
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var imageSize = parameters.ImageSize;
+        if (imageSize is null && File.Exists(workspace.ModelPath))
+            imageSize = OnnxModelInspector.Inspect(workspace.ModelPath).InputWidth;
+        imageSize ??= 640;
+
+        lock (_trainingGate)
+        {
+            if (_trainingCancellation is not null)
+                throw new InvalidOperationException("Training is already running.");
+
+            _trainingCancellation = new CancellationTokenSource();
+            _trainingGameId = parameters.GameId;
+            var cancellation = _trainingCancellation;
+            _ = RunTrainingAsync(workspace, imageSize.Value, parameters, cancellation);
+        }
+        PushTrainingProgress(parameters.GameId, "started", $"Training started at {imageSize}x{imageSize}.");
+    }
+
+    internal void CancelTraining()
+    {
+        lock (_trainingGate)
+        {
+            _trainingRunner.Cancel();
+            _trainingCancellation?.Cancel();
+        }
+    }
+
+    internal void InstallTrainingModelCommand(TrainingGameParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => InstallTrainingModelCommandCore(parameters));
+    }
+
+    private void InstallTrainingModelCommandCore(TrainingGameParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
+            throw new ArgumentException("A game id is required to install a model.");
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var source = Path.Combine(workspace.DatasetPath, "model.onnx");
+        var result = InstallTrainingModel(parameters.GameId, source);
+        PushTrainingProgress(parameters.GameId, "completed", $"Installed {result.ModelPath}.");
+        PushTrainingCore(parameters.GameId);
+    }
+
+    private async Task RunTrainingAsync(TrainingWorkspace workspace, int imageSize,
+        StartTrainingParameters parameters, CancellationTokenSource cancellation)
+    {
+        await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var result = await _trainingRunner.RunAsync(workspace, imageSize, parameters.Epochs,
+                parameters.Device, parameters.BaseModel,
+                message => PushTrainingProgress(parameters.GameId, "progress", message),
+                cancellation.Token).ConfigureAwait(false);
+            var installed = InstallTrainingModel(parameters.GameId, result.DatasetModelPath);
+            PushTrainingProgress(parameters.GameId, "completed", $"Installed {installed.ModelPath}.");
+            PushTrainingCore(parameters.GameId);
+        }
+        catch (OperationCanceledException)
+        {
+            PushTrainingProgress(parameters.GameId, "cancelled", "Training was cancelled.");
+        }
+        catch (Exception exception)
+        {
+            PushTrainingProgress(parameters.GameId, "error", exception.Message);
+        }
+        finally
+        {
+            lock (_trainingGate)
+            {
+                if (ReferenceEquals(_trainingCancellation, cancellation))
+                {
+                    _trainingCancellation = null;
+                    _trainingGameId = null;
+                }
+            }
+            cancellation.Dispose();
+            _trainingWorkspaceGate.Release();
+        }
+    }
+
+    private static TrainingLabel ToTrainingLabel(TrainingLabelParameters label) => new()
+    {
+        ClassId = label.ClassId,
+        CenterX = label.CenterX,
+        CenterY = label.CenterY,
+        Width = label.Width,
+        Height = label.Height,
+    };
+
+    private static int CountTrainingImages(string datasetPath, string split)
+    {
+        var path = Path.Combine(datasetPath, "images", split);
+        return Directory.Exists(path)
+            ? Directory.EnumerateFiles(path).Count(IsTrainingImage)
+            : 0;
+    }
+
+    private static bool IsTrainingImage(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg";
+
+    private void PushTrainingSample(string gameId, TrainingWorkspace workspace, TrainingSampleRecord sample,
+        string messageName = "trainingSample")
+    {
+        var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
+        if (!File.Exists(imagePath))
+            throw new FileNotFoundException("The training sample image is missing.", imagePath);
+
+        _ipc.Broadcast(messageName, JsonSerializer.SerializeToElement(new
+        {
+            sample,
+            gameId,
+            imageData = "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(imagePath)),
+        }, Wire.Options));
+    }
+
+    private void PushTrainingProgress(string gameId, string status, string message) =>
+        _ipc.Broadcast("trainingProgress", JsonSerializer.SerializeToElement(new
+        {
+            gameId,
+            status,
+            message,
+        }, Wire.Options));
+#endif
+
     // ---- content ----
 
     // ContentServer holds the same root (it owns the traversal guard); this is for callers that need
@@ -992,6 +1586,7 @@ internal sealed class AppHost : IDisposable
 
         // Recording base name -> game, used to give the clips a game after the loop.
         var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
+        var gameIdsByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
         var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
         var clips = new List<ContentItem>();
         var probeBudget = DurationProbeBudget;
@@ -1034,12 +1629,17 @@ internal sealed class AppHost : IDisposable
                     item.Favorite = metadata.Favorite;
                     item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
                     item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
+                    item.GameId = string.IsNullOrWhiteSpace(metadata.GameId)
+                        ? ResolveLegacyGameId(item.Game)
+                        : metadata.GameId;
                     item.DurationSeconds = metadata.DurationSeconds;
                     item.AudioTracks = ToAudioTrackInfo(metadata);
 
                     var baseName = Path.GetFileNameWithoutExtension(file.Name);
                     if (item.Game is not null)
                         gamesByRecording[baseName] = item.Game;
+                    if (item.GameId is not null)
+                        gameIdsByRecording[baseName] = item.GameId;
                     if (item.AudioTracks is not null)
                         tracksByRecording[baseName] = item.AudioTracks;
                 }
@@ -1080,6 +1680,7 @@ internal sealed class AppHost : IDisposable
         foreach (var clip in clips)
         {
             clip.Game = InheritedGame(clip.FileName, gamesByRecording);
+            clip.GameId = InheritedFrom(clip.FileName, gameIdsByRecording);
             // A clip keeps every audio track of the session it was cut from, so it keeps the names.
             clip.AudioTracks = InheritedFrom(clip.FileName, tracksByRecording);
         }

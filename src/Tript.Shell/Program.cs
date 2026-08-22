@@ -22,11 +22,6 @@ namespace Tript.Shell;
 // disposed on the main thread after the background thread has drained.
 internal static class Program
 {
-    // Where the UI host listens. The URL the window actually loads carries the launch's session
-    // token (host.UiUrl) and is built in-process — never a command-line argument, and never in the
-    // message below.
-    private static readonly string UiAddress = $"http://localhost:{LocalPorts.Ui}/";
-
     // STAThread on the entry point: WebView2's CoreWebView2Controller must be created on a
     // single-threaded apartment (the controller holds COM state the apartment owns). The .NET
     // runtime initialises the main thread as MTA by default, and without this the Photino webview
@@ -69,10 +64,10 @@ internal static class Program
                 // first paint is not a connection failure. Give up gracefully: a webview that
                 // cannot reach the host is a hang, and a hang is the one failure the shell must
                 // never have — report it on stderr and exit non-zero.
-                if (!WaitForUi(UiAddress, TimeSpan.FromSeconds(15)))
+                if (!WaitForUi(host.UiUrl, TimeSpan.FromSeconds(15)))
                 {
                     Console.Error.WriteLine(
-                        "Tript.Shell: the app host did not come up in time (no reply from " + UiAddress +
+                        "Tript.Shell: the app host did not come up in time (no reply from " + host.UiUrl +
                         "); giving up.");
                     return 1;
                 }
@@ -180,6 +175,12 @@ internal static class Program
         // an in-flight recording); for now a close always goes through.
         window.RegisterWindowClosingHandler((_, _) => false);
 
+        // Install the picker delegates before loading the UI. The native window is created by the
+        // time a user can click Browse, and setting these eagerly also avoids depending on the
+        // WindowCreated callback ordering across the Windows and Linux Photino backends.
+        host.FolderPicker = () => PickRecordingFolder(window, host);
+        host.TrainingFolderPicker = () => PickTrainingFolder(window);
+
         // Install the host's native folder picker once the window exists. Photino fires the
         // WindowCreated handler inside WaitForClose, after it has created the native window
         // (_nativeInstance is set), so the picker's ShowOpenFolder can marshal onto the GTK
@@ -187,6 +188,7 @@ internal static class Program
         window.RegisterWindowCreatedHandler((_, _) =>
         {
             host.FolderPicker = () => PickRecordingFolder(window, host);
+            host.TrainingFolderPicker = () => PickTrainingFolder(window);
         });
 
         window.Load(url);
@@ -206,13 +208,51 @@ internal static class Program
             ? Tript.Settings.RecordingLocations.DefaultDirectory()
             : configured;
 
+        return PickFolder(window, "Select recordings folder", ExistingFolderOrParent(defaultPath));
+    }
+
+    private static string? PickTrainingFolder(PhotinoWindow window)
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (string.IsNullOrWhiteSpace(documents))
+            documents = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return PickFolder(window, "Select training data folder",
+            ExistingFolderOrParent(Path.Combine(documents, "Tript", "training")));
+    }
+
+    private static string ExistingFolderOrParent(string path)
+    {
+        var candidate = Path.GetFullPath(path);
+        while (!Directory.Exists(candidate))
+        {
+            var parent = Directory.GetParent(candidate)?.FullName;
+            if (parent is null || string.Equals(parent, candidate, StringComparison.OrdinalIgnoreCase))
+                return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            candidate = parent;
+        }
+        return candidate;
+    }
+
+    private static string? PickFolder(PhotinoWindow window, string title, string defaultPath)
+    {
         string? result = null;
+        using var completed = new ManualResetEventSlim(false);
         window.Invoke(() =>
         {
-            var picked = window.ShowOpenFolder("Select recordings folder", defaultPath, multiSelect: false);
-            if (picked.Length > 0)
-                result = picked[0];
+            try
+            {
+                var picked = window.ShowOpenFolder(title, defaultPath, multiSelect: false);
+                if (picked.Length > 0)
+                    result = picked[0];
+            }
+            finally
+            {
+                completed.Set();
+            }
         });
+
+        if (!completed.Wait(TimeSpan.FromMinutes(5)))
+            throw new TimeoutException("The native folder picker did not return.");
         return result;
     }
 }

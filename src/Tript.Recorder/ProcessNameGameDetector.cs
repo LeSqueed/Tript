@@ -35,7 +35,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
     public event Action<string>? GameStarted;
 
-    public event Action? GameStopped;
+    public event Action<string>? GameStopped;
 
     public void Start()
     {
@@ -115,7 +115,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
         // for seconds (stopping a recording does), and holding _gate across that blocks Dispose and
         // every other tick behind it.
         List<string> started;
-        int stopped;
+        List<string> stopped;
         lock (_gate)
         {
             if (_disposed)
@@ -123,7 +123,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
             started = seen.Except(_running).ToList();
             var gone = _running.Except(seen).ToArray();
-            stopped = gone.Length;
+            stopped = gone.ToList();
 
             foreach (var game in started)
                 _running.Add(game);
@@ -135,8 +135,8 @@ public sealed class ProcessNameGameDetector : IGameDetector
         foreach (var game in started)
             Raise(() => GameStarted?.Invoke(game));
 
-        for (var i = 0; i < stopped; i++)
-            Raise(() => GameStopped?.Invoke());
+        foreach (var game in stopped)
+            Raise(() => GameStopped?.Invoke(game));
     }
 
     // A subscriber that throws must not take the process with it. These run on a timer callback,

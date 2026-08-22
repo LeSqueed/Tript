@@ -12,6 +12,8 @@ namespace Tript.Media.Tests;
 // a checked-in media file.
 internal static class MediaTestFixture
 {
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(60);
+
     // The ffmpeg/ffprobe the engine will shell out to. Located through the real locator so the
     // tests exercise the same discovery path the product uses.
     internal static readonly (string Ffmpeg, string Ffprobe) Binaries = Locate();
@@ -33,26 +35,38 @@ internal static class MediaTestFixture
 
     internal static string Run(string ffmpeg, IReadOnlyList<string> args)
     {
+        var (_, stderr, exitCode) = RunCaptured(ffmpeg, args);
+        if (exitCode != 0)
+            throw new InvalidOperationException($"ffmpeg failed ({exitCode}): {stderr}");
+        return stderr;
+    }
+
+    private static (string Stdout, string Stderr, int ExitCode) RunCaptured(string executable,
+        IReadOnlyList<string> args)
+    {
         var psi = new ProcessStartInfo
         {
-            FileName = ffmpeg,
+            FileName = executable,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            CreateNoWindow = true,
         };
-
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
-        using var process = Process.Start(psi)!;
-        var stderr = process.StandardError.ReadToEnd();
-        process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Could not start {executable}.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(ProcessTimeout))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            process.WaitForExit(TimeSpan.FromSeconds(10));
+            throw new TimeoutException($"{executable} did not exit within {ProcessTimeout}.");
+        }
 
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"ffmpeg failed ({process.ExitCode}): {stderr}");
-
-        return stderr;
+        return (stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult(), process.ExitCode);
     }
 
     // A stand-in for the ffmpeg binary that exits 0 and writes either nothing or an empty file at
@@ -170,40 +184,14 @@ internal static class MediaTestFixture
             ? new[] { "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path }
             : new[] { "-v", "error", "-select_streams", streamSelector, "-show_entries", $"stream={key}", "-of", "default=nw=1:nk=1", path };
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffprobe,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-
-        using var process = Process.Start(psi)!;
-        var stdout = process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return stdout.Trim();
+        return RunCaptured(ffprobe, args).Stdout.Trim();
     }
 
     // The first frame's MD5 hash, for exact-time content comparisons on lossless sources.
     internal static string FirstFrameHash(string ffmpeg, string path)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpeg,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in new[] { "-hide_banner", "-v", "error", "-i", path, "-frames:v", "1", "-f", "framemd5", "-" })
-            psi.ArgumentList.Add(arg);
-
-        using var process = Process.Start(psi)!;
-        var stdout = process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        var stdout = RunCaptured(ffmpeg,
+            ["-hide_banner", "-v", "error", "-i", path, "-frames:v", "1", "-f", "framemd5", "-"]).Stdout;
 
         foreach (var line in stdout.Split('\n'))
         {
@@ -269,29 +257,11 @@ internal static class MediaTestFixture
 
     private static double RawPsnrDb(string ffmpeg, string frameA, string frameB, int width, int height)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpeg,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in new[]
-                 {
-                     "-hide_banner", "-v", "info",
-                     "-f", "rawvideo", "-s", $"{width}x{height}", "-pix_fmt", "yuv420p", "-i", frameA,
-                     "-f", "rawvideo", "-s", $"{width}x{height}", "-pix_fmt", "yuv420p", "-i", frameB,
-                     "-filter_complex", "psnr",
-                     "-f", "null", "-",
-                 })
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(psi)!;
-        var stderr = process.StandardError.ReadToEnd();
-        process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
+        var stderr = RunCaptured(ffmpeg,
+            ["-hide_banner", "-v", "info",
+             "-f", "rawvideo", "-s", $"{width}x{height}", "-pix_fmt", "yuv420p", "-i", frameA,
+             "-f", "rawvideo", "-s", $"{width}x{height}", "-pix_fmt", "yuv420p", "-i", frameB,
+             "-filter_complex", "psnr", "-f", "null", "-"]).Stderr;
 
         foreach (var line in stderr.Split('\n'))
         {
@@ -312,26 +282,9 @@ internal static class MediaTestFixture
     // A single audio stream's RMS level in dB, or double.NegativeInfinity for silence.
     internal static double AudioRmsDb(string ffmpeg, string path, int audioStreamIndex)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ffmpeg,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in new[]
-                 {
-                     "-v", "info", "-i", path, "-map", $"0:a:{audioStreamIndex}",
-                     "-af", "astats=metadata=1:reset=0", "-f", "null", "-",
-                 })
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(psi)!;
-        var stderr = process.StandardError.ReadToEnd();
-        process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
+        var stderr = RunCaptured(ffmpeg,
+            ["-v", "info", "-i", path, "-map", $"0:a:{audioStreamIndex}",
+             "-af", "astats=metadata=1:reset=0", "-f", "null", "-"]).Stderr;
 
         foreach (var line in stderr.Split('\n'))
         {

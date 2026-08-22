@@ -123,20 +123,21 @@ internal sealed class AppOptions
             throw new ArgumentException("The IPC ports must be distinct values between 1 and 65535.");
     }
 
-    // The game list pushed on every NewConnection and broadcast when it changes. The alpha has no
-    // remote catalogue feed, so the catalogue is whatever is in the
-    // settings' game list plus an optional test override.
-    internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, string? overrideJson)
+    // The game list pushed on every NewConnection and broadcast when it changes. Stable game identity
+    // comes from the packaged project catalogue; settings only provide display names and overrides.
+    internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
+        string? overrideJson)
     {
         var games = new List<GameInfo>();
-        foreach (var game in settings.Game.GameList)
+        foreach (var entry in catalog.Entries)
         {
-            var executable = game.EffectiveExecutable;
+            var setting = settings.Game.GameList.FirstOrDefault(game =>
+                string.Equals(game.Id, entry.GameId, StringComparison.OrdinalIgnoreCase));
             games.Add(new GameInfo
             {
-                Id = game.Id,
-                Name = game.Name,
-                Executable = string.IsNullOrWhiteSpace(executable) ? null : executable,
+                Id = entry.GameId,
+                Name = string.IsNullOrWhiteSpace(setting?.Name) ? entry.GameId : setting.Name,
+                Executable = entry.Executable,
                 Detected = false,
             });
         }

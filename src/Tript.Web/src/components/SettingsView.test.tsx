@@ -219,7 +219,7 @@ describe('SettingsView', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
     expect(screen.getByLabelText(/^Game-capture timeout/)).toBeTruthy();
-    expect(screen.getByPlaceholderText('Game name')).toBeTruthy();
+    expect(screen.getByText(/known games come from the project catalogue/i)).toBeTruthy();
     // How capture works is a Capture-page setting. This page only says which games depart from it,
     // and that lives on the game's own row rather than as a page-wide control.
     expect(screen.queryByLabelText(/^Capture mode/)).toBeNull();

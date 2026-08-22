@@ -20,6 +20,7 @@
 #   SELF_CONTAINED=false          self-contained .NET publish (Windows bundle defaults true)
 #   DIST_DIR=dist                 output directory for assembled builds
 #   FAKE_RECORDER=true|false      pass --fake-recorder to `run` (default true for dev)
+#   TRAINING=true|false           include the model-training feature set (default false)
 #   OBS_URL=<url>                 override the OBS zip download URL
 #
 # The Linux build is framework-dependent and expects OBS as a system dependency (the app
@@ -39,6 +40,7 @@ OBS_VERSION ?= 32.2.2
 SELF_CONTAINED ?= false
 DIST_DIR ?= dist
 FAKE_RECORDER ?= true
+TRAINING ?= false
 OBS_URL ?= https://github.com/obsproject/obs-studio/releases/download/$(OBS_VERSION)/OBS-Studio-$(OBS_VERSION)-Windows-x64.zip
 
 # ---- derived paths ----
@@ -59,7 +61,7 @@ all: linux
 
 # ---- web (frontend) ----
 web frontend:
-	cd $(WEB_SRC) && npm ci && npm run build
+	cd $(WEB_SRC) && npm ci && VITE_TRIPT_TRAINING=$(TRAINING) npm run build
 
 # ---- publish ----
 publish: publish-linux
@@ -67,6 +69,7 @@ publish: publish-linux
 # Linux: framework-dependent publish. OBS is a system dependency; the app discovers it at runtime.
 publish-linux: web
 	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r $(RID) --self-contained $(SELF_CONTAINED) \
+		-p:EnableTraining=$(TRAINING) \
 		-o $(PUBLISH_DIR)
 	# The app host serves the built frontend from ./dist next to the binary.
 	mkdir -p $(PUBLISH_DIR)/dist
@@ -80,6 +83,7 @@ publish-windows:
 	$(MAKE) web
 	$(MAKE) obs-fetch
 	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r win-x64 --self-contained true \
+		-p:EnableTraining=$(TRAINING) \
 		-o $(WIN_PUBLISH_DIR)
 	# Publish the desktop shell (Photino window) next to the app host so the folder is a launchable app.
 	$(MAKE) publish-shell-win
@@ -164,7 +168,7 @@ assemble-windows: obs-fetch
 # construction seam and serves the same UI; it needs webkit2gtk-4.1 on Linux (see README).
 publish-shell:
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r $(RID) \
-		--self-contained $(SELF_CONTAINED) -o $(PUBLISH_DIR)
+		--self-contained $(SELF_CONTAINED) -p:EnableTraining=$(TRAINING) -o $(PUBLISH_DIR)
 	# The shell resolves its UI root from ./dist next to the binary (DefaultWebRoot prefers the
 	# published layout), so the built frontend must ship into the publish folder here — a shell
 	# build must not depend on a prior publish-linux having populated it.
@@ -177,7 +181,7 @@ publish-shell:
 # self-contained win-x64 publish lands automatically.
 publish-shell-win:
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r win-x64 \
-		--self-contained true -o $(WIN_PUBLISH_DIR)
+		--self-contained true -p:EnableTraining=$(TRAINING) -o $(WIN_PUBLISH_DIR)
 
 shell: web publish-shell
 	@echo "Shell built at: $(PUBLISH_DIR)/Tript.Shell"
@@ -202,7 +206,7 @@ dev: publish-linux
 
 release:
 	@echo "Building the release app (headless host + desktop shell)..."
-	$(MAKE) CONFIG=Release linux publish-shell
+	$(MAKE) CONFIG=Release TRAINING=$(TRAINING) linux publish-shell
 	@echo ""
 	@echo "Built the release app at: $(DIST_DIR)/Release/"
 	@echo "Run it with:              make run CONFIG=Release   (prefers the native window)"
@@ -256,7 +260,7 @@ test:
 test-dotnet:
 	@fail=0; \
 	for project in $(UNIT_TEST_PROJECTS); do \
-		dotnet test $$project -c $(CONFIG) -f net10.0 --nologo -m:1 || fail=1; \
+		dotnet test $$project -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1 || fail=1; \
 	done; \
 	exit $$fail
 
@@ -265,14 +269,14 @@ test-dotnet:
 test-web:
 	cd $(WEB_SRC) && [ -d node_modules ] || (cd $(WEB_SRC) && npm ci)
 	cd $(WEB_SRC) && npx tsc -b --noEmit
-	cd $(WEB_SRC) && npx vitest run
+	cd $(WEB_SRC) && VITE_TRIPT_TRAINING=$(TRAINING) npx vitest run
 
 # The OBS binding's integration suite. Kept out of `test` because it needs more than a checkout:
 # OBS >= 30.1 (the binding P/Invokes entry points absent from earlier builds), a display server, and
 # the obs-ffmpeg-mux helper. On a machine that does not have them it fails for reasons that have
 # nothing to do with the change under test, which is exactly how a gate stops being read.
 test-integration:
-	dotnet test tests/Tript.Obs.IntegrationTests -c $(CONFIG) -f net10.0 --nologo -m:1
+	dotnet test tests/Tript.Obs.IntegrationTests -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1
 
 test-all: test test-integration
 

@@ -56,21 +56,21 @@ public sealed class GameExecutableRoutingTests : IDisposable
     }
 
     [Fact]
-    public void ACatalogueEntryWithNoExecutable_CarriesTheDisplayNameAsOne()
+    public void TheProjectCatalogueCarriesTheKnownExecutable()
     {
         Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Executable);
+        Assert.Equal("Overwatch.exe", Assert.Single(_host.GameList).Executable);
     }
 
     [Fact]
-    public void ACatalogueEntryWithAnExecutable_KeepsTheDisplayNameSeparate()
+    public void SettingsDoNotReplaceTheProjectCatalogueIdentity()
     {
         Catalogue(new GameSetting { Id = "cs2", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
         var game = Assert.Single(_host.GameList);
-        Assert.Equal("Counter-Strike 2", game.Name);
-        Assert.Equal("cs2.exe", game.Executable);
+        Assert.Equal("Overwatch", game.Name);
+        Assert.Equal("Overwatch.exe", game.Executable);
     }
 
     // The gameList push spells it `executable`, camelCase like every other field on the wire.
@@ -83,8 +83,8 @@ public sealed class GameExecutableRoutingTests : IDisposable
             JsonSerializer.Serialize(_host.GameList, Wire.Options));
 
         var entry = document.RootElement[0];
-        Assert.Equal("Counter-Strike 2", entry.GetProperty("name").GetString());
-        Assert.Equal("cs2.exe", entry.GetProperty("executable").GetString());
+        Assert.Equal("Overwatch", entry.GetProperty("name").GetString());
+        Assert.Equal("Overwatch.exe", entry.GetProperty("executable").GetString());
     }
 
     // ---- auto-start ----
@@ -98,30 +98,30 @@ public sealed class GameExecutableRoutingTests : IDisposable
     {
         Catalogue(new GameSetting { Id = "cs2-id", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
-        Assert.Equal("cs2-id", _host.ResolveDetectedGameId("cs2"));
+        Assert.Equal("cs2", _host.ResolveDetectedGameId("cs2"));
     }
 
     // The detector strips a trailing .exe from both sides, so an entry may spell the executable
     // either way and the caller is never asked to guess which.
     [Theory]
-    [InlineData("cs2.exe")]
-    [InlineData("cs2")]
-    [InlineData("CS2.EXE")]
-    public void AnExecutableSpelledEitherWay_ResolvesTheSameGame(string executable)
+    [InlineData("Overwatch.exe")]
+    [InlineData("Overwatch")]
+    [InlineData("OVERWATCH.EXE")]
+    public void TheKnownExecutableResolvesToTheProjectGame(string executable)
     {
-        Catalogue(new GameSetting { Id = "cs2-id", Name = "Counter-Strike 2", Executable = executable });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch", Executable = executable });
 
-        Assert.Equal("cs2-id", _host.ResolveDetectedGameId("cs2"));
+        Assert.Equal("Overwatch", _host.ResolveDetectedGameId("Overwatch"));
     }
 
-    // The path that worked before Executable existed, still working: no executable set, so the
-    // display name is what the detector watches for.
+    // The catalogue executable is explicit, so this does not depend on the settings entry carrying
+    // a duplicate executable value.
     [Fact]
     public void AGameWithNoExecutable_IsStillResolvedByItsDisplayName()
     {
-        Catalogue(new GameSetting { Id = "ow-id", Name = "Overwatch" });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
-        Assert.Equal("ow-id", _host.ResolveDetectedGameId("Overwatch"));
+        Assert.Equal("Overwatch", _host.ResolveDetectedGameId("Overwatch"));
     }
 
     // Nothing in the catalogue matches: the name is passed through, which is what a manual start for
@@ -129,7 +129,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
     [Fact]
     public void AnUnlistedProcess_IsPassedThrough()
     {
-        Catalogue(new GameSetting { Id = "ow-id", Name = "Overwatch" });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
         Assert.Equal("doom", _host.ResolveDetectedGameId("doom"));
     }
@@ -139,24 +139,23 @@ public sealed class GameExecutableRoutingTests : IDisposable
     [Fact]
     public void GameCapture_HooksTheExecutable_NotTheDisplayName()
     {
-        Catalogue(new GameSetting { Id = "cs2-id", Name = "Counter-Strike 2", Executable = "cs2.exe" });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
-        // Extension-free: the caller appends the platform's own, and "cs2.exe.exe" hooks nothing.
-        Assert.Equal("cs2", _host.GameCaptureName("cs2-id"));
+        Assert.Equal("Overwatch", _host.GameCaptureName("Overwatch"));
     }
 
     [Fact]
     public void GameCapture_FallsBackToTheDisplayName_WhenNoExecutableIsSet()
     {
-        Catalogue(new GameSetting { Id = "ow-id", Name = "Overwatch" });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
-        Assert.Equal("Overwatch", _host.GameCaptureName("ow-id"));
+        Assert.Equal("Overwatch", _host.GameCaptureName("Overwatch"));
     }
 
     [Fact]
     public void GameCapture_ForAnUnlistedGame_UsesTheIdItself()
     {
-        Catalogue(new GameSetting { Id = "ow-id", Name = "Overwatch" });
+        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
         Assert.Equal("doom", _host.GameCaptureName("doom"));
     }

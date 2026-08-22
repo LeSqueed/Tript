@@ -6,7 +6,6 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -32,14 +31,6 @@ public class VisualEventDetector : IDisposable
 
     // Past this, a frame callback is assumed never to finish, and teardown stops waiting for it.
     private const int FrameCallbackQuiesceTimeoutMs = 1000;
-
-    // A YOLO detect head emits 4 box rows (cx, cy, w, h) before the per-class score rows.
-    private const int YoloBoxChannels = 4;
-
-    // metadata_props holds a Python dict literal — {0: 'Elimination'} — not JSON: bare int keys,
-    // single-quoted values.
-    private static readonly Regex ClassNamePattern =
-        new(@"(?<id>\d+)\s*:\s*(?:'(?<name>[^']*)'|""(?<name>[^""]*)"")", RegexOptions.CultureInvariant);
 
     private readonly int _detectionIntervalMs;
     private IFrameSubscription? _subscription;
@@ -274,16 +265,7 @@ public class VisualEventDetector : IDisposable
     // A detect head outputs [batch, 4 + numClasses, numAnchors] — [1, 11, 8400] for the shipped
     // 7-class model. Anything else is reported as underivable rather than guessed at.
     internal static bool TryDeriveClassCount(IReadOnlyList<int>? outputDimensions, out int numClasses)
-    {
-        numClasses = 0;
-        if (outputDimensions == null || outputDimensions.Count != 3) return false;
-
-        var channels = outputDimensions[1];
-        if (channels <= YoloBoxChannels) return false;
-
-        numClasses = channels - YoloBoxChannels;
-        return true;
-    }
+        => OnnxModelInspector.TryDeriveClassCount(outputDimensions, out numClasses);
 
     // Absent on models from other tooling, so a null map skips the name check; the shape check holds.
     private static IReadOnlyDictionary<int, string>? ReadModelClassNames(InferenceSession session)
@@ -302,41 +284,13 @@ public class VisualEventDetector : IDisposable
     }
 
     internal static IReadOnlyDictionary<int, string>? ParseClassNames(string? names)
-    {
-        if (string.IsNullOrWhiteSpace(names)) return null;
-
-        var map = new Dictionary<int, string>();
-        foreach (Match match in ClassNamePattern.Matches(names))
-        {
-            if (int.TryParse(match.Groups["id"].ValueSpan, NumberStyles.Integer,
-                    CultureInfo.InvariantCulture, out var classId))
-                map[classId] = match.Groups["name"].Value;
-        }
-
-        return map.Count > 0 ? map : null;
-    }
+        => OnnxModelInspector.ParseClassNames(names);
 
     // events.json keys bookmarks by classId; the model decides what each classId means. An entry
     // added, removed or renamed without retraining mislabels every detection. Null when they agree.
     internal static string? FindClassMapMismatch(IReadOnlyList<EventDefinition> definitions,
         int numClasses, IReadOnlyDictionary<int, string>? modelClassNames)
-    {
-        foreach (var def in definitions)
-        {
-            if (def.ClassId < 0 || def.ClassId >= numClasses)
-                return $"classId {def.ClassId} ('{def.Name}') falls outside the model's {numClasses} classes";
-
-            if (modelClassNames == null) continue;
-
-            if (!modelClassNames.TryGetValue(def.ClassId, out var modelName))
-                return $"classId {def.ClassId} ('{def.Name}') is missing from the model's class map";
-
-            if (!string.Equals(modelName, def.Name, StringComparison.OrdinalIgnoreCase))
-                return $"classId {def.ClassId} is '{def.Name}' in events.json but '{modelName}' in the model";
-        }
-
-        return null;
-    }
+        => ModelEventCompatibility.FindMismatch(definitions, numClasses, modelClassNames);
 
     private void OnFrame(in VideoFrame frame)
     {

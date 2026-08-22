@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The executable field on the game page. The display name is not the process name often enough that
-// the page has to say so, and has to show what a blank field falls back to.
+// The catalogue owns game identities and executables; this page only edits per-game overrides.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -27,49 +26,30 @@ function renderPage(settings: GameSettings = SETTINGS) {
 
 afterEach(cleanup);
 
-describe('the game page executable field', () => {
-  it('explains what the executable is, and that blank means the name', () => {
+describe('the game page catalogue boundary', () => {
+  it('explains that the catalogue owns game identities and executables', () => {
     renderPage();
-    const explanation = screen.getByText(/process name the recorder watches for/i);
-    expect(explanation.textContent).toMatch(/cs2/);
-    expect(explanation.textContent).toMatch(/blank/i);
+    expect(screen.getByText(/Stable game identities and known executables come from/i)).toBeTruthy();
+    expect(screen.getByText(/Games and executables are maintained in the project catalogue/i)).toBeTruthy();
   });
 
-  // The placeholder is the game's own name, so the fallback is not something the user has to recall.
-  it('offers the game name as the placeholder when nothing is set', () => {
+  it('does not offer a control for adding a non-catalogue game', () => {
     renderPage();
-    const field = screen.getByLabelText('Executable for Counter-Strike 2') as HTMLInputElement;
-    expect(field.value).toBe('');
-    expect(field.placeholder).toBe('Counter-Strike 2');
+    expect(screen.queryByRole('button', { name: 'Add game' })).toBeNull();
   });
 
-  it('shows the stored executable when there is one', () => {
-    renderPage();
-    expect((screen.getByLabelText('Executable for Overwatch') as HTMLInputElement).value)
-      .toBe('Overwatch.exe');
-  });
-
-  it('sends the edited executable on the game it belongs to, leaving the others alone', () => {
+  it('still sends a per-game display-name override', () => {
     const { update } = renderPage();
-    fireEvent.change(screen.getByLabelText('Executable for Counter-Strike 2'), {
-      target: { value: 'cs2' },
+    fireEvent.change(screen.getByDisplayValue('Counter-Strike 2'), {
+      target: { value: 'CS2' },
     });
 
     expect(update).toHaveBeenCalledTimes(1);
     const [page, patch] = update.mock.calls[0];
     expect(page).toBe('game');
-    expect((patch as { gameList: { id: string; executable?: string | null }[] }).gameList).toEqual([
-      { id: 'cs2', name: 'Counter-Strike 2', executable: 'cs2', integrations: { enabled: false } },
+    expect((patch as { gameList: { id: string; name: string }[] }).gameList).toEqual([
+      { id: 'cs2', name: 'CS2', integrations: { enabled: false } },
       { id: 'ow', name: 'Overwatch', executable: 'Overwatch.exe', integrations: { enabled: false } },
     ]);
-  });
-
-  it('sends null when the field is cleared, not an empty process name', () => {
-    const { update } = renderPage();
-    fireEvent.change(screen.getByLabelText('Executable for Overwatch'), { target: { value: '' } });
-
-    const [, patch] = update.mock.calls[0];
-    const list = (patch as { gameList: { executable?: string | null }[] }).gameList;
-    expect(list[1].executable).toBeNull();
   });
 });

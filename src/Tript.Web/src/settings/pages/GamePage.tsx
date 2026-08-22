@@ -8,7 +8,6 @@ import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import { Button, Checkbox, Field, SelectField, TextField } from '../../components/ui/controls';
-import { executablePatch } from '../gameExecutable';
 
 // "" means inherit; the global lives on the Capture page.
 const CAPTURE_METHOD_OVERRIDES: { value: string; label: string }[] = [
@@ -43,29 +42,7 @@ export function GamePage({
     setTimeoutSeconds(String(settings.gameCaptureTimeout));
   }, [externalPushCount, settings.gameCaptureTimeout]);
 
-  const [newGameName, setNewGameName] = useState('');
-  const [newGameId, setNewGameId] = useState('');
-
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
-
-  function addGame() {
-    const name = newGameName.trim();
-    const id = newGameId.trim() || name;
-    if (!name || !id) {
-      return;
-    }
-    const next: GameSetting[] = [
-      ...gameList,
-      {
-        id,
-        name,
-        integrations: { enabled: false },
-      },
-    ];
-    update(page, { gameList: next });
-    setNewGameName('');
-    setNewGameId('');
-  }
 
   function removeGame(index: number) {
     const next = gameList.filter((_, i) => i !== index);
@@ -105,14 +82,13 @@ export function GamePage({
       </Field>
 
       <div className="game-list">
-        <h3 className="subheading">Known games</h3>
+        <h3 className="subheading">Game overrides</h3>
         {gameList.length === 0 ? (
-          <p className="muted small">No games yet — add one to set per-game overrides.</p>
+          <p className="muted small">No overrides yet — known games come from the project catalogue.</p>
         ) : (
           <p className="muted small">
-            Executable is the process name the recorder watches for and attaches game capture to. It
-            is often not the display name — Counter-Strike 2 runs as <code>cs2</code>. Leave it blank
-            to watch for the name itself.
+            Stable game identities and known executables come from <code>data/games.json</code>. These
+            settings provide per-game recording, capture, quality, and integration overrides.
           </p>
         )}
 
@@ -127,18 +103,6 @@ export function GamePage({
             </div>
 
             <div className="game-row-overrides">
-              <label className="settings-inline-field">
-                <span className="muted small">Executable</span>
-                <TextField
-                  type="text"
-                  value={game.executable ?? ''}
-                  // The name itself, so the field shows exactly what blank falls back to.
-                  placeholder={game.name}
-                  aria-label={`Executable for ${game.name}`}
-                  onChange={(value) => patchGame(index, executablePatch(value))}
-                />
-              </label>
-
               <label className="settings-inline-field">
                 <span className="muted small">Recording mode</span>
                 <SelectField
@@ -237,13 +201,9 @@ export function GamePage({
           </div>
         ))}
 
-        <div className="game-add">
-          <TextField value={newGameName} onChange={setNewGameName} placeholder="Game name" />
-          <TextField value={newGameId} onChange={setNewGameId} placeholder="id (defaults to name)" />
-          <Button onClick={addGame} disabled={!newGameName.trim()}>
-            Add game
-          </Button>
-        </div>
+        <p className="muted small">
+          Games and executables are maintained in the project catalogue. This page only edits per-game overrides.
+        </p>
       </div>
     </div>
   );

@@ -22,9 +22,11 @@ import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
 import { TripwireMark } from '../components/TripwireMark';
 import { Icon } from '../components/ui/Icon';
+import { trainingEnabled } from '../buildFeatures';
+import { TrainingView } from '../components/TrainingView';
 import './app.css';
 
-export type Route = 'library' | 'settings' | 'player';
+export type Route = 'library' | 'settings' | 'player' | 'training';
 
 export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // Without the launch token every listener refuses this page: the socket, the videos, the
@@ -101,6 +103,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
         event.preventDefault();
         closePlayer();
       }
@@ -144,6 +147,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   }, []);
   const showLibrary = useCallback(() => leaveFor('library'), [leaveFor]);
   const showSettings = useCallback(() => leaveFor('settings'), [leaveFor]);
+  const showTraining = useCallback(() => leaveFor('training'), [leaveFor]);
 
   return (
     <div className="app-shell">
@@ -172,6 +176,17 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
             <Icon name="settings" className="nav-glyph" />
             <span>Settings</span>
           </button>
+          {trainingEnabled && (
+            <button
+              type="button"
+              className={route === 'training' ? 'nav-item active' : 'nav-item'}
+              aria-current={route === 'training' ? 'page' : undefined}
+              onClick={showTraining}
+            >
+              <Icon name="clip" className="nav-glyph" />
+              <span>Training</span>
+            </button>
+          )}
         </nav>
         {route === 'player' && <span className="app-topbar-context">{playerTitle}</span>}
         <RecorderBar client={client} connectionState={connectionState} />
@@ -203,6 +218,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
           {route === 'player' && playerItem && (
             <PlayerView
               client={client}
+              trainingEnabled={trainingEnabled}
               source={source}
               item={playerItem}
               navigationItems={playerNavigation}
@@ -211,6 +227,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
             />
           )}
           {route === 'settings' && <SettingsView client={client} />}
+          {route === 'training' && trainingEnabled && <TrainingView client={client} />}
         </div>
       </main>
     </div>

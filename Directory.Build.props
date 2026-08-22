@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
+    <!-- Training is an opt-in build feature. Keep it absent from normal builds and let the
+         Makefile pass EnableTraining=true for development builds that need it. -->
+    <EnableTraining Condition="'$(EnableTraining)' == ''">false</EnableTraining>
+    <DefineConstants Condition="'$(EnableTraining)' == 'true'">$(DefineConstants);TRIPT_TRAINING</DefineConstants>
     <!-- Both target frameworks are carried from the first commit even while only one is exercised:
          retrofitting a second TFM later costs more than carrying an idle one. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

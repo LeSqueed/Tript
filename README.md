@@ -64,6 +64,18 @@ make windows  # Windows self-contained publish with the bundled OBS runtime (cro
 make test     # .NET test suite + frontend Vitest suite
 ```
 
+Model-training functionality is excluded from normal builds. Enable it explicitly at build time:
+
+```sh
+make TRAINING=true release
+make TRAINING=true test
+```
+
+The flag is compile-time only. C# code uses the `TRIPT_TRAINING` symbol and the frontend uses
+`trainingEnabled` from `src/Tript.Web/src/buildFeatures.ts`; future training code must remain behind
+those guards.
+Changing an environment variable after the application has been built cannot enable training.
+
 `make dev` / `make run` / `make release` use `dist/<config>` under the repo root.
 
 ## Run
@@ -97,15 +109,16 @@ straight off disk. The key rides in the URL query, because a WebSocket handshake
 have no other channel, so treat a pasted URL or a screenshot of the address bar as handing over
 control for the life of that launch.
 
-## First launch: seed the game list for auto-record
+## Game catalogue and auto-record
 
-The host reads `settings.Game.GameList` for the game catalogue; auto-start only fires when a game is in settings. If your settings file has no games yet, add an entry:
+Stable game identities and known executables are kept in the project-owned `data/games.json` catalogue.
+It currently contains Overwatch. Settings retain per-game recording and capture overrides, but they do
+not define the detection catalogue. If an unknown Windows process owns a fullscreen foreground window,
+Tript can fall back to that executable name after ignoring system locations such as `System32` and
+`WindowsApps`.
 
-```json
-{ "game": { "gameList": [ { "id": "Overwatch", "name": "Overwatch" } ] } }
-```
-
-The settings file lives in the platform config directory (`$XDG_CONFIG_HOME/Tript` or `~/.config/Tript` on Linux, `%AppData%\Tript` on Windows) or wherever you point `--settings-path`.
+The settings file lives in the platform config directory (`$XDG_CONFIG_HOME/Tript` or `~/.config/Tript` on
+Linux, `%AppData%\Tript` on Windows) or wherever you point `--settings-path`.
 
 ## Project layout
 

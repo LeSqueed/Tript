@@ -288,6 +288,8 @@ internal sealed class AppHost : IDisposable
     {
         var shutdownRequested = new ManualResetEventSlim(false);
         _ipc.ShutdownRequested += shutdownRequested.Set;
+        if (_ipc.ShutdownWasRequested)
+            shutdownRequested.Set();
 
         while (!shutdownRequested.IsSet)
             Thread.Sleep(100);
@@ -311,9 +313,15 @@ internal sealed class AppHost : IDisposable
         _detectionHost?.Dispose();
         _detector?.Dispose();
 
-        // A recording still running holds its bookmarks in the session and its metadata record
-        // unwritten; quitting mid-recording used to drop both on the floor.
-        StopRecording();
+        // Preserve recording metadata when possible, but never let a dead recorder block shutdown.
+        try
+        {
+            StopRecording();
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Tript.App: recording cleanup failed during shutdown: {exception.Message}");
+        }
 
         lock (_recorderGate)
         {

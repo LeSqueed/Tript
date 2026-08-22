@@ -170,10 +170,13 @@ describe('App shell', () => {
     expect(screen.queryByTestId('library-groups')).toBeNull();
   });
 
-  it('recognizes a unique settings fragment from repeated shell navigation', () => {
-    window.location.hash = '#settings-unique-request';
+  it('follows a settings command from the desktop shell without reloading', () => {
     renderApp();
     connect();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('tript:navigate', { detail: 'settings' }));
+    });
 
     expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
     expect(screen.queryByTestId('library-groups')).toBeNull();
@@ -189,8 +192,7 @@ describe('App shell', () => {
     expect(window.location.hash).toBe('#library');
 
     act(() => {
-      window.location.hash = '#settings';
-      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      window.dispatchEvent(new CustomEvent('tript:navigate', { detail: 'settings' }));
     });
 
     expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();

@@ -36,7 +36,8 @@ internal static class WindowsWindow
 
     internal static void CloseWindow(PhotinoWindow window)
     {
-        PostMessage(window.WindowHandle, WmClose, IntPtr.Zero, IntPtr.Zero);
+        if (!PostMessage(window.WindowHandle, WmClose, IntPtr.Zero, IntPtr.Zero))
+            throw new ApplicationException("Windows could not close the shell window.");
     }
 
     internal static bool IsVisible(PhotinoWindow window) => IsWindowVisible(window.WindowHandle);
@@ -60,7 +61,7 @@ internal static class WindowsWindow
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]

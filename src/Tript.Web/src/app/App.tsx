@@ -26,6 +26,12 @@ import './app.css';
 
 export type Route = 'library' | 'settings' | 'player';
 
+type PhotinoShellWindow = Window & {
+  external?: {
+    sendMessage?: (message: string) => void;
+  };
+};
+
 export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // Without the launch token every listener refuses this page: the socket, the videos, the
   // thumbnails. Rendering the shell anyway would be an empty library over a socket reconnecting
@@ -70,8 +76,27 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       setPlayerTitle('');
       setPlayerNavigation([]);
     };
+    const onNativeNavigation = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== 'settings') {
+        return;
+      }
+      replaceRouteHash('settings');
+      setRoute('settings');
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setPlayerNavigation([]);
+    };
     window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('tript:navigate', onNativeNavigation);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('tript:navigate', onNativeNavigation);
+    };
+  }, []);
+
+  // Register the listener before announcing readiness so queued tray commands are not lost.
+  useEffect(() => {
+    (window as PhotinoShellWindow).external?.sendMessage?.('tript:ready');
   }, []);
 
   // One IPC session source for the shell's lifetime, shared by the library and the player so a

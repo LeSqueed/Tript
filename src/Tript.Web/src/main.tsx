@@ -3,6 +3,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
+import { installPhotinoBridge, type PhotinoExternal } from './app/nativeBridge';
 import './theme/theme.css';
 import './theme/utilities.css';
 import './app/app.css';
@@ -24,13 +25,12 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Photino uses this bridge to tell the native shell that the document and React tree actually ran.
-// The shell waits for this before hiding/minimizing a tray launch; hiding the native window earlier
-// can prevent WebView2 from creating its renderer and leaves a white window on later restore.
+// Install Photino's native message bridge before React announces readiness.
 type PhotinoWindow = Window & {
-  external?: {
+  external?: PhotinoExternal & {
     sendMessage?: (message: string) => void;
   };
 };
 
-(window as PhotinoWindow).external?.sendMessage?.('tript:ready');
+const photinoWindow = window as PhotinoWindow;
+installPhotinoBridge(photinoWindow.external);

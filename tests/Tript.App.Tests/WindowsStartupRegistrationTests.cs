@@ -57,14 +57,40 @@ public sealed class WindowsStartupRegistrationTests
     }
 
     [Fact]
-    public void BuildSettingsUrl_UsesAUniqueFragmentWithoutChangingTheLaunchToken()
+    public void NavigateSettingsMessage_UsesTheShellToWebContract()
     {
-        var first = Tript.Shell.Program.BuildSettingsUrl("http://localhost:2882/?k=token");
-        var second = Tript.Shell.Program.BuildSettingsUrl("http://localhost:2882/?k=token");
+        Assert.Equal("tript:navigate:settings", Tript.Shell.Program.NavigateSettingsMessage);
+    }
 
-        Assert.StartsWith("http://localhost:2882/?k=token#settings-", first);
-        Assert.StartsWith("http://localhost:2882/?k=token#settings-", second);
-        Assert.NotEqual(first, second);
+    [Fact]
+    public void CloseShellOrRequestShutdown_ClosesBeforeFallingBackToHostShutdown()
+    {
+        var events = new List<string>();
+
+        Tript.Shell.Program.CloseShellOrRequestShutdown(
+            () => events.Add("close"),
+            () => events.Add("shutdown"),
+            () => events.Add("force-exit"));
+
+        Assert.Equal(["close"], events);
+
+        events.Clear();
+        Tript.Shell.Program.CloseShellOrRequestShutdown(
+            () => throw new ApplicationException("webview gone"),
+            () => events.Add("shutdown"),
+            () => events.Add("force-exit"));
+
+        Assert.Equal(["shutdown", "force-exit"], events);
+    }
+
+    [Fact]
+    public void RequestShutdown_IsLatchedForAHostThatHasNotStartedWaitingYet()
+    {
+        using var server = new Tript.App.Ipc.IpcServer(null!, new Tript.App.SessionToken());
+
+        server.RequestShutdown();
+
+        Assert.True(server.ShutdownWasRequested);
     }
 
     [Theory]

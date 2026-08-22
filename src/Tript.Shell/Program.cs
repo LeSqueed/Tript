@@ -22,6 +22,8 @@ namespace Tript.Shell;
 // disposed on the main thread after the background thread has drained.
 internal static class Program
 {
+    internal const string NavigateSettingsMessage = "tript:navigate:settings";
+
     // Where the UI host listens. The URL the window actually loads carries the launch's session
     // token (host.UiUrl) and is built in-process — never a command-line argument, and never in the
     // message below.
@@ -115,10 +117,14 @@ internal static class Program
             }
             finally
             {
-                // The window is gone (closed or failed); unblock the host's WaitForShutdown and
-                // wait for the background thread to drain before disposing the host.
+                // Stop the host before disposing it; force termination if it ignores shutdown.
                 host.Ipc.RequestShutdown();
-                hostThread.Join();
+                if (!hostThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    // The shell and backend share a process, so a stuck host must not outlive the UI.
+                    Console.Error.WriteLine("Tript.Shell: the app host did not stop; terminating the process.");
+                    Environment.Exit(1);
+                }
             }
         }
 
@@ -197,6 +203,8 @@ internal static class Program
         var activationPending = false;
         var startupMinimizePending = false;
         var exitRequested = false;
+        var webReady = false;
+        string? pendingNavigation = null;
         var startupVisibility = general.StartupVisibility;
         var startupVisibilityApplied = false;
         using var tray = OperatingSystem.IsWindows() && File.Exists(iconPath)
@@ -278,9 +286,14 @@ internal static class Program
                             window.Invoke(() =>
                             {
                                 WindowsWindow.ShowWindow(window);
-                                // Use a fresh fragment so WebView2 does not coalesce repeated tray
-                                // requests into a no-op when the document is already on Settings.
-                                window.Load(BuildSettingsUrl(url));
+                                if (webReady)
+                                {
+                                    window.SendWebMessage(NavigateSettingsMessage);
+                                }
+                                else
+                                {
+                                    pendingNavigation = NavigateSettingsMessage;
+                                }
                             });
                         }
                         catch (ApplicationException)
@@ -291,17 +304,10 @@ internal static class Program
                     break;
                 case TrayCommand.Exit:
                     exitRequested = true;
-                    if (host.IsRecording)
-                        host.StopRecordingOrReport();
-
-                    try
-                    {
-                        window.Invoke(() => WindowsWindow.CloseWindow(window));
-                    }
-                    catch (ApplicationException)
-                    {
-                        activationPending = true;
-                    }
+                    CloseShellOrRequestShutdown(
+                        () => window.Invoke(() => WindowsWindow.CloseWindow(window)),
+                        host.Ipc.RequestShutdown,
+                        () => Environment.Exit(1));
                     break;
             }
         }
@@ -407,7 +413,18 @@ internal static class Program
 
             try
             {
-                window.Invoke(ApplyStartupVisibility);
+                window.Invoke(() =>
+                {
+                    webReady = true;
+                    if (pendingNavigation is not null)
+                    {
+                        var navigation = pendingNavigation;
+                        pendingNavigation = null;
+                        window.SendWebMessage(navigation);
+                    }
+
+                    ApplyStartupVisibility();
+                });
             }
             catch (ApplicationException)
             {
@@ -442,7 +459,20 @@ internal static class Program
 
     internal static string BuildLibraryUrl(string url) => $"{url}#library";
 
-    internal static string BuildSettingsUrl(string url) => $"{url}#settings-{Guid.NewGuid():N}";
+    internal static void CloseShellOrRequestShutdown(
+        Action closeShell, Action requestShutdown, Action forceExit)
+    {
+        try
+        {
+            closeShell();
+        }
+        catch (ApplicationException)
+        {
+            // The WebView may already be gone after a host failure.
+            requestShutdown();
+            forceExit();
+        }
+    }
 
     internal static bool NotificationEnabled(NotificationSettings settings, NotificationKind kind) => kind switch
     {

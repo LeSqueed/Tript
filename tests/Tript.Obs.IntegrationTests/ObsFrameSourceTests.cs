@@ -684,5 +684,5 @@ internal sealed class ActiveOutput : IDisposable
     }
 
     private static string CreateScratchFile() =>
-        Path.Combine(Path.GetTempPath(), $"reference-product_frame_driver_{Guid.NewGuid():N}.mp4");
+        Path.Combine(Path.GetTempPath(), $"tript_frame_driver_{Guid.NewGuid():N}.mp4");
 }

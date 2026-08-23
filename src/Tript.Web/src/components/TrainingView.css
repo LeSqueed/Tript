@@ -143,10 +143,6 @@
   color: var(--color-muted);
 }
 
-.training-dataset-empty {
-  color: var(--color-muted);
-}
-
 .training-model-facts strong {
   color: var(--color-base-content);
 }
@@ -208,8 +204,9 @@
 .training-sample-thumb {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
+  height: auto;
+  max-height: 18rem;
+  object-fit: contain;
   border-radius: calc(var(--radius-sm) - 2px);
   background: var(--color-base-300);
 }
@@ -327,12 +324,40 @@
   background: var(--color-panel-raised);
 }
 
+.training-active-status {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--color-accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+}
+
+.training-active-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.training-active-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--color-success) 18%, transparent);
+}
+
 .training-editor-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: end;
+}
+
+.training-sample-navigation {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .training-editor-canvas {
@@ -375,6 +400,19 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 0.45rem 0.75rem;
+}
+
+.training-modal-header-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.training-save-notice {
+  margin: 0;
+  color: var(--color-accent);
+  font-size: 0.75rem;
 }
 
 .training-modal-header {
@@ -625,6 +663,11 @@
 
 .training-box.selected {
   border-color: var(--color-success);
+}
+
+.training-box.suggested {
+  border-style: dashed;
+  border-color: var(--color-warning);
 }
 
 .training-box-label {

@@ -5,6 +5,7 @@ import { useTrainingDialog } from './useTrainingDialog';
 
 interface TrainingEventEditorProps {
   event: TrainingEventDefinition;
+  events?: TrainingEventDefinition[];
   isNew: boolean;
   onCancel(): void;
   onSave(event: TrainingEventDefinition): void;
@@ -12,11 +13,14 @@ interface TrainingEventEditorProps {
 
 const BOOKMARK_TYPES = ['Manual', 'Kill', 'Goal', 'Assist', 'Death'];
 
-export function TrainingEventEditor({ event, isNew, onCancel, onSave }: TrainingEventEditorProps) {
+export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSave }: TrainingEventEditorProps) {
   const [name, setName] = useState(event.name);
   const [type, setType] = useState<TrainingEventDefinition['type']>(event.type);
   const [bookmarkType, setBookmarkType] = useState(event.bookmarkType ?? '');
   const [lifetimeMs, setLifetimeMs] = useState(event.lifetimeMs == null ? '' : String(event.lifetimeMs));
+  const [subtractsEventId, setSubtractsEventId] = useState(
+    event.subtractsEventId == null ? '' : String(event.subtractsEventId),
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
   const dialogRef = useTrainingDialog<HTMLElement>(onCancel);
 
@@ -31,14 +35,27 @@ export function TrainingEventEditor({ event, isNew, onCancel, onSave }: Training
       setValidationError('Lifetime must be a whole number of milliseconds.');
       return;
     }
+    const parsedSubtractsEventId = subtractsEventId === '' ? null : Number(subtractsEventId);
+    if (type === 'Subtractor' && (parsedSubtractsEventId === null || !Number.isInteger(parsedSubtractsEventId))) {
+      setValidationError('A subtractor must reference a trigger event.');
+      return;
+    }
+    if (type === 'Subtractor' && !events.some((candidate) =>
+      candidate.id === parsedSubtractsEventId && candidate.type === 'Trigger' && candidate.id !== event.id)) {
+      setValidationError('A subtractor must reference an existing trigger event.');
+      return;
+    }
 
     setValidationError(null);
     onSave({
       ...event,
       name: trimmedName,
       type,
-      bookmarkType: bookmarkType || null,
+      bookmarkType: type === 'Subtractor' ? null : bookmarkType || null,
       lifetimeMs: parsedLifetime,
+       ...(type === 'Subtractor' || event.subtractsEventId !== undefined
+         ? { subtractsEventId: type === 'Subtractor' ? parsedSubtractsEventId : null }
+         : {}),
     });
   };
 
@@ -59,18 +76,39 @@ export function TrainingEventEditor({ event, isNew, onCancel, onSave }: Training
           <Field label="Type">
             <SelectField
               value={type}
-              onChange={(value) => setType(value as TrainingEventDefinition['type'])}
-              options={[{ value: 'Trigger', label: 'Trigger' }, { value: 'Exclusion', label: 'Exclusion' }]}
+              onChange={(value) => {
+                const nextType = value as TrainingEventDefinition['type'];
+                setType(nextType);
+                if (nextType !== 'Subtractor') setSubtractsEventId('');
+                if (nextType === 'Subtractor') setBookmarkType('');
+              }}
+              options={[{ value: 'Trigger', label: 'Trigger' }, { value: 'Exclusion', label: 'Exclusion' }, { value: 'Subtractor', label: 'Subtractor' }]}
             />
           </Field>
           <Field label="Bookmark">
             <SelectField
               value={bookmarkType}
               onChange={setBookmarkType}
+              disabled={type === 'Subtractor'}
               options={[{ value: '', label: 'No bookmark' }, ...BOOKMARK_TYPES.map((value) => ({ value, label: value }))]}
             />
           </Field>
         </div>
+        {type === 'Subtractor' && (
+          <Field label="Subtracts event" hint="One matching trigger occurrence is removed per detected subtractor instance in the same batch.">
+            <SelectField
+              aria-label="Subtracts event"
+              value={subtractsEventId}
+              onChange={setSubtractsEventId}
+              options={[
+                { value: '', label: 'Choose trigger event' },
+                ...events
+                  .filter((candidate) => candidate.type === 'Trigger' && candidate.id !== event.id)
+                  .map((candidate) => ({ value: String(candidate.id), label: candidate.name })),
+              ]}
+            />
+          </Field>
+        )}
         <Field label="Lifetime (ms)" hint="Optional cooldown for this event.">
           <TextField
             type="number"

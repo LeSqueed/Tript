@@ -774,8 +774,12 @@ public class VisualEventDetector : IDisposable
         => FillInputTensor(grayData, destination, inputSize, VectorFillSupported);
 
     internal static void FillInputTensor(byte[] grayData, float[] destination, int inputSize, bool useVectorPath)
+        => FillInputTensor(grayData, destination, inputSize, inputSize, useVectorPath);
+
+    internal static void FillInputTensor(byte[] grayData, float[] destination,
+        int inputWidth, int inputHeight, bool useVectorPath)
     {
-        var pixels = inputSize * inputSize;
+        var pixels = inputWidth * inputHeight;
         if (grayData.Length < pixels || destination.Length < pixels * 3)
             throw new ArgumentException(
                 $"FillInputTensor needs {pixels} source bytes and {pixels * 3} destination floats, " +
@@ -852,6 +856,10 @@ public class VisualEventDetector : IDisposable
 
     private static List<DetectionResult> ParseYoloOutput(
         ReadOnlySpan<float> output, int inputSize, int numClasses)
+        => ParseYoloOutputForInput(output, inputSize, inputSize, numClasses);
+
+    internal static List<DetectionResult> ParseYoloOutputForInput(
+        ReadOnlySpan<float> output, int inputWidth, int inputHeight, int numClasses)
     {
         var results = new List<DetectionResult>();
         var numDetections = output.Length / (4 + numClasses);
@@ -872,10 +880,10 @@ public class VisualEventDetector : IDisposable
 
             if (maxConf < 0.7f) continue;
 
-            var cx = output[i] / inputSize;
-            var cy = output[1 * numDetections + i] / inputSize;
-            var w = output[2 * numDetections + i] / inputSize;
-            var h = output[3 * numDetections + i] / inputSize;
+            var cx = output[i] / inputWidth;
+            var cy = output[1 * numDetections + i] / inputHeight;
+            var w = output[2 * numDetections + i] / inputWidth;
+            var h = output[3 * numDetections + i] / inputHeight;
 
             results.Add(new DetectionResult
             {

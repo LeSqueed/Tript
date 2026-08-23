@@ -30,6 +30,28 @@ internal static class TrainingEventValidator
                 throw new InvalidDataException($"Training event '{eventDefinition.Name}' has an out-of-bounds screen region.");
         }
     }
+
+    internal static void ValidateSubtractorReferences(IReadOnlyList<EventDefinition> events)
+    {
+        if (events.Select(eventDefinition => eventDefinition.Id).Distinct().Count() != events.Count)
+            throw new InvalidDataException("Training event ids must be unique.");
+        var byId = events.ToDictionary(eventDefinition => eventDefinition.Id);
+        foreach (var eventDefinition in events.Where(eventDefinition => eventDefinition.Type == EventType.Subtractor))
+        {
+            if (eventDefinition.SubtractsEventId is not int targetId)
+                throw new InvalidDataException(
+                    $"Training subtractor '{eventDefinition.Name}' must reference a trigger event.");
+            if (targetId == eventDefinition.Id)
+                throw new InvalidDataException(
+                    $"Training subtractor '{eventDefinition.Name}' cannot subtract itself.");
+            if (!byId.TryGetValue(targetId, out var target))
+                throw new InvalidDataException(
+                    $"Training subtractor '{eventDefinition.Name}' references a missing event.");
+            if (target.Type != EventType.Trigger)
+                throw new InvalidDataException(
+                    $"Training subtractor '{eventDefinition.Name}' must reference a trigger event.");
+        }
+    }
 }
 
 #endif

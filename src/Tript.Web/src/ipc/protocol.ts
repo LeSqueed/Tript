@@ -231,10 +231,11 @@ export interface WarningMessage {
 export interface TrainingEventDefinition {
   id: number;
   name: string;
-  type: 'Trigger' | 'Exclusion';
+  type: 'Trigger' | 'Exclusion' | 'Subtractor';
   classId: number;
   bookmarkType?: string | null;
   lifetimeMs?: number | null;
+  subtractsEventId?: number | null;
   screenRegionX?: number | null;
   screenRegionY?: number | null;
   screenRegionW?: number | null;
@@ -301,12 +302,26 @@ export interface TrainingSampleMessage {
   gameId: string;
   sample: TrainingSample;
   imageData: string;
+  requestId?: string | null;
 }
 
 export interface TrainingSamplePreviewMessage {
   gameId: string;
   sample: TrainingSample;
   imageData: string;
+  requestId?: string | null;
+}
+
+export interface TrainingLabelSuggestion {
+  label: TrainingLabel;
+  confidence: number;
+}
+
+export interface TrainingLabelSuggestionsMessage {
+  gameId: string;
+  sampleId: string;
+  suggestions: TrainingLabelSuggestion[];
+  requestId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +506,13 @@ export interface TrainingSampleParameters {
   gameId: string;
   sampleId: string;
   previewOnly?: boolean;
+  requestId?: string;
+}
+
+export interface SuggestTrainingLabelsParameters {
+  gameId: string;
+  sampleId: string;
+  requestId?: string;
 }
 
 export interface StartTrainingParameters {
@@ -532,6 +554,7 @@ export type CommandParameters =
   | UpdateTrainingSampleParameters
   | UpdateTrainingEventsParameters
   | TrainingSampleParameters
+  | SuggestTrainingLabelsParameters
   | StartTrainingParameters
   | NewConnectionParameters;
 
@@ -590,6 +613,7 @@ export type CommandName =
   | 'CaptureTrainingSample'
   | 'GetTrainingSample'
   | 'UpdateTrainingSample'
+  | 'SuggestTrainingLabels'
   | 'UpdateTrainingEvents'
   | 'DeleteTrainingSample'
   | 'StartTraining'
@@ -621,5 +645,6 @@ export type MessageName =
   | 'trainingProgress'
   | 'trainingSample'
   | 'trainingSamplePreview'
+  | 'trainingLabelSuggestions'
   | 'trainingFolderSelected'
   | 'trainingFolderCancelled';

@@ -7,7 +7,6 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Tript.Detection;
-using ReferenceProduct.Backend.Games;
 using Xunit;
 
 namespace Tript.Detection.Tests;

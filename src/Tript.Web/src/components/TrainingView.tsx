@@ -35,12 +35,19 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [regionEditor, setRegionEditor] = useState<TrainingEventDefinition | null>(null);
   const [eventError, setEventError] = useState<string | null>(null);
   const [samplePreviews, setSamplePreviews] = useState<Record<string, string>>({});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({});
   const [sampleFilter, setSampleFilter] = useState('');
   const [samplePage, setSamplePage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
   const pendingEventsRef = useRef<{ gameId: string; events: TrainingEventDefinition[] } | null>(null);
   const importingRef = useRef(false);
   const loadedTrainingGameIdRef = useRef<string | null>(null);
+  const activeGameIdRef = useRef(gameId);
+  const previewRequestsRef = useRef(new Map<string, string>());
+  const previewRetryCountRef = useRef(new Map<string, number>());
+  const previewRequestCounterRef = useRef(0);
+  const selectedSampleRequestRef = useRef<string | null>(null);
+  activeGameIdRef.current = gameId;
   const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
   const sourcePlaceholder = isWindows
     ? String.raw`C:\Users\You\Documents\Tript training`
@@ -52,26 +59,30 @@ export function TrainingView({ client }: TrainingViewProps) {
       setGames(nextGames);
       setGameId((current) => current || nextGames[0]?.id || '');
     });
-      const removeTraining = client.on('training', (content) => {
-        const message = (content as { training?: TrainingMessage }).training;
-        if (message) {
-          if (message.gameId && gameId && message.gameId !== gameId) return;
-          if (pendingEventsRef.current?.gameId === message.gameId) return;
-          loadedTrainingGameIdRef.current = message.gameId;
-          setTraining(message);
-          if (message.gameId) setGameId(message.gameId);
-        }
-      });
-      const removeProgress = client.on('trainingProgress', (content) => {
-        const message = content as TrainingProgressMessage;
-        if (message.gameId !== gameId) return;
-        setProgress(message);
+    const removeTraining = client.on('training', (content) => {
+      const message = (content as { training?: TrainingMessage }).training;
+      if (message) {
+        if (message.gameId && message.gameId !== activeGameIdRef.current) return;
+        if (pendingEventsRef.current?.gameId === message.gameId) return;
+        loadedTrainingGameIdRef.current = message.gameId;
+        setTraining(message);
+        if (message.gameId) setGameId(message.gameId);
+      }
+    });
+    const removeProgress = client.on('trainingProgress', (content) => {
+      const message = content as TrainingProgressMessage;
+      if (message.gameId !== activeGameIdRef.current) return;
+      setProgress(message);
       if (message.status === 'eventsUpdated') pendingEventsRef.current = null;
       if (message.status === 'imported') {
         importingRef.current = false;
         setIsImporting(false);
         setSelectedSample(null);
         setSamplePreviews({});
+        setPreviewErrors({});
+        previewRequestsRef.current.clear();
+        previewRetryCountRef.current.clear();
+        selectedSampleRequestRef.current = null;
         setSamplePage(1);
         client.send('ListTraining', { gameId: message.gameId });
       }
@@ -87,14 +98,24 @@ export function TrainingView({ client }: TrainingViewProps) {
         if (gameId) client.send('ListTraining', { gameId });
       }
     });
-      const removeSample = client.on('trainingSample', (content) => {
+    const removeSample = client.on('trainingSample', (content) => {
       const message = content as TrainingSampleMessage;
-      if (message.gameId === gameId) setSelectedSample(message);
+      if (message.requestId && message.requestId !== selectedSampleRequestRef.current) return;
+      if (message.gameId === activeGameIdRef.current) setSelectedSample(message);
     });
     const removePreview = client.on('trainingSamplePreview', (content) => {
       const preview = content as TrainingSamplePreviewMessage;
-      if (preview.gameId === gameId)
-        setSamplePreviews((current) => ({ ...current, [preview.sample.id]: preview.imageData }));
+      if (preview.gameId !== activeGameIdRef.current) return;
+      if (preview.requestId && previewRequestsRef.current.get(preview.sample.id) !== preview.requestId) return;
+      previewRequestsRef.current.delete(preview.sample.id);
+      previewRetryCountRef.current.delete(preview.sample.id);
+      setPreviewErrors((current) => {
+        if (!current[preview.sample.id]) return current;
+        const next = { ...current };
+        delete next[preview.sample.id];
+        return next;
+      });
+      setSamplePreviews((current) => ({ ...current, [preview.sample.id]: preview.imageData }));
     });
     const removeFolder = client.on('trainingFolderSelected', (content) => {
       const path = (content as { path?: unknown }).path;
@@ -127,15 +148,19 @@ export function TrainingView({ client }: TrainingViewProps) {
       client.send('ListTraining', { gameId });
       setSelectedSample(null);
       setSamplePreviews({});
+      setPreviewErrors({});
+      previewRequestsRef.current.clear();
+      previewRetryCountRef.current.clear();
+      selectedSampleRequestRef.current = null;
       setSamplePage(1);
     }
   }, [client, gameId]);
 
   const importAssets = () => {
     if (!gameId || !sourcePath.trim() || isImporting || loadedTrainingGameIdRef.current !== gameId) return;
-    const hasExistingData = training.events.length > 0 || training.samples.length > 0 || totalDatasetImages > 0;
+    const hasExistingData = training.events.length > 0 || training.samples.length > 0;
     if (hasExistingData && !window.confirm(
-      'This training workspace already contains data. Importing will replace events.json and the imported model, overwrite matching dataset files, and remove the current model if the import has no model. Existing captured samples will be preserved; imported dataset images will be added to the sample gallery. Continue?',
+      'This training workspace already contains data. Importing will replace events.json and the imported model, add full-resolution samples, and remove the current model if the import has no model. Prepared dataset images are ignored; existing captured samples are preserved. Continue?',
     )) return;
 
     importingRef.current = true;
@@ -148,10 +173,9 @@ export function TrainingView({ client }: TrainingViewProps) {
     });
   };
 
-  const dataset = training.dataset ?? { trainingImages: 0, validationImages: 0 };
   const regionPreviewSample = training.samples.find((sample) => samplePreviews[sample.id]);
-  const totalDatasetImages = dataset.trainingImages + dataset.validationImages;
   const hasUnlabeledSamples = training.samples.some((sample) => sample.labels.length === 0);
+  const trainingIsActive = training.trainingActive || progress?.status === 'started' || progress?.status === 'progress';
   const normalizedSampleFilter = sampleFilter.trim().toLowerCase();
   const filteredSamples = training.samples.filter((sample) => {
     if (!normalizedSampleFilter) return true;
@@ -163,12 +187,28 @@ export function TrainingView({ client }: TrainingViewProps) {
   const pageSamples = filteredSamples.slice((samplePage - 1) * SAMPLE_PAGE_SIZE, samplePage * SAMPLE_PAGE_SIZE);
   const pageSampleIds = pageSamples.map((sample) => sample.id).join('|');
 
+  const requestPreview = (sample: TrainingSample) => {
+    if (!gameId) return;
+    const requestId = `${++previewRequestCounterRef.current}-${sample.id}`;
+    previewRequestsRef.current.set(sample.id, requestId);
+    client.send('GetTrainingSample', { gameId, sampleId: sample.id, previewOnly: true, requestId });
+  };
+
+  const retryPreview = (sample: TrainingSample) => {
+    const attempts = (previewRetryCountRef.current.get(sample.id) ?? 0) + 1;
+    previewRetryCountRef.current.set(sample.id, attempts);
+    if (attempts <= 2) {
+      requestPreview(sample);
+      return;
+    }
+    previewRequestsRef.current.delete(sample.id);
+    setPreviewErrors((current) => ({ ...current, [sample.id]: true }));
+  };
+
   useEffect(() => {
     if (!gameId || !pageSampleIds) return;
     pageSamples.forEach((sample) => {
-      if (!samplePreviews[sample.id]) {
-        client.send('GetTrainingSample', { gameId, sampleId: sample.id, previewOnly: true });
-      }
+      if (!samplePreviews[sample.id] && !previewRequestsRef.current.has(sample.id)) requestPreview(sample);
     });
   }, [client, gameId, pageSampleIds, samplePage, samplePreviews]);
 
@@ -238,8 +278,24 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const loadSample = (sample: TrainingSample) => {
     if (gameId) {
-      client.send('GetTrainingSample', { gameId, sampleId: sample.id });
+      const requestId = `editor-${++previewRequestCounterRef.current}-${sample.id}`;
+      selectedSampleRequestRef.current = requestId;
+      client.send('GetTrainingSample', { gameId, sampleId: sample.id, requestId });
     }
+  };
+
+  const selectedSampleIndex = selectedSample
+    ? filteredSamples.findIndex((sample) => sample.id === selectedSample.sample.id)
+    : -1;
+  const canNavigatePrevious = selectedSampleIndex > 0;
+  const canNavigateNext = selectedSampleIndex >= 0 && selectedSampleIndex < filteredSamples.length - 1;
+  const navigateSample = (direction: 'previous' | 'next') => {
+    if (selectedSampleIndex < 0) return;
+    const nextIndex = selectedSampleIndex + (direction === 'next' ? 1 : -1);
+    const nextSample = filteredSamples[nextIndex];
+    if (!nextSample) return;
+    setSamplePage(Math.floor(nextIndex / SAMPLE_PAGE_SIZE) + 1);
+    loadSample(nextSample);
   };
 
   return (
@@ -285,12 +341,8 @@ export function TrainingView({ client }: TrainingViewProps) {
                 </strong>
                 <span>Runtime classes</span>
                 <strong>{training.model?.classCount ?? 'Not trained'}</strong>
-                <span>Imported dataset</span>
-                <strong className={totalDatasetImages === 0 ? 'training-dataset-empty' : undefined}>
-                  {totalDatasetImages === 0
-                    ? 'No images yet'
-                    : `${dataset.trainingImages} train · ${dataset.validationImages} validation`}
-                </strong>
+                <span>Editable samples</span>
+                <strong>{training.samples.length}</strong>
               </div>
               <ul className="training-event-list">
                 {training.events.map((event) => (
@@ -313,10 +365,10 @@ export function TrainingView({ client }: TrainingViewProps) {
             <section className="panel training-panel training-import-panel">
               <p className="training-eyebrow">Workspace</p>
               <h2>Import an existing workspace</h2>
-              <p className="muted">Use this when you already have an event contract, model, or prepared dataset on disk.</p>
+              <p className="muted">Use this when you already have an event contract, model, and full-resolution labeled samples on disk.</p>
               <div className="training-import-guide">
                 <strong>Expected contents</strong>
-                <span className="muted small"><code>events.json</code> is required. <code>model.onnx</code> and <code>dataset/</code> are optional.</span>
+                <span className="muted small"><code>events.json</code> and paired files in <code>samples/</code> are required. <code>model.onnx</code> is optional; <code>dataset/</code> is ignored.</span>
               </div>
               <Field label="Training folder" hint="The selected folder is copied into this game's local workspace.">
                 <div className="training-path-row">
@@ -376,10 +428,18 @@ export function TrainingView({ client }: TrainingViewProps) {
                   <div className="training-sample-list">
                 {pageSamples.map((sample) => (
                   <Button variant="ghost" className="training-sample-card" key={sample.id} onClick={() => loadSample(sample)}>
-                    {samplePreviews[sample.id] ? (
-                      <img className="training-sample-thumb" src={samplePreviews[sample.id]} alt="" />
+                    {samplePreviews[sample.id] && !previewErrors[sample.id] ? (
+                      <img
+                        className="training-sample-thumb"
+                        style={{ aspectRatio: `${sample.imageWidth} / ${sample.imageHeight}` }}
+                        src={samplePreviews[sample.id]}
+                        alt=""
+                        onError={() => retryPreview(sample)}
+                      />
                     ) : (
-                      <span className="training-sample-thumb training-sample-thumb-empty">Loading preview</span>
+                      <span className="training-sample-thumb training-sample-thumb-empty">
+                        {previewErrors[sample.id] ? 'Preview unavailable' : 'Loading preview'}
+                      </span>
                     )}
                     <span className="training-sample-card-body">
                       <strong>{sample.id}</strong>
@@ -407,12 +467,25 @@ export function TrainingView({ client }: TrainingViewProps) {
             )}
           </section>
 
-          <section className="panel training-panel training-controls">
+           <section className="panel training-panel training-controls">
              <div>
               <p className="training-eyebrow">Train</p>
               <h2>Build and activate</h2>
               <p className="muted">A model can only be trained from labeled frames. It is validated against the event contract before reload.</p>
-            </div>
+             </div>
+             {trainingIsActive && (
+               <div className="training-active-status" role="status">
+                 <div className="training-active-heading">
+                   <span className="training-active-dot" aria-hidden="true" />
+                   <strong>Training in progress</strong>
+                 </div>
+                 <span className="muted small">
+                   Requested device: {device === 'auto' ? 'Auto (actual device is shown in the console)' : device.toUpperCase()}
+                   {' · '} {epochs} epochs {' · '} {training.model?.inputWidth ?? 640}x{training.model?.inputHeight ?? 640} input
+                 </span>
+                 <span className="muted small">Detailed Ultralytics output is open in the training console window.</span>
+               </div>
+             )}
             <div className="training-field compact">
               <Field label="Epochs">
                 <TextField type="number" value={epochs} min={1} onChange={(value) => setEpochs(Number(value))} />
@@ -425,17 +498,19 @@ export function TrainingView({ client }: TrainingViewProps) {
                   onChange={setDevice}
                   options={[
                     { value: 'auto', label: 'Auto GPU / CPU' },
+                    { value: 'rocm', label: 'ROCm / AMD GPU' },
                     { value: 'cuda', label: 'CUDA GPU' },
+                    { value: 'directml', label: 'DirectML / AMD GPU' },
                     { value: 'cpu', label: 'CPU' },
                   ]}
                 />
               </Field>
             </div>
-            <Button onClick={startTraining} disabled={hasUnlabeledSamples || (training.samples.length === 0 && !training.model)}>
-              Start training
-            </Button>
-            <Button variant="ghost" onClick={() => client.send('CancelTraining')}>
-              Cancel
+             <Button onClick={startTraining} disabled={trainingIsActive || hasUnlabeledSamples || (training.samples.length === 0 && !training.model)}>
+               Start training
+             </Button>
+             <Button variant="ghost" onClick={() => client.send('CancelTraining')} disabled={!trainingIsActive}>
+               Cancel
             </Button>
           </section>
 
@@ -451,7 +526,11 @@ export function TrainingView({ client }: TrainingViewProps) {
               gameId={gameId}
               sample={selectedSample}
               events={training.events}
+              hasModel={training.model != null}
               onEventsChange={saveEventsFromEditor}
+              onNavigate={navigateSample}
+              canNavigatePrevious={canNavigatePrevious}
+              canNavigateNext={canNavigateNext}
               onClose={() => setSelectedSample(null)}
             />
           )}
@@ -461,6 +540,7 @@ export function TrainingView({ client }: TrainingViewProps) {
         <TrainingEventEditor
           key={`${eventEditor.event.id}-${eventEditor.event.name}-${eventEditor.isNew}`}
           event={eventEditor.event}
+          events={training.events}
           isNew={eventEditor.isNew}
           onCancel={() => setEventEditor(null)}
           onSave={saveEvent}

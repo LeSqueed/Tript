@@ -22,11 +22,21 @@ public sealed class DetectionHostTests
     private static EventDefinition Trigger(int classId, BookmarkType? bookmarkType = BookmarkType.Kill,
         int? lifetimeMs = null) => new()
     {
+        Id = classId,
         ClassId = classId,
         Name = "event" + classId,
         Type = EventType.Trigger,
         BookmarkType = bookmarkType,
         LifetimeMs = lifetimeMs,
+    };
+
+    private static EventDefinition Subtractor(int id, int classId, int targetId) => new()
+    {
+        Id = id,
+        ClassId = classId,
+        Name = "subtractor" + classId,
+        Type = EventType.Subtractor,
+        SubtractsEventId = targetId,
     };
 
     private static DetectionResult Box(int classId, float x = 0.4f, float y = 0.3f,
@@ -255,6 +265,87 @@ public sealed class DetectionHostTests
 
             var bookmark = Assert.Single(recording.Bookmarks);
             Assert.Equal(BookmarkType.Kill, bookmark.Type);
+        }
+    }
+
+    [Fact]
+    public void Detections_TwoSubtractorInstances_RemoveTwoTriggerBookmarksInTheSameBatch()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0), Subtractor(1, 1, 0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(
+                Box(0, x: 0.1f), Box(0, x: 0.6f),
+                Box(1, x: 0.1f), Box(1, x: 0.6f));
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void Detections_DifferentSubtractorDefinitionsAreAdditive()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0), Subtractor(1, 1, 0), Subtractor(2, 2, 0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0), Box(1), Box(2));
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void Detections_DuplicateSubtractorBoxesCountOnce()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0), Subtractor(1, 1, 0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0, x: 0.1f), Box(0, x: 0.6f),
+                Box(1, x: 0.1f), Box(1, x: 0.101f));
+
+            Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void Detections_SubtractionIsLimitedToTheCurrentBatch()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0, lifetimeMs: 1), Subtractor(1, 1, 0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0), Box(1));
+            Thread.Sleep(10);
+            detector.RaiseDetections(Box(0, x: 0.8f));
+
+            Assert.Single(recording.Bookmarks);
         }
     }
 

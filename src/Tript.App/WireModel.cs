@@ -334,6 +334,17 @@ internal sealed class TrainingSampleParameters
     public string SampleId { get; set; } = string.Empty;
 
     public bool PreviewOnly { get; set; }
+
+    public string? RequestId { get; set; }
+}
+
+internal sealed class SuggestTrainingLabelsParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public string SampleId { get; set; } = string.Empty;
+
+    public string? RequestId { get; set; }
 }
 
 internal sealed class StartTrainingParameters

@@ -44,30 +44,28 @@ def main() -> int:
     events = load_events(workspace / "events.json")
     samples = load_samples(workspace, events)
     dataset = workspace / f"dataset.export-{uuid.uuid4().hex}"
-    existing_dataset = workspace / "dataset"
 
     try:
-        if existing_dataset.exists():
-            shutil.copytree(existing_dataset, dataset)
-        else:
-            for split in ("train", "val"):
-                (dataset / "images" / split).mkdir(parents=True)
-                (dataset / "labels" / split).mkdir(parents=True)
+        for split in ("train", "val"):
+            (dataset / "images" / split).mkdir(parents=True)
+            (dataset / "labels" / split).mkdir(parents=True)
 
-        captured_samples = [sample for sample in samples if not sample.get("datasetImagePath")]
-        assignments = split_samples(captured_samples, args.validation) if captured_samples else {"train": [], "val": []}
+        assignments = split_samples(samples, args.validation)
         exported = 0
         for split, split_samples_list in assignments.items():
             for sample in split_samples_list:
                 exported += export_sample(sample, split, dataset, events, args.size, exported)
 
-        if exported == 0 and not existing_dataset.exists():
+        if exported == 0:
             raise ValueError("no valid training crops were exported")
 
         # JSON is also valid YAML, avoiding another parser dependency while preserving the standard
         # Ultralytics dataset contract.
         dataset_config = {
-            "path": ".",
+            # Ultralytics resolves `path` from the process working directory rather than from the
+            # directory containing dataset.yaml. Use the absolute staging path so the desktop
+            # release and a headless launch resolve the same images and labels.
+            "path": str((workspace / "dataset").resolve()),
             "train": "images/train",
             "val": "images/val",
             "nc": len(events),
@@ -132,7 +130,7 @@ def load_samples(workspace: Path, events: list[dict]) -> list[dict]:
         validate_labels(
             sample["labels"],
             sample["imageFile"],
-            require_label=not sample.get("datasetImagePath"),
+            require_label=True,
             class_ids={event["classId"] for event in events},
         )
         samples.append(sample)

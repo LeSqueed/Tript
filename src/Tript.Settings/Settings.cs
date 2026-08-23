@@ -8,8 +8,8 @@
 // structure.
 
 // The file contract: JSON, versioned, at the platform config directory under the product name
-// (Tript, not ReferenceProduct — the directories rename with the project and need a migration path; see
-// charter/branding.md). Unknown keys survive a load because each page keeps the original
+// (the directories rename with the project and need a migration path; see charter/branding.md).
+// Unknown keys survive a load because each page keeps the original
 // dictionary alongside its typed properties, so an older build writing a field a newer build has
 // not modelled yet is not lost, and a newer build writing a field an older build has not
 // modelled yet is not rejected.

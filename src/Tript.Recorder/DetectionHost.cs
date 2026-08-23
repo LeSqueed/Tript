@@ -297,11 +297,15 @@ public sealed class DetectionHost : IDisposable
         internal CooldownTracker Tracker { get; }
 
         private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsByClass;
+        private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsById;
 
         internal DetectionRun(string gameId, IReadOnlyDictionary<int, EventDefinition> definitionsByClass)
         {
             GameId = gameId;
             _definitionsByClass = definitionsByClass;
+            _definitionsById = definitionsByClass.Values
+                .GroupBy(definition => definition.Id)
+                .ToDictionary(group => group.Key, group => group.First());
             Tracker = new CooldownTracker();
         }
 
@@ -338,10 +342,36 @@ public sealed class DetectionHost : IDisposable
                 return;
             }
 
+            var subtractionCounts = new Dictionary<int, int>();
+            foreach (var subtractorGroup in resolved
+                .Where(item => item.Definition.Type == EventType.Subtractor)
+                .GroupBy(item => item.Definition.Id))
+            {
+                var subtractor = subtractorGroup.First().Definition;
+                if (subtractor.SubtractsEventId is not int targetId
+                    || !_definitionsById.TryGetValue(targetId, out var target)
+                    || target.Type != EventType.Trigger)
+                {
+                    Log.Warning("DetectionHost: subtractor in {GameId} has an invalid target; ignoring it",
+                        GameId);
+                    continue;
+                }
+
+                subtractionCounts[target.Id] = subtractionCounts.GetValueOrDefault(target.Id)
+                    + CooldownTracker.CountDistinctDetections(
+                        subtractorGroup.Select(item => item.Detection).ToList());
+            }
+
             foreach (var (detection, definition) in resolved)
             {
-                if (definition.Type == EventType.Trigger)
-                    Tracker.ProcessDetection(detection, definition, now);
+                if (definition.Type != EventType.Trigger)
+                    continue;
+
+                subtractionCounts.TryGetValue(definition.Id, out var remainingSubtractions);
+                var created = Tracker.ProcessDetection(detection, definition, now,
+                    createBookmark: remainingSubtractions <= 0);
+                if (created && remainingSubtractions > 0)
+                    subtractionCounts[definition.Id] = remainingSubtractions - 1;
             }
         }
     }

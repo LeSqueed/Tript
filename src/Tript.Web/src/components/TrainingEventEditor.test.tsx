@@ -41,4 +41,23 @@ describe('TrainingEventEditor', () => {
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toContain('whole number');
   });
+
+  it('requires a trigger target for subtractor events', () => {
+    const onSave = vi.fn();
+    const events: TrainingEventDefinition[] = [
+      { id: 1, classId: 0, name: 'Elimination', type: 'Trigger' },
+      { id: 2, classId: 1, name: 'Turret', type: 'Subtractor' },
+    ];
+    render(<TrainingEventEditor event={events[1]} events={events} isNew={false} onCancel={vi.fn()} onSave={onSave} />);
+
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'Subtractor' } });
+    fireEvent.change(screen.getByLabelText('Subtracts event'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'Subtractor',
+      bookmarkType: null,
+      subtractsEventId: 1,
+    }));
+  });
 });

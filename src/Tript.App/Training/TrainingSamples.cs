@@ -24,6 +24,81 @@ internal sealed class TrainingLabel
     public double Height { get; set; }
 }
 
+internal sealed class TrainingLabelSuggestion
+{
+    public TrainingLabel Label { get; init; } = new();
+
+    public float Confidence { get; init; }
+}
+
+internal static class TrainingLabelSuggestionFilter
+{
+    private const float OverlapIouThreshold = 0.3f;
+
+    internal static List<TrainingLabelSuggestion> Merge(
+        IReadOnlyList<TrainingLabel> existing, IReadOnlyList<DetectionResult> detections)
+    {
+        var accepted = existing.Select(ToBox).ToList();
+        var suggestions = new List<TrainingLabelSuggestion>();
+        foreach (var detection in detections.OrderByDescending(detection => detection.Confidence))
+        {
+            if (!float.IsFinite(detection.X) || !float.IsFinite(detection.Y)
+                || !float.IsFinite(detection.Width) || !float.IsFinite(detection.Height)
+                || detection.Width <= 0 || detection.Height <= 0
+                || detection.X < 0 || detection.Y < 0
+                || detection.X + detection.Width > 1 || detection.Y + detection.Height > 1)
+                continue;
+
+            var box = ToBox(detection);
+            if (accepted.Any(existingBox => IoU(existingBox, box) >= OverlapIouThreshold))
+                continue;
+
+            accepted.Add(box);
+            suggestions.Add(new TrainingLabelSuggestion
+            {
+                Label = new TrainingLabel
+                {
+                    ClassId = detection.ClassId,
+                    CenterX = detection.X + detection.Width / 2,
+                    CenterY = detection.Y + detection.Height / 2,
+                    Width = detection.Width,
+                    Height = detection.Height,
+                },
+                Confidence = detection.Confidence,
+            });
+        }
+
+        return suggestions;
+    }
+
+    private static Box ToBox(TrainingLabel label) => new(
+        (float)(label.CenterX - label.Width / 2),
+        (float)(label.CenterY - label.Height / 2),
+        (float)label.Width,
+        (float)label.Height);
+
+    private static Box ToBox(DetectionResult detection) => new(
+        detection.X, detection.Y, detection.Width, detection.Height);
+
+    private static float IoU(Box left, Box right)
+    {
+        var leftArea = left.Width * left.Height;
+        var rightArea = right.Width * right.Height;
+        if (leftArea <= 0 || rightArea <= 0) return 1f;
+
+        var overlapWidth = MathF.Min(left.X + left.Width, right.X + right.Width)
+            - MathF.Max(left.X, right.X);
+        var overlapHeight = MathF.Min(left.Y + left.Height, right.Y + right.Height)
+            - MathF.Max(left.Y, right.Y);
+        if (overlapWidth <= 0 || overlapHeight <= 0) return 0;
+
+        var intersection = overlapWidth * overlapHeight;
+        return intersection / (leftArea + rightArea - intersection);
+    }
+
+    private readonly record struct Box(float X, float Y, float Width, float Height);
+}
+
 internal sealed class TrainingSampleRecord
 {
     public string Id { get; set; } = string.Empty;
@@ -146,6 +221,12 @@ internal sealed class TrainingSampleStore
             .Select(path => Load(path))
             .OrderBy(sample => sample.Id, StringComparer.Ordinal)
             .ToList();
+    }
+
+    internal void RemoveDatasetBackedSamples()
+    {
+        foreach (var sample in List().Where(sample => sample.DatasetImagePath is not null).ToList())
+            Delete(sample.Id);
     }
 
     internal TrainingSampleRecord LoadById(string id)

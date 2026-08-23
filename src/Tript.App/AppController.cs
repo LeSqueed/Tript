@@ -92,9 +92,11 @@ internal sealed class AppController
                  parameters.Deserialize<UpdateTrainingEventsParameters>()),
             ["GetTrainingSample"] = (parameters, _) => _host.GetTrainingSample(
                 parameters.Deserialize<TrainingSampleParameters>()),
-            ["UpdateTrainingSample"] = (parameters, _) => _host.UpdateTrainingSample(
-                parameters.Deserialize<UpdateTrainingSampleParameters>()),
-            ["DeleteTrainingSample"] = (parameters, _) => _host.DeleteTrainingSample(
+             ["UpdateTrainingSample"] = (parameters, _) => _host.UpdateTrainingSample(
+                 parameters.Deserialize<UpdateTrainingSampleParameters>()),
+             ["SuggestTrainingLabels"] = (parameters, _) => _host.SuggestTrainingLabels(
+                 parameters.Deserialize<SuggestTrainingLabelsParameters>()),
+             ["DeleteTrainingSample"] = (parameters, _) => _host.DeleteTrainingSample(
                 parameters.Deserialize<TrainingSampleParameters>()),
             ["StartTraining"] = (parameters, _) => _host.StartTraining(
                 parameters.Deserialize<StartTrainingParameters>()),

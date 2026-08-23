@@ -10,7 +10,8 @@ namespace Tript.Detection;
 public enum EventType
 {
     Trigger,
-    Exclusion
+    Exclusion,
+    Subtractor
 }
 
 public class EventDefinition
@@ -19,6 +20,7 @@ public class EventDefinition
     public string Name { get; set; } = string.Empty;
     public EventType Type { get; set; }
     public int ClassId { get; set; }
+    public int? SubtractsEventId { get; set; }
     // Without the converter these read as numbers and events.json's "Kill"/"Assist" throw.
     [JsonConverter(typeof(BookmarkTypeConverter))]
     public BookmarkType? BookmarkType { get; set; }

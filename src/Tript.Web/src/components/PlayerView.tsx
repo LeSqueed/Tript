@@ -276,11 +276,13 @@ export function PlayerView({
   }, [client, currentTime, item, trainingEnabled]);
 
   const [trainingEvents, setTrainingEvents] = useState<TrainingEventDefinition[]>([]);
+  const [trainingModelAvailable, setTrainingModelAvailable] = useState(false);
   const [labelingSample, setLabelingSample] = useState<TrainingSampleMessage | null>(null);
   const currentGameId = item?.gameId ?? item?.game;
 
   useEffect(() => {
     setLabelingSample(null);
+    setTrainingModelAvailable(false);
   }, [currentGameId]);
 
   useEffect(() => {
@@ -289,6 +291,9 @@ export function PlayerView({
       const message = (content as { training?: { gameId?: string; events?: TrainingEventDefinition[] } }).training;
       if (message?.events && (!message.gameId || message.gameId === currentGameId)) {
         setTrainingEvents(message.events);
+      }
+      if (message?.gameId === currentGameId) {
+        setTrainingModelAvailable(Boolean((message as { model?: unknown }).model));
       }
     });
     const removeSample = client.on('trainingSample', (content) => {
@@ -786,6 +791,7 @@ export function PlayerView({
           gameId={currentGameId}
           sample={labelingSample}
           events={trainingEvents}
+          hasModel={trainingModelAvailable}
           onEventsChange={(events) => client.send('UpdateTrainingEvents', { gameId: currentGameId, events })}
           onClose={() => setLabelingSample(null)}
         />

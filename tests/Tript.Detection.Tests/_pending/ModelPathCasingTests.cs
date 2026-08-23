@@ -2,7 +2,6 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using Tript.Detection;
-using ReferenceProduct.Backend.Games;
 using Xunit;
 
 namespace Tript.Detection.Tests;

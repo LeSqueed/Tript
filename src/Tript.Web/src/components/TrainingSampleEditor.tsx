@@ -3,6 +3,7 @@ import type { IpcClient } from '../ipc/websocketClient';
 import type {
   TrainingEventDefinition,
   TrainingLabel,
+  TrainingLabelSuggestionsMessage,
   TrainingSampleMessage,
 } from '../ipc/protocol';
 import { Button } from './ui/controls';
@@ -23,6 +24,10 @@ interface TrainingSampleEditorProps {
   sample: TrainingSampleMessage;
   events: TrainingEventDefinition[];
   onEventsChange?: (events: TrainingEventDefinition[]) => void;
+  onNavigate?: (direction: 'previous' | 'next') => void;
+  canNavigatePrevious?: boolean;
+  canNavigateNext?: boolean;
+  hasModel?: boolean;
   onClose(): void;
 }
 
@@ -31,8 +36,39 @@ type Gesture =
   | { kind: 'move'; index: number; start: TrainingPoint; original: TrainingLabel }
   | { kind: 'resize'; index: number; original: TrainingLabel };
 
-export function TrainingSampleEditor({ client, gameId, sample, events, onEventsChange, onClose }: TrainingSampleEditorProps) {
+function boxesOverlap(left: TrainingLabel, right: TrainingLabel): boolean {
+  const leftArea = left.width * left.height;
+  const rightArea = right.width * right.height;
+  if (leftArea <= 0 || rightArea <= 0) return true;
+
+  const intersectionWidth = Math.min(left.centerX + left.width / 2, right.centerX + right.width / 2)
+    - Math.max(left.centerX - left.width / 2, right.centerX - right.width / 2);
+  const intersectionHeight = Math.min(left.centerY + left.height / 2, right.centerY + right.height / 2)
+    - Math.max(left.centerY - left.height / 2, right.centerY - right.height / 2);
+  if (intersectionWidth <= 0 || intersectionHeight <= 0) return false;
+
+  const intersection = intersectionWidth * intersectionHeight;
+  return intersection / (leftArea + rightArea - intersection) >= 0.3;
+}
+
+export function TrainingSampleEditor({
+  client,
+  gameId,
+  sample,
+  events,
+  onEventsChange,
+  onNavigate,
+  canNavigatePrevious = false,
+  canNavigateNext = false,
+  hasModel = false,
+  onClose,
+}: TrainingSampleEditorProps) {
   const [labels, setLabels] = useState<TrainingLabel[]>(sample.sample.labels);
+  const [savedLabels, setSavedLabels] = useState<TrainingLabel[]>(sample.sample.labels);
+  const [showSaveNotice, setShowSaveNotice] = useState(false);
+  const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestionConfidence, setSuggestionConfidence] = useState<Record<number, number>>({});
   const [eventDefinitions, setEventDefinitions] = useState(events);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [classId, setClassId] = useState(String(events[0]?.classId ?? 0));
@@ -42,13 +78,74 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const dialogRef = useTrainingDialog<HTMLElement>(onClose);
+  const suggestionRequestRef = useRef<string | null>(null);
+  const labelsAreDirty = JSON.stringify(labels) !== JSON.stringify(savedLabels);
+
+  const requestClose = () => {
+    if (labelsAreDirty && !window.confirm(
+      'You have unsaved changes. They will not be saved if you leave this sample. Continue?',
+    )) return;
+    onClose();
+  };
+
+  const dialogRef = useTrainingDialog<HTMLElement>(requestClose);
 
   useEffect(() => {
     setLabels(sample.sample.labels);
+    setSavedLabels(sample.sample.labels);
+    setShowSaveNotice(false);
+    setSuggestionNotice(null);
+    setIsSuggesting(false);
+    setSuggestionConfidence({});
     setSelectedIndex(null);
     setGesture(null);
   }, [sample.sample.id, sample.sample.labels]);
+
+  useEffect(() => {
+    const removeSuggestions = client.on('trainingLabelSuggestions', (content) => {
+      const message = content as TrainingLabelSuggestionsMessage;
+      if (message.gameId !== gameId || message.sampleId !== sample.sample.id
+        || message.requestId !== suggestionRequestRef.current) return;
+
+      suggestionRequestRef.current = null;
+      setIsSuggesting(false);
+      setLabels((current) => {
+        const additions = message.suggestions.reduce<typeof message.suggestions>((result, suggestion) => {
+          if (current.some((label) => boxesOverlap(label, suggestion.label))
+            || result.some((item) => boxesOverlap(item.label, suggestion.label))) return result;
+          return [...result, suggestion];
+        }, []);
+        if (additions.length === 0) {
+          setSuggestionNotice('No new labels suggested');
+          return current;
+        }
+
+        const firstIndex = current.length;
+        setSuggestionConfidence(Object.fromEntries(additions.map((suggestion, index) => [
+          firstIndex + index,
+          suggestion.confidence,
+        ])));
+        setSuggestionNotice(`Added ${additions.length} suggested label${additions.length === 1 ? '' : 's'}`);
+        return [...current, ...additions.map((suggestion) => suggestion.label)];
+      });
+    });
+    const removeError = client.on('error', (content) => {
+      if (suggestionRequestRef.current === null) return;
+      suggestionRequestRef.current = null;
+      setIsSuggesting(false);
+      setSuggestionNotice((content as { message?: string }).message ?? 'Could not suggest labels');
+    });
+    return () => {
+      removeSuggestions();
+      removeError();
+    };
+  }, [client, gameId, sample.sample.id]);
+
+  useEffect(() => {
+    if (!showSaveNotice) return;
+    const timer = window.setTimeout(() => setShowSaveNotice(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [showSaveNotice]);
 
   useEffect(() => {
     setEventDefinitions(events);
@@ -158,12 +255,32 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
   const deleteSelected = () => {
     if (selectedIndex === null) return;
     setLabels((current) => current.filter((_, index) => index !== selectedIndex));
+    setSuggestionConfidence((current) => Object.fromEntries(Object.entries(current)
+      .filter(([index]) => Number(index) !== selectedIndex)
+      .map(([index, confidence]) => [Number(index) > selectedIndex ? Number(index) - 1 : Number(index), confidence])));
     setSelectedIndex(null);
+  };
+
+  const suggestLabels = () => {
+    if (!hasModel || isSuggesting) return;
+    const requestId = `${sample.sample.id}-${Date.now()}`;
+    suggestionRequestRef.current = requestId;
+    setSuggestionNotice(null);
+    setIsSuggesting(true);
+    client.send('SuggestTrainingLabels', { gameId, sampleId: sample.sample.id, requestId });
   };
 
   const saveLabels = () => {
     client.send('UpdateTrainingSample', { gameId, sampleId: sample.sample.id, labels });
-    onClose();
+    setSavedLabels(labels.map((label) => ({ ...label })));
+    setShowSaveNotice(true);
+  };
+
+  const navigate = (direction: 'previous' | 'next') => {
+    if (labelsAreDirty && !window.confirm(
+      'You have unsaved changes. They will not be saved if you leave this sample. Continue?',
+    )) return;
+    onNavigate?.(direction);
   };
 
   const openNewEvent = () => {
@@ -203,8 +320,11 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
     <div className="training-modal-backdrop" role="presentation">
       <section ref={dialogRef} tabIndex={-1} className="training-modal" role="dialog" aria-modal="true" aria-label="Label frame">
         <header className="training-modal-header">
-          <p className="training-eyebrow">Label frame</p>
-          <Button variant="ghost" size="small" onClick={onClose} aria-label="Close label frame">Close</Button>
+          <div className="training-modal-header-copy">
+            <p className="training-eyebrow">Label frame</p>
+            {showSaveNotice && <p className="training-save-notice" role="status">Labels saved</p>}
+          </div>
+          <Button variant="ghost" size="small" onClick={requestClose} aria-label="Close label frame">Close</Button>
         </header>
 
         <div className="training-modal-body">
@@ -221,7 +341,7 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
               <img src={sample.imageData} alt="Training frame to label" draggable={false} />
               {labels.map((label, index) => (
                 <span
-                  className={index === selectedIndex ? 'training-box selected' : 'training-box'}
+                  className={`${index === selectedIndex ? 'training-box selected' : 'training-box'}${suggestionConfidence[index] == null ? '' : ' suggested'}`}
                   key={`${sample.sample.id}-${index}`}
                   style={{
                     left: `${(label.centerX - label.width / 2) * 100}%`,
@@ -233,6 +353,7 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
                 >
                   <span className="training-box-label">
                     {eventDefinitions.find((item) => item.classId === label.classId)?.name ?? label.classId}
+                    {suggestionConfidence[index] == null ? '' : ` (${Math.round(suggestionConfidence[index] * 100)}%)`}
                   </span>
                   <span className="training-box-handle" onPointerDown={(event) => beginResize(event, index)} />
                 </span>
@@ -277,6 +398,28 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
         <footer className="training-modal-footer">
           <span className="muted small">{labels.length} label{labels.length === 1 ? '' : 's'} on this frame</span>
           <div className="training-editor-actions">
+            <div className="training-sample-navigation" aria-label="Sample navigation">
+              <Button
+                variant="ghost"
+                size="small"
+                onClick={() => navigate('previous')}
+                disabled={!canNavigatePrevious}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="ghost"
+                size="small"
+                onClick={() => navigate('next')}
+                disabled={!canNavigateNext}
+              >
+                Next
+              </Button>
+            </div>
+            <Button variant="ghost" onClick={suggestLabels} disabled={!hasModel || isSuggesting}>
+              {isSuggesting ? 'Suggesting...' : 'Suggest labels'}
+            </Button>
+            {suggestionNotice && <span className="training-save-notice" role="status">{suggestionNotice}</span>}
             <Button variant="danger" onClick={() => { client.send('DeleteTrainingSample', { gameId, sampleId: sample.sample.id }); onClose(); }}>
               Delete frame
             </Button>
@@ -289,6 +432,7 @@ export function TrainingSampleEditor({ client, gameId, sample, events, onEventsC
         <TrainingEventEditor
           key={`${eventDraft.event.id}-${eventDraft.event.name}-${eventDraft.isNew}`}
           event={eventDraft.event}
+          events={eventDefinitions}
           isNew={eventDraft.isNew}
           onCancel={() => setEventDraft(null)}
           onSave={saveEvent}

@@ -1216,7 +1216,7 @@ internal sealed class AppHost : IDisposable
             throw new InvalidOperationException("This training workspace already contains data. Confirm overwrite before importing.");
 
         var result = TrainingAssetImporter.Import(parameters.SourcePath, parameters.GameId);
-        var importMessage = $"Imported {result.EventCount} events and {result.TrainingImageCount + result.ValidationImageCount} dataset images.";
+        var importMessage = $"Imported {result.EventCount} events and {result.SampleCount} full-frame samples. Prepared dataset images were not imported.";
         if (result.Warnings.Count > 0)
             importMessage += " Warnings: " + string.Join(" ", result.Warnings);
         PushTrainingProgress(parameters.GameId, "imported",
@@ -1302,14 +1302,29 @@ internal sealed class AppHost : IDisposable
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
         var workspace = EnsureTrainingWorkspace(parameters.GameId);
-        var sample = new TrainingSampleStore(workspace).LoadById(parameters.SampleId);
+        var store = new TrainingSampleStore(workspace);
+        TrainingSampleRecord sample;
+        try
+        {
+            sample = store.LoadById(parameters.SampleId);
+        }
+        catch (FileNotFoundException) when (parameters.PreviewOnly)
+        {
+            // A page preview can be in flight while an import replaces the sample set. The response
+            // is no longer relevant, so do not surface the stale lookup as an application error.
+            return;
+        }
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
         if (!File.Exists(imagePath))
+        {
+            if (parameters.PreviewOnly)
+                return;
             throw new FileNotFoundException("The training sample image is missing.", imagePath);
+        }
 
         PushTrainingSample(parameters.GameId, workspace, sample, parameters.PreviewOnly
             ? "trainingSamplePreview"
-            : "trainingSample");
+            : "trainingSample", parameters.RequestId);
     }
 
     internal void UpdateTrainingEvents(UpdateTrainingEventsParameters? parameters)
@@ -1342,6 +1357,7 @@ internal sealed class AppHost : IDisposable
             .Select((eventDefinition, index) => new { Old = eventDefinition.ClassId, New = index })
             .ToDictionary(pair => pair.Old, pair => pair.New);
         TrainingEventValidator.ValidateRegions(orderedEvents);
+        TrainingEventValidator.ValidateSubtractorReferences(orderedEvents);
         var sampleStore = new TrainingSampleStore(workspace);
         var originalMetadata = sampleStore.RemapClassIds(classIdMap);
         foreach (var eventDefinition in orderedEvents)
@@ -1381,6 +1397,36 @@ internal sealed class AppHost : IDisposable
             workspace.LoadDefinitions());
         PushTrainingProgress(parameters.GameId, "sampleUpdated", sample.Id);
         PushTrainingCore(parameters.GameId);
+    }
+
+    internal void SuggestTrainingLabels(SuggestTrainingLabelsParameters? parameters)
+    {
+        WithTrainingWorkspaceLock(() => SuggestTrainingLabelsCore(parameters));
+    }
+
+    private void SuggestTrainingLabelsCore(SuggestTrainingLabelsParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
+            throw new ArgumentException("A game id is required to suggest training labels.");
+
+        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var sample = new TrainingSampleStore(workspace).LoadById(parameters.SampleId);
+        var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
+        if (!File.Exists(imagePath))
+            throw new FileNotFoundException("The training sample image is missing.", imagePath);
+        if (!File.Exists(workspace.ModelPath))
+            throw new InvalidOperationException("No trained model is available for label suggestions.");
+
+        var detections = ModelPredictionService.Predict(workspace.ModelPath,
+            File.ReadAllBytes(imagePath), workspace.LoadDefinitions());
+        var suggestions = TrainingLabelSuggestionFilter.Merge(sample.Labels, detections);
+        _ipc.Broadcast("trainingLabelSuggestions", JsonSerializer.SerializeToElement(new
+        {
+            gameId = parameters.GameId,
+            sampleId = parameters.SampleId,
+            requestId = parameters.RequestId,
+            suggestions,
+        }, Wire.Options));
     }
 
     internal void DeleteTrainingSample(TrainingSampleParameters? parameters)
@@ -1424,7 +1470,9 @@ internal sealed class AppHost : IDisposable
             var cancellation = _trainingCancellation;
             _ = RunTrainingAsync(workspace, imageSize.Value, parameters, cancellation);
         }
-        PushTrainingProgress(parameters.GameId, "started", $"Training started at {imageSize}x{imageSize}.");
+        PushTrainingProgress(parameters.GameId, "started",
+            $"Training is running in a console window. Requested device: {parameters.Device}; " +
+            $"epochs: {parameters.Epochs}; input: {imageSize}x{imageSize}.");
     }
 
     internal void CancelTraining()
@@ -1486,6 +1534,16 @@ internal sealed class AppHost : IDisposable
             }
             cancellation.Dispose();
             _trainingWorkspaceGate.Release();
+            try
+            {
+                // The UI needs a final full state push so trainingActive becomes false after an error
+                // or cancellation, not only after a successful model installation.
+                PushTrainingCore(parameters.GameId);
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception, "Training: could not refresh workspace state after training ended");
+            }
         }
     }
 
@@ -1510,7 +1568,7 @@ internal sealed class AppHost : IDisposable
         Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg";
 
     private void PushTrainingSample(string gameId, TrainingWorkspace workspace, TrainingSampleRecord sample,
-        string messageName = "trainingSample")
+        string messageName = "trainingSample", string? requestId = null)
     {
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
         if (!File.Exists(imagePath))
@@ -1520,6 +1578,7 @@ internal sealed class AppHost : IDisposable
         {
             sample,
             gameId,
+            requestId,
             imageData = "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(imagePath)),
         }, Wire.Options));
     }

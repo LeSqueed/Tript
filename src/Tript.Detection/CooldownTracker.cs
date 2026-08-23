@@ -31,7 +31,8 @@ public class CooldownTracker
         public float Height { get; set; }
     }
 
-    public void ProcessDetection(DetectionResult result, EventDefinition definition, DateTime now)
+    public bool ProcessDetection(DetectionResult result, EventDefinition definition, DateTime now,
+        bool createBookmark = true)
     {
         var classId = result.ClassId;
         var lifetimeMs = definition.LifetimeMs ?? DefaultLifetimeMs;
@@ -79,7 +80,41 @@ public class CooldownTracker
         }
 
         // Outside the lock: bookmarking touches the active recording and notifies listeners.
-        if (created) CreateBookmark(result, definition, now);
+        if (created && createBookmark) CreateBookmark(result, definition, now);
+        else if (created)
+            Log.Debug("ProcessDetection: suppressed new instance of '{EventName}'", definition.Name);
+
+        return created;
+    }
+
+    // Counts distinct boxes in one inference batch without carrying state across batches. The
+    // detector can emit duplicate boxes when region groups overlap, while two nearby instances
+    // must remain separate when one box overlaps both. The same best-overlap rule as the cooldown
+    // tracker handles both cases.
+    public static int CountDistinctDetections(IReadOnlyList<DetectionResult> results)
+    {
+        var instances = new List<DetectionResult>();
+        foreach (var result in results)
+        {
+            var bestIndex = -1;
+            var bestIou = 0f;
+            for (var index = 0; index < instances.Count; index++)
+            {
+                var iou = IntersectionOverUnion(instances[index], result);
+                if (iou >= OverlapIouThreshold && iou > bestIou)
+                {
+                    bestIndex = index;
+                    bestIou = iou;
+                }
+            }
+
+            if (bestIndex >= 0)
+                instances[bestIndex] = result;
+            else
+                instances.Add(result);
+        }
+
+        return instances.Count;
     }
 
     public void Cleanup(DateTime now)
@@ -148,6 +183,24 @@ public class CooldownTracker
 
         var intersection = overlapWidth * overlapHeight;
         return intersection / (instanceArea + resultArea - intersection);
+    }
+
+    private static float IntersectionOverUnion(DetectionResult leftBox, DetectionResult rightBox)
+    {
+        var leftArea = leftBox.Width * leftBox.Height;
+        var rightArea = rightBox.Width * rightBox.Height;
+        if (leftArea <= 0 || rightArea <= 0) return 1f;
+
+        var left = MathF.Max(leftBox.X, rightBox.X);
+        var top = MathF.Max(leftBox.Y, rightBox.Y);
+        var right = MathF.Min(leftBox.X + leftBox.Width, rightBox.X + rightBox.Width);
+        var bottom = MathF.Min(leftBox.Y + leftBox.Height, rightBox.Y + rightBox.Height);
+        var overlapWidth = right - left;
+        var overlapHeight = bottom - top;
+        if (overlapWidth <= 0 || overlapHeight <= 0) return 0f;
+
+        var intersection = overlapWidth * overlapHeight;
+        return intersection / (leftArea + rightArea - intersection);
     }
 
     private void CreateBookmark(DetectionResult result, EventDefinition definition, DateTime now)

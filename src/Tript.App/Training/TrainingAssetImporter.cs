@@ -16,6 +16,7 @@ internal sealed record TrainingImportResult(
     string WorkspacePath,
     bool ModelImported,
     int EventCount,
+    int SampleCount,
     int TrainingImageCount,
     int ValidationImageCount,
     IReadOnlyList<string> Warnings,
@@ -40,6 +41,7 @@ internal static class TrainingAssetImporter
         if (definitions.Count == 0)
             throw new InvalidDataException("events.json contains no event definitions.");
         TrainingEventValidator.ValidateRegions(definitions);
+        TrainingEventValidator.ValidateSubtractorReferences(definitions);
 
         var sourceModelPath = Path.Combine(sourceRoot, "model.onnx");
         OnnxModelMetadata? modelMetadata = null;
@@ -55,6 +57,10 @@ internal static class TrainingAssetImporter
         {
             warnings.Add("No model.onnx was imported; this workspace has a provisional event schema.");
         }
+
+        var importedSamples = LoadSourceSamples(sourceRoot, definitions);
+        if (importedSamples.Count == 0)
+            throw new InvalidDataException("The selected training workspace contains no full-frame samples.");
 
         var workspace = TrainingWorkspace.ForGame(gameId, rootPath);
         var existingWorkspace = Directory.Exists(workspace.RootPath);
@@ -75,13 +81,16 @@ internal static class TrainingAssetImporter
             else if (File.Exists(staging.ModelPath))
                 File.Delete(staging.ModelPath);
 
-            var counts = CopyDataset(sourceRoot, staging.DatasetPath);
-            ImportDatasetSamples(sourceRoot, staging, definitions, warnings);
-            var classIds = definitions.Select(definition => definition.ClassId).ToHashSet();
-            var incompatibleSamples = new TrainingSampleStore(staging).List()
-                .Count(sample => sample.Labels.Any(label => !classIds.Contains(label.ClassId)));
-            if (incompatibleSamples > 0)
-                warnings.Add($"{incompatibleSamples} preserved samples use class IDs not present in the imported event contract.");
+            var sampleStore = new TrainingSampleStore(staging);
+            sampleStore.RemoveDatasetBackedSamples();
+            if (Directory.Exists(staging.DatasetPath))
+                Directory.Delete(staging.DatasetPath, recursive: true);
+            Directory.CreateDirectory(staging.DatasetPath);
+            foreach (var sample in importedSamples)
+            {
+                sampleStore.Save(sample.SourcePath, sample.TimestampSeconds, sample.Width, sample.Height, sample.Labels,
+                    File.ReadAllBytes(sample.SourcePath), definitions);
+            }
             if (existingWorkspace)
             {
                 backupPath = workspace.RootPath + ".backup-" + Guid.NewGuid().ToString("N");
@@ -101,8 +110,9 @@ internal static class TrainingAssetImporter
                 workspace.RootPath,
                 modelMetadata is not null,
                 definitions.Count,
-                counts.Training,
-                counts.Validation,
+                importedSamples.Count,
+                0,
+                0,
                 warnings,
                 modelMetadata);
         }
@@ -151,98 +161,94 @@ internal static class TrainingAssetImporter
         };
     }
 
-    private static (int Training, int Validation) CopyDataset(string sourceRoot, string destinationRoot)
+    private sealed record ImportedSample(string SourcePath, double TimestampSeconds, int Width, int Height,
+        List<TrainingLabel> Labels);
+
+    private static List<ImportedSample> LoadSourceSamples(string sourceRoot,
+        IReadOnlyList<EventDefinition> definitions)
     {
-        var sourceDataset = Path.Combine(sourceRoot, "dataset");
-        if (!Directory.Exists(sourceDataset))
-            return (0, 0);
+        var sourceSamples = Path.Combine(sourceRoot, "samples");
+        if (!Directory.Exists(sourceSamples))
+            return [];
 
-        var counts = new int[2];
-        foreach (var (split, index) in new[] { ("train", 0), ("val", 1) })
+        var eventById = definitions.ToDictionary(definition => definition.Id);
+        var images = Directory.EnumerateFiles(sourceSamples, "*.png", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var labels = Directory.EnumerateFiles(sourceSamples, "*.txt", SearchOption.TopDirectoryOnly)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var imported = new List<ImportedSample>();
+        foreach (var imagePath in images)
         {
-            var sourceImages = Path.Combine(sourceDataset, "images", split);
-            var sourceLabels = Path.Combine(sourceDataset, "labels", split);
-            if (!Directory.Exists(sourceImages))
-                continue;
-
-            var destinationImages = Path.Combine(destinationRoot, "images", split);
-            var destinationLabels = Path.Combine(destinationRoot, "labels", split);
-            Directory.CreateDirectory(destinationImages);
-            Directory.CreateDirectory(destinationLabels);
-
-            foreach (var imagePath in Directory.EnumerateFiles(sourceImages)
-                         .Where(IsImageFile).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                    File.Copy(imagePath, Path.Combine(destinationImages, Path.GetFileName(imagePath)), overwrite: true);
-                counts[index]++;
-            }
-
-            if (Directory.Exists(sourceLabels))
-            {
-                foreach (var labelPath in Directory.EnumerateFiles(sourceLabels, "*.txt")
-                             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-                {
-                        File.Copy(labelPath, Path.Combine(destinationLabels, Path.GetFileName(labelPath)), overwrite: true);
-                }
-            }
+            var labelPath = Path.ChangeExtension(imagePath, ".txt");
+            if (!labels.Contains(labelPath))
+                throw new InvalidDataException($"The full-frame sample has no matching label file: {imagePath}");
+            var timestampSeconds = ParseSampleFileName(imagePath, eventById);
+            if (!TryReadPngDimensions(File.ReadAllBytes(imagePath), out var width, out var height))
+                throw new InvalidDataException($"The full-frame sample is not a supported PNG: {imagePath}");
+            imported.Add(new ImportedSample(imagePath, timestampSeconds, width, height,
+                LoadSampleLabels(labelPath, eventById)));
         }
 
-        var yaml = Path.Combine(sourceDataset, "dataset.yaml");
-        if (File.Exists(yaml))
-            File.Copy(yaml, Path.Combine(destinationRoot, "dataset.yaml"), overwrite: true);
-
-        return (counts[0], counts[1]);
+        var unmatchedLabels = Directory.EnumerateFiles(sourceSamples, "*.txt", SearchOption.TopDirectoryOnly)
+            .Where(path => !File.Exists(Path.ChangeExtension(path, ".png")))
+            .ToList();
+        if (unmatchedLabels.Count > 0)
+            throw new InvalidDataException($"The full-frame sample has no matching image file: {unmatchedLabels[0]}");
+        return imported;
     }
 
-    private static void ImportDatasetSamples(string sourceRoot, TrainingWorkspace workspace,
-        IReadOnlyList<EventDefinition> definitions, ICollection<string> warnings)
+    private static double ParseSampleFileName(string imagePath,
+        IReadOnlyDictionary<int, EventDefinition> eventById)
     {
-        var store = new TrainingSampleStore(workspace);
-        foreach (var (split, _) in new[] { ("train", 0), ("val", 1) })
+        var stem = Path.GetFileNameWithoutExtension(imagePath);
+        var separator = stem.IndexOf('_');
+        if (separator <= 0 || separator == stem.Length - 1
+            || !int.TryParse(stem[..separator], NumberStyles.Integer, CultureInfo.InvariantCulture, out var eventId)
+            || !long.TryParse(stem[(separator + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks)
+            || ticks < 0)
         {
-            var sourceImages = Path.Combine(sourceRoot, "dataset", "images", split);
-            var sourceLabels = Path.Combine(sourceRoot, "dataset", "labels", split);
-            if (!Directory.Exists(sourceImages)) continue;
-
-            foreach (var imagePath in Directory.EnumerateFiles(sourceImages)
-                         .Where(IsImageFile).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                var labelPath = Path.Combine(sourceLabels, Path.GetFileNameWithoutExtension(imagePath) + ".txt");
-                var labels = File.Exists(labelPath) ? LoadYoloLabels(labelPath) : [];
-                var image = File.ReadAllBytes(imagePath);
-                if (!TryReadPngDimensions(image, out var width, out var height))
-                {
-                    warnings.Add($"Skipped dataset sample with unsupported image data: {imagePath}");
-                    continue;
-                }
-                var datasetImagePath = Path.Combine("images", split, Path.GetFileName(imagePath));
-                store.Save(imagePath, 0, width, height, labels, image, definitions, datasetImagePath);
-            }
+            throw new InvalidDataException($"The full-frame sample filename is invalid: {imagePath}");
         }
+        if (!eventById.ContainsKey(eventId))
+            throw new InvalidDataException($"The full-frame sample filename references unknown event id {eventId}: {imagePath}");
+
+        // The source timestamp is an absolute tick value, while the editor field is video-relative.
+        return 0;
     }
 
-    private static List<TrainingLabel> LoadYoloLabels(string path)
+    private static List<TrainingLabel> LoadSampleLabels(string path,
+        IReadOnlyDictionary<int, EventDefinition> eventById)
     {
         var labels = new List<TrainingLabel>();
         foreach (var line in File.ReadLines(path))
         {
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0) continue;
-            if (parts.Length != 5 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var classId)
+            if (parts.Length != 5
+                || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var eventId)
                 || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerX)
                 || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerY)
                 || !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var width)
                 || !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var height))
             {
-                throw new InvalidDataException($"The dataset label file is invalid: {path}");
+                throw new InvalidDataException($"The full-frame sample label file is invalid: {path}");
             }
+            if (!eventById.TryGetValue(eventId, out var definition))
+                throw new InvalidDataException($"The full-frame sample label references unknown event id {eventId}: {path}");
+            var left = Math.Max(0, centerX - width / 2);
+            var top = Math.Max(0, centerY - height / 2);
+            var right = Math.Min(1, centerX + width / 2);
+            var bottom = Math.Min(1, centerY + height / 2);
+            if (right <= left || bottom <= top)
+                throw new InvalidDataException($"The full-frame sample label lies outside the image: {path}");
             labels.Add(new TrainingLabel
             {
-                ClassId = classId,
-                CenterX = centerX,
-                CenterY = centerY,
-                Width = width,
-                Height = height,
+                ClassId = definition.ClassId,
+                CenterX = (left + right) / 2,
+                CenterY = (top + bottom) / 2,
+                Width = right - left,
+                Height = bottom - top,
             });
         }
         return labels;
@@ -261,8 +267,6 @@ internal static class TrainingAssetImporter
         return width > 0 && height > 0;
     }
 
-    private static bool IsImageFile(string path) =>
-        Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg";
 }
 
 #endif

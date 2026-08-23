@@ -5,7 +5,6 @@ using System;
 using System.Collections.Generic;
 using Tript.Core;
 using Tript.Detection;
-using ReferenceProduct.Backend.Games;
 using Xunit;
 
 namespace Tript.Detection.Tests;

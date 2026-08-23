@@ -2,7 +2,7 @@
 
 These test files came across in the Stage 0 port and are excluded from the test project's compile,
 **not deleted**. Every one of them fails to compile for the same immediate reason: they call
-`ReferenceProduct.Backend.Games.GameIntegrationService`, a static service that Tript never ported. Three of them
+an external `GameIntegrationService`, a static service that Tript never ported. Three of them
 also want `Tript.Core.AppState.Instance.Recording` and a mutable `Recording` with a `Bookmarks` list;
 Tript's equivalent is `RecordingSessionRegistry` + the `IRecordingSession` interface, which hands out
 no list to read back — a port supplies a fake session instead, as `DetectionHostTests` does.

@@ -35,21 +35,15 @@ internal sealed class TrainingRunner
         }
 
         var python = FindPython();
-        if (Directory.Exists(workspace.SamplesPath)
-            && Directory.EnumerateFiles(workspace.SamplesPath, "*.json").Any())
+        if (!Directory.Exists(workspace.SamplesPath)
+            || !Directory.EnumerateFiles(workspace.SamplesPath, "*.json").Any())
         {
-            await RunProcessAsync(python, exportScript, workspace.RootPath,
-                ["--size", imageSize.ToString(System.Globalization.CultureInfo.InvariantCulture)],
-                progress, cancellationToken).ConfigureAwait(false);
+            throw new InvalidDataException("The workspace contains no editable samples.");
         }
-        else if (File.Exists(Path.Combine(workspace.DatasetPath, "dataset.yaml")))
-        {
-            progress("USING_IMPORTED_DATASET existing dataset.yaml");
-        }
-        else
-        {
-            throw new InvalidDataException("The workspace contains neither samples nor an imported dataset.");
-        }
+
+        await RunProcessAsync(python, exportScript, workspace.RootPath,
+            ["--size", imageSize.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+            progress, cancellationToken).ConfigureAwait(false);
 
         var trainArguments = new List<string>
         {
@@ -123,11 +117,12 @@ internal sealed class TrainingRunner
             StartInfo = new ProcessStartInfo
             {
                 FileName = python.FileName,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
+                WorkingDirectory = workspace,
+                // Training is intentionally visible: Ultralytics owns the detailed progress display,
+                // while the web UI reports the high-level running state.
+                UseShellExecute = true,
+                CreateNoWindow = false,
+                WindowStyle = ProcessWindowStyle.Normal,
             },
         };
         foreach (var prefix in python.PrefixArguments)
@@ -138,22 +133,15 @@ internal sealed class TrainingRunner
         foreach (var argument in scriptArguments)
             process.StartInfo.ArgumentList.Add(argument);
 
-        process.OutputDataReceived += (_, args) => Report(progress, args.Data);
-        process.ErrorDataReceived += (_, args) => Report(progress, "stderr: " + args.Data);
-
         if (!process.Start())
             throw new InvalidOperationException($"Could not start Python: {python.FileName}");
 
         lock (_gate)
             _process = process;
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
         try
         {
-            process.StandardInput.Close();
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            process.WaitForExit();
         }
         catch (OperationCanceledException)
         {
@@ -170,22 +158,9 @@ internal sealed class TrainingRunner
         }
 
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Training process failed with exit code {process.ExitCode}.");
-    }
-
-    private static void Report(Action<string> progress, string? line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return;
-
-        try
-        {
-            progress(line);
-        }
-        catch
-        {
-            // A disconnected UI must not take down the training process.
-        }
+            throw new InvalidOperationException(
+                $"Training process '{Path.GetFileName(script)}' failed with exit code {process.ExitCode}. " +
+                "See the training console window for details.");
     }
 }
 

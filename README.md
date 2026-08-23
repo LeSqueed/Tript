@@ -76,6 +76,39 @@ The flag is compile-time only. C# code uses the `TRIPT_TRAINING` symbol and the 
 those guards.
 Changing an environment variable after the application has been built cannot enable training.
 
+Training's Python dependencies are not bundled in the Windows release. Set up the release-local
+virtual environment once before starting a training run:
+
+```powershell
+py -3.12 -m venv dist\Release-win\.venv
+dist\Release-win\.venv\Scripts\python.exe -m pip install -r dist\Release-win\Training\Scripts\requirements.txt
+```
+
+The runner prefers this `.venv` automatically. If it is absent, it falls back to `TRIPT_PYTHON` and
+then the system `python` command.
+
+For AMD GPUs on Windows, prefer the standard ROCm PyTorch backend. Install the matching AMD wheel
+set in the same environment:
+
+```powershell
+dist\Release-win\.venv\Scripts\python.exe -m pip install --no-deps -r dist\Release-win\Training\Scripts\requirements-rocm.txt
+```
+
+Select **ROCm / AMD GPU** in the training view. This uses PyTorch's normal `torch.cuda` path,
+which is the path supported by Ultralytics and ROCm.
+
+DirectML remains available as an explicit fallback for Windows systems without ROCm:
+
+```powershell
+dist\Release-win\.venv\Scripts\python.exe -m pip install -r dist\Release-win\Training\Scripts\requirements-directml.txt
+```
+
+Select **DirectML / AMD GPU** in the training view. DirectML is a preview backend, supports one GPU,
+does not use mixed precision, skips Ultralytics' in-run validation because of a DirectML inference-mode
+limitation, and requires a current DirectX 12 graphics driver. The exported ONNX model is still checked
+against the Tript event contract. If `Auto GPU / CPU` is selected, DirectML is used when CUDA is
+unavailable and the optional package is installed.
+
 `make dev` / `make run` / `make release` use `dist/<config>` under the repo root.
 
 ## Run

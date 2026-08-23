@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// The settings UI is split into logical pages — recording, buffer/replay, audio, capture, game
+// The settings UI is split into logical pages — general, recording, buffer/replay, audio, capture, game
 // — and each page is addressed and saved
 // independently. These tests pin that the five pages exist, that each persists its own fields,
 // and that editing one page does not disturb another.
@@ -40,11 +40,11 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void TheFivePages_Exist()
+    public void TheSixPages_Exist()
     {
-        Assert.Equal(5, Enum.GetValues<SettingsPage>().Length);
+        Assert.Equal(6, Enum.GetValues<SettingsPage>().Length);
         Assert.Equal(
-            new[] { SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture, SettingsPage.Game },
+            new[] { SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture, SettingsPage.Game, SettingsPage.General },
             Enum.GetValues<SettingsPage>());
     }
 
@@ -53,18 +53,22 @@ public class LogicalPagesTests : IDisposable
     {
         var recording = _store.Page<RecordingSettings>(SettingsPage.Recording);
         var buffer = _store.Page<BufferSettings>(SettingsPage.Buffer);
+        var general = _store.Page<GeneralSettings>(SettingsPage.General);
 
         Assert.Equal(SettingsPage.Recording, recording.Page);
         Assert.Equal(SettingsPage.Buffer, buffer.Page);
+        Assert.Equal(SettingsPage.General, general.Page);
 
         recording.Load().Mode = RecordingMode.Session;
         buffer.Load().Enabled = true;
+        general.Load().StartupVisibility = StartupVisibility.Tray;
         recording.Save();
 
         // Editing the recording page left the buffer page's value intact in the saved file.
         var reloaded = new SettingsStore(_provider).Load();
         Assert.Equal(RecordingMode.Session, reloaded.Recording.Mode);
         Assert.True(reloaded.Buffer.Enabled);
+        Assert.Equal(StartupVisibility.Tray, reloaded.General.StartupVisibility);
     }
 
     [Fact]

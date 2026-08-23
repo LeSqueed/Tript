@@ -12,8 +12,10 @@ import { BufferPage } from '../settings/pages/BufferPage';
 import { AudioPage } from '../settings/pages/AudioPage';
 import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
+import { GeneralPage } from '../settings/pages/GeneralPage';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
+  { id: 'general', label: 'General' },
   { id: 'recording', label: 'Recording' },
   { id: 'buffer', label: 'Buffer' },
   { id: 'audio', label: 'Audio' },
@@ -22,7 +24,7 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
 ];
 
 export function SettingsView({ client }: { client: IpcClient }) {
-  const [page, setPage] = useState<SettingsPageName>('recording');
+  const [page, setPage] = useState<SettingsPageName>('general');
   const controller = useSettings(client);
 
   return (
@@ -99,6 +101,13 @@ export function SettingsView({ client }: { client: IpcClient }) {
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
+          />
+          )}
+          {page === 'general' && (
+          <GeneralPage
+            settings={controller.settings.general}
+            update={controller.update}
+            page={page}
           />
           )}
         </div>

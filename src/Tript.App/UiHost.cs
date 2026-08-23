@@ -76,9 +76,11 @@ internal sealed class UiHost : IDisposable
             // — to anything that asks for the page.
             //
             // The document request carries ?k=; on success it is answered with a cookie, so the
-            // assets it pulls in need no token in their URLs. Nothing is served either way without
-            // one, and the refusal never repeats what was presented.
-            if (!_token.Authorises(context.Request, acceptCookie: true))
+            // assets it pulls in need no token in their URLs. AuthorisesUi also accepts the
+            // same-origin document referrer for embedded profiles that do not replay the cookie.
+            // Nothing is served either way without one, and the refusal never repeats what was
+            // presented.
+            if (!_token.AuthorisesUi(context.Request))
             {
                 Refuse(context);
                 return;
@@ -110,7 +112,17 @@ internal sealed class UiHost : IDisposable
 
             if (!File.Exists(candidate))
             {
-                // SPA fallback: an unknown route serves the shell, which decides what to render.
+                // SPA fallback applies only to extensionless routes. Returning index.html for a
+                // missing script or stylesheet makes the browser report a misleading module MIME
+                // error and leaves the shell looking like a white page.
+                if (Path.HasExtension(relative))
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.Close();
+                    return;
+                }
+
+                // An unknown extensionless route serves the shell, which decides what to render.
                 candidate = Path.Combine(_webRoot, "index.html");
                 if (!File.Exists(candidate))
                 {

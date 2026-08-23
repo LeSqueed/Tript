@@ -20,6 +20,8 @@ internal sealed class FakeRecorderSession : IRecorderSession
     // When set, CreateOutput throws rather than returning a fake — the wiring-failure path.
     public Exception? CreateOutputError { get; set; }
 
+    public Exception? PlaceSourceError { get; set; }
+
     // Installs the output the next CreateOutput call returns.
     public void SetOutput(FakeOutput output) => LastCreatedOutput = output;
 
@@ -32,7 +34,12 @@ internal sealed class FakeRecorderSession : IRecorderSession
         return LastCreatedOutput;
     }
 
-    public void PlaceSourceOnChannel() => PlaceSourceCalls++;
+    public void PlaceSourceOnChannel()
+    {
+        PlaceSourceCalls++;
+        if (PlaceSourceError is not null)
+            throw PlaceSourceError;
+    }
 
     public void ClearSourceFromChannel() => ClearSourceCalls++;
 
@@ -52,10 +59,15 @@ internal sealed class FakeRecorderSession : IRecorderSession
 internal sealed class FakeOutput : IRecorderOutput
 {
     private bool _active;
+    private readonly ManualResetEventSlim _stopped = new(false);
 
     public bool IsActive => _active;
 
     public bool StartReturns { get; set; } = true;
+
+    public Exception? StartError { get; set; }
+
+    public bool RaiseStopDuringStart { get; set; }
 
     public string? LastError { get; set; }
 
@@ -70,7 +82,14 @@ internal sealed class FakeOutput : IRecorderOutput
     public bool Start()
     {
         StartCalls++;
+        _stopped.Reset();
+        if (StartError is not null)
+            throw StartError;
+
         _active = StartReturns;
+        if (RaiseStopDuringStart)
+            RaiseStop(ObsOutputStopCode.Success);
+
         return StartReturns;
     }
 
@@ -78,14 +97,18 @@ internal sealed class FakeOutput : IRecorderOutput
     {
         StopCalls++;
         _active = false;
+        _stopped.Set();
     }
 
     // Simulates the output's stop signal, the way the binding delivers it.
     public void RaiseStop(ObsOutputStopCode code, string? lastError = null)
     {
         _active = false;
+        _stopped.Set();
         Stopped?.Invoke(this, new ObsOutputStopEvent(code, lastError));
     }
+
+    public bool WaitForStop(TimeSpan timeout) => _stopped.Wait(timeout);
 
     public void Dispose() => Disposed = true;
 }

@@ -1039,6 +1039,8 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         public void Stop() => _output.Stop();
 
+        public bool WaitForStop(TimeSpan timeout) => _output.WaitForStop(timeout);
+
         public string? LastError => _output.LastError;
 
         public event EventHandler<ObsOutputStopEvent>? Stopped

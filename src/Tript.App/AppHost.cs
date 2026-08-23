@@ -19,6 +19,14 @@ using SettingsModel = Tript.Settings.Settings;
 
 namespace Tript.App;
 
+public enum NotificationKind
+{
+    RecordingStarted,
+    RecordingStopped,
+    Error,
+    Recovery,
+}
+
 // Assembles every component into the running app and owns the process lifetime: the settings store
 // and session tracker, the recorder plus its game detector and detection host, the three local IPC
 // channels (control socket, content server, UI host), the content catalogue, and the clip pipeline.
@@ -81,11 +89,13 @@ internal sealed class AppHost : IDisposable
     // A stop can hold this for up to its 10s settle, and a start that waits behind it is correct:
     // there is one recorder.
     private readonly object _recorderGate = new();
+    private readonly TimeSpan _recorderStopTimeout;
     private bool _shuttingDown;
 
     private RecorderStateMachine? _recorder;
     private IRecorderSession? _recorderSession;
     private ObsSource? _colourSource;
+    private bool _stopFinalizationPending;
     private ProcessNameGameDetector? _detector;
     private FullscreenGameDetector? _fullscreenDetector;
     private DetectionHost? _detectionHost;
@@ -132,7 +142,8 @@ internal sealed class AppHost : IDisposable
 
     // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
-        RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null)
+        RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
+        TimeSpan? recorderStopTimeout = null)
     {
         _options = options;
         _settingsStore = settingsStore;
@@ -140,6 +151,7 @@ internal sealed class AppHost : IDisposable
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
+        _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
 
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
@@ -159,6 +171,12 @@ internal sealed class AppHost : IDisposable
     internal AppOptions Options => _options;
 
     internal SettingsStore SettingsStore => _settingsStore;
+
+    internal event Action<SettingsModel>? SettingsChanged;
+
+    internal event Action<bool, string?>? StateChanged;
+
+    internal event Action<NotificationKind, string, string>? NotificationRequested;
 
     internal ObsRuntime? Runtime => _runtime;
 
@@ -301,6 +319,8 @@ internal sealed class AppHost : IDisposable
             Console.Out.Flush();
 
             // No browser is opened — the desktop shell renders the UI in its own window.
+            if (_ipc.ShutdownWasRequested)
+                shutdownRequested.Set();
             WaitForShutdown(shutdownRequested);
         }
         finally
@@ -338,21 +358,47 @@ internal sealed class AppHost : IDisposable
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
 
-        // A recording still running holds its bookmarks in the session and its metadata record
-        // unwritten; quitting mid-recording used to drop both on the floor.
-        StopRecording();
+        // Preserve recording metadata when possible, but never let a dead recorder block shutdown.
+        try
+        {
+            StopRecording();
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Tript.App: recording cleanup failed during shutdown: {exception.Message}");
+        }
 
+        RecorderStateMachine? recorder;
+        IRecorderSession? recorderSession;
+        ObsSource? colourSource;
+        ObsRuntime? runtime;
         lock (_recorderGate)
         {
-            _recorder?.Dispose();
-            _recorderSession?.Dispose();
-            _colourSource?.Dispose();
+            recorder = _recorder;
+            recorderSession = _recorderSession;
+            colourSource = _colourSource;
+            runtime = _runtime;
+            _recorder = null;
+            _recorderSession = null;
+            _colourSource = null;
+        }
+
+        if (recorder?.Snapshot.State == RecorderState.Stopping)
+        {
+            // A native muxer can remain stopped-but-unacknowledged indefinitely. Keep the native
+            // session alive and finish this disposal after its callback instead of blocking app exit
+            // or releasing the runtime underneath the callback.
+            ThreadPool.QueueUserWorkItem(_ => DisposeRecorderResources(
+                recorder, recorderSession, colourSource, runtime));
+        }
+        else
+        {
+            DisposeRecorderResources(recorder, recorderSession, colourSource, runtime);
         }
 
         _ipc.Dispose();
         _content.Dispose();
         _ui.Dispose();
-        _runtime?.Dispose();
     }
 
     // ---- recorder wiring ----
@@ -368,7 +414,12 @@ internal sealed class AppHost : IDisposable
     internal void StopRecordingOrReport()
     {
         if (!StopRecording())
-            PushError("There was no recording to stop.");
+        {
+            var state = _recorder?.Snapshot.State;
+            PushError(state == RecorderState.Stopping
+                ? "The recording is still stopping; it will remain active until the output finishes."
+                : "There was no recording to stop.");
+        }
     }
 
     internal bool StartRecording(string? gameId)
@@ -381,9 +432,12 @@ internal sealed class AppHost : IDisposable
     {
         var effectiveGameId = gameId ?? StartupGameId;
 
-        // The detector's handlers can still fire once after teardown began: its Dispose no longer
-        // blocks behind an in-flight callback, deliberately.
+        // Detector teardown owns the callback barrier; do not admit new recording starts while it is
+        // being dismantled.
         if (_shuttingDown)
+            return false;
+
+        if (_stopFinalizationPending)
             return false;
 
         if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
@@ -433,8 +487,8 @@ internal sealed class AppHost : IDisposable
                 _captureWaitCancellation = null;
                 PushWarning(null);
                 capture.ClearSourceFromChannel();
+                waitCancellation.Dispose();
             }
-            waitCancellation.Dispose();
         }
 
         if (!_recorder!.Start(resolved))
@@ -455,6 +509,8 @@ internal sealed class AppHost : IDisposable
         StartDetection(effectiveGameId);
 
         PushState(recording: true, effectiveGameId);
+        RequestNotification(NotificationKind.RecordingStarted, "Recording started",
+            string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
         return true;
     }
 
@@ -487,14 +543,52 @@ internal sealed class AppHost : IDisposable
 
         // The recorder marshals the transition onto the thread it was created on; the IPC thread is that
         // thread for the real recorder, and the fake raises the signal synchronously inside Stop.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + _recorderStopTimeout;
         while (_recorder.Snapshot.State != RecorderState.Idle)
         {
             if (DateTime.UtcNow > deadline)
-                break;
+            {
+                _stopFinalizationPending = true;
+                var recorder = _recorder;
+                ThreadPool.QueueUserWorkItem(_ => CompletePendingStop(recorder!));
+                Log.Warning("AppHost: recording output did not finish stopping within {Timeout}; leaving the recording in Stopping state until its callback arrives",
+                    _recorderStopTimeout);
+                return false;
+            }
             Thread.Sleep(20);
         }
 
+        FinalizeStoppedRecordingLocked();
+        return true;
+    }
+
+    private void CompletePendingStop(RecorderStateMachine recorder)
+    {
+        while (true)
+        {
+            lock (_recorderGate)
+            {
+                if (_disposed || !ReferenceEquals(_recorder, recorder))
+                {
+                    _stopFinalizationPending = false;
+                    return;
+                }
+
+                if (recorder.Snapshot.State == RecorderState.Idle)
+                {
+                    _stopFinalizationPending = false;
+                    FinalizeStoppedRecordingLocked();
+                    return;
+                }
+            }
+
+            Thread.Sleep(20);
+        }
+    }
+
+    private void FinalizeStoppedRecordingLocked()
+    {
+        _recorder!.DrainCompletedOutput();
         StopDetection();
 
         var session = _sessionTracker.Stop();
@@ -510,7 +604,23 @@ internal sealed class AppHost : IDisposable
         _automaticRecordingOwner = null;
 
         PushState(recording: false, null);
-        return true;
+        RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
+    }
+
+    private static void DisposeRecorderResources(RecorderStateMachine? recorder,
+        IRecorderSession? recorderSession, ObsSource? colourSource, ObsRuntime? runtime)
+    {
+        try { recorder?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred recorder disposal failed"); }
+
+        try { recorderSession?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred recorder session disposal failed"); }
+
+        try { colourSource?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred colour source disposal failed"); }
+
+        try { runtime?.Dispose(); }
+        catch (Exception exception) { Log.Warning(exception, "AppHost: deferred OBS runtime disposal failed"); }
     }
 
     // Persists the recording's metadata — game, start time, content type, audio tracks, the
@@ -875,6 +985,7 @@ internal sealed class AppHost : IDisposable
             Directory.CreateDirectory(effectiveRoot);
         }
 
+        SettingsChanged?.Invoke(settings);
         PushSettings();
         return true;
     }
@@ -903,6 +1014,9 @@ internal sealed class AppHost : IDisposable
                 case "game" when property.Value.ValueKind == JsonValueKind.Object:
                     ApplyObjectPatch(settings.Game, property.Value);
                     break;
+                case "general" when property.Value.ValueKind == JsonValueKind.Object:
+                    ApplyObjectPatch(settings.General, property.Value);
+                    break;
             }
         }
     }
@@ -922,6 +1036,9 @@ internal sealed class AppHost : IDisposable
             var value = clone.GetType().GetProperty(property.Name)?.GetValue(clone);
             property.SetValue(page, value);
         }
+
+        if (page is GeneralSettings general)
+            SettingsSerialization.RemoveRemovedGeneralProperties(general);
     }
 
     private static string MergeObjects(JsonElement baseObject, JsonElement patch)
@@ -929,15 +1046,40 @@ internal sealed class AppHost : IDisposable
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
-            writer.WriteStartObject();
-            foreach (var property in baseObject.EnumerateObject())
-                property.WriteTo(writer);
-            foreach (var property in patch.EnumerateObject())
-                property.WriteTo(writer);
-            writer.WriteEndObject();
+            WriteMergedObject(writer, baseObject, patch);
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteMergedObject(Utf8JsonWriter writer, JsonElement baseObject, JsonElement patch)
+    {
+        writer.WriteStartObject();
+
+        foreach (var property in baseObject.EnumerateObject())
+        {
+            if (!patch.TryGetProperty(property.Name, out var replacement))
+            {
+                property.WriteTo(writer);
+                continue;
+            }
+
+            writer.WritePropertyName(property.Name);
+            if (property.Value.ValueKind == JsonValueKind.Object && replacement.ValueKind == JsonValueKind.Object)
+                WriteMergedObject(writer, property.Value, replacement);
+            else
+                replacement.WriteTo(writer);
+        }
+
+        foreach (var property in patch.EnumerateObject())
+        {
+            if (baseObject.TryGetProperty(property.Name, out _))
+                continue;
+
+            property.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
     }
 
     // ---- game list ----
@@ -987,6 +1129,7 @@ internal sealed class AppHost : IDisposable
                 startedAt = recording ? DateTimeToUnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
             },
         }, Wire.Options));
+        StateChanged?.Invoke(recording, gameId);
     }
 
     // The machine's active WASAPI endpoints, inputs first then outputs. Each entry carries its
@@ -1152,7 +1295,8 @@ internal sealed class AppHost : IDisposable
             validationImages = CountTrainingImages(workspace.DatasetPath, "val"),
         };
         OnnxModelMetadata? metadata = null;
-        var modelPath = workspace.ModelPath;
+        var modelPath = ResolveTrainingModelPath(
+            ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
         if (File.Exists(modelPath))
         {
             try
@@ -1414,10 +1558,12 @@ internal sealed class AppHost : IDisposable
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
         if (!File.Exists(imagePath))
             throw new FileNotFoundException("The training sample image is missing.", imagePath);
-        if (!File.Exists(workspace.ModelPath))
+        var modelPath = ResolveTrainingModelPath(
+            ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
+        if (!File.Exists(modelPath))
             throw new InvalidOperationException("No trained model is available for label suggestions.");
 
-        var detections = ModelPredictionService.Predict(workspace.ModelPath,
+        var detections = ModelPredictionService.Predict(modelPath,
             File.ReadAllBytes(imagePath), workspace.LoadDefinitions());
         var suggestions = TrainingLabelSuggestionFilter.Merge(sample.Labels, detections);
         _ipc.Broadcast("trainingLabelSuggestions", JsonSerializer.SerializeToElement(new
@@ -1456,8 +1602,10 @@ internal sealed class AppHost : IDisposable
 
         var workspace = EnsureTrainingWorkspace(parameters.GameId);
         var imageSize = parameters.ImageSize;
-        if (imageSize is null && File.Exists(workspace.ModelPath))
-            imageSize = OnnxModelInspector.Inspect(workspace.ModelPath).InputWidth;
+        var currentModelPath = ResolveTrainingModelPath(
+            ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
+        if (imageSize is null && File.Exists(currentModelPath))
+            imageSize = OnnxModelInspector.Inspect(currentModelPath).InputWidth;
         imageSize ??= 640;
 
         lock (_trainingGate)
@@ -1567,6 +1715,9 @@ internal sealed class AppHost : IDisposable
     private static bool IsTrainingImage(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg";
 
+    internal static string ResolveTrainingModelPath(string installedModelPath, string workspaceModelPath) =>
+        File.Exists(installedModelPath) ? installedModelPath : workspaceModelPath;
+
     private void PushTrainingSample(string gameId, TrainingWorkspace workspace, TrainingSampleRecord sample,
         string messageName = "trainingSample", string? requestId = null)
     {
@@ -1621,7 +1772,11 @@ internal sealed class AppHost : IDisposable
         {
             message,
         }, Wire.Options));
+        RequestNotification(NotificationKind.Error, "Tript error", message);
     }
+
+    private void RequestNotification(NotificationKind kind, string title, string body) =>
+        NotificationRequested?.Invoke(kind, title, body);
 
     private void PushWarning(string? message)
     {
@@ -2451,6 +2606,8 @@ internal sealed class AppHost : IDisposable
                 typeLabel = Path.GetFileName(file),
             }),
         }, Wire.Options));
+        RequestNotification(NotificationKind.Recovery, "Unfinished recording found",
+            $"Tript found {orphans.Count} recording file{(orphans.Count == 1 ? "" : "s")} to recover.");
     }
 
     private List<string> FindOrphanFiles()

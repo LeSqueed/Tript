@@ -22,6 +22,9 @@ public interface IRecorderOutput : IDisposable
     // Asks the output to stop. The completion is the Stopped event, not this call's return.
     void Stop();
 
+    // Waits for native stop completion and callback quiescence before the output is released.
+    bool WaitForStop(TimeSpan timeout);
+
     // The plugin's failure report, borrowed and possibly null. Only meaningful when Start returned
     // false; the Stopped event carries the failure text for a stop.
     string? LastError { get; }

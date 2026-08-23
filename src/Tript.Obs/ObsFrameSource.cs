@@ -114,6 +114,9 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
     private CallbackTarget? _target;
     private bool _connected;
     private int _disposed;
+    private readonly object _callbackGate = new();
+    private int _callbacksInFlight;
+    private readonly ThreadLocal<int> _callbackDepth = new();
 
     internal ObsFrameSubscription(ObsRuntime runtime, nint video, FramePixelFormat format,
         VideoScaleInfoNative conversion, uint frameRateDivisor, FrameCallback callback)
@@ -169,6 +172,13 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
         // Unregistering after the native removal, and the id is never reused, so a callback still in
         // flight resolves either this subscription (whose _target is already null) or nothing.
         Live.TryRemove(_id, out _);
+
+        lock (_callbackGate)
+        {
+            var ownCallbacks = _callbackDepth.Value;
+            while (_callbacksInFlight > ownCallbacks)
+                Monitor.Wait(_callbackGate);
+        }
     }
 
     // The native callback, invoked on the video output's own dedicated thread. The video_data it
@@ -184,17 +194,49 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
             if (!Live.TryGetValue(parameter, out var subscription))
                 return;
 
-            var target = subscription._target;
-            if (target is null)
+            if (!subscription.TryEnterCallback())
                 return;
 
-            target.Deliver((VideoDataNative*)framePointer);
+            try
+            {
+                subscription._callbackDepth.Value++;
+                var target = Volatile.Read(ref subscription._target);
+                if (target is not null)
+                    target.Deliver((VideoDataNative*)framePointer);
+            }
+            finally
+            {
+                subscription._callbackDepth.Value--;
+                subscription.ExitCallback();
+            }
         }
         catch
         {
             // Nothing may throw across the native frame; an exception escaping an
             // UnmanagedCallersOnly method terminates the process. A consumer whose callback throws
             // loses that frame and the connection survives.
+        }
+    }
+
+    private bool TryEnterCallback()
+    {
+        lock (_callbackGate)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                return false;
+
+            _callbacksInFlight++;
+            return true;
+        }
+    }
+
+    private void ExitCallback()
+    {
+        lock (_callbackGate)
+        {
+            _callbacksInFlight--;
+            if (_callbacksInFlight == 0)
+                Monitor.PulseAll(_callbackGate);
         }
     }
 

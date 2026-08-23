@@ -73,6 +73,7 @@ public sealed class SettingsStore
         SettingsPage.Audio => settings.Audio,
         SettingsPage.Capture => settings.Capture,
         SettingsPage.Game => settings.Game,
+        SettingsPage.General => settings.General,
         _ => throw new ArgumentOutOfRangeException(nameof(page), page, null),
     };
 }

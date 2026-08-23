@@ -14,7 +14,7 @@ import type {
 } from './settingsModel';
 import { readAvailableDisplays, readDisplayFallbackWarning } from './displayModel';
 
-export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game';
+export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game' | 'general';
 
 /** The page key on the wire, used both to read and to send. */
 const PAGE_KEY: Record<SettingsPageName, string> = {
@@ -23,6 +23,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
   audio: 'audio',
   capture: 'capture',
   game: 'game',
+  general: 'general',
 };
 
 /** The default settings object, so the pages render even before the first push. */
@@ -45,6 +46,19 @@ const DEFAULT_SETTINGS: SettingsModel = {
   audio: { outputMode: 'Normal', tracks: [], devices: [], mic: null, desktop: null },
   capture: { method: 'Auto', display: null, displayLabel: null },
   game: { gameCaptureTimeout: 10, gameList: [] },
+  general: {
+    startWithWindows: false,
+    startupVisibility: 'Window',
+    minimizeBehavior: 'Taskbar',
+    closeBehavior: 'Exit',
+    notifications: {
+      enabled: true,
+      recordingStarted: true,
+      recordingStopped: true,
+      errors: true,
+      recovery: true,
+    },
+  },
 };
 
 export interface SettingsController {
@@ -127,7 +141,7 @@ export function useSettings(client: IpcClient): SettingsController {
         pendingCauses.current.delete(cause);
       }
       setLastCause(cause);
-      setSettings(pushed);
+       setSettings(mergeSettings(pushed));
       // The encoder list is a sibling of `settings` on the wire, not a field inside it: it is what
       // this machine's runtime registered, not a persisted setting. Anything that is not an array
       // of ids (absent, null, or a shape we do not recognise) is "unknown", and the recording page
@@ -178,5 +192,25 @@ export function useSettings(client: IpcClient): SettingsController {
     displayResolution,
     availableDisplays,
     displayFallbackWarning,
+  };
+}
+
+function mergeSettings(pushed: SettingsModel): SettingsModel {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...pushed,
+    recording: { ...DEFAULT_SETTINGS.recording, ...pushed.recording },
+    buffer: { ...DEFAULT_SETTINGS.buffer, ...pushed.buffer },
+    audio: { ...DEFAULT_SETTINGS.audio, ...pushed.audio },
+    capture: { ...DEFAULT_SETTINGS.capture, ...pushed.capture },
+    game: { ...DEFAULT_SETTINGS.game, ...pushed.game },
+    general: {
+      ...DEFAULT_SETTINGS.general,
+      ...pushed.general,
+      notifications: {
+        ...DEFAULT_SETTINGS.general.notifications,
+        ...pushed.general?.notifications,
+      },
+    },
   };
 }

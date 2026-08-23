@@ -27,6 +27,7 @@ internal sealed class IpcServer : IDisposable
 
     private Thread? _acceptThread;
     private volatile bool _running;
+    private int _shutdownRequested;
 
     public IpcServer(AppController controller, SessionToken token, int port = LocalPorts.ControlSocket,
         int uiPort = LocalPorts.Ui)
@@ -39,7 +40,13 @@ internal sealed class IpcServer : IDisposable
 
     public event Action? ShutdownRequested;
 
-    public void RequestShutdown() => ShutdownRequested?.Invoke();
+    internal bool ShutdownWasRequested => Volatile.Read(ref _shutdownRequested) != 0;
+
+    public void RequestShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownRequested, 1) == 0)
+            ShutdownRequested?.Invoke();
+    }
 
     public void Start()
     {

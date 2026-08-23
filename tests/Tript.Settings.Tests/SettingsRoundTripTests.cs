@@ -69,6 +69,70 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
     }
 
+    [Fact]
+    public void SaveThenLoad_RoundTripsGeneralSettings()
+    {
+        var settings = _store.Load();
+        settings.General.StartWithWindows = true;
+        settings.General.StartupVisibility = StartupVisibility.Tray;
+        settings.General.MinimizeBehavior = MinimizeBehavior.Tray;
+        settings.General.CloseBehavior = CloseBehavior.HideToTray;
+        settings.General.Notifications.Enabled = false;
+        settings.General.Notifications.Errors = false;
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+
+        Assert.True(reloaded.General.StartWithWindows);
+        Assert.Equal(StartupVisibility.Tray, reloaded.General.StartupVisibility);
+        Assert.Equal(MinimizeBehavior.Tray, reloaded.General.MinimizeBehavior);
+        Assert.Equal(CloseBehavior.HideToTray, reloaded.General.CloseBehavior);
+        Assert.False(reloaded.General.Notifications.Enabled);
+        Assert.False(reloaded.General.Notifications.Errors);
+    }
+
+    [Fact]
+    public void AFileWithoutGeneralSettings_UsesTheGeneralDefaults()
+    {
+        File.WriteAllText(_provider.FilePath, "{\"version\":1,\"recording\":{\"mode\":\"Session\"}}");
+
+        var settings = _store.Load();
+
+        Assert.False(settings.General.StartWithWindows);
+        Assert.Equal(StartupVisibility.Window, settings.General.StartupVisibility);
+        Assert.Equal(MinimizeBehavior.Taskbar, settings.General.MinimizeBehavior);
+        Assert.Equal(CloseBehavior.Exit, settings.General.CloseBehavior);
+        Assert.True(settings.General.Notifications.Enabled);
+    }
+
+    [Fact]
+    public void RemovedGeneralSettings_AreNotPreserved()
+    {
+        File.WriteAllText(_provider.FilePath,
+            "{\"general\":{\"startupWindow\":\"settings\",\"closeButtonAction\":\"keepRecording\"}}");
+
+        var settings = _store.Load();
+        _store.Save();
+
+        var general = JsonDocument.Parse(File.ReadAllText(_provider.FilePath)).RootElement.GetProperty("general");
+        Assert.False(general.TryGetProperty("startupWindow", out _));
+        Assert.False(general.TryGetProperty("closeButtonAction", out _));
+        Assert.Equal(StartupVisibility.Window, settings.General.StartupVisibility);
+        Assert.Equal(CloseBehavior.Exit, settings.General.CloseBehavior);
+    }
+
+    [Fact]
+    public void AnUnknownGeneralEnum_FallsBackWithoutRejectingTheFile()
+    {
+        File.WriteAllText(_provider.FilePath,
+            """{"general":{"startupVisibility":"FutureMode","closeBehavior":"FutureClose"}}""");
+
+        var settings = _store.Load();
+
+        Assert.Equal(StartupVisibility.Window, settings.General.StartupVisibility);
+        Assert.Equal(CloseBehavior.Exit, settings.General.CloseBehavior);
+    }
+
     // The trash retention is a stored setting with no UI yet, so the round trip is the only thing
     // holding it: a default of a week on a fresh model, and whatever the user set after a reload.
     [Fact]
@@ -300,6 +364,24 @@ public class SettingsRoundTripTests : IDisposable
         using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
         Assert.True(doc.RootElement.GetProperty("recording").TryGetProperty("futureSetting", out _),
             "unknown page key was dropped on save");
+    }
+
+    [Fact]
+    public void SaveAfterLoad_PreservesUnknownGeneralAndNotificationKeys()
+    {
+        File.WriteAllText(_provider.FilePath,
+            """{"general":{"futureSetting":"keep","notifications":{"futureNotification":true}}}""");
+
+        var settings = _store.Load();
+        Assert.Equal("keep", settings.General.UnknownProperties["futureSetting"].GetString());
+        Assert.True(settings.General.Notifications.UnknownProperties["futureNotification"].GetBoolean());
+
+        _store.Save();
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
+        var general = doc.RootElement.GetProperty("general");
+        Assert.True(general.TryGetProperty("futureSetting", out _));
+        Assert.True(general.GetProperty("notifications").TryGetProperty("futureNotification", out _));
     }
 
     // A file with no model fields at all still loads to defaults, and a save produces a valid

@@ -29,7 +29,8 @@ internal sealed class SessionToken
     internal const string QueryKey = "k";
 
     // The cookie the UI host hands back, so the assets the document pulls in do not each need the
-    // token spelled out in their URL.
+    // token spelled out in their URL. The UI host also accepts a same-origin referrer fallback for
+    // embedded profiles that do not replay this cookie on subresource requests.
     internal const string CookieName = "tript_session";
 
     private const int TokenBytes = 32;
@@ -72,17 +73,55 @@ internal sealed class SessionToken
         return acceptCookie && Matches(FromCookie(request));
     }
 
+    // Some embedded WebView2 profiles do not replay a Set-Cookie header for subresource requests.
+    // Same-origin requests still carry the launch URL as their referrer, so the UI host can recover
+    // the token without weakening the other listeners or accepting a token from another origin.
+    internal bool AuthorisesUi(HttpListenerRequest request)
+    {
+        if (Authorises(request, acceptCookie: true))
+            return true;
+
+        var referrer = request.UrlReferrer;
+        var requestUrl = request.Url;
+        if (referrer is null || requestUrl is null ||
+            Uri.Compare(referrer, requestUrl, UriComponents.SchemeAndServer,
+                UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) != 0)
+        {
+            return false;
+        }
+
+        return Matches(FromQuery(referrer));
+    }
+
     private static string? FromQuery(HttpListenerRequest request)
     {
+        return FromQuery(request.Url);
+    }
+
+    private static string? FromQuery(Uri? url)
+    {
+        if (url is null)
+            return null;
+
         try
         {
-            return request.QueryString[QueryKey];
+            foreach (var pair in url.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var separator = pair.IndexOf('=');
+                var key = separator < 0 ? pair : pair[..separator];
+                if (Uri.UnescapeDataString(key) != QueryKey)
+                    continue;
+
+                var value = separator < 0 ? string.Empty : pair[(separator + 1)..];
+                return Uri.UnescapeDataString(value);
+            }
         }
-        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        catch (UriFormatException)
         {
-            // A query string HttpListener cannot parse carries no token as far as we are concerned.
-            return null;
+            // A malformed query carries no token as far as we are concerned.
         }
+
+        return null;
     }
 
     private static string? FromCookie(HttpListenerRequest request)

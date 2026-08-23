@@ -197,6 +197,28 @@ export interface GameSettings {
   [key: string]: unknown;
 }
 
+export type StartupVisibility = 'Window' | 'Minimized' | 'Tray';
+export type MinimizeBehavior = 'Taskbar' | 'Tray';
+export type CloseBehavior = 'Exit' | 'HideToTray';
+
+export interface NotificationSettings {
+  enabled: boolean;
+  recordingStarted: boolean;
+  recordingStopped: boolean;
+  errors: boolean;
+  recovery: boolean;
+  [key: string]: unknown;
+}
+
+export interface GeneralSettings {
+  startWithWindows: boolean;
+  startupVisibility: StartupVisibility;
+  minimizeBehavior: MinimizeBehavior;
+  closeBehavior: CloseBehavior;
+  notifications: NotificationSettings;
+  [key: string]: unknown;
+}
+
 /** The full settings object, page-typed and open-ended, mirroring the backend schema. */
 export interface SettingsModel {
   recording: RecordingSettings;
@@ -204,6 +226,7 @@ export interface SettingsModel {
   audio: AudioSettings;
   capture: CaptureSettings;
   game: GameSettings;
+  general: GeneralSettings;
   [key: string]: unknown;
 }
 

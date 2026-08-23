@@ -21,6 +21,10 @@ internal sealed class AppOptions
     // without libobs (or a display server, or the muxer helper) present.
     public bool FakeRecorder { get; init; }
 
+    // Set by the Windows per-user startup entry so the shell can distinguish a login launch from a
+    // user opening the executable directly when those behaviors diverge later.
+    public bool StartedByWindows { get; init; }
+
     public int UiPort { get; init; } = LocalPorts.Ui;
 
     public int ContentPort { get; init; } = LocalPorts.Content;
@@ -41,6 +45,7 @@ internal sealed class AppOptions
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
         string webRoot = DefaultWebRoot();
         var fakeRecorder = false;
+        var startedByWindows = false;
         string? gameListJson = null;
         var uiPort = LocalPorts.Ui;
         var contentPort = LocalPorts.Content;
@@ -62,6 +67,9 @@ internal sealed class AppOptions
                 case "--fake-recorder":
                     fakeRecorder = true;
                     break;
+                case "--startup":
+                    startedByWindows = true;
+                    break;
                 case "--game-list" when index + 1 < args.Length:
                     gameListJson = args[++index];
                     break;
@@ -75,7 +83,7 @@ internal sealed class AppOptions
                 case "-h":
                     Console.WriteLine(
                         "Usage: Tript.App [--content-root <dir>] [--settings-path <file>] " +
-                        "[--web-root <dir>] [--fake-recorder] [--game-list <json>] " +
+                        "[--web-root <dir>] [--fake-recorder] [--startup] [--game-list <json>] " +
                         "[--ui-port <port>] [--content-port <port>] [--control-port <port>]");
                     return null;
                 default:
@@ -90,6 +98,7 @@ internal sealed class AppOptions
             SettingsPath = settingsPath,
             WebRoot = webRoot,
             FakeRecorder = fakeRecorder,
+            StartedByWindows = startedByWindows,
             GameListJson = gameListJson,
             UiPort = uiPort,
             ContentPort = contentPort,
@@ -109,7 +118,7 @@ internal sealed class AppOptions
         if (Directory.Exists(published))
             return published;
 
-        var dev = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "Tript.Web", "dist");
+        var dev = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Tript.Web", "dist");
         return dev;
     }
 

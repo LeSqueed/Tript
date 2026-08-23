@@ -48,22 +48,27 @@ public enum ContentType
     Buffer
 }
 
-// What the app shows when it starts. The windows exist because capture configuration is per
-// window; whether each member survives is a frontend question, not a model one.
-public enum StartupWindowMode
+// How visible the desktop shell is when the process starts. Window is the normal restored window;
+// Tray keeps the shell alive without showing the Photino window.
+public enum StartupVisibility
 {
-    Library,
-    Settings,
-    Record
+    Window,
+    Minimized,
+    Tray
 }
 
-// What closing the window does while something is being recorded. Quit drops the in-flight
-// recording on the floor; keep-it-recording lets it continue (an orphaned file the recovery
-// prompt then offers to recover on next start).
-public enum CloseButtonAction
+// What clicking the native minimize button does.
+public enum MinimizeBehavior
 {
-    Quit,
-    KeepRecording
+    Taskbar,
+    Tray
+}
+
+// What closing the window does. An active recording is stopped before this policy is applied.
+public enum CloseBehavior
+{
+    Exit,
+    HideToTray
 }
 
 // Which capture path supplies the picture.

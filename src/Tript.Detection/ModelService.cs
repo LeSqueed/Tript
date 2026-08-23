@@ -26,9 +26,10 @@ public static class ModelService
         public int RefCount { get; set; }
     }
 
-    private static readonly Dictionary<string, ModelHandle> _models = new();
+    private static readonly Dictionary<string, ModelHandle> _models = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _modelsLock = new();
-    private static readonly ConcurrentDictionary<string, List<EventDefinition>> _definitions = new();
+    private static readonly ConcurrentDictionary<string, List<EventDefinition>> _definitions =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -38,7 +39,8 @@ public static class ModelService
 
     public static List<EventDefinition> LoadEventDefinitions(string gameId)
     {
-        return _definitions.GetOrAdd(gameId, id =>
+        var key = CanonicalGameId(gameId);
+        return _definitions.GetOrAdd(key, id =>
         {
             var path = Path.Combine(GetGamePath(id), "events.json");
 
@@ -57,11 +59,12 @@ public static class ModelService
 
     public static void SaveEventDefinitions(string gameId, List<EventDefinition> definitions)
     {
+        var key = CanonicalGameId(gameId);
         var path = Path.Combine(GetGamePath(gameId), "events.json");
         var json = JsonSerializer.Serialize(definitions, _jsonOptions);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, json);
-        _definitions[gameId] = definitions;
+        _definitions[key] = definitions;
         Log.Information("Saved {Count} event definitions for game {GameId}", definitions.Count, gameId);
     }
 
@@ -91,19 +94,20 @@ public static class ModelService
     // one UnloadModel; the session stays alive until the last of those calls.
     public static InferenceSession LoadModel(string gameId)
     {
+        var key = CanonicalGameId(gameId);
         ModelHandle handle;
         int refCount;
 
         lock (_modelsLock)
         {
-            if (!_models.TryGetValue(gameId, out var existing))
+            if (!_models.TryGetValue(key, out var existing))
             {
                 existing = new ModelHandle
                 {
-                    Session = new Lazy<InferenceSession>(() => CreateSession(gameId),
+                    Session = new Lazy<InferenceSession>(() => CreateSession(key),
                         LazyThreadSafetyMode.ExecutionAndPublication),
                 };
-                _models[gameId] = existing;
+                _models[key] = existing;
             }
 
             handle = existing;
@@ -114,7 +118,7 @@ public static class ModelService
         {
             // Outside the lock: construction reads a 10 MB file and runs ORT's graph optimizer.
             var session = handle.Session.Value;
-            Log.Debug("ONNX model for game {GameId} now has {RefCount} user(s)", gameId, refCount);
+            Log.Debug("ONNX model for game {GameId} now has {RefCount} user(s)", key, refCount);
             return session;
         }
         catch
@@ -124,9 +128,9 @@ public static class ModelService
             lock (_modelsLock)
             {
                 if (--handle.RefCount <= 0
-                    && _models.TryGetValue(gameId, out var current) && ReferenceEquals(current, handle))
+                    && _models.TryGetValue(key, out var current) && ReferenceEquals(current, handle))
                 {
-                    _models.Remove(gameId);
+                    _models.Remove(key);
                 }
             }
             throw;
@@ -137,28 +141,29 @@ public static class ModelService
     // another detector on the same game is still running inference against.
     public static void UnloadModel(string gameId)
     {
+        var key = CanonicalGameId(gameId);
         InferenceSession? released = null;
 
         lock (_modelsLock)
         {
-            if (!_models.TryGetValue(gameId, out var handle))
+            if (!_models.TryGetValue(key, out var handle))
             {
                 // Unbalanced release (or a detector that never got a session). Definitions are
                 // still dropped so a re-read picks up an edited events.json.
-                _definitions.TryRemove(gameId, out _);
-                Log.Debug("No loaded ONNX model to unload for game {GameId}", gameId);
+                _definitions.TryRemove(key, out _);
+                Log.Debug("No loaded ONNX model to unload for game {GameId}", key);
                 return;
             }
 
             if (--handle.RefCount > 0)
             {
                 Log.Debug("ONNX model for game {GameId} still has {RefCount} user(s), keeping it loaded",
-                    gameId, handle.RefCount);
+                    key, handle.RefCount);
                 return;
             }
 
-            _models.Remove(gameId);
-            _definitions.TryRemove(gameId, out _);
+            _models.Remove(key);
+            _definitions.TryRemove(key, out _);
 
             // Nothing to dispose when the only user never got past a failed construction.
             if (handle.Session.IsValueCreated)
@@ -167,15 +172,16 @@ public static class ModelService
 
         // Outside the lock: native teardown must not block another game's load.
         released?.Dispose();
-        Log.Information("Unloaded ONNX model for game {GameId}", gameId);
+        Log.Information("Unloaded ONNX model for game {GameId}", key);
     }
 
     // Test seam. The reference count is the whole point of the cache and is not observable from
     // the InferenceSession callers get back.
     internal static int GetSessionRefCount(string gameId)
     {
+        var key = CanonicalGameId(gameId);
         lock (_modelsLock)
-            return _models.TryGetValue(gameId, out var handle) ? handle.RefCount : 0;
+            return _models.TryGetValue(key, out var handle) ? handle.RefCount : 0;
     }
 
     private static InferenceSession CreateSession(string gameId)
@@ -187,7 +193,7 @@ public static class ModelService
 
         // ORT defaults to one intra-op thread per physical core and spins them after every
         // Run. Disabling spin and capping threads keeps idle CPU near zero.
-        var options = new SessionOptions
+        using var options = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             IntraOpNumThreads = 2,
@@ -200,6 +206,12 @@ public static class ModelService
 
         Log.Information("Loaded ONNX model for game {GameId} from {ModelPath}", gameId, modelPath);
         return session;
+    }
+
+    private static string CanonicalGameId(string gameId)
+    {
+        var directory = FindGameDirectory(gameId);
+        return directory is null ? gameId : Path.GetFileName(directory)!;
     }
 
     // Directories ship with the game's own casing ("Overwatch") but the id reaching us can be

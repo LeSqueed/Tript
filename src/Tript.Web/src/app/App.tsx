@@ -28,6 +28,12 @@ import './app.css';
 
 export type Route = 'library' | 'settings' | 'player' | 'training';
 
+type PhotinoShellWindow = Window & {
+  external?: {
+    sendMessage?: (message: string) => void;
+  };
+};
+
 export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // Without the launch token every listener refuses this page: the socket, the videos, the
   // thumbnails. Rendering the shell anyway would be an empty library over a socket reconnecting
@@ -59,10 +65,41 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   // launch, so a tab left open across a restart 403s on everything and would otherwise just sit
   // there empty.
   const reachability = useHostReachability(connectionState);
-  const [route, setRoute] = useState<Route>('library');
+  const startupRoute = readStartupRoute();
+  const [route, setRoute] = useState<Route>(startupRoute);
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setRoute(readStartupRoute());
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setPlayerNavigation([]);
+    };
+    const onNativeNavigation = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== 'settings') {
+        return;
+      }
+      replaceRouteHash('settings');
+      setRoute('settings');
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setPlayerNavigation([]);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('tript:navigate', onNativeNavigation);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('tript:navigate', onNativeNavigation);
+    };
+  }, []);
+
+  // Register the listener before announcing readiness so queued tray commands are not lost.
+  useEffect(() => {
+    (window as PhotinoShellWindow).external?.sendMessage?.('tript:ready');
+  }, []);
 
   // One IPC session source for the shell's lifetime, shared by the library and the player so a
   // `content` push anywhere is reflected everywhere.
@@ -145,8 +182,14 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setRoute(next);
     setPlayerItem(null);
   }, []);
-  const showLibrary = useCallback(() => leaveFor('library'), [leaveFor]);
-  const showSettings = useCallback(() => leaveFor('settings'), [leaveFor]);
+  const showLibrary = useCallback(() => {
+    replaceRouteHash('library');
+    leaveFor('library');
+  }, [leaveFor]);
+  const showSettings = useCallback(() => {
+    replaceRouteHash('settings');
+    leaveFor('settings');
+  }, [leaveFor]);
   const showTraining = useCallback(() => leaveFor('training'), [leaveFor]);
 
   return (
@@ -232,4 +275,20 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       </main>
     </div>
   );
+}
+
+function readStartupRoute(): Route {
+  const hash = window.location.hash.slice(1).toLowerCase();
+  if (hash === 'settings' || hash.startsWith('settings-')) {
+      return 'settings';
+  }
+  return 'library';
+}
+
+function replaceRouteHash(route: 'library' | 'settings'): void {
+  const hash = `#${route}`;
+  if (window.location.hash === hash) {
+    return;
+  }
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
 }

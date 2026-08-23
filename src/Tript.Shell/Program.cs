@@ -2,9 +2,9 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Drawing;
-using System.Net.Sockets;
 using Photino.NET;
 using Tript.App;
+using Tript.Settings;
 
 namespace Tript.Shell;
 
@@ -22,6 +22,16 @@ namespace Tript.Shell;
 // disposed on the main thread after the background thread has drained.
 internal static class Program
 {
+    internal const string NavigateSettingsMessage = "tript:navigate:settings";
+
+    // Where the UI host listens. The URL the window actually loads carries the launch's session
+    // token (host.UiUrl) and is built in-process — never a command-line argument, and never in the
+    // message below.
+    private static readonly string UiAddress = $"http://localhost:{LocalPorts.Ui}/";
+    private static readonly HttpClient UiClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(2),
+    };
     // STAThread on the entry point: WebView2's CoreWebView2Controller must be created on a
     // single-threaded apartment (the controller holds COM state the apartment owns). The .NET
     // runtime initialises the main thread as MTA by default, and without this the Photino webview
@@ -34,6 +44,10 @@ internal static class Program
         var options = AppOptions.Parse(args);
         if (options is null)
             return 2;
+
+        using var singleInstance = SingleInstance.TryAcquire();
+        if (singleInstance is null)
+            return 0;
 
         // BuildApp starts the libobs runtime (or not, with --fake-recorder) and wires the host, so
         // a missing OBS runtime is surfaced here with the same exit contract as the headless
@@ -51,6 +65,11 @@ internal static class Program
 
         using (host)
         {
+            var startupRegistration = WindowsStartupRegistration.Create();
+            ApplyStartupRegistration(startupRegistration, host.SettingsStore.Load().General.StartWithWindows);
+            host.SettingsChanged += settings =>
+                ApplyStartupRegistration(startupRegistration, settings.General.StartWithWindows);
+
             var hostThread = new Thread(() => RunHost(host))
             {
                 IsBackground = true,
@@ -88,7 +107,7 @@ internal static class Program
                 // The window is the whole shell UI, so the process exits when it is gone. The URL
                 // is the tokenised one, handed over in memory: the UI host serves nothing without
                 // it, and the document request trades it for a cookie so the assets follow.
-                OpenWindow(host.UiUrl, host);
+                OpenWindow(host.UiUrl, host, singleInstance);
             }
             catch (Exception exception)
             {
@@ -97,14 +116,33 @@ internal static class Program
             }
             finally
             {
-                // The window is gone (closed or failed); unblock the host's WaitForShutdown and
-                // wait for the background thread to drain before disposing the host.
+                // Stop the host before disposing it; force termination if it ignores shutdown.
                 host.Ipc.RequestShutdown();
-                hostThread.Join();
+                if (!hostThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    // The shell and backend share a process, so a stuck host must not outlive the UI.
+                    Console.Error.WriteLine("Tript.Shell: the app host did not stop; terminating the process.");
+                    Environment.Exit(1);
+                }
             }
         }
 
         return 0;
+    }
+
+    private static void ApplyStartupRegistration(WindowsStartupRegistration registration, bool enabled)
+    {
+        try
+        {
+            registration.Apply(enabled, Environment.ProcessPath
+                ?? throw new InvalidOperationException("The shell executable path is unavailable."));
+        }
+        catch (Exception exception)
+        {
+            // Startup registration is a preference, not a reason to prevent recording. Keep the
+            // setting persisted and report the platform failure for the user to act on.
+            Console.Error.WriteLine($"Tript.Shell: could not update Windows startup registration: {exception.Message}");
+        }
     }
 
     private static void RunHost(AppHost host)
@@ -143,22 +181,40 @@ internal static class Program
     {
         try
         {
-            var uri = new Uri(url);
-            using var client = new TcpClient();
-            client.Connect(uri.Host, uri.Port);
-            return true;
+            using var response = UiClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
+                .GetAwaiter().GetResult();
+            return response.IsSuccessStatusCode;
         }
-        catch (Exception exception) when (exception is SocketException or ArgumentException)
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or ArgumentException)
         {
-            // Nothing listening yet, or the URI is unusable — both mean "not reachable", not a
-            // shell failure. The bounded retry loop around this is what decides the outcome.
+            // Nothing listening yet, the URI is unusable, or the request timed out — all mean "not
+            // reachable", not a shell failure. The bounded retry loop decides the outcome.
             return false;
         }
     }
 
-    private static void OpenWindow(string url, AppHost host)
+    private static void OpenWindow(string url, AppHost host, SingleInstance singleInstance)
     {
-        var window = new PhotinoWindow
+            var general = host.SettingsStore.Load().General;
+            var iconPath = Path.Combine(host.Options.WebRoot, "tript.ico");
+        var startupUrl = BuildLibraryUrl(url);
+        PhotinoWindow? window = null;
+        var activationPending = false;
+        var startupMinimizePending = false;
+        var exitRequested = false;
+        var webReady = false;
+        string? pendingNavigation = null;
+        var startupVisibility = general.StartupVisibility;
+        var startupVisibilityApplied = false;
+        using var tray = OperatingSystem.IsWindows() && File.Exists(iconPath)
+            ? new WindowsTrayPresence(
+                iconPath,
+                () => window is not null && WindowsWindow.IsVisible(window),
+                () => host.IsRecording,
+                command => HandleTrayCommand(command))
+            : null;
+
+        window = new PhotinoWindow
         {
             Title = "Tript",
             Size = new Size(1280, 800),
@@ -169,11 +225,151 @@ internal static class Program
             DevToolsEnabled = false,
         };
 
-        // Allow the window to close immediately: the handler returns false so a close goes
-        // through (true would prevent the window from closing and hang WaitForClose forever).
-        // The handler is kept so a future windowed build can intercept close (unsaved state,
-        // an in-flight recording); for now a close always goes through.
-        window.RegisterWindowClosingHandler((_, _) => false);
+        if (File.Exists(iconPath))
+            window.IconFile = iconPath;
+        if (OperatingSystem.IsWindows())
+        {
+            // Keep the native channel enabled for the shell lifetime. The persisted preference is
+            // checked by the notification sink, while Photino does not allow this property to change
+            // after the native window has been created.
+            window.NotificationsEnabled = true;
+            window.NotificationRegistrationId = "Tript";
+        }
+
+        void ShowMainWindow()
+        {
+            if (window is null)
+            {
+                activationPending = true;
+                return;
+            }
+
+            try
+            {
+                if (!startupVisibilityApplied)
+                    startupVisibility = StartupVisibility.Window;
+                window.Invoke(() => WindowsWindow.ShowWindow(window));
+            }
+            catch (ApplicationException)
+            {
+                activationPending = true;
+            }
+        }
+
+        singleInstance.ActivationRequested += ShowMainWindow;
+
+        void HandleTrayCommand(TrayCommand command)
+        {
+            if (window is null)
+                return;
+
+            switch (command)
+            {
+                case TrayCommand.Show:
+                    ShowMainWindow();
+                    break;
+                case TrayCommand.Hide:
+                    WindowsWindow.HideWindow(window);
+                    break;
+                case TrayCommand.StartRecording:
+                    ThreadPool.QueueUserWorkItem(_ => host.StartRecordingOrReport(null));
+                    break;
+                case TrayCommand.StopRecording:
+                    ThreadPool.QueueUserWorkItem(_ => host.StopRecordingOrReport());
+                    break;
+                case TrayCommand.OpenSettings:
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        try
+                        {
+                            window.Invoke(() =>
+                            {
+                                WindowsWindow.ShowWindow(window);
+                                if (webReady)
+                                {
+                                    window.SendWebMessage(NavigateSettingsMessage);
+                                }
+                                else
+                                {
+                                    pendingNavigation = NavigateSettingsMessage;
+                                }
+                            });
+                        }
+                        catch (ApplicationException)
+                        {
+                            activationPending = true;
+                        }
+                    });
+                    break;
+                case TrayCommand.Exit:
+                    exitRequested = true;
+                    CloseShellOrRequestShutdown(
+                        () => window.Invoke(() => WindowsWindow.CloseWindow(window)),
+                        host.Ipc.RequestShutdown,
+                        () => Environment.Exit(1));
+                    break;
+            }
+        }
+
+        void UpdateTrayState(bool recording, string? gameId)
+        {
+            if (tray is null || window is null)
+                return;
+
+            try
+            {
+                window.Invoke(() => tray.SetRecordingState(recording, gameId));
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Tript.Shell: could not update tray state: {exception.Message}");
+            }
+        }
+
+        host.StateChanged += UpdateTrayState;
+        host.NotificationRequested += (kind, title, body) =>
+        {
+            if (!OperatingSystem.IsWindows() || window is null)
+                return;
+
+            var notifications = host.SettingsStore.Load().General.Notifications;
+            if (!notifications.Enabled || !NotificationEnabled(notifications, kind))
+                return;
+
+            try
+            {
+                window.Invoke(() =>
+                {
+                    if (WindowsWindow.IsVisible(window) && !window.Minimized)
+                        return;
+                    window.SendNotification(title, body);
+                });
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Tript.Shell: could not send notification: {exception.Message}");
+            }
+        };
+
+        window.RegisterWindowClosingHandler((_, _) =>
+        {
+            if (exitRequested)
+                return false;
+
+            if (tray is null)
+                return false;
+
+            var settings = host.SettingsStore.Load().General;
+            if (host.IsRecording)
+                host.StopRecordingOrReport();
+
+            var shouldHide = settings.CloseBehavior == CloseBehavior.HideToTray;
+            if (!shouldHide)
+                return false;
+
+            WindowsWindow.HideWindow(window);
+            return true;
+        });
 
         // Install the picker delegates before loading the UI. The native window is created by the
         // time a user can click Browse, and setting these eagerly also avoids depending on the
@@ -189,11 +385,109 @@ internal static class Program
         {
             host.FolderPicker = () => PickRecordingFolder(window, host);
             host.TrainingFolderPicker = () => PickTrainingFolder(window);
+            tray?.SetRecordingState(host.IsRecording, host.CurrentGameId);
+            if (activationPending)
+            {
+                activationPending = false;
+                startupVisibility = StartupVisibility.Window;
+                WindowsWindow.ShowWindow(window);
+            }
+
         });
 
-        window.Load(url);
-        window.WaitForClose();
+        void ApplyStartupVisibility()
+        {
+            if (startupVisibilityApplied)
+                return;
+
+            startupVisibilityApplied = true;
+            if (startupVisibility == StartupVisibility.Minimized)
+            {
+                startupMinimizePending = true;
+                WindowsWindow.MinimizeWindow(window);
+            }
+            else if (startupVisibility == StartupVisibility.Tray)
+            {
+                WindowsWindow.HideWindow(window);
+            }
+        }
+
+        window.RegisterWebMessageReceivedHandler((_, message) =>
+        {
+            if (!string.Equals(message, "tript:ready", StringComparison.Ordinal))
+                return;
+
+            try
+            {
+                window.Invoke(() =>
+                {
+                    webReady = true;
+                    if (pendingNavigation is not null)
+                    {
+                        var navigation = pendingNavigation;
+                        pendingNavigation = null;
+                        window.SendWebMessage(navigation);
+                    }
+
+                    ApplyStartupVisibility();
+                });
+            }
+            catch (ApplicationException)
+            {
+                // The page-ready message can race window teardown; WaitForClose will perform the
+                // normal cleanup and there is no visibility action left to apply.
+            }
+        });
+
+        window.WindowMinimizedHandler = (_, _) =>
+        {
+            if (startupMinimizePending)
+            {
+                startupMinimizePending = false;
+                return;
+            }
+
+            if (tray is not null && host.SettingsStore.Load().General.MinimizeBehavior == MinimizeBehavior.Tray)
+                WindowsWindow.HideWindow(window);
+        };
+
+        tray?.Start();
+        window.Load(startupUrl);
+        try
+        {
+            window.WaitForClose();
+        }
+        finally
+        {
+            singleInstance.ActivationRequested -= ShowMainWindow;
+        }
     }
+
+    internal static string BuildLibraryUrl(string url) => $"{url}#library";
+
+    internal static void CloseShellOrRequestShutdown(
+        Action closeShell, Action requestShutdown, Action forceExit)
+    {
+        try
+        {
+            closeShell();
+        }
+        catch (ApplicationException)
+        {
+            // The WebView may already be gone after a host failure.
+            requestShutdown();
+            forceExit();
+        }
+    }
+
+    internal static bool NotificationEnabled(NotificationSettings settings, NotificationKind kind) => kind switch
+    {
+        NotificationKind.RecordingStarted => settings.RecordingStarted,
+        NotificationKind.RecordingStopped => settings.RecordingStopped,
+        NotificationKind.Error => settings.Errors,
+        NotificationKind.Recovery => settings.Recovery,
+        _ => false,
+    };
 
     // Runs the native "select a folder" dialog and returns the chosen directory, or null when the
     // user cancels. SetVideoLocation arrives on the host's IPC receive thread, so the dialog must

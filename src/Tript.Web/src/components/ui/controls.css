@@ -268,6 +268,11 @@
   font-size: var(--text-body);
 }
 
+.toggle.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toggle-knob {
     transition: none;

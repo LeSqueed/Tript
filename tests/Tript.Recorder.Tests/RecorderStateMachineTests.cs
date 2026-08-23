@@ -52,6 +52,21 @@ public class RecorderStateMachineTests
     }
 
     [Fact]
+    public void CompletedStop_CanDrainTheDeferredOutputImmediately()
+    {
+        using var recorder = NewRecorder(_session);
+        recorder.Start(TestSettings.Session());
+        var output = _session.LastCreatedOutput!;
+
+        output.RaiseStop(ObsOutputStopCode.Success);
+        Assert.False(output.Disposed);
+
+        recorder.DrainCompletedOutput();
+
+        Assert.True(output.Disposed);
+    }
+
+    [Fact]
     public void StopFromIdle_IsANoOp()
     {
         using var recorder = NewRecorder(_session);
@@ -161,6 +176,49 @@ public class RecorderStateMachineTests
         Assert.Equal(0, refusing.PlaceSourceCalls);
     }
 
+    [Fact]
+    public void OutputStartException_CleansUpTheOutputAndRefusesTheStart()
+    {
+        var session = new FakeRecorderSession();
+        var output = new FakeOutput { StartError = new InvalidOperationException("start failed") };
+        session.SetOutput(output);
+        using var recorder = new Recorder(session, TestSettings.Session());
+
+        Assert.False(recorder.Start(TestSettings.Session()));
+        Assert.True(output.Disposed);
+        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
+        Assert.Equal(RecorderStopReason.StartRefused, recorder.Snapshot.LastStopReason);
+    }
+
+    [Fact]
+    public void PlaceSourceException_CleansUpTheStartedOutputAndClearsTheSource()
+    {
+        var session = new FakeRecorderSession
+        {
+            PlaceSourceError = new InvalidOperationException("place failed")
+        };
+        using var recorder = NewRecorder(session);
+
+        Assert.False(recorder.Start(TestSettings.Session()));
+        Assert.True(session.LastCreatedOutput!.Disposed);
+        Assert.Equal(1, session.ClearSourceCalls);
+        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
+    }
+
+    [Fact]
+    public void OutputStoppingDuringStart_DoesNotPublishRecording()
+    {
+        var session = new FakeRecorderSession();
+        var output = new FakeOutput { RaiseStopDuringStart = true };
+        session.SetOutput(output);
+        using var recorder = new Recorder(session, TestSettings.Session());
+
+        Assert.False(recorder.Start(TestSettings.Session()));
+        Assert.True(output.Disposed);
+        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
+        Assert.Equal(0, session.PlaceSourceCalls);
+    }
+
     // A wiring failure (encoder unavailable, no video mix) refuses the start synchronously with the
     // exception's message as the reason.
     [Fact]
@@ -231,6 +289,7 @@ public class RecorderStateMachineTests
 
         Assert.Equal(RecorderState.Stopping, recorder.Snapshot.State);
         Assert.Equal(RecorderStopReason.Disposed, recorder.Snapshot.LastStopReason);
+        Assert.Equal(1, _session.ClearSourceCalls);
 
         // Dispose is idempotent.
         recorder.Dispose();

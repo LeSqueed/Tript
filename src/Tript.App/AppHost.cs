@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
+using Tript.Core;
 using Tript.Detection;
 using Tript.Media;
 using Tript.Obs;
@@ -101,6 +102,15 @@ internal sealed class AppHost : IDisposable
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
+    private readonly object _automaticClipGate = new();
+    private readonly List<Bookmark> _automaticClipBookmarks = [];
+    private AutomaticClipJob? _automaticClipJob;
+    private CancellationTokenSource? _liveHighlightCancellation;
+    private readonly List<Task> _liveHighlightTasks = [];
+    private readonly List<LiveHighlightRegion> _liveHighlightRegions = [];
+    private readonly HashSet<Guid> _liveHighlightBookmarkIds = [];
+    private DateTime _recordingStartUtc;
+    private bool _liveHighlightsEnabled;
     private CancellationTokenSource? _captureWaitCancellation;
     private int _recordingStopRequested;
 
@@ -118,6 +128,35 @@ internal sealed class AppHost : IDisposable
     private Timer? _trashPurgeTimer;
 
     private bool _disposed;
+
+    private sealed class AutomaticClipJob
+    {
+        internal required string SourceSessionPath { get; init; }
+
+        internal required int Total { get; init; }
+
+        internal int Completed { get; set; }
+
+        internal bool Paused { get; set; }
+    }
+
+    private sealed class LiveHighlightRegion
+    {
+        internal required TimeSpan Start { get; set; }
+
+        internal required TimeSpan End { get; set; }
+
+        internal HashSet<Guid> BookmarkIds { get; } = [];
+
+        internal bool SaveRequested { get; set; }
+
+        internal bool Abandoned { get; set; }
+    }
+
+    // Let a detection callback at the exact post-roll boundary arrive before the replay save is
+    // requested. The clip end remains the event's ten-second post-roll; this only removes the timer
+    // race between the detector callback and the save task.
+    private static readonly TimeSpan LiveHighlightBoundaryGrace = TimeSpan.FromSeconds(1);
 
 #if TRIPT_TRAINING
     private readonly TrainingRunner _trainingRunner = new();
@@ -346,6 +385,12 @@ internal sealed class AppHost : IDisposable
         // Refuse new starts before anything is torn down. The detector's Dispose deliberately does
         // not block behind an in-flight handler, so a GameStarted can still arrive after it returns.
         _captureWaitCancellation?.Cancel();
+        lock (_automaticClipGate)
+        {
+            if (_automaticClipJob is not null)
+                _automaticClipJob.Paused = false;
+            Monitor.PulseAll(_automaticClipGate);
+        }
 #if TRIPT_TRAINING
         _trainingRunner.Cancel();
         _trainingCancellation?.Cancel();
@@ -446,13 +491,10 @@ internal sealed class AppHost : IDisposable
         var settings = _settingsStore.Load();
         var resolved = SettingsResolver.Resolve(settings, effectiveGameId);
 
-        // The app records Session only; a resolved Hybrid is flattened so the recorder accepts the start.
-        if (resolved.Mode == RecordingMode.Hybrid)
-            resolved.Mode = RecordingMode.Session;
-        if (resolved.Mode != RecordingMode.Session)
+        if (!resolved.Mode.IsAlphaSupported())
             return false;
 
-        resolved.OutputPath = BuildOutputPath(settings);
+        resolved.OutputPath = BuildOutputPath(settings, effectiveGameId);
 
         EnsureRecorderBuilt(resolved);
 
@@ -505,6 +547,20 @@ internal sealed class AppHost : IDisposable
         };
 
         _sessionTracker.Start(_pendingMetadata.StartTime);
+        lock (_automaticClipGate)
+        {
+            _automaticClipBookmarks.Clear();
+            _liveHighlightRegions.Clear();
+            _liveHighlightBookmarkIds.Clear();
+            _recordingStartUtc = DateTime.UtcNow;
+            _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
+                && resolved.Mode.UsesReplayBuffer();
+            _liveHighlightCancellation?.Dispose();
+            _liveHighlightCancellation = _liveHighlightsEnabled
+                ? new CancellationTokenSource()
+                : null;
+            _liveHighlightTasks.Clear();
+        }
 
         StartDetection(effectiveGameId);
 
@@ -537,6 +593,8 @@ internal sealed class AppHost : IDisposable
     {
         if (_recorder is null || _recorder.Snapshot.State == RecorderState.Idle)
             return false;
+
+        StopLiveAutomaticHighlights();
 
         if (!_recorder.Stop())
             return false;
@@ -591,11 +649,34 @@ internal sealed class AppHost : IDisposable
         _recorder!.DrainCompletedOutput();
         StopDetection();
 
+        var sourcePath = _activeOutputPath;
+        List<Bookmark> automaticBookmarks;
+        HashSet<Guid> liveBookmarkIds;
+        lock (_automaticClipGate)
+        {
+            automaticBookmarks = _automaticClipBookmarks.ToList();
+            _automaticClipBookmarks.Clear();
+            liveBookmarkIds = _liveHighlightBookmarkIds.ToHashSet();
+            _liveHighlightRegions.Clear();
+            _liveHighlightBookmarkIds.Clear();
+            _liveHighlightsEnabled = false;
+        }
+
         var session = _sessionTracker.Stop();
         if (session is not null && _pendingMetadata is not null)
         {
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
             WriteMetadataRecord(_pendingMetadata);
+
+            if (sourcePath is not null && _pendingMetadata.VideoPath.Length > 0
+                && _settingsStore.Load().Recording.AutomaticClipsEnabled)
+            {
+                var unsavedBookmarks = automaticBookmarks
+                    .Where(bookmark => !liveBookmarkIds.Contains(bookmark.Id))
+                    .ToList();
+                if (unsavedBookmarks.Count > 0)
+                    QueueAutomaticClips(sourcePath, _pendingMetadata.VideoPath, unsavedBookmarks);
+            }
         }
 
         _pendingMetadata = null;
@@ -878,7 +959,7 @@ internal sealed class AppHost : IDisposable
         _detectionHost = null;
 
         var detector = new VisualEventDetectorAdapter(new VisualEventDetector());
-        _detectionHost = new DetectionHost(detector);
+        _detectionHost = new DetectionHost(detector, onAutomaticClipBookmark: RememberAutomaticClipBookmark);
         if (_detectionHost.Start(gameId))
         {
             PushGameList();
@@ -896,6 +977,352 @@ internal sealed class AppHost : IDisposable
         _detectionHost?.Stop();
         _detectionHost?.Dispose();
         _detectionHost = null;
+    }
+
+    private void RememberAutomaticClipBookmark(Bookmark bookmark)
+    {
+        bookmark.IsAutomaticClipCandidate = true;
+        LiveHighlightRegion? regionToSchedule = null;
+        CancellationToken token = default;
+        lock (_automaticClipGate)
+        {
+            _automaticClipBookmarks.Add(bookmark);
+
+            if (!_liveHighlightsEnabled || _liveHighlightCancellation is null)
+                return;
+
+            var start = bookmark.Time > AutomaticClipPlanner.PreRoll
+                ? bookmark.Time - AutomaticClipPlanner.PreRoll
+                : TimeSpan.Zero;
+            var existing = _liveHighlightRegions.FirstOrDefault(region =>
+                !region.SaveRequested && bookmark.Time <= region.End);
+            if (existing is not null)
+            {
+                existing.End = existing.End > bookmark.Time + AutomaticClipPlanner.PostRoll
+                    ? existing.End
+                    : bookmark.Time + AutomaticClipPlanner.PostRoll;
+                existing.BookmarkIds.Add(bookmark.Id);
+                return;
+            }
+
+            regionToSchedule = new LiveHighlightRegion
+            {
+                Start = start,
+                End = bookmark.Time + AutomaticClipPlanner.PostRoll,
+            };
+            regionToSchedule.BookmarkIds.Add(bookmark.Id);
+            _liveHighlightRegions.Add(regionToSchedule);
+            token = _liveHighlightCancellation.Token;
+        }
+
+        var task = SaveLiveAutomaticHighlightWhenReady(regionToSchedule, token);
+        lock (_automaticClipGate)
+            _liveHighlightTasks.Add(task);
+    }
+
+    private async Task SaveLiveAutomaticHighlightWhenReady(LiveHighlightRegion region,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                TimeSpan delay;
+                lock (_automaticClipGate)
+                {
+                    if (region.SaveRequested || !_liveHighlightsEnabled)
+                        return;
+                    delay = _recordingStartUtc + region.End + LiveHighlightBoundaryGrace - DateTime.UtcNow;
+                }
+
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+
+                lock (_automaticClipGate)
+                {
+                    if (region.SaveRequested || !_liveHighlightsEnabled)
+                        return;
+                    if (_recordingStartUtc + region.End + LiveHighlightBoundaryGrace > DateTime.UtcNow)
+                        continue;
+                    region.SaveRequested = true;
+                }
+
+                var recorder = _recorder;
+                var sourcePath = _activeOutputPath;
+                if (recorder is null || sourcePath is null)
+                    return;
+
+                var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
+                Directory.CreateDirectory(replayDirectory);
+                var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
+                var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var accepted = recorder.SaveReplayBuffer(replayDirectory,
+                    "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss",
+                    replayPath =>
+                    {
+                        _ = Task.Run(() =>
+                        {
+                            try
+                            {
+                                CreateLiveAutomaticHighlight(region, sourceSessionPath, sourcePath,
+                                    replayPath, saveElapsed);
+                            }
+                            catch (Exception exception)
+                            {
+                                Log.Error(exception, "AppHost: live automatic highlight failed for {SourcePath}",
+                                    sourcePath);
+                            }
+                            finally
+                            {
+                                completed.TrySetResult();
+                            }
+                        });
+                    });
+
+                if (!accepted)
+                {
+                    lock (_automaticClipGate)
+                        region.SaveRequested = false;
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
+                await completed.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A stop gives unsaved regions one final chance to come from the active replay buffer;
+            // anything that still fails is handled by the finished-session fallback.
+        }
+        catch (TimeoutException)
+        {
+            lock (_automaticClipGate)
+            {
+                region.Abandoned = true;
+                region.SaveRequested = false;
+            }
+            Log.Warning("AppHost: replay buffer save did not complete for live automatic highlight");
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "AppHost: live automatic highlight scheduling failed");
+        }
+    }
+
+    private void CreateLiveAutomaticHighlight(LiveHighlightRegion region, string sourceSessionPath,
+        string sourcePath, string replayPath, double replayEndSeconds, bool deleteReplay = true)
+    {
+        try
+        {
+            if (!File.Exists(replayPath) || IsAbandonedLiveRegion(region))
+                return;
+
+            var bufferSeconds = Math.Max(1,
+                _settingsStore.Load().Buffer.Duration.TotalSeconds);
+            var replayStartSeconds = Math.Max(0, replayEndSeconds - bufferSeconds);
+            var localStart = Math.Max(0, region.Start.TotalSeconds - replayStartSeconds);
+            var localEnd = region.End.TotalSeconds - replayStartSeconds;
+            if (localEnd <= localStart)
+                return;
+
+            _clipEngine ??= BuildClipEngine();
+            var outputDirectory = HighlightsDirectoryForSource(sourcePath);
+            var outputPath = Path.Combine(outputDirectory,
+                $"{Path.GetFileNameWithoutExtension(sourcePath)}-highlight-live-{Guid.NewGuid():N}.mp4");
+            var localRegion = new ClipRegion(TimeSpan.FromSeconds(localStart),
+                TimeSpan.FromSeconds(localEnd));
+            var results = _clipEngine.CreateClips(new ClipRequest
+            {
+                OperationId = $"automatic-live-{Guid.NewGuid():N}",
+                SourcePath = replayPath,
+                SourceSessionPath = sourceSessionPath,
+                Regions = [localRegion],
+                Mode = ClipMode.Combine,
+                OutputPath = outputPath,
+                EncoderFamily = "libx264",
+                PreferStreamCopy = true,
+            });
+
+            if (IsAbandonedLiveRegion(region))
+            {
+                foreach (var result in results)
+                {
+                    try { File.Delete(result); }
+                    catch (IOException exception) { Log.Warning(exception, "AppHost: abandoned live highlight could not be removed"); }
+                    catch (UnauthorizedAccessException exception) { Log.Warning(exception, "AppHost: abandoned live highlight could not be removed"); }
+                }
+                return;
+            }
+
+            var metadataSaved = true;
+            foreach (var result in results)
+            {
+                metadataSaved &= _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
+                    region.Start.TotalSeconds, region.End.TotalSeconds);
+            }
+            if (!metadataSaved)
+            {
+                foreach (var result in results)
+                {
+                    try { File.Delete(result); }
+                    catch (IOException exception) { Log.Warning(exception, "AppHost: live highlight could not be removed after metadata failure"); }
+                    catch (UnauthorizedAccessException exception) { Log.Warning(exception, "AppHost: live highlight could not be removed after metadata failure"); }
+                }
+                return;
+            }
+
+            lock (_automaticClipGate)
+            {
+                foreach (var bookmarkId in region.BookmarkIds)
+                    _liveHighlightBookmarkIds.Add(bookmarkId);
+            }
+            PushContent();
+        }
+        finally
+        {
+            if (deleteReplay)
+            {
+                try { File.Delete(replayPath); }
+                catch (IOException exception) { Log.Warning(exception, "AppHost: replay temporary file could not be removed"); }
+                catch (UnauthorizedAccessException exception) { Log.Warning(exception, "AppHost: replay temporary file could not be removed"); }
+            }
+        }
+    }
+
+    private bool IsAbandonedLiveRegion(LiveHighlightRegion region)
+    {
+        lock (_automaticClipGate)
+            return region.Abandoned;
+    }
+
+    private void StopLiveAutomaticHighlights()
+    {
+        Task[] tasks;
+        CancellationTokenSource? cancellation;
+        lock (_automaticClipGate)
+        {
+            _liveHighlightsEnabled = false;
+            cancellation = _liveHighlightCancellation;
+            cancellation?.Cancel();
+            _liveHighlightCancellation = null;
+            tasks = _liveHighlightTasks.ToArray();
+        }
+
+        try
+        {
+            Task.WaitAll(tasks, TimeSpan.FromSeconds(2));
+        }
+        catch (Exception exception) when (exception is AggregateException or ObjectDisposedException)
+        {
+            Log.Debug(exception, "AppHost: live automatic highlight tasks did not all settle before stop");
+        }
+        finally
+        {
+            lock (_automaticClipGate)
+            {
+                foreach (var region in _liveHighlightRegions)
+                {
+                    if (region.SaveRequested && !_liveHighlightBookmarkIds.Overlaps(region.BookmarkIds))
+                    {
+                        region.Abandoned = true;
+                        region.SaveRequested = false;
+                    }
+                }
+            }
+            cancellation?.Dispose();
+        }
+
+        SavePendingLiveHighlightsAtStop();
+    }
+
+    private void SavePendingLiveHighlightsAtStop()
+    {
+        var recorder = _recorder;
+        var sourcePath = _activeOutputPath;
+        if (recorder is null || sourcePath is null)
+            return;
+
+        List<LiveHighlightRegion> pending;
+        lock (_automaticClipGate)
+        {
+            pending = _liveHighlightRegions
+                .Where(region => !region.Abandoned
+                    && !region.SaveRequested
+                    && !_liveHighlightBookmarkIds.Overlaps(region.BookmarkIds))
+                .ToList();
+            foreach (var region in pending)
+                region.SaveRequested = true;
+        }
+
+        if (pending.Count == 0)
+            return;
+
+        var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
+        Directory.CreateDirectory(replayDirectory);
+        var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var accepted = recorder.SaveReplayBuffer(replayDirectory,
+            "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss",
+            replayPath =>
+            {
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        foreach (var region in pending)
+                            CreateLiveAutomaticHighlight(region, sourceSessionPath, sourcePath,
+                                replayPath, saveElapsed, deleteReplay: false);
+                    }
+                    catch (Exception exception)
+                    {
+                        Log.Error(exception, "AppHost: pending live automatic highlights failed at stop");
+                    }
+                    finally
+                    {
+                        try { File.Delete(replayPath); }
+                        catch (IOException exception) { Log.Warning(exception, "AppHost: stop replay temporary file could not be removed"); }
+                        catch (UnauthorizedAccessException exception) { Log.Warning(exception, "AppHost: stop replay temporary file could not be removed"); }
+                        completed.TrySetResult();
+                    }
+                });
+            });
+
+        if (!accepted)
+        {
+            lock (_automaticClipGate)
+            {
+                foreach (var region in pending)
+                    region.SaveRequested = false;
+            }
+            return;
+        }
+
+        try
+        {
+            if (!completed.Task.Wait(TimeSpan.FromSeconds(5)))
+            {
+                lock (_automaticClipGate)
+                {
+                    foreach (var region in pending)
+                    {
+                        region.Abandoned = true;
+                        region.SaveRequested = false;
+                    }
+                }
+                Log.Warning("AppHost: pending live automatic highlights timed out at stop");
+            }
+        }
+        catch (AggregateException exception)
+        {
+            Log.Warning(exception, "AppHost: pending live automatic highlights did not settle at stop");
+        }
     }
 
 #if TRIPT_TRAINING
@@ -1116,6 +1543,10 @@ internal sealed class AppHost : IDisposable
             Detected = _detector is not null && _detectorGameNames.Contains(gameId),
         };
 
+        AutomaticClipJob? automaticClipJob;
+        lock (_automaticClipGate)
+            automaticClipJob = _automaticClipJob;
+
         _ipc.Broadcast("state", JsonSerializer.SerializeToElement(new
         {
             state = new
@@ -1127,6 +1558,14 @@ internal sealed class AppHost : IDisposable
                 // connected, which for an 8-hour recording is a confidently wrong number — worse
                 // than showing none.
                 startedAt = recording ? DateTimeToUnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
+                automaticClips = automaticClipJob is null ? null : new
+                {
+                    active = true,
+                    paused = automaticClipJob.Paused,
+                    sourceSessionPath = automaticClipJob.SourceSessionPath,
+                    completed = automaticClipJob.Completed,
+                    total = automaticClipJob.Total,
+                },
             },
         }, Wire.Options));
         StateChanged?.Invoke(recording, gameId);
@@ -1287,7 +1726,7 @@ internal sealed class AppHost : IDisposable
         }
 
         var workspace = EnsureTrainingWorkspace(gameId);
-        var definitions = workspace.LoadDefinitions();
+        var definitions = workspace.LoadRuntimeDefinitions();
         var samples = new TrainingSampleStore(workspace).List();
         var dataset = new
         {
@@ -1513,8 +1952,12 @@ internal sealed class AppHost : IDisposable
         };
         try
         {
-            TrainingSampleStore.WriteAtomically(workspace.EventsPath,
-                JsonSerializer.SerializeToUtf8Bytes(orderedEvents, options));
+            var serializedEvents = JsonSerializer.SerializeToUtf8Bytes(orderedEvents, options);
+            TrainingSampleStore.WriteAtomically(workspace.EventsPath, serializedEvents);
+
+            var runtimeEventsPath = TrainingPaths.InstalledEventsPath(parameters.GameId);
+            Directory.CreateDirectory(Path.GetDirectoryName(runtimeEventsPath)!);
+            TrainingSampleStore.WriteAtomically(runtimeEventsPath, serializedEvents);
         }
         catch
         {
@@ -1802,8 +2245,22 @@ internal sealed class AppHost : IDisposable
         var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
         var gameIdsByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
         var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
+        var gamesByRecordingPath = new Dictionary<string, string>(StringComparer.Ordinal);
+        var gameIdsByRecordingPath = new Dictionary<string, string>(StringComparer.Ordinal);
+        var tracksByRecordingPath = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
         var clips = new List<ContentItem>();
         var probeBudget = DurationProbeBudget;
+        string? processingSessionPath;
+        bool processingPaused = false;
+        int? processingCompleted = null;
+        int? processingTotal = null;
+        lock (_automaticClipGate)
+        {
+            processingSessionPath = _automaticClipJob?.SourceSessionPath;
+            processingPaused = _automaticClipJob?.Paused == true;
+            processingCompleted = _automaticClipJob?.Completed;
+            processingTotal = _automaticClipJob?.Total;
+        }
 
         foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
         {
@@ -1814,7 +2271,7 @@ internal sealed class AppHost : IDisposable
                 continue;
 
             var topLevel = TopLevelDirectory(relative);
-            var contentType = topLevel.Equals("clips", StringComparison.Ordinal) ? "clip" : "recording";
+            var contentType = topLevel is "clips" or "highlights" ? "clip" : "recording";
 
             var item = new ContentItem
             {
@@ -1823,6 +2280,14 @@ internal sealed class AppHost : IDisposable
                 FilePath = relative,
                 Title = Path.GetFileNameWithoutExtension(file.Name),
                 FileSizeBytes = SafeLength(file),
+                AutomaticClipsProcessing = string.Equals(relative, processingSessionPath,
+                    StringComparison.OrdinalIgnoreCase),
+                AutomaticClipsPaused = string.Equals(relative, processingSessionPath,
+                    StringComparison.OrdinalIgnoreCase) && processingPaused,
+                AutomaticClipsCompleted = string.Equals(relative, processingSessionPath,
+                    StringComparison.OrdinalIgnoreCase) ? processingCompleted : null,
+                AutomaticClipsTotal = string.Equals(relative, processingSessionPath,
+                    StringComparison.OrdinalIgnoreCase) ? processingTotal : null,
             };
 
             if (contentType == "recording")
@@ -1851,11 +2316,20 @@ internal sealed class AppHost : IDisposable
 
                     var baseName = Path.GetFileNameWithoutExtension(file.Name);
                     if (item.Game is not null)
+                    {
                         gamesByRecording[baseName] = item.Game;
+                        gamesByRecordingPath[relative] = item.Game;
+                    }
                     if (item.GameId is not null)
+                    {
                         gameIdsByRecording[baseName] = item.GameId;
+                        gameIdsByRecordingPath[relative] = item.GameId;
+                    }
                     if (item.AudioTracks is not null)
+                    {
                         tracksByRecording[baseName] = item.AudioTracks;
+                        tracksByRecordingPath[relative] = item.AudioTracks;
+                    }
                 }
                 else
                 {
@@ -1867,6 +2341,16 @@ internal sealed class AppHost : IDisposable
             {
                 // A clip without a stored title falls back to its file name. Its own record carries the duration.
                 var record = _clipTitles.LoadRecord(file.Name);
+                item.SourceSessionPath = record?.SourceSessionPath;
+                if (record?.IsAutomatic == true)
+                {
+                    contentType = "highlight";
+                    item.ContentType = contentType;
+                    item.Automated = true;
+                    item.SourceSessionPath = record.SourceSessionPath;
+                    item.ClipStartTime = record.ClipStartTime;
+                    item.ClipEndTime = record.ClipEndTime;
+                }
                 if (!string.IsNullOrWhiteSpace(record?.Title))
                     item.Title = record.Title;
                 item.Favorite = record?.Favorite ?? false;
@@ -1893,10 +2377,10 @@ internal sealed class AppHost : IDisposable
 
         foreach (var clip in clips)
         {
-            clip.Game = InheritedGame(clip.FileName, gamesByRecording);
-            clip.GameId = InheritedFrom(clip.FileName, gameIdsByRecording);
+            clip.Game = InheritedGame(clip, gamesByRecordingPath, gamesByRecording);
+            clip.GameId = InheritedFrom(clip, gameIdsByRecordingPath, gameIdsByRecording);
             // A clip keeps every audio track of the session it was cut from, so it keeps the names.
-            clip.AudioTracks = InheritedFrom(clip.FileName, tracksByRecording);
+            clip.AudioTracks = InheritedFrom(clip, tracksByRecordingPath, tracksByRecording);
         }
 
         // The relative path is the tiebreak so the order is total: List.Sort is unstable, and two files
@@ -1913,16 +2397,22 @@ internal sealed class AppHost : IDisposable
     // The game a clip inherits from the session it was cut from. A clip has no metadata record of
     // its own and nothing on the wire carries the game into CreateClip's output, so the file name
     // is the link: both naming paths start the name with the source session's base name.
-    private static string? InheritedGame(string clipFileName, Dictionary<string, string> gamesByRecording)
-        => InheritedFrom(clipFileName, gamesByRecording);
+    private static string? InheritedGame(ContentItem clip,
+        Dictionary<string, string> gamesByRecordingPath, Dictionary<string, string> gamesByRecording)
+        => InheritedFrom(clip, gamesByRecordingPath, gamesByRecording);
 
     // What a clip inherits from the session it was cut from. A clip has no metadata record of its
     // own and nothing on the wire carries this into CreateClip's output, so the file name is the
     // link: both naming paths start the name with the source session's base name. The longest
     // matching session wins, so a session whose name is a prefix of another cannot claim its clips.
-    private static TValue? InheritedFrom<TValue>(string clipFileName, Dictionary<string, TValue> bySession)
+    private static TValue? InheritedFrom<TValue>(ContentItem clip,
+        Dictionary<string, TValue> byRecordingPath, Dictionary<string, TValue> bySession)
         where TValue : class
     {
+        if (clip.SourceSessionPath is not null && byRecordingPath.TryGetValue(clip.SourceSessionPath, out var linked))
+            return linked;
+
+        var clipFileName = clip.FileName;
         var clipBaseName = Path.GetFileNameWithoutExtension(clipFileName);
         TValue? inherited = null;
         var matched = 0;
@@ -2043,9 +2533,18 @@ internal sealed class AppHost : IDisposable
         }
     }
 
-    // Classifies an item by its top-level directory (sessions/ -> recording, clips/ -> clip).
+    // Finds the content directory in both the legacy root/{sessions,clips} layout and the game-scoped
+    // root/{game}/{sessions,clips} layout.
     private static string TopLevelDirectory(string relativePath)
     {
+        foreach (var segment in relativePath.Split('/'))
+        {
+            if (segment.Equals("sessions", StringComparison.Ordinal)
+                || segment.Equals("clips", StringComparison.Ordinal)
+                || segment.Equals("highlights", StringComparison.Ordinal))
+                return segment;
+        }
+
         var separator = relativePath.IndexOf('/');
         return separator >= 0 ? relativePath[..separator] : relativePath;
     }
@@ -2194,7 +2693,7 @@ internal sealed class AppHost : IDisposable
     {
         if (requested is not null && WireContentTypes.Contains(requested))
             return requested;
-        return TopLevelDirectory(relativePath).Equals("clips", StringComparison.Ordinal) ? "clip" : "recording";
+        return TopLevelDirectory(relativePath) is "clips" or "highlights" ? "clip" : "recording";
     }
 
     // ---- trash ----
@@ -2361,7 +2860,7 @@ internal sealed class AppHost : IDisposable
         // ListContent classifies the same way and reads a clip's title from ClipTitleStore, so a
         // clip renamed into a RecordingMetadata record would write something nothing ever reads —
         // and the wire's contentType defaults to "recording" whether or not the caller meant it.
-        if (TopLevelDirectory(relative).Equals("clips", StringComparison.Ordinal))
+        if (TopLevelDirectory(relative) is "clips" or "highlights")
         {
             RenameClip(fileName, parameters.Title);
             return;
@@ -2438,7 +2937,7 @@ internal sealed class AppHost : IDisposable
 
         var fileName = Path.GetFileName(target);
         var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
-        if (TopLevelDirectory(relative).Equals("clips", StringComparison.Ordinal))
+        if (TopLevelDirectory(relative) is "clips" or "highlights")
         {
             if (!_clipTitles.SaveFavorite(fileName, parameters.Favorite))
             {
@@ -2622,12 +3121,14 @@ internal sealed class AppHost : IDisposable
             var relative = Path.GetRelativePath(EffectiveRoot, file.FullName);
             var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
 
-            // Orphaned means not part of the catalogue the library builds. A file in clips/ is never orphaned.
+            // Orphaned means not part of the catalogue the library builds. A file in a sessions/ or
+            // clips/ directory is never orphaned, in either legacy or game-scoped layout.
             if (IsTrashPath(normalized))
                 continue;
-            if (normalized.StartsWith("sessions/", StringComparison.Ordinal))
-                continue;
-            if (normalized.StartsWith("clips/", StringComparison.Ordinal))
+            var contentDirectory = TopLevelDirectory(normalized);
+            if (contentDirectory.Equals("sessions", StringComparison.Ordinal)
+                || contentDirectory.Equals("clips", StringComparison.Ordinal)
+                || contentDirectory.Equals("highlights", StringComparison.Ordinal))
                 continue;
 
             orphans.Add(normalized);
@@ -2647,6 +3148,162 @@ internal sealed class AppHost : IDisposable
     }
 
     // ---- clipping ----
+
+    internal void CreateAutomaticClips(CreateAutomaticClipsParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.FilePath))
+        {
+            PushError("No recording was selected for automatic highlights.");
+            return;
+        }
+
+        var sourcePath = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
+        if (sourcePath is null || !File.Exists(sourcePath)
+            || !TopLevelDirectory(parameters.FilePath.Replace('\\', '/'))
+                .Equals("sessions", StringComparison.Ordinal))
+        {
+            PushError("That recording is not inside the sessions library.");
+            return;
+        }
+
+        var metadata = _metadata.Load(Path.GetFileName(sourcePath));
+        if (metadata is null)
+        {
+            PushError("That recording has no event metadata, so no automatic highlights can be created.");
+            return;
+        }
+
+        var candidates = metadata.Bookmarks
+            .Where(bookmark => bookmark.IsAutomaticClipCandidate == true
+                || (bookmark.IsAutomaticClipCandidate is null
+                    && bookmark.Type.IsIncludedInHighlights()))
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            PushError("That recording has no positive events to turn into highlights.");
+            return;
+        }
+
+        var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates))
+            PushError("Automatic highlights are already being created for another recording.");
+    }
+
+    internal void ToggleAutomaticClipPause()
+    {
+        lock (_automaticClipGate)
+        {
+            if (_automaticClipJob is null)
+                return;
+
+            _automaticClipJob.Paused = !_automaticClipJob.Paused;
+            Monitor.PulseAll(_automaticClipGate);
+        }
+
+        PushState(IsRecording, CurrentGameId);
+        PushContent();
+    }
+
+    private bool QueueAutomaticClips(string sourcePath, string sourceSessionPath,
+        IReadOnlyList<Bookmark> bookmarks)
+    {
+        var regions = AutomaticClipPlanner.Plan(bookmarks.Select(bookmark => bookmark.Time));
+        if (regions.Count == 0)
+            return false;
+
+        var job = new AutomaticClipJob
+        {
+            SourceSessionPath = sourceSessionPath,
+            Total = regions.Count,
+        };
+        lock (_automaticClipGate)
+        {
+            if (_automaticClipJob is not null)
+                return false;
+            _automaticClipJob = job;
+        }
+
+        PushState(IsRecording, CurrentGameId);
+        PushContent();
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                _clipEngine ??= BuildClipEngine();
+                var sourceBaseName = Path.GetFileNameWithoutExtension(sourcePath);
+                var outputDirectory = HighlightsDirectoryForSource(sourcePath);
+                var failures = 0;
+
+                for (var index = 0; index < regions.Count; index++)
+                {
+                    try
+                    {
+                        lock (_automaticClipGate)
+                        {
+                            while (ReferenceEquals(_automaticClipJob, job) && job.Paused)
+                                Monitor.Wait(_automaticClipGate);
+                        }
+
+                        if (!ReferenceEquals(_automaticClipJob, job))
+                            return;
+
+                        var region = regions[index];
+                        var outputPath = Path.Combine(outputDirectory,
+                            $"{sourceBaseName}-highlight-{index + 1}-{Guid.NewGuid():N}.mp4");
+                        var results = _clipEngine.CreateClips(new ClipRequest
+                        {
+                            OperationId = $"automatic-{Guid.NewGuid():N}",
+                            SourcePath = sourcePath,
+                            Regions = [region],
+                            Mode = ClipMode.Combine,
+                            OutputPath = outputPath,
+                            EncoderFamily = "libx264",
+                            PreferStreamCopy = true,
+                        });
+
+                        foreach (var result in results)
+                        {
+                            _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
+                                region.Start.TotalSeconds, region.End.TotalSeconds);
+                        }
+
+                        lock (_automaticClipGate)
+                            job.Completed++;
+                        PushState(IsRecording, CurrentGameId);
+                    }
+                    catch (Exception exception)
+                    {
+                        failures++;
+                        Log.Error(exception, "AppHost: automatic highlight {Index} failed for {SourcePath}",
+                            index + 1, sourcePath);
+                    }
+                }
+
+                if (failures > 0)
+                    PushError($"{failures} automatic highlight{(failures == 1 ? "" : "s")} could not be created.");
+            }
+            catch (Exception exception)
+            {
+                Log.Error(exception, "AppHost: automatic highlight creation failed for {SourcePath}", sourcePath);
+                PushError($"Automatic highlights could not be created: {exception.Message}");
+            }
+            finally
+            {
+                lock (_automaticClipGate)
+                {
+                    if (ReferenceEquals(_automaticClipJob, job))
+                        _automaticClipJob = null;
+                    Monitor.PulseAll(_automaticClipGate);
+                }
+
+                PushState(IsRecording, CurrentGameId);
+                PushContent();
+            }
+        });
+        return true;
+    }
 
     // Reports a clip that could not even be started — a source path that does not resolve inside the
     // recording root. It reuses the importProgress "error" frame the engine's own failures use, which
@@ -2685,6 +3342,11 @@ internal sealed class AppHost : IDisposable
                 {
                     foreach (var result in results)
                         _clipTitles.Save(Path.GetFileName(result), request.Title);
+                }
+                if (!string.IsNullOrWhiteSpace(request.SourceSessionPath))
+                {
+                    foreach (var result in results)
+                        _clipTitles.SaveSourceSession(Path.GetFileName(result), request.SourceSessionPath);
                 }
 
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
@@ -2791,14 +3453,61 @@ internal sealed class AppHost : IDisposable
         return ProcessNameGameDetector.NormalizeProcessName(entry is null ? gameId : ExecutableOf(entry));
     }
 
-    // Sessions are flat under <effectiveRoot>/sessions/ — the timestamp is already in the file name.
-    private string BuildOutputPath(SettingsModel settings)
+    // New recordings are scoped under <effectiveRoot>/<game>/sessions/. Existing legacy recordings
+    // remain readable because catalogue classification accepts both layouts.
+    private string BuildOutputPath(SettingsModel settings, string gameId)
     {
-        var directory = Path.Combine(EffectiveRoot, "sessions");
+        var directory = Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
         Directory.CreateDirectory(directory);
         // Millisecond resolution keeps two sessions started in the same second from colliding on one file
         // name, which would overwrite the recording and its metadata record.
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmssfff}.mp4";
         return Path.Combine(directory, name);
+    }
+
+    private string ClipDirectoryForSource(string sourcePath)
+    {
+        var relative = Path.GetRelativePath(EffectiveRoot, sourcePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sessionsIndex = Array.FindIndex(parts,
+            part => part.Equals("sessions", StringComparison.Ordinal));
+        if (sessionsIndex > 0)
+            return Path.Combine(new[] { EffectiveRoot }
+                .Concat(parts.Take(sessionsIndex))
+                .Append("clips")
+                .ToArray());
+
+        return Path.Combine(EffectiveRoot, "clips");
+    }
+
+    private string HighlightsDirectoryForSource(string sourcePath)
+    {
+        var relative = Path.GetRelativePath(EffectiveRoot, sourcePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sessionsIndex = Array.FindIndex(parts,
+            part => part.Equals("sessions", StringComparison.Ordinal));
+        var directory = sessionsIndex > 0
+            ? Path.Combine(new[] { EffectiveRoot }
+                .Concat(parts.Take(sessionsIndex))
+                .Append("highlights")
+                .ToArray())
+            : Path.Combine(EffectiveRoot, "highlights");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private string GameFolderName(string gameId)
+    {
+        var game = GameList.FirstOrDefault(candidate => candidate.Id == gameId)?.Name;
+        return SafeDirectoryName(string.IsNullOrWhiteSpace(game) ? gameId : game);
+    }
+
+    private static string SafeDirectoryName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var name = new string(value.Trim().Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        return string.IsNullOrWhiteSpace(name) || name is "." or ".." ? "Unknown Game" : name;
     }
 }

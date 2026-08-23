@@ -39,6 +39,9 @@ internal sealed class AppController
             ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
             ["CreateClip"] = (parameters, _) => CreateClip(parameters),
+            ["CreateAutomaticClips"] = (parameters, _) => _host.CreateAutomaticClips(
+                parameters.Deserialize<CreateAutomaticClipsParameters>()),
+            ["PauseAutomaticClips"] = (_, _) => _host.ToggleAutomaticClipPause(),
             ["ListContent"] = (_, _) => _host.PushContent(),
             ["ListGames"] = (_, _) => _host.PushGameList(),
             ["CancelClip"] = (_, _) => { /* The engine is not cancellable in the alpha. */ },
@@ -213,12 +216,14 @@ internal sealed class AppController
             return null;
         }
 
-        var outputPath = BuildClipOutputPath(parsed, effectiveRoot);
+        var outputPath = BuildClipOutputPath(parsed, effectiveRoot, sourcePath);
 
         return new ClipRequest
         {
             OperationId = parsed.Id,
             SourcePath = sourcePath,
+            SourceSessionPath = Path.GetRelativePath(effectiveRoot, sourcePath)
+                .Replace(Path.DirectorySeparatorChar, '/'),
             Regions = regions,
             Mode = mode,
             OutputPath = outputPath,
@@ -270,11 +275,20 @@ internal sealed class AppController
     private static bool TryTrackIndex(string? key, out int index) =>
         int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out index) && index >= 0;
 
-    // Where a clip is written. Clips live in a single top-level clips/ directory under the
-    // recording root.
+    // Where a clip is written. New clips live beside their source recording under the same game's
+    // clips directory. The legacy root/clips fallback keeps old-layout test and imported paths valid.
     internal static string BuildClipOutputPath(CreateClipParameters parameters, string effectiveRoot)
     {
-        var outputDirectory = Path.Combine(effectiveRoot, "clips");
+        var sourcePath = ContentServer.ResolveWithinRoot(effectiveRoot, parameters.FilePath);
+        return BuildClipOutputPath(parameters, effectiveRoot, sourcePath);
+    }
+
+    private static string BuildClipOutputPath(CreateClipParameters parameters, string effectiveRoot,
+        string? sourcePath)
+    {
+        var outputDirectory = sourcePath is null
+            ? Path.Combine(effectiveRoot, "clips")
+            : ClipDirectoryForSource(sourcePath, effectiveRoot);
 
         if (parameters.OutputMode.Equals("separate", StringComparison.OrdinalIgnoreCase))
         {
@@ -283,6 +297,22 @@ internal sealed class AppController
 
         var sourceBaseName = Path.GetFileNameWithoutExtension(parameters.FilePath);
         return Path.Combine(outputDirectory, $"{sourceBaseName}-{SafeClipId(parameters.Id)}.mp4");
+    }
+
+    private static string ClipDirectoryForSource(string sourcePath, string effectiveRoot)
+    {
+        var relative = Path.GetRelativePath(effectiveRoot, sourcePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sessionsIndex = Array.FindIndex(parts,
+            part => part.Equals("sessions", StringComparison.Ordinal));
+        if (sessionsIndex > 0)
+            return Path.Combine(new[] { effectiveRoot }
+                .Concat(parts.Take(sessionsIndex))
+                .Append("clips")
+                .ToArray());
+
+        return Path.Combine(effectiveRoot, "clips");
     }
 
     // The wire's clip id, reduced to something that can only ever be one path segment. It arrives

@@ -438,6 +438,8 @@ public class VisualEventDetector : IDisposable
                     if (IsNearBlack(frameData.Buffer, fW, fH))
                     {
                         Log.Debug("DetectionLoop: skipping near-black frame");
+                        // A skipped frame is still a checked frame for the host's net-count state.
+                        DetectionsAvailable?.Invoke([]);
                         continue;
                     }
 

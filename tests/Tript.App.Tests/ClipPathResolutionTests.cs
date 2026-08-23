@@ -50,6 +50,7 @@ public sealed class ClipPathResolutionTests : IDisposable
         // Path.Combine here is the cross-platform assertion: the wire's '/' separators must come out
         // as the platform's, so this also pins the Windows behaviour ('\' in the resolved path).
         Assert.Equal(Path.Combine(_root, "sessions", "session-20260817-152046741.mp4"), request.SourcePath);
+        Assert.Equal("sessions/session-20260817-152046741.mp4", request.SourceSessionPath);
 
         // The bug, stated directly: the source must not resolve against the CWD. Before the fix
         // SourcePath was the bare wire string, which is exactly what ffmpeg resolved this way.
@@ -110,6 +111,17 @@ public sealed class ClipPathResolutionTests : IDisposable
         // The engine names the per-region files from the source path, which is now absolute; the
         // names it derives are unchanged because it uses the file name only.
         Assert.Equal(Path.Combine(_root, "sessions", "session-x.mp4"), request.SourcePath);
+    }
+
+    [SkippableFact]
+    public void Game_scoped_source_writes_clips_beside_its_sessions_directory()
+    {
+        var request = AppController.BuildClipRequest(
+            Parameters("Overwatch/sessions/session-x.mp4"), _root);
+
+        Assert.NotNull(request);
+        Assert.Equal(Path.Combine(_root, "Overwatch", "clips", "session-x-clip-abc.mp4"), request.OutputPath);
+        Assert.Equal("Overwatch/sessions/session-x.mp4", request.SourceSessionPath);
     }
 
     private static CreateClipParameters Parameters(string filePath, string outputMode = "combine") => new()

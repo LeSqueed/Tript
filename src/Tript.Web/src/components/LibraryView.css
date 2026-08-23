@@ -142,22 +142,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 2;
-  pointer-events: none;
-}
-
-.recording-review-label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, #fff 30%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, #080a0e 66%, transparent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  text-shadow: 0 1px 2px #000;
+  pointer-events: auto;
 }
 
 .recording-group-body {
@@ -196,6 +181,39 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
   gap: 22px;
+}
+
+.session-clips-view {
+  padding: 28px clamp(18px, 4vw, 56px) 48px;
+}
+
+.session-clips-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.session-clips-header h1 {
+  margin: 2px 0 0;
+  font-size: clamp(1.25rem, 2vw, 1.8rem);
+}
+
+.session-clips-count {
+  color: var(--muted, #8f98a8);
+  font-size: 0.9rem;
+}
+
+.session-clips-processing {
+  margin: -12px 0 24px;
+  color: var(--color-accent, #a8e6cf);
+}
+
+.session-clips-empty {
+  max-width: 560px;
+  margin: 50px auto;
+  padding: 36px;
+  text-align: center;
 }
 
 .content-card {
@@ -288,6 +306,29 @@
   color: #fff;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.content-card-highlights {
+  position: absolute;
+  right: var(--space-2);
+  bottom: calc(var(--space-2) + 25px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 9, 13, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.content-card-highlights--active {
+  color: var(--color-accent);
 }
 
 .content-card-title {

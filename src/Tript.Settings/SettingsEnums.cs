@@ -7,14 +7,16 @@
 // earlier version.
 namespace Tript.Settings;
 
-// The three recording modes. Hybrid (both at once) is the default globally and per game, and is
-// designed for but deferred in alpha: the mode is a first-class model from the start so the
-// two-output shape slots in without a refactor.
+// Session is always present. SessionWithReplayBuffer adds the explicitly allowed replay output;
+// the legacy names remain readable for persisted settings and normalize to that combined mode.
 public enum RecordingMode
 {
     Session,
-    Buffer,
-    Hybrid
+    SessionWithReplayBuffer,
+
+    // Legacy persisted values. These are not exposed by the settings UI.
+    Buffer = SessionWithReplayBuffer,
+    Hybrid = 2,
 }
 
 // How the video encoder is told to spend its bits. The four members are the modes the encoder

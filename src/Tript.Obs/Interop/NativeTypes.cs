@@ -143,3 +143,14 @@ internal struct VideoOutputInfoNative
     public int ColorSpace;
     public int Range;
 }
+
+// callback/calldata.h. The stack is allocated by calldata_set_data when a procedure returns a value;
+// callers release it with bfree after copying any returned strings.
+[StructLayout(LayoutKind.Sequential)]
+internal struct CalldataNative
+{
+    public nint Stack;
+    public nuint Size;
+    public nuint Capacity;
+    public byte Fixed;
+}

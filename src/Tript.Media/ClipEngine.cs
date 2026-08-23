@@ -26,6 +26,9 @@ public sealed class ClipEngine : IClipEngine
 
         var (sourceInfo, regions) = Validate(request);
 
+        if (request.PreferStreamCopy && request.Mode == ClipMode.Combine && regions.Count == 1)
+            return CreateStreamCopy(request, regions[0]);
+
         return request.Mode == ClipMode.Combine
             ? CreateCombined(request, sourceInfo, regions)
             : CreateSeparate(request, sourceInfo, regions);
@@ -124,6 +127,29 @@ public sealed class ClipEngine : IClipEngine
     };
 
     // ---- Combine: several regions, one output file ----
+
+    private IReadOnlyList<string> CreateStreamCopy(ClipRequest request, ClipRegion region)
+    {
+        var outputPath = Path.GetFullPath(request.OutputPath);
+        EnsureOutputDirectory(outputPath);
+
+        var args = new List<string>
+        {
+            "-ss", FormatSeconds(region.Start.TotalSeconds),
+            "-i", request.SourcePath,
+            "-t", FormatSeconds(region.Duration.TotalSeconds),
+            "-map", "0:v:0?",
+            "-map", "0:a?",
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart",
+            outputPath,
+        };
+
+        FfmpegRunner.Run(_ffmpegPath, args, request, "stream-copy");
+        EnsureOutputWritten(outputPath);
+        return [outputPath];
+    }
 
     private IReadOnlyList<string> CreateCombined(ClipRequest request, MediaInfo sourceInfo,
         IReadOnlyList<ClipRegion> regions)

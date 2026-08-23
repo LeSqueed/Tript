@@ -33,6 +33,10 @@
   white-space: nowrap;
 }
 
+.player-header-delete {
+  margin-left: auto;
+}
+
 .player-view-fullscreen {
   max-width: none;
   padding: 12px 20px;

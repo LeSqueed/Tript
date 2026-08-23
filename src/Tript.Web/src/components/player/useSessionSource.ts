@@ -14,7 +14,7 @@ import { createIpcSessionSource, type IpcSessionSource } from './ipcSessionSourc
 export interface SessionList {
   /** Sessions (contentType === 'recording') in list order. */
   sessions: ContentItem[];
-  /** Clips (contentType === 'clip') in list order. */
+  /** Manual clips and automated highlights in list order. */
   clips: ContentItem[];
   /**
    * The whole list in the backend's order — what the library grid renders over. Falls back to

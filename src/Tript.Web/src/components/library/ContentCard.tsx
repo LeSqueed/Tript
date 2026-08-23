@@ -36,6 +36,7 @@ export function ContentCard({
   action,
   priority = false,
   clipsCount = 0,
+  highlightsCount = 0,
 }: {
   item: ContentItem;
   /** The library's open seam: called with the item the user activated. */
@@ -57,6 +58,8 @@ export function ContentCard({
   priority?: boolean;
   /** Number of clips cut from this recording, shown as a metadata chip when present. */
   clipsCount?: number;
+  /** Number of generated highlights, shown as an affordance on the thumbnail. */
+  highlightsCount?: number;
   /**
    * An extra affordance, rendered inside the shell beside the card rather than within it — a button
    * inside a button is invalid markup, and the delete and favourite controls are siblings for the
@@ -124,10 +127,28 @@ export function ContentCard({
               <span className="pill pill-muted">{game}</span>
               <span className="pill pill-muted">{formatDateChip(item)}</span>
               {clipsCount > 0 && <span className="pill pill-muted">Clips: {clipsCount}</span>}
+              {item.automaticClipsProcessing && (
+                <span className="pill pill-muted">
+                  {item.automaticClipsPaused ? 'Highlights paused' : 'Creating highlights'}
+                </span>
+              )}
               {size !== null && <span className="pill pill-muted">{size}</span>}
             </span>
           </span>
           {duration !== null && <span className="content-card-duration">{duration}</span>}
+          {(highlightsCount > 0 || item.automaticClipsProcessing) && (
+            <span
+              className={item.automaticClipsProcessing ? 'content-card-highlights content-card-highlights--active' : 'content-card-highlights'}
+              aria-label={
+                item.automaticClipsProcessing
+                  ? 'Highlights are being created'
+                  : `${highlightsCount} highlight${highlightsCount === 1 ? '' : 's'}`
+              }
+              data-testid="content-card-highlights"
+            >
+              <Icon name="clip" size={14} />
+            </span>
+          )}
         </span>
       </button>
 

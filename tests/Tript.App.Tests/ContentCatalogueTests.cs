@@ -175,6 +175,35 @@ public sealed class ContentCatalogueTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task ListContent_ExposesAutomatedClipsWithTheirSourceSession()
+    {
+        Directory.CreateDirectory(Path.Combine(_contentRoot, "sessions"));
+        Directory.CreateDirectory(Path.Combine(_contentRoot, "clips"));
+        await File.WriteAllTextAsync(Path.Combine(_contentRoot, "sessions", "session-1.mp4"), "session");
+        await File.WriteAllTextAsync(Path.Combine(_contentRoot, "clips", "session-1-highlight-1.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("session-1-highlight-1.mp4", "sessions/session-1.mp4", 20, 40));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        var highlight = items.Single(item => item.GetProperty("fileName").GetString() == "session-1-highlight-1.mp4");
+        Assert.Equal("highlight", highlight.GetProperty("contentType").GetString());
+        Assert.True(highlight.GetProperty("automated").GetBoolean());
+        Assert.Equal("sessions/session-1.mp4", highlight.GetProperty("sourceSessionPath").GetString());
+        Assert.Equal(20, highlight.GetProperty("clipStartTime").GetDouble());
+        Assert.Equal(40, highlight.GetProperty("clipEndTime").GetDouble());
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
     public async Task ListContent_SessionWithMetadataShowsBookmarks_SessionWithoutShowsEmpty()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
@@ -634,10 +663,13 @@ public sealed class ContentCatalogueTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(clips, "session-10-clip-1-0s-10s.mp4"), "clip");
         // A clip whose source is gone (or never had a game) has no game rather than a wrong one.
         await File.WriteAllTextAsync(Path.Combine(clips, "session-99-clip-x.mp4"), "clip");
+        await File.WriteAllTextAsync(Path.Combine(clips, "generated-name.mp4"), "clip");
 
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         store.Save(new RecordingMetadata { VideoPath = "sessions/session-1.mp4", Game = "Overwatch" });
         store.Save(new RecordingMetadata { VideoPath = "sessions/session-10.mp4", Game = "Deep Rock Galactic" });
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveSourceSession("generated-name.mp4", "sessions/session-1.mp4"));
 
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
@@ -652,6 +684,7 @@ public sealed class ContentCatalogueTests : IDisposable
         // The boundary check: "session-1" must not claim a clip of "session-10".
         Assert.Equal("Deep Rock Galactic", GameOf(items, "session-10-clip-1-0s-10s.mp4"));
         Assert.Null(GameOf(items, "session-99-clip-x.mp4"));
+        Assert.Equal("Overwatch", GameOf(items, "generated-name.mp4"));
 
         await host.ShutdownAsync();
     }

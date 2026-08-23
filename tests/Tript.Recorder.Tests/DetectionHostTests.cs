@@ -12,7 +12,7 @@ namespace Tript.Recorder.Tests;
 
 // The detection host's wiring, tested against fakes so no frame source, ONNX model or background
 // thread is involved: detections from the detector become bookmarks on the active recording, with
-// the right definition matched to the result, coalesced inside a definition's lifetime and never
+// the right definition matched to the result, with bookmarks driven by net-count increases and never
 // from a definition without a BookmarkType. The fake detector records its Start/Stop calls so a
 // game switch is observable.
 [Collection(RecorderRecordingCollection.Name)]
@@ -21,14 +21,14 @@ public sealed class DetectionHostTests
     private static readonly DateTime Origin = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Local);
 
     private static EventDefinition Trigger(int classId, BookmarkType? bookmarkType = BookmarkType.Kill,
-        int? lifetimeMs = null) => new()
+        bool includeInAutoClips = false) => new()
     {
         Id = classId,
         ClassId = classId,
         Name = "event" + classId,
         Type = EventType.Trigger,
         BookmarkType = bookmarkType,
-        LifetimeMs = lifetimeMs,
+        IncludeInAutoClips = includeInAutoClips,
     };
 
     private static EventDefinition Subtractor(int id, int classId, int targetId) => new()
@@ -74,7 +74,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0));
@@ -97,7 +97,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession { StartTime = DateTime.Now };
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0));
@@ -125,7 +125,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0)); // an elimination icon
@@ -147,7 +147,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0));
@@ -156,18 +156,18 @@ public sealed class DetectionHostTests
         }
     }
 
-    // Detections within the definition's lifetime are the same event and coalesce into one bookmark.
+    // A stable count does not create another bookmark.
     [Fact]
-    public void Detections_WithinLifetime_CoalesceIntoOneBookmark()
+    public void Detections_StableCount_CreatesOneBookmark()
     {
         var detector = WithFrameSource(new()
         {
-            ["Overwatch"] = [Trigger(0, lifetimeMs: 5000)],
+            ["Overwatch"] = [Trigger(0)],
         });
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0));
@@ -175,6 +175,74 @@ public sealed class DetectionHostTests
             detector.RaiseDetections(Box(0));
 
             Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void Detections_OnlyDefinitionsMarkedForAutoClipsReachTheClipCallback()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] =
+            [
+                Trigger(0, BookmarkType.Kill, includeInAutoClips: true),
+                Trigger(1, BookmarkType.Death),
+            ],
+        });
+        var recording = new FakeRecordingSession();
+        var automaticBookmarks = new List<Bookmark>();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource,
+                   onAutomaticClipBookmark: automaticBookmarks.Add))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0), Box(1, x: 0.7f));
+
+            var bookmark = Assert.Single(automaticBookmarks);
+            Assert.Same(recording.Bookmarks[0], bookmark);
+            Assert.Equal(2, recording.Bookmarks.Count);
+        }
+    }
+
+    [Fact]
+    public void Detections_IncreasedCount_CreatesOnlyTheIncrease()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0, x: 0.1f));
+            detector.RaiseDetections(Box(0, x: 0.1f), Box(0, x: 0.6f));
+
+            Assert.Equal(2, recording.Bookmarks.Count);
+        }
+    }
+
+    [Fact]
+    public void Detections_EmptyFrameResetsTheCount()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0));
+            detector.RaiseDetections();
+            detector.RaiseDetections(Box(0));
+
+            Assert.Equal(2, recording.Bookmarks.Count);
         }
     }
 
@@ -198,7 +266,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(1));
@@ -228,7 +296,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0), Box(1));
@@ -258,7 +326,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(1));
@@ -266,6 +334,36 @@ public sealed class DetectionHostTests
 
             var bookmark = Assert.Single(recording.Bookmarks);
             Assert.Equal(BookmarkType.Kill, bookmark.Type);
+        }
+    }
+
+    [Fact]
+    public void Detections_ExclusionDoesNotResetAnExistingNetCount()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] =
+            [
+                Trigger(0, BookmarkType.Kill),
+                new EventDefinition
+                {
+                    ClassId = 1,
+                    Name = "Death Spectating",
+                    Type = EventType.Exclusion,
+                },
+            ],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0));
+            detector.RaiseDetections(Box(0), Box(1));
+            detector.RaiseDetections(Box(0));
+
+            Assert.Single(recording.Bookmarks);
         }
     }
 
@@ -279,7 +377,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(
@@ -300,12 +398,35 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0), Box(1), Box(2));
 
             Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void Detections_SubtractionHoldsTheNetCountUntilItRises()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0), Subtractor(1, 1, 0)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(Box(0, x: 0.1f));
+            detector.RaiseDetections(
+                Box(0, x: 0.1f), Box(0, x: 0.6f), Box(1));
+            detector.RaiseDetections(
+                Box(0, x: 0.1f), Box(0, x: 0.6f), Box(0, x: 0.8f), Box(1));
+
+            Assert.Equal(2, recording.Bookmarks.Count);
         }
     }
 
@@ -319,7 +440,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0, x: 0.1f), Box(0, x: 0.6f),
@@ -334,23 +455,22 @@ public sealed class DetectionHostTests
     {
         var detector = WithFrameSource(new()
         {
-            ["Overwatch"] = [Trigger(0, lifetimeMs: 1), Subtractor(1, 1, 0)],
+            ["Overwatch"] = [Trigger(0), Subtractor(1, 1, 0)],
         });
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(0), Box(1));
-            Thread.Sleep(10);
             detector.RaiseDetections(Box(0, x: 0.8f));
 
             Assert.Single(recording.Bookmarks);
         }
     }
 
-    // A detection whose ClassId no definition covers is dropped before the cooldown tracker sees it:
+    // A detection whose ClassId no definition covers is dropped before count processing:
     // the model can emit classes events.json says nothing about, and there is no bookmark type to
     // give them. Ported from _pending/DetectionSessionTests, whose subsystem never landed — this
     // guard is DetectionHost's, and it shipped without a test.
@@ -364,7 +484,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession();
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             detector.RaiseDetections(Box(7));
@@ -379,7 +499,7 @@ public sealed class DetectionHostTests
     public void Start_WithNoModel_IsRefusedAndStartsNothing()
     {
         var detector = new FakeDetector(new());
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.False(host.Start("Overwatch"));
         Assert.False(host.IsRunning);
@@ -397,7 +517,7 @@ public sealed class DetectionHostTests
         {
             ["Overwatch"] = [Trigger(0)],
         });
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.False(host.Start("Overwatch"));
         Assert.False(host.IsRunning);
@@ -413,7 +533,7 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
 
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.True(host.Start("Overwatch"));
         Assert.True(host.IsRunning);
@@ -424,6 +544,24 @@ public sealed class DetectionHostTests
     }
 
     [Fact]
+    public void Start_DoesNotLoseABatchEmittedImmediatelyByTheDetector()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [Trigger(0)],
+        });
+        detector.DetectionsOnStart = [Box(0)];
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
     public void Stop_StopsTheDetectorAndClearsTheCurrentGame()
     {
         var detector = WithFrameSource(new()
@@ -431,7 +569,7 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
 
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
         Assert.True(host.Start("Overwatch"));
 
         host.Stop();
@@ -453,7 +591,7 @@ public sealed class DetectionHostTests
             ["Valorant"] = [Trigger(0)],
         });
 
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.True(host.Start("Overwatch"));
         Assert.True(host.Start("Valorant"));
@@ -479,7 +617,7 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
 
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.True(host.Start("Overwatch"));
         Assert.False(host.Start("A Game That Ships No Model"));
@@ -498,7 +636,7 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
 
-        using var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        using var host = new DetectionHost(detector, detector.DefinitionSource);
 
         Assert.True(host.Start("Overwatch"));
         Assert.True(host.Start("Overwatch"));
@@ -517,7 +655,7 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
 
-        var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero);
+        var host = new DetectionHost(detector, detector.DefinitionSource);
         Assert.True(host.Start("Overwatch"));
 
         host.Dispose();
@@ -535,7 +673,7 @@ public sealed class DetectionHostTests
         var recording = new FakeRecordingSession { BlockBookmark = true };
 
         using (new ActiveRecordingScope(recording))
-        using (var host = new DetectionHost(detector, detector.DefinitionSource, cleanupInterval: TimeSpan.Zero))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
             var detection = Task.Run(() => detector.RaiseDetections(Box(0)));
@@ -567,12 +705,16 @@ public sealed class DetectionHostTests
 
         internal int StopCount;
 
+        internal DetectionResult[]? DetectionsOnStart;
+
         public event Action<List<DetectionResult>>? DetectionsAvailable;
 
         public void Start(string gameId)
         {
             StartedGameId = gameId;
             StartCount++;
+            if (DetectionsOnStart is { } detections)
+                DetectionsAvailable?.Invoke(detections.ToList());
         }
 
         public void Stop() => StopCount++;

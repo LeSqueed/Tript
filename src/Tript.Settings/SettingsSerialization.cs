@@ -49,9 +49,28 @@ public static class SettingsSerialization
             return null;
 
         RemoveRemovedGeneralProperties(settings.General);
+        NormalizeRecordingModes(settings);
 
         return settings;
     }
+
+    // Buffer and Hybrid were the pre-implementation names for replay-capable modes. Session is
+    // always retained, so both legacy values now migrate to the combined mode on the next save.
+    private static void NormalizeRecordingModes(Settings settings)
+    {
+        settings.Recording.Mode = NormalizeRecordingMode(settings.Recording.Mode);
+        foreach (var game in settings.Game.GameList)
+        {
+            if (game.RecordingModeOverride is not null)
+                game.RecordingModeOverride.Mode = NormalizeRecordingMode(game.RecordingModeOverride.Mode);
+        }
+    }
+
+    private static RecordingMode NormalizeRecordingMode(RecordingMode mode) => mode switch
+    {
+        RecordingMode.Buffer or RecordingMode.Hybrid => RecordingMode.SessionWithReplayBuffer,
+        _ => mode,
+    };
 
     public static void RemoveRemovedGeneralProperties(GeneralSettings general)
     {

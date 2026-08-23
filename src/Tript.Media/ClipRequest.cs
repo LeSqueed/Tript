@@ -13,6 +13,10 @@ public sealed class ClipRequest
     // The finished recording being clipped.
     public required string SourcePath { get; init; }
 
+    // The source recording's root-relative path, when the request came from the library. Persisting
+    // this on the finished clip avoids relying on generated filenames to recover its session.
+    public string? SourceSessionPath { get; init; }
+
     // The marked regions, in timeline order. In Separate mode each becomes its own file; in Combine
     // mode they are concatenated into one.
     public required IReadOnlyList<ClipRegion> Regions { get; init; }
@@ -30,6 +34,10 @@ public sealed class ClipRequest
     // The encoder family to target. Defaults to the generic software path, libx265, which can carry
     // 10-bit and therefore preserves a uniform HDR source.
     public string EncoderFamily { get; init; } = "libx265";
+
+    // Replay-buffer highlights already contain encoded media. Automatic callers can use a
+    // stream-copy trim to avoid re-encoding the recording while it is still active.
+    public bool PreferStreamCopy { get; init; }
 
     // The user's clip title from the clip dialog ("The clutch"), carried through so the host can
     // persist it against the finished clip(s). Empty means the user set no title and the clip

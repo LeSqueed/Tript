@@ -33,3 +33,14 @@ public interface IRecorderOutput : IDisposable
     // (ObsOutputStopCode.Success) or a failure.
     event EventHandler<ObsOutputStopEvent>? Stopped;
 }
+
+// An output that owns an active replay ring. The callback fires after OBS has finished writing the
+// saved replay file and supplies its absolute path.
+public interface IReplayBufferOutput
+{
+    bool SaveReplay(string directory, string format, Action<string> onSaved);
+
+    // A replay save is asynchronous inside OBS. The output must remain alive until its saved signal
+    // has completed, otherwise stopping the replay output races the native save worker.
+    bool WaitForReplaySave(TimeSpan timeout);
+}

@@ -32,7 +32,7 @@ function activeSocket(): MockWebSocket {
 function makeSettings(): SettingsMessageContent['settings'] {
   return {
     recording: {
-      mode: 'Hybrid',
+      mode: 'SessionWithReplayBuffer',
       resolutionWidth: 1920,
       resolutionHeight: 1080,
       fps: 60,
@@ -224,27 +224,19 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText('Start with Windows') as HTMLInputElement).checked).toBe(false);
   });
 
-  // The shipped default, before any push. It has to be the mode the recorder actually runs: Buffer
-  // and Hybrid are not implemented and a resolved Hybrid is flattened to Session at the host, so a
-  // Hybrid default routed every automatic recording through that silent flattening.
+  // The shipped default, before any push, enables both the session recording and replay buffer.
   it('defaults the recording mode to the one the recorder implements', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
     render(<SettingsView client={client} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
-    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Session');
+    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
   });
 
-  it('says plainly that the buffer is not implemented, in both of its states', () => {
+  it('describes the replay buffer settings', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Buffer' }));
-    const note = screen.getByText(/not implemented yet/i);
-    expect(note).toBeTruthy();
-
-    // And it keeps saying so once the checkbox is ticked — the old copy told the truth in one state
-    // only, promising that turning it on would start keeping something.
-    fireEvent.click(screen.getByLabelText('Enable rolling buffer'));
-    expect(screen.getByText(/not implemented yet/i)).toBeTruthy();
+    expect(screen.getByText(/runs when the recording mode is set to Session \+ Replay Buffer/i)).toBeTruthy();
   });
 
   // Settings keeps its technical vocabulary on purpose: the people who open these pages are the
@@ -276,7 +268,6 @@ describe('SettingsView', () => {
   it('renders the buffer page controls', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Buffer' }));
-    expect(screen.getByLabelText('Enable rolling buffer')).toBeTruthy();
     expect(screen.getByLabelText(/^Buffer duration/)).toBeTruthy();
     expect(screen.getByLabelText(/^Maximum buffer size/)).toBeTruthy();
   });
@@ -828,10 +819,10 @@ describe('SettingsView', () => {
     const { ws } = renderSettings();
     // A second external push changes the mode; the UI reflects it.
     const updated = makeSettings();
-    updated.recording.mode = 'Buffer';
+    updated.recording.mode = 'Session';
     pushSettings(ws, updated, 'server:changed');
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
-    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Buffer');
+    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Session');
   });
 
   it('forms stay editable before the backend pushes settings', () => {

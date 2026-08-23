@@ -6,8 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace Tript.Core;
 
-// Whether a bookmark type earns a place in the automatic highlights is a property of the type, not
-// of a rule elsewhere that has to be kept in step with this list.
+// Legacy type-level highlight metadata. Event definitions now explicitly decide whether a detected
+// event contributes to automatic clips, because the same bookmark type can mean different things in
+// different games.
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class IncludeInHighlightsAttribute : Attribute
 {
@@ -25,8 +26,8 @@ public enum BookmarkType
     [IncludeInHighlights]
     Goal,
 
-    // Deliberately not highlighted, against the obvious reading: an assist is not the play, and a
-    // death is not a moment the player wants cut into a reel.
+    // An assist is positive and may be included by an event definition.
+    [IncludeInHighlights]
     Assist,
     Death
 }
@@ -70,4 +71,8 @@ public class Bookmark
     // Assigned after the fact by whatever scores the moment, so it is absent on a bookmark that
     // has not been rated rather than zero.
     public int? AiRating { get; set; }
+
+    // Null keeps older metadata distinguishable from a recording written before candidate events
+    // were persisted. A true value is assigned only by an event definition that opts into highlights.
+    public bool? IsAutomaticClipCandidate { get; set; }
 }

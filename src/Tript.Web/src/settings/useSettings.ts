@@ -29,7 +29,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
 /** The default settings object, so the pages render even before the first push. */
 const DEFAULT_SETTINGS: SettingsModel = {
   recording: {
-    mode: 'Session',
+    mode: 'SessionWithReplayBuffer',
     resolutionWidth: 1920,
     resolutionHeight: 1080,
     fps: 60,

@@ -120,7 +120,7 @@ public class CropGeometryTests
 
     // A region-less event definition produces a (0, 0, 1, 1) group, whose crop is the frame, so the
     // mapping has to be the identity. Everything downstream reads these coordinates as frame-relative
-    // — CooldownTracker matches instances by their overlap in exactly this space — so a full-frame
+    // — DetectionBatchCounter matches boxes in exactly this space — so a full-frame
     // group that rescaled its boxes would put the whole class in the wrong place with no crop
     // geometry left to blame.
     [Fact]

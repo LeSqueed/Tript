@@ -20,3 +20,4 @@ window.matchMedia = ((query: string): MediaQueryList => ({
 // normal UI behavior. Keep the test output focused on real failures instead of repeating jsdom's
 // "Not implemented" warning for every player render.
 HTMLMediaElement.prototype.pause = () => {};
+HTMLMediaElement.prototype.play = () => Promise.resolve();

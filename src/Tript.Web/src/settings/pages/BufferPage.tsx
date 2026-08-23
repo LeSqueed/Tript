@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The buffer page — a first-class settings surface even though the buffer itself is deferred in
-// alpha (design decision 2026-08-15). Enable/disable and configure the rolling replay buffer
-// independently of the session.
+// The buffer page configures the replay output used by Session + Replay Buffer mode.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
-import { Button, Checkbox, Field } from '../../components/ui/controls';
+import { Button, Field } from '../../components/ui/controls';
 
 /** 1 MiB — the human-readable unit the size field is edited in. */
 const MIB = 1024 * 1024;
@@ -68,19 +66,9 @@ export function BufferPage({
 
   return (
     <div className="settings-page" data-page="buffer">
-      <label className="field settings-toggle">
-        <span className="field-label">Enable rolling buffer</span>
-        <Checkbox
-          checked={settings.enabled}
-          onChange={(enabled) => update(page, { enabled })}
-        />
-      </label>
-      {/* Unconditional, because the old copy told the truth in one state and not the other: the
-        * disabled line said "nothing is kept in memory until you turn it on", which implies that
-        * turning it on would keep something. The recorder does not read these settings at all. */}
       <p className="settings-page-note">
-        The rolling buffer is not implemented yet — the recorder does not read these settings. They
-        are stored, so what you set here holds until it does.
+        The replay buffer runs when the recording mode is set to Session + Replay Buffer. These
+        settings control its duration and maximum size.
       </p>
 
       <Field label="Buffer duration" hint="How far back the rolling buffer reaches, in seconds.">

@@ -152,6 +152,32 @@ public sealed class AudioRoutingServiceTests
     }
 
     [Fact]
+    public void ReplayRouting_CreatesTrackEncodersWithoutDuplicateCaptureSources()
+    {
+        var sink = new FakeSink();
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Game", Sources =
+            {
+                new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 1.0f },
+            } },
+            new() { Name = "Mic", Sources =
+            {
+                new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, Volume = 1.0f },
+            } },
+        });
+
+        using var routing = new AudioRoutingService(sink).Wire(plan, includeCaptureSources: false);
+
+        Assert.Empty(sink.CreatedSources);
+        Assert.Empty(sink.Routed);
+        Assert.Empty(sink.Activated);
+        Assert.Equal(2, sink.CreatedEncoders.Count);
+        Assert.Equal([0, 1], sink.CreatedEncoders.Select(encoder => encoder.MixerIndex));
+        Assert.Equal([0, 1], sink.Assigned.Select(assignment => assignment.OutputSlot));
+    }
+
+    [Fact]
     public void DisposingTheRouting_DeactivatesEveryCreatedSource()
     {
         var sink = new FakeSink();

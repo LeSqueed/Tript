@@ -857,6 +857,9 @@ internal static unsafe partial class ObsNative
     internal static partial nint obs_output_get_signal_handler(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_output_get_proc_handler(nint output);
+
+    [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_output_set_media(nint output, nint video, nint audio);
 
     [LibraryImport(ObsLibrary.Name)]
@@ -969,6 +972,10 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool calldata_get_string(nint calldata, string name, nint* value);
+
+    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool proc_handler_call(nint handler, string name, nint calldata);
 
     // ---- obs-data.h: settings objects ----
     //

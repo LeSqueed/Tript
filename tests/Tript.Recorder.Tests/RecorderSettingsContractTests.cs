@@ -16,7 +16,7 @@ public class RecorderSettingsContractTests
     public void Resolver_ProducesTheFlatShapeTheRecorderStartsWith()
     {
         var settings = new Tript.Settings.Settings();
-        settings.Recording.Mode = RecordingMode.Hybrid;
+        settings.Recording.Mode = RecordingMode.SessionWithReplayBuffer;
         settings.Recording.ResolutionWidth = 2560;
         settings.Recording.ResolutionHeight = 1440;
         settings.Recording.Fps = 60;
@@ -27,7 +27,7 @@ public class RecorderSettingsContractTests
         var resolved = SettingsResolver.Resolve(settings);
 
         Assert.IsType<ResolvedRecorderSettings>(resolved);
-        Assert.Equal(RecordingMode.Hybrid, resolved.Mode);
+        Assert.Equal(RecordingMode.SessionWithReplayBuffer, resolved.Mode);
         Assert.Equal(2560, resolved.ResolutionWidth);
         Assert.Equal(1440, resolved.ResolutionHeight);
         Assert.Equal(60, resolved.Fps);
@@ -63,8 +63,9 @@ public class RecorderSettingsContractTests
     {
         Assert.True(RecordingMode.Session.IsAlphaSupported());
         Assert.True(RecordingMode.Session.RecordsSession());
-        Assert.False(RecordingMode.Buffer.IsAlphaSupported());
-        Assert.False(RecordingMode.Hybrid.IsAlphaSupported());
-        Assert.True(RecordingMode.Hybrid.RecordsSession());
+        // Buffer is a legacy enum alias for the combined mode and is normalized when loaded.
+        Assert.True(RecordingMode.Buffer.IsAlphaSupported());
+        Assert.True(RecordingMode.SessionWithReplayBuffer.IsAlphaSupported());
+        Assert.True(RecordingMode.SessionWithReplayBuffer.RecordsSession());
     }
 }

@@ -556,11 +556,11 @@ describe('LibraryView recent sessions and groups', () => {
     startTime: NOW,
   });
 
-  it('makes the newest sessions a recent shelf with Review actions', () => {
+  it('makes the newest sessions a recent shelf without a separate highlights action', () => {
     renderLibrary([older, newest, cutOfNewest]);
     const recent = screen.getByTestId('library-recent');
     expect(within(recent).getByRole('heading', { name: 'Recent recordings' })).toBeTruthy();
-    expect(within(recent).getAllByText('Review')).toHaveLength(2);
+    expect(within(recent).queryByRole('button', { name: /Highlights/ })).toBeNull();
     expect(within(recent).queryByText('Recording 2 - 01')).toBeNull();
     expect(within(recent).getByText('Clips: 1')).toBeTruthy();
     expect(within(recent).getByText('Recording 1')).toBeTruthy();
@@ -569,8 +569,8 @@ describe('LibraryView recent sessions and groups', () => {
   it('renders a recent session without a clips row when it has none', () => {
     renderLibrary([newest]);
     const recent = screen.getByTestId('library-recent');
-    expect(within(recent).getByText('Review')).toBeTruthy();
-    // No placeholder, no "no clips yet": the Review action is the point and it works regardless.
+    expect(within(recent).queryByRole('button', { name: /Highlights/ })).toBeNull();
+    // No placeholder, no "no clips yet": the recording card remains the only open affordance.
     expect(within(recent).queryByTestId('recording-group-clips')).toBeNull();
   });
 
@@ -582,7 +582,7 @@ describe('LibraryView recent sessions and groups', () => {
     expect(within(recent).getByRole('button', { name: 'Open Recording 2' })).toBeTruthy();
   });
 
-  it('opens the recording from Review, not only from the thumbnail', () => {
+  it('keeps the recording open affordance separate from Highlights', () => {
     const onOpen = vi.fn();
     renderLibrary([newest], onOpen);
     fireEvent.click(within(screen.getByTestId('library-recent')).getByRole('button', { name: 'Open Recording 2' }));

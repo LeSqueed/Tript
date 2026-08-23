@@ -72,6 +72,18 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
+    public void AutomaticClips_DefaultOff_AndRoundTrips()
+    {
+        var settings = _store.Load();
+        Assert.False(settings.Recording.AutomaticClipsEnabled);
+
+        settings.Recording.AutomaticClipsEnabled = true;
+        _store.Save();
+
+        Assert.True(new SettingsStore(_provider).Load().Recording.AutomaticClipsEnabled);
+    }
+
+    [Fact]
     public void SaveOnePage_DoesNotDisturbTheOthers()
     {
         var settings = _store.Load();

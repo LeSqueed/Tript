@@ -105,9 +105,7 @@ public sealed class Recorder : IDisposable
             {
                 _lastStopReason = RecorderStopReason.UnsupportedMode;
                 _lastStopCode = null;
-                _lastError = settings.Mode == RecordingMode.Hybrid
-                    ? "Hybrid mode is designed for but deferred; alpha records Session only."
-                    : "Buffer mode writes nothing by design; alpha records Session only.";
+                _lastError = $"Recording mode '{settings.Mode}' is not supported.";
                 return false;
             }
 
@@ -200,6 +198,20 @@ public sealed class Recorder : IDisposable
         return started;
     }
 
+    public bool SaveReplayBuffer(string directory, string format, Action<string> onSaved)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(directory);
+        ArgumentException.ThrowIfNullOrEmpty(format);
+        ArgumentNullException.ThrowIfNull(onSaved);
+
+        lock (_gate)
+        {
+            if (_state != RecorderState.Recording || _output is not IReplayBufferOutput replay)
+                return false;
+            return replay.SaveReplay(directory, format, onSaved);
+        }
+    }
+
     // Stops the recording in flight, if any. A no-op from Idle. The stop signal is what completes
     // the transition back to Idle; until then the recorder is in Stopping.
     public bool Stop()
@@ -222,6 +234,8 @@ public sealed class Recorder : IDisposable
             // null output: every later stop then dereferenced it, and the app's settle loop waited
             // out its full deadline on every single stop.
             _state = RecorderState.Stopping;
+            if (output is IReplayBufferOutput replay)
+                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
             output.Stop();
             return true;
         }
@@ -247,6 +261,8 @@ public sealed class Recorder : IDisposable
             // a synchronous stop signal resolves the reason as it passes through RecordStop.
             _state = RecorderState.Stopping;
             _lastStopReason = RecorderStopReason.GameStopped;
+            if (output is IReplayBufferOutput replay)
+                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
             output.Stop();
             return true;
         }
@@ -281,6 +297,8 @@ public sealed class Recorder : IDisposable
         {
             try
             {
+                if (stopping is IReplayBufferOutput replay)
+                    replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
                 stopping.Stop();
                 stopping.WaitForStop(Timeout.InfiniteTimeSpan);
             }
@@ -326,6 +344,8 @@ public sealed class Recorder : IDisposable
 
         if (toDispose is not null)
         {
+            if (toDispose is IReplayBufferOutput replay)
+                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
             toDispose.WaitForStop(Timeout.InfiniteTimeSpan);
             toDispose.Dispose();
         }

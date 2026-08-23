@@ -232,7 +232,6 @@ export function TrainingView({ client }: TrainingViewProps) {
         name: 'New event',
         type: 'Trigger',
         bookmarkType: 'Manual',
-        lifetimeMs: null,
       },
       isNew: true,
     });

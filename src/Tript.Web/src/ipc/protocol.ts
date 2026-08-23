@@ -86,6 +86,14 @@ export interface ContentItem {
   fileSizeBytes?: number;
   /** Bookmark events inside a recording. Absent (never empty) on clips. */
   bookmarks?: BookmarkItem[];
+  automated?: boolean;
+  sourceSessionPath?: string;
+  clipStartTime?: number;
+  clipEndTime?: number;
+  automaticClipsProcessing?: boolean;
+  automaticClipsPaused?: boolean;
+  automaticClipsCompleted?: number;
+  automaticClipsTotal?: number;
 }
 
 export interface BookmarkItem {
@@ -163,6 +171,13 @@ export interface RecordingState {
    * moment it connected — which for an 8-hour recording is a confidently wrong number.
    */
   startedAt?: number | null;
+  automaticClips?: {
+    active: boolean;
+    paused: boolean;
+    sourceSessionPath: string;
+    completed: number;
+    total: number;
+  } | null;
   /** Audio routing status per track, when multi-track recording is active. */
   audioTracks?: { id: string; device: string; muted: boolean; volume: number }[];
   [key: string]: unknown;
@@ -234,7 +249,7 @@ export interface TrainingEventDefinition {
   type: 'Trigger' | 'Exclusion' | 'Subtractor';
   classId: number;
   bookmarkType?: string | null;
-  lifetimeMs?: number | null;
+  includeInAutoClips?: boolean;
   subtractsEventId?: number | null;
   screenRegionX?: number | null;
   screenRegionY?: number | null;
@@ -372,6 +387,10 @@ export interface CreateClipParameters {
   outputMode: 'combine' | 'separate';
   audioTrackVolumes?: Record<string, number>;
   mutedAudioTracks?: string[];
+}
+
+export interface CreateAutomaticClipsParameters {
+  filePath: string;
 }
 
 export interface ClipSegment {
@@ -531,6 +550,7 @@ export interface NewConnectionParameters {
 /** Union of every command's parameter shape. */
 export type CommandParameters =
   | CreateClipParameters
+  | CreateAutomaticClipsParameters
   | DeleteContentParameters
   | DeleteMultipleContentParameters
   | RestoreTrashParameters
@@ -581,6 +601,8 @@ export type CommandName =
   | 'ListGames'
   | 'BrowseTrainingFolder'
   | 'CreateClip'
+  | 'CreateAutomaticClips'
+  | 'PauseAutomaticClips'
   | 'CancelClip'
   | 'DeleteContent'
   | 'DeleteMultipleContent'

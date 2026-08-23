@@ -186,7 +186,7 @@ public class ParseYoloOutputDecodeTests
     }
 
     // Boxes come out of the detect head as a centre plus a size in input pixels, and everything
-    // downstream — MapDetectionsToFullFrame, CooldownTracker's overlap match — reads them as
+    // downstream — MapDetectionsToFullFrame, DetectionBatchCounter's overlap match — reads them as
     // normalized top-left corners. Half the width is subtracted, not the whole width and not none
     // of it, and the same input size divides both terms.
     [Fact]

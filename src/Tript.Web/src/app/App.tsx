@@ -11,6 +11,7 @@ import { WarningBanner } from '../components/WarningBanner';
 import { ConnectionBanner } from '../components/ConnectionBanner';
 import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
 import { LibraryView } from '../components/LibraryView';
+import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
@@ -26,7 +27,7 @@ import { trainingEnabled } from '../buildFeatures';
 import { TrainingView } from '../components/TrainingView';
 import './app.css';
 
-export type Route = 'library' | 'settings' | 'player' | 'training';
+export type Route = 'library' | 'session' | 'settings' | 'player' | 'training';
 
 type PhotinoShellWindow = Window & {
   external?: {
@@ -70,6 +71,8 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
+  const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
+  const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -122,6 +125,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       setPlayerItem(item);
       setPlayerTitle(itemLabel(item));
       setPlayerNavigation(resultItems);
+      setPlayerReturnRoute('library');
       setRoute('player');
     },
     [],
@@ -131,8 +135,42 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPlayerItem(null);
     setPlayerTitle('');
     setPlayerNavigation([]);
-    setRoute((current) => (current === 'player' ? 'library' : current));
+    setRoute((current) => (current === 'player' ? playerReturnRoute : current));
+  }, [playerReturnRoute]);
+
+  const openSessionReview = useCallback((recording: ContentItem) => {
+    const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
+    setSessionReview({ recording, clips });
+    setRoute('session');
+  }, [items]);
+
+  const openSessionClip = useCallback((item: ContentItem, navigation: ContentItem[]) => {
+    setPlayerItem(item);
+    setPlayerTitle(itemLabel(item));
+    setPlayerNavigation(navigation);
+    setPlayerReturnRoute('session');
+    setRoute('player');
   }, []);
+
+  const deletePlayerItem = useCallback((item: ContentItem) => {
+    if (!item.automated) {
+      return;
+    }
+
+    client.send('DeleteContent', { contentType: item.contentType, fileName: item.filePath });
+    const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
+    const deletedIndex = playerNavigation.findIndex((candidate) => candidate.filePath === item.filePath);
+    const replacement = remaining[deletedIndex] ?? remaining[deletedIndex - 1];
+    setPlayerNavigation(remaining);
+    if (replacement) {
+      setPlayerItem(replacement);
+      setPlayerTitle(itemLabel(replacement));
+    } else {
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setRoute(playerReturnRoute);
+    }
+  }, [client, playerNavigation, playerReturnRoute]);
 
   useEffect(() => {
     if (route !== 'player') {
@@ -177,10 +215,32 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     );
   }, [items, playerItem, closePlayer]);
 
+  useEffect(() => {
+    setSessionReview((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      const recording = items.find((item) => item.filePath === previous.recording.filePath);
+      if (!recording) {
+        return null;
+      }
+
+      // Content pushes are the live source of truth. Rebuild the highlight list instead of only
+      // pruning deleted clips, because automatic generation adds clips after this page is already open.
+      const clips = items.filter(
+        (item) => item.automated && item.sourceSessionPath === recording.filePath,
+      );
+      return { recording, clips };
+    });
+  }, [items]);
+
   // Leaving for another destination closes whatever was open in the player route.
   const leaveFor = useCallback((next: Route) => {
     setRoute(next);
     setPlayerItem(null);
+    if (next !== 'session') {
+      setSessionReview(null);
+    }
   }, []);
   const showLibrary = useCallback(() => {
     replaceRouteHash('library');
@@ -191,6 +251,16 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     leaveFor('settings');
   }, [leaveFor]);
   const showTraining = useCallback(() => leaveFor('training'), [leaveFor]);
+  const backFromPlayer = useCallback(() => {
+    if (playerReturnRoute === 'session') {
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setPlayerNavigation([]);
+      setRoute('session');
+      return;
+    }
+    showLibrary();
+  }, [playerReturnRoute, showLibrary]);
 
   return (
     <div className="app-shell">
@@ -203,8 +273,8 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
         <nav className="app-nav" aria-label="Primary">
           <button
             type="button"
-            className={route === 'library' || route === 'player' ? 'nav-item active' : 'nav-item'}
-            aria-current={route === 'library' || route === 'player' ? 'page' : undefined}
+            className={route === 'library' || route === 'player' || route === 'session' ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'library' || route === 'player' || route === 'session' ? 'page' : undefined}
             onClick={showLibrary}
           >
             <Icon name="library" className="nav-glyph" />
@@ -243,10 +313,10 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}
         >
-          {(route === 'library' || route === 'player') && (
+          {(route === 'library' || route === 'player' || route === 'session') && (
             // Mounted but hidden while the player route is up. Unmounting would lose the user's
             // filters, sort, page and scroll while the player is open.
-            <div hidden={route === 'player'}>
+            <div hidden={route === 'player' || route === 'session'}>
               <LibraryView
                 client={client}
                 items={items}
@@ -265,8 +335,22 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               source={source}
               item={playerItem}
               navigationItems={playerNavigation}
-              onBack={showLibrary}
+              onBack={backFromPlayer}
+              onDelete={deletePlayerItem}
+              onReviewSession={openSessionReview}
+              highlightCount={items.filter(
+                (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
+              ).length}
               onItemChange={(item) => setPlayerTitle(itemLabel(item))}
+            />
+          )}
+          {route === 'session' && sessionReview && (
+            <SessionClipsView
+              recording={sessionReview.recording}
+              clips={sessionReview.clips}
+              client={client}
+              onBack={showLibrary}
+              onOpen={openSessionClip}
             />
           )}
           {route === 'settings' && <SettingsView client={client} />}

@@ -40,6 +40,19 @@ internal sealed class TrainingWorkspace
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? [];
     }
 
+    // Runtime event definitions are installed beside the model. The training workspace keeps its
+    // own copy for dataset/training operations, but the detector and training UI must agree on this
+    // one authoritative definition file.
+    internal List<EventDefinition> LoadRuntimeDefinitions()
+    {
+        var runtimePath = TrainingPaths.InstalledEventsPath(GameId);
+        if (!File.Exists(runtimePath))
+            return LoadDefinitions();
+
+        return JsonSerializer.Deserialize<List<EventDefinition>>(File.ReadAllText(runtimePath),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? [];
+    }
+
     internal static TrainingWorkspace ForGame(string gameId, string? rootPath = null)
     {
         if (string.IsNullOrWhiteSpace(gameId))

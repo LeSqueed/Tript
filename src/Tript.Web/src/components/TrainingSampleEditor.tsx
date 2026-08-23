@@ -293,7 +293,6 @@ export function TrainingSampleEditor({
         name: 'New event',
         type: 'Trigger',
         bookmarkType: 'Manual',
-        lifetimeMs: null,
       },
       isNew: true,
     });

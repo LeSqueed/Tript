@@ -20,8 +20,7 @@ const CAPTURE_METHOD_OVERRIDES: { value: string; label: string }[] = [
 const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
   { value: '', label: 'Inherit global setting' },
   { value: 'Session', label: 'Session' },
-  { value: 'Buffer', label: 'Buffer' },
-  { value: 'Hybrid', label: 'Hybrid' },
+  { value: 'SessionWithReplayBuffer', label: 'Session + Replay Buffer' },
 ];
 
 export function GamePage({

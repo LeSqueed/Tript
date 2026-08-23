@@ -74,6 +74,23 @@ internal sealed class ContentItem
     // The bookmarks the recording carries on the wire, null when the item has none (clips never
     // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).
     public List<BookmarkItem>? Bookmarks { get; set; }
+
+    // Set only on generated highlights. Manual clips remain independent library content.
+    public bool Automated { get; set; }
+
+    public string? SourceSessionPath { get; set; }
+
+    public double? ClipStartTime { get; set; }
+
+    public double? ClipEndTime { get; set; }
+
+    public bool AutomaticClipsProcessing { get; set; }
+
+    public bool AutomaticClipsPaused { get; set; }
+
+    public int? AutomaticClipsCompleted { get; set; }
+
+    public int? AutomaticClipsTotal { get; set; }
 }
 
 internal sealed class GameInfo
@@ -132,6 +149,11 @@ internal sealed class CreateClipParameters
     public Dictionary<string, double>? AudioTrackVolumes { get; set; }
 
     public List<string>? MutedAudioTracks { get; set; }
+}
+
+internal sealed class CreateAutomaticClipsParameters
+{
+    public string FilePath { get; set; } = string.Empty;
 }
 
 internal sealed class ClipSegment

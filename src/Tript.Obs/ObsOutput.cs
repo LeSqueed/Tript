@@ -35,6 +35,8 @@ public sealed class ObsOutput : IDisposable
     private readonly ObsOutputHandle _handle;
     private readonly object _stopGate = new();
     private ObsOutputStopSubscription? _stopEvent;
+    private readonly object _savedGate = new();
+    private ObsOutputSignalSubscription? _savedEvent;
     private int _disposeRequested;
 
     private ObsOutput(nint pointer) => _handle = new ObsOutputHandle(pointer);
@@ -83,6 +85,7 @@ public sealed class ObsOutput : IDisposable
             return;
 
         var stopEvent = StopListeningForStop();
+        var savedEvent = StopListeningForSaved();
         if (stopEvent?.IsCurrentCallback == true)
         {
             // The native signal handler is still executing on this thread. Releasing the output from
@@ -92,10 +95,12 @@ public sealed class ObsOutput : IDisposable
                 stopEvent.WaitForCallbacks(Timeout.InfiniteTimeSpan);
                 _handle.Dispose();
             });
+            savedEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
             return;
         }
 
         stopEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
+        savedEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
         _handle.Dispose();
     }
 
@@ -182,6 +187,54 @@ public sealed class ObsOutput : IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         ObsNative.obs_output_update(Pointer, settings.Pointer);
+    }
+
+    // Calls a procedure exposed by the output plugin. The replay_buffer output uses this procedure
+    // surface for save() and get_last_replay(), avoiding the Qt frontend API in headless hosts.
+    public bool CallProcedure(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        unsafe
+        {
+            CalldataNative data = default;
+            try
+            {
+                CalldataNative* pointer = &data;
+                return ObsNative.proc_handler_call(ObsNative.obs_output_get_proc_handler(Pointer), name,
+                    (nint)pointer);
+            }
+            finally
+            {
+                if (data.Stack != nint.Zero)
+                    ObsNative.bfree(data.Stack);
+            }
+        }
+    }
+
+    public string? CallStringProcedure(string name, string resultName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrEmpty(resultName);
+        unsafe
+        {
+            CalldataNative data = default;
+            try
+            {
+                nint value = nint.Zero;
+                CalldataNative* pointer = &data;
+                if (!ObsNative.proc_handler_call(ObsNative.obs_output_get_proc_handler(Pointer), name,
+                        (nint)pointer))
+                    return null;
+                if (!ObsNative.calldata_get_string((nint)pointer, resultName, &value))
+                    return null;
+                return Utf8Marshal.ReadBorrowed(value);
+            }
+            finally
+            {
+                if (data.Stack != nint.Zero)
+                    ObsNative.bfree(data.Stack);
+            }
+        }
     }
 
     // ---- wiring ----
@@ -337,6 +390,33 @@ public sealed class ObsOutput : IDisposable
         }
     }
 
+    // Signals emitted by output plugins that are not stop events. The replay buffer emits saved after
+    // its asynchronous mux thread has finished writing the file.
+    public event EventHandler? Saved
+    {
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_savedGate)
+            {
+                _savedEvent ??= new ObsOutputSignalSubscription(this, "saved");
+                _savedEvent.Connect();
+                _savedEvent.Add(value);
+            }
+        }
+        remove
+        {
+            lock (_savedGate)
+            {
+                if (_savedEvent is null || value is null)
+                    return;
+                _savedEvent.Remove(value);
+                if (_savedEvent.IsEmpty)
+                    _savedEvent.Disconnect();
+            }
+        }
+    }
+
     internal bool WaitForStop(TimeSpan timeout)
     {
         ObsOutputStopSubscription? stopEvent;
@@ -354,6 +434,17 @@ public sealed class ObsOutput : IDisposable
             stopEvent?.Disconnect();
             _stopEvent = null;
             return stopEvent;
+        }
+    }
+
+    private ObsOutputSignalSubscription? StopListeningForSaved()
+    {
+        lock (_savedGate)
+        {
+            var savedEvent = _savedEvent;
+            savedEvent?.Disconnect();
+            _savedEvent = null;
+            return savedEvent;
         }
     }
 
@@ -409,6 +500,20 @@ public sealed class ObsOutput : IDisposable
         {
             // Nothing here may throw across the native frame; a handler that throws terminates the
             // process. A failed dispatch shows up as a missing event, which the caller sees.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    internal static void OnSaved(nint parameter, nint calldata)
+    {
+        try
+        {
+            if (GCHandle.FromIntPtr(parameter).Target is ObsOutputSignalSubscription signal)
+                signal.OnNativeSignal();
+        }
+        catch
+        {
+            // Nothing may escape through the native callback frame.
         }
     }
 }
@@ -625,4 +730,159 @@ internal sealed class ObsOutputStopSubscription
         if (_disconnectRequested && _callbacksInFlight == 0 && _pinned.IsAllocated)
             _pinned.Free();
     }
+}
+
+internal sealed class ObsOutputSignalSubscription
+{
+    private readonly ObsOutput _output;
+    private readonly string _signal;
+    private readonly List<EventHandler> _handlers = [];
+    private readonly SynchronizationContext? _context;
+    private readonly object _gate = new();
+    private GCHandle _pinned;
+    private bool _connected;
+    private int _callbacksInFlight;
+    private readonly ManualResetEventSlim _callbacksDone = new(true);
+
+    internal ObsOutputSignalSubscription(ObsOutput output, string signal)
+    {
+        _output = output;
+        _signal = signal;
+        _context = SynchronizationContext.Current;
+    }
+
+    internal bool IsEmpty
+    {
+        get
+        {
+            lock (_gate)
+                return _handlers.Count == 0;
+        }
+    }
+
+    internal void Add(EventHandler handler)
+    {
+        lock (_gate)
+            _handlers.Add(handler);
+    }
+
+    internal void Remove(EventHandler handler)
+    {
+        lock (_gate)
+            _handlers.Remove(handler);
+    }
+
+    internal void Connect()
+    {
+        lock (_gate)
+        {
+            if (_connected)
+                return;
+
+            _pinned = GCHandle.Alloc(this);
+            unsafe
+            {
+                ObsNative.signal_handler_connect(ObsNative.obs_output_get_signal_handler(_output.Pointer), _signal,
+                    &ObsOutput.OnSaved, GCHandle.ToIntPtr(_pinned));
+            }
+            _connected = true;
+        }
+    }
+
+    internal void Disconnect()
+    {
+        lock (_gate)
+        {
+            if (!_connected)
+                return;
+
+            unsafe
+            {
+                ObsNative.signal_handler_disconnect(ObsNative.obs_output_get_signal_handler(_output.Pointer), _signal,
+                    &ObsOutput.OnSaved, GCHandle.ToIntPtr(_pinned));
+            }
+            _connected = false;
+            while (_callbacksInFlight != 0)
+                Monitor.Wait(_gate);
+            if (_pinned.IsAllocated)
+                _pinned.Free();
+        }
+    }
+
+    internal void OnNativeSignal()
+    {
+        EventHandler[] handlers;
+        lock (_gate)
+        {
+            if (!_connected)
+                return;
+            _callbacksInFlight++;
+            _callbacksDone.Reset();
+            handlers = _handlers.ToArray();
+        }
+
+        try
+        {
+            foreach (var handler in handlers)
+            {
+                if (_context is null)
+                    handler(_output, EventArgs.Empty);
+                else
+                {
+                    var captured = handler;
+                    lock (_gate)
+                    {
+                        _callbacksInFlight++;
+                        _callbacksDone.Reset();
+                    }
+                    try
+                    {
+                        _context.Post(_ =>
+                        {
+                            try
+                            {
+                                captured(_output, EventArgs.Empty);
+                            }
+                            finally
+                            {
+                                CompletePostedCallback();
+                            }
+                        }, null);
+                    }
+                    catch
+                    {
+                        CompletePostedCallback();
+                        throw;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _callbacksInFlight--;
+                if (_callbacksInFlight == 0)
+                {
+                    _callbacksDone.Set();
+                    Monitor.PulseAll(_gate);
+                }
+            }
+        }
+    }
+
+    private void CompletePostedCallback()
+    {
+        lock (_gate)
+        {
+            _callbacksInFlight--;
+            if (_callbacksInFlight == 0)
+            {
+                _callbacksDone.Set();
+                Monitor.PulseAll(_gate);
+            }
+        }
+    }
+
+    internal bool WaitForCallbacks(TimeSpan timeout) => _callbacksDone.Wait(timeout);
 }

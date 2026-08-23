@@ -10,20 +10,16 @@ namespace Tript.Settings;
 // (see SettingsStore), and the alpha recorder consumes the resolved values via
 // ResolvedRecorderSettings rather than these raw page objects.
 
-// The recording page: the session recording itself. Alpha records a single-output session; the
-// mode is first-class from the start because the buffer/hybrid two-output shape slots in without
-// a refactor.
+// The recording page: every mode writes a continuous session. The combined mode additionally keeps
+// an explicitly requested replay buffer alive for live highlight saves.
 public sealed class RecordingSettings
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
 
-    // Session, because Session is what the app does. Buffer and Hybrid are designed for but not
-    // implemented (RecordingModeExtensions.IsAlphaSupported), and AppHost flattens a resolved Hybrid
-    // to Session so the recorder will accept the start — which meant the shipped default routed
-    // EVERY automatic recording through the one path the recorder's own contract forbids: "refuse
-    // loudly rather than silently record something else". A default has to describe what happens.
-    public RecordingMode Mode { get; set; } = RecordingMode.Session;
+    // New users get both outputs. Existing persisted Session values remain Session and are never
+    // upgraded implicitly, so enabling replay is an explicit migration choice for them.
+    public RecordingMode Mode { get; set; } = RecordingMode.SessionWithReplayBuffer;
 
     public int ResolutionWidth { get; set; } = 1920;
 
@@ -67,6 +63,10 @@ public sealed class RecordingSettings
     // The directory recordings are written to, or empty for the platform default (Videos/Tript).
     // The host resolves the effective path; the recorder never sees this field.
     public string? OutputDirectory { get; set; }
+
+    // Whether detected positive events should be turned into highlights automatically. In combined
+    // mode the replay buffer still runs when this is false, ready for future manual hotkeys.
+    public bool AutomaticClipsEnabled { get; set; }
 
     // How long a deleted recording stays in the trash before it is purged for good. Zero or less
     // disables the automatic purge, so entries stay until they are emptied by hand.

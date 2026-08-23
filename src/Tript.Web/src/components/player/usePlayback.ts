@@ -56,6 +56,9 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
     if (video) {
       video.currentTime = 0;
       video.pause();
+      void video.play().catch(() => {
+        // Browser autoplay policies may require the existing play overlay to be clicked.
+      });
     }
   }, [itemKey]);
 

@@ -10,9 +10,8 @@ namespace Tript.Recorder;
 // instead of a real one, which needs a frame source, an ONNX model and a background thread.
 public interface IVisualEventDetector : IDisposable
 {
-    // Raised on the detector's own thread, one batch per detection cycle. A batch is the
-    // unsuppressed output of one cycle across every region group — the CooldownTracker folds
-    // duplicates within it.
+    // Raised on the detector's own thread, one batch per detection cycle. Empty batches are
+    // significant because the host uses every cycle to update each event's net count.
     event Action<List<DetectionResult>>? DetectionsAvailable;
 
     void Start(string gameId);

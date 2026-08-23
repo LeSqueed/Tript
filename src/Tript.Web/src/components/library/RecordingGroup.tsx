@@ -8,7 +8,6 @@
 //
 // Recent groups form a compact landing shelf. Every other group renders as an archive row.
 
-import type { ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import type { RecordingGroup as Group } from './libraryModel';
 import { ContentCard } from './ContentCard';
@@ -26,17 +25,17 @@ function cardFor(
   item: ContentItem,
   actions: GroupActions,
   variant: 'grid' | 'wide' = 'grid',
-  action?: ReactNode,
   priority = false,
   clipsCount = 0,
+  highlightsCount = 0,
 ) {
   return (
     <ContentCard
       item={item}
       variant={variant}
-      action={action}
       priority={priority}
       clipsCount={clipsCount}
+      highlightsCount={highlightsCount}
       onOpen={actions.onOpen}
       onDelete={actions.onDelete}
       onToggleFavorite={actions.onToggleFavorite}
@@ -57,6 +56,7 @@ export function RecordingGroup({
   actions: GroupActions;
 }) {
   const recording = group.recording;
+  const automaticClips = group.clips.filter((clip) => clip.automated);
 
   if ((variant === 'hero' || variant === 'recent') && recording) {
     return (
@@ -66,14 +66,12 @@ export function RecordingGroup({
         aria-label={variant === 'recent' ? 'Recent recording' : 'Newest recording'}
       >
         {cardFor(
-          recording,
-          actions,
-          variant === 'recent' ? 'grid' : 'wide',
-           <span className="recording-review-label" aria-hidden="true">
-             Review
-           </span>,
-          variant === 'recent',
-          group.clips.length,
+            recording,
+            actions,
+            variant === 'recent' ? 'grid' : 'wide',
+            variant === 'recent',
+           group.clips.length,
+           automaticClips.length,
         )}
       </section>
     );
@@ -88,8 +86,10 @@ export function RecordingGroup({
 
   return (
     <section className="recording-group" data-testid="recording-group">
-      <div className="recording-group-body">
-         <div className="recording-group-head">{cardFor(recording, actions, 'grid', undefined, false, group.clips.length)}</div>
+        <div className="recording-group-body">
+          <div className="recording-group-head">
+            {cardFor(recording, actions, 'grid', false, group.clips.length, automaticClips.length)}
+          </div>
       </div>
     </section>
   );

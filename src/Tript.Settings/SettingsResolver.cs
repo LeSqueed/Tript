@@ -16,9 +16,11 @@ public sealed class SettingsResolver
         if (!string.IsNullOrEmpty(gameId))
             game = settings.Game.GameList.FirstOrDefault(g => g.Id == gameId);
 
+        var mode = ResolveMode(settings.Recording.Mode, game?.RecordingModeOverride?.Mode);
+
         return new ResolvedRecorderSettings
         {
-            Mode = ResolveMode(settings.Recording.Mode, game?.RecordingModeOverride?.Mode),
+            Mode = mode,
 
             ResolutionWidth = game?.QualityOverride?.ResolutionWidth ?? settings.Recording.ResolutionWidth,
             ResolutionHeight = game?.QualityOverride?.ResolutionHeight ?? settings.Recording.ResolutionHeight,
@@ -34,7 +36,9 @@ public sealed class SettingsResolver
             MaxBitrateKbps = settings.Recording.MaxBitrateKbps,
             EnableHdr = settings.Recording.EnableHdr,
 
-            BufferEnabled = settings.Buffer.Enabled,
+            // Recording mode is the only authority for whether the replay output runs. The legacy
+            // buffer checkbox is retained for settings-file compatibility but cannot enable it.
+             BufferEnabled = mode is RecordingMode.SessionWithReplayBuffer,
             BufferDuration = settings.Buffer.Duration,
             BufferMaxSizeBytes = settings.Buffer.MaxSizeBytes,
 

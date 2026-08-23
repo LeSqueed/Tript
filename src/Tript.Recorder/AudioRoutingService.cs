@@ -23,7 +23,7 @@ public sealed class AudioRoutingService
     // Wires the whole audio path for a plan and returns the sources and encoders it created, plus
     // the metadata layout describing what went where. The recorder holds onto the returned wiring
     // for the life of the recording and disposes it when it stops.
-    public AudioRouting Wire(AudioRoutingPlan plan)
+    public AudioRouting Wire(AudioRoutingPlan plan, bool includeCaptureSources = true)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -35,14 +35,17 @@ public sealed class AudioRoutingService
         {
             foreach (var track in plan.Tracks)
             {
-                foreach (var source in track.Sources)
+                if (includeCaptureSources)
                 {
-                    var capture = _sink.CreateCaptureSource(source.Kind, source.Name, source.DeviceId);
-                    sources.Add(capture);
-                    _sink.RouteSourceToMixer(capture, track.MixerIndex);
-                    _sink.SetSourceVolume(capture, source.Volume);
-                    _sink.ActivateSource(capture);
-                    activeSources.Add(capture);
+                    foreach (var source in track.Sources)
+                    {
+                        var capture = _sink.CreateCaptureSource(source.Kind, source.Name, source.DeviceId);
+                        sources.Add(capture);
+                        _sink.RouteSourceToMixer(capture, track.MixerIndex);
+                        _sink.SetSourceVolume(capture, source.Volume);
+                        _sink.ActivateSource(capture);
+                        activeSources.Add(capture);
+                    }
                 }
 
                 var encoder = _sink.CreateTrackEncoder(track.MixerIndex, track.Name);

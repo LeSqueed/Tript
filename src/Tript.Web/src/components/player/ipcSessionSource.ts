@@ -26,7 +26,7 @@ interface ContentMessageContent {
 }
 
 export interface IpcSessionSource extends SessionSource {
-  /** Clips (contentType === 'clip') in the same list order. */
+  /** Manual clips and automated highlights in the same list order. */
   getClips(): ContentItem[];
   /** The whole pushed list, in the backend's order — what the library grid renders over. */
   getItems(): ContentItem[];
@@ -79,7 +79,7 @@ export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
       return items.filter((item) => item.contentType === 'recording');
     },
     getClips(): ContentItem[] {
-      return items.filter((item) => item.contentType === 'clip');
+      return items.filter((item) => item.contentType === 'clip' || item.contentType === 'highlight');
     },
     getItems(): ContentItem[] {
       // The pushed array itself, not a copy: consumers treat it as immutable (the library sorts into

@@ -9,8 +9,9 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// The bookmark vocabulary is a compatibility surface: five members in a fixed order, with only Kill
-// and Goal marked for inclusion in automatic highlights. The on-file contract is the member name,
+// The bookmark vocabulary is a compatibility surface: five members in a fixed order, with Kill, Goal
+// and Assist marked as positive bookmark types. Event definitions decide automatic clip
+// inclusion per game. The on-file contract is the member name,
 // and the converter tolerates unknown values by falling back to Manual.
 public class BookmarkMetadataTests
 {
@@ -23,14 +24,14 @@ public class BookmarkMetadataTests
     }
 
     [Fact]
-    public void HighlightMarking_DistinguishesKillsAndGoalsFromDeathsAndAssists()
+    public void HighlightMarking_DistinguishesPositiveTypesFromManualAndDeaths()
     {
         Assert.True(BookmarkType.Kill.IsIncludedInHighlights());
         Assert.True(BookmarkType.Goal.IsIncludedInHighlights());
 
-        // Deliberately not highlighted, against the obvious reading.
+        Assert.True(BookmarkType.Assist.IsIncludedInHighlights());
+
         Assert.False(BookmarkType.Manual.IsIncludedInHighlights());
-        Assert.False(BookmarkType.Assist.IsIncludedInHighlights());
         Assert.False(BookmarkType.Death.IsIncludedInHighlights());
     }
 

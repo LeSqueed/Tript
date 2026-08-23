@@ -55,6 +55,9 @@ export interface PlayerViewProps {
   /** The complete filtered/sorted library result set used for previous/next navigation. */
   navigationItems?: ContentItem[];
   onItemChange?(item: ContentItem): void;
+  onDelete?(item: ContentItem): void;
+  onReviewSession?(recording: ContentItem): void;
+  highlightCount?: number;
   onBack?(): void;
   /**
    * The clip-dialog seam. When a session is playing, the player opens its own dialog that owns the
@@ -72,6 +75,9 @@ export function PlayerView({
   item: requestedItem,
   navigationItems,
   onItemChange,
+  onDelete,
+  onReviewSession,
+  highlightCount = 0,
   onBack,
   regions: externalRegions,
   selectedRegionId: externalSelectedRegionId,
@@ -118,6 +124,17 @@ export function PlayerView({
       : requestedIndex < 0
         ? (requestedItem ?? navigation[itemIndex] ?? navigation[0])
         : (navigation[itemIndex] ?? navigation[0]);
+
+  const [automaticClips, setAutomaticClips] = useState<RecordingState['automaticClips']>(null);
+  useEffect(() => client.on('state', (content) => {
+    const state = (content as { state?: RecordingState }).state;
+    const job = state?.automaticClips;
+    setAutomaticClips(job?.sourceSessionPath === item?.filePath ? job : null);
+  }), [client, item?.filePath]);
+
+  const creatingHighlights = item?.contentType === 'recording'
+    && (item.automaticClipsProcessing === true || automaticClips?.active === true);
+  const highlightsPaused = item?.automaticClipsPaused === true || automaticClips?.paused === true;
 
   useEffect(() => {
     if (item) {
@@ -560,14 +577,42 @@ export function PlayerView({
   }
 
   const videoSrc = contentUrl(item.filePath);
+  const handleAutomaticClips = () => {
+    if (creatingHighlights) {
+      client.send('PauseAutomaticClips');
+    } else {
+      client.send('CreateAutomaticClips', { filePath: item.filePath });
+    }
+  };
 
   return (
     <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
       <div className="player-header">
         <Button variant="ghost" size="small" icon="chevronLeft" onClick={onBack}>
-          Back to library
+          Back
         </Button>
         <span className="player-header-title">{item.title?.trim() || item.fileName}</span>
+        {item.contentType === 'recording' && (
+          <Button variant="ghost" size="small" onClick={handleAutomaticClips}>
+            {creatingHighlights ? (highlightsPaused ? 'Resume highlights' : 'Pause highlights') : 'Create highlights'}
+          </Button>
+        )}
+        {item.contentType === 'recording' && highlightCount > 0 && onReviewSession && (
+          <Button variant="ghost" size="small" onClick={() => onReviewSession(item)}>
+            View highlights ({highlightCount})
+          </Button>
+        )}
+        {item.automated && onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="player-header-delete"
+            icon="trash"
+            onClick={() => onDelete(item)}
+            aria-label="Move highlight to trash"
+            title="Move highlight to trash"
+          />
+        )}
       </div>
       <div className="video-frame">
         <video
@@ -580,6 +625,8 @@ export function PlayerView({
            aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
            src={videoSrc}
            poster={thumbnailUrl(item.filePath)}
+           autoPlay
+           playsInline
            onClick={playback.togglePlayPause}
           onTimeUpdate={(event) => playback.onVideoTimeUpdate(event.currentTarget.currentTime)}
            onDurationChange={(event) => playback.onVideoDuration(event.currentTarget.duration)}

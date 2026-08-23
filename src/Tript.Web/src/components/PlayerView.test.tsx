@@ -152,6 +152,11 @@ describe('PlayerView', () => {
     expect(screen.getByRole('button', { name: 'Play recording' })).toBeTruthy();
   });
 
+  it('starts videos automatically when the player opens', () => {
+    renderPlayer();
+    expect((document.querySelector('video') as HTMLVideoElement).autoplay).toBe(true);
+  });
+
   it('resets the playhead when navigating to another session', () => {
     const { container } = renderPlayer();
     act(() => clickBarAt(container, 80));

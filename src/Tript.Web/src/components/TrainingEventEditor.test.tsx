@@ -13,7 +13,6 @@ describe('TrainingEventEditor', () => {
       name: 'Round end',
       type: 'Exclusion',
       bookmarkType: null,
-      lifetimeMs: 500,
       screenRegionX: 0.1,
       screenRegionY: 0.2,
       screenRegionW: 0.3,
@@ -28,18 +27,8 @@ describe('TrainingEventEditor', () => {
     expect(onSave).toHaveBeenCalledWith({
       ...event,
       name: 'Round complete',
+      includeInAutoClips: false,
     });
-  });
-
-  it('reports fractional lifetimes instead of sending an invalid event', () => {
-    const onSave = vi.fn();
-    render(<TrainingEventEditor event={{ id: 1, classId: 1, name: 'Kill', type: 'Trigger' }} isNew={false} onCancel={vi.fn()} onSave={onSave} />);
-
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1.5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
-
-    expect(onSave).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toContain('whole number');
   });
 
   it('requires a trigger target for subtractor events', () => {

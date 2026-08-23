@@ -17,7 +17,7 @@ public sealed class RecorderRecordingCollection
 }
 
 // Installs an active recording for the duration of a test body and restores the registry
-// afterwards. Bookmark-producing components (the detection host, the CooldownTracker) write
+// afterwards. Bookmark-producing components (the detection host) write
 // through the active session, so this is how a test observes what they produced.
 public sealed class ActiveRecordingScope : IDisposable
 {

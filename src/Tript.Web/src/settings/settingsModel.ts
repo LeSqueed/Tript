@@ -4,9 +4,8 @@
 // camelCase-serialized). The `settings` message carries this whole object; `UpdateSettings` carries
 // a partial.
 
-/** Recording mode — Session, Buffer, or Hybrid (both at once). Session is the default, and
- * the only one the recorder implements today. */
-export type RecordingMode = 'Session' | 'Buffer' | 'Hybrid';
+/** Every mode records a session; the combined mode additionally runs the replay buffer. */
+export type RecordingMode = 'Session' | 'SessionWithReplayBuffer';
 
 /**
  * How the encoder is told to spend its bits. The four members are the modes the encoder families
@@ -52,11 +51,14 @@ export interface RecordingSettings {
    * (Videos/Tript). A path the user types is a local draft, committed on blur like resolution.
    */
   outputDirectory?: string | null;
+  /** Create detected highlights automatically when a recording stops. Off by default. */
+  automaticClipsEnabled?: boolean;
   [key: string]: unknown;
 }
 
 export interface BufferSettings {
-  enabled: boolean;
+  /** Legacy field retained in persisted settings; recording mode is the activation authority. */
+  enabled?: boolean;
   /** Rolling-buffer length, in seconds. */
   duration: number;
   /** Maximum rolling-buffer size, in bytes. */

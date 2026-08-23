@@ -162,6 +162,10 @@ export interface RecordingGroup {
   clips: ContentItem[];
 }
 
+export function isClipContent(item: ContentItem): boolean {
+  return item.contentType === 'clip' || item.contentType === 'highlight';
+}
+
 /** The file name without its extension, which is what the clip→recording link is written in. */
 function baseName(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
@@ -180,6 +184,10 @@ function baseName(fileName: string): string {
  * separator, so `ow` cannot claim `owl-01`.
  */
 function sourceOf(clip: ContentItem, recordings: readonly ContentItem[]): ContentItem | null {
+  if (clip.sourceSessionPath) {
+    return recordings.find((recording) => recording.filePath === clip.sourceSessionPath) ?? null;
+  }
+
   const clipBase = baseName(clip.fileName);
   let source: ContentItem | null = null;
   let matched = 0;
@@ -209,13 +217,13 @@ function sourceOf(clip: ContentItem, recordings: readonly ContentItem[]): Conten
  * recording is not something the user can act on, and burying it at the end helps nobody.
  */
 export function groupByRecording(items: readonly ContentItem[]): RecordingGroup[] {
-  const recordings = items.filter((item) => item.contentType !== 'clip');
+  const recordings = items.filter((item) => !isClipContent(item));
   const groups = new Map<ContentItem, RecordingGroup>();
   const ordered: RecordingGroup[] = [];
 
   // Heads first, so every group sits where its head sat in the caller's order.
   for (const item of items) {
-    if (item.contentType !== 'clip') {
+    if (!isClipContent(item)) {
       const group: RecordingGroup = { recording: item, clips: [] };
       groups.set(item, group);
       ordered.push(group);
@@ -225,7 +233,7 @@ export function groupByRecording(items: readonly ContentItem[]): RecordingGroup[
   }
 
   for (const item of items) {
-    if (item.contentType !== 'clip') continue;
+    if (!isClipContent(item)) continue;
     const source = sourceOf(item, recordings);
     if (source !== null) {
       groups.get(source)!.clips.push(item);
@@ -295,7 +303,7 @@ export function matchesType(item: ContentItem, filter: ContentTypeFilter): boole
   if (filter === 'all') {
     return true;
   }
-  const isClip = item.contentType === 'clip';
+  const isClip = isClipContent(item);
   return filter === 'clips' ? isClip : !isClip;
 }
 

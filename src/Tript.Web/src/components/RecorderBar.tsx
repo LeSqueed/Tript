@@ -64,7 +64,13 @@ export function RecorderBar({
   }, [client]);
 
   const recording = recordingState?.recording ?? false;
-  const creatingClips = clipJobs.size > 0;
+  const automaticClips = recordingState?.automaticClips;
+  const creatingClips = clipJobs.size > 0 || automaticClips?.active === true;
+  const clipStatus = automaticClips?.active
+    ? automaticClips.paused
+      ? `Highlights paused (${automaticClips.completed}/${automaticClips.total})`
+      : `Creating highlights (${automaticClips.completed}/${automaticClips.total})`
+    : 'Creating clips…';
 
   // One tick a second, and only while there is a clock to advance.
   useEffect(() => {
@@ -99,7 +105,7 @@ export function RecorderBar({
           {state.startedAt === null ? '—' : formatElapsed(now - state.startedAt)}
         </span>
         {state.game && <span className="rec-game">{state.game}</span>}
-        {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">Creating clips…</span>}
+        {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">{clipStatus}</span>}
         <Button variant="ghost" size="small" onClick={() => client.send('StopRecording')}>
           Stop
         </Button>
@@ -109,7 +115,7 @@ export function RecorderBar({
 
   return (
     <div className="recorder-bar" data-testid="recorder-bar">
-      {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">Creating clips…</span>}
+      {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">{clipStatus}</span>}
       <Button variant="ghost" size="small" onClick={() => client.send('StartRecording')}>
         Record
       </Button>

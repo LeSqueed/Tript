@@ -439,6 +439,22 @@ describe('grouping clips under their recording', () => {
     expect(groups.find((g) => g.recording?.fileName === 'ow.mp4')?.clips).toEqual([]);
   });
 
+  it('uses an automated clip source link instead of its generated filename', () => {
+    const groups = groupByRecording([
+      item({ fileName: 'session-1.mp4', filePath: 'sessions/session-1.mp4' }),
+      item({
+        fileName: 'highlight-random.mp4',
+        filePath: 'clips/highlight-random.mp4',
+        contentType: 'highlight',
+        automated: true,
+        sourceSessionPath: 'sessions/session-1.mp4',
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].clips.map((clip) => clip.fileName)).toEqual(['highlight-random.mp4']);
+  });
+
   it('does not let a recording claim a clip that merely starts with its name', () => {
     const groups = groupByRecording([
       link('ow.mp4', 'recording'),

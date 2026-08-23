@@ -22,7 +22,7 @@ export interface SessionSource {
    * as the `useSyncExternalStore` snapshot. A static source has no external updates and omits it.
    */
   getVersion?: () => number;
-  /** Clips (contentType === 'clip') in list order. The IPC-backed source implements it. */
+  /** Manual clips and automated highlights in list order. The IPC-backed source implements it. */
   getClips?: () => ContentItem[];
   /**
    * The WHOLE content list in the backend's own order, sessions and clips interleaved. The library

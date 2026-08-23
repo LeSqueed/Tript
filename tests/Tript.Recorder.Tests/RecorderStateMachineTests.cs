@@ -125,13 +125,6 @@ public class RecorderStateMachineTests
     {
         using var recorder = NewRecorder(_session);
 
-        var buffer = TestSettings.Session();
-        buffer.Mode = RecordingMode.Buffer;
-        Assert.False(recorder.Start(buffer));
-        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
-        Assert.Equal(RecorderStopReason.UnsupportedMode, recorder.Snapshot.LastStopReason);
-        Assert.Equal(0, _session.PlaceSourceCalls);
-
         var hybrid = TestSettings.Session();
         hybrid.Mode = RecordingMode.Hybrid;
         Assert.False(recorder.Start(hybrid));

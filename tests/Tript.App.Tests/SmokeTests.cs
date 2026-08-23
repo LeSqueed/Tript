@@ -84,7 +84,7 @@ public sealed class SmokeTests : IDisposable
     }
 
     // A configured recording output directory must be honoured by the host's output-path builder.
-    // BuildOutputPath creates the sessions/ directory unconditionally — flat, no date subfolder —
+    // BuildOutputPath creates the game/sessions/ directory unconditionally — flat, no date subfolder —
     // so a fake-recorder StartRecording is enough to observe where the recording would land: no
     // libobs, no real file.
     [Fact]
@@ -105,9 +105,9 @@ public sealed class SmokeTests : IDisposable
         Assert.Equal("state", startMethod);
         Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
 
-        var expected = Path.Combine(outputRoot, "sessions");
+        var expected = Path.Combine(outputRoot, "Overwatch", "sessions");
         Assert.True(Directory.Exists(expected), $"The configured output directory was not created: {expected}");
-        // Sessions are flat: the timestamp is in the file name, so there is no date subfolder.
+        // Sessions are flat inside the game folder: the timestamp is in the file name, so there is no date subfolder.
         Assert.Empty(Directory.GetDirectories(expected));
 
         await host.ShutdownAsync();

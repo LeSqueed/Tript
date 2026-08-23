@@ -84,8 +84,9 @@ export function filterTrashEntries(
   const search = query.search.trim().toLowerCase();
   return [...entries]
     .filter((entry) => {
-      if (query.type === 'clips' && entry.contentType !== 'clip') return false;
-      if (query.type === 'sessions' && entry.contentType === 'clip') return false;
+      const isClip = entry.contentType === 'clip' || entry.contentType === 'highlight';
+      if (query.type === 'clips' && !isClip) return false;
+      if (query.type === 'sessions' && isClip) return false;
       if (query.game !== '__any_game__') {
         const game = typeof entry.game === 'string' && entry.game.trim().length > 0 ? entry.game.trim() : null;
         if (query.game === '__no_game__' ? game !== null : game?.toLowerCase() !== query.game.toLowerCase()) {

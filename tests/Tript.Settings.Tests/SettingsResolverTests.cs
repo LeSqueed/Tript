@@ -46,14 +46,14 @@ public class SettingsResolverTests
                 Encoder = "nvenc",
             };
         });
-        settings.Recording.Mode = RecordingMode.Hybrid;
+        settings.Recording.Mode = RecordingMode.SessionWithReplayBuffer;
         settings.Recording.Fps = 60;
         settings.Recording.Encoder = "x264";
         settings.Recording.ResolutionWidth = 1920;
 
         var resolved = SettingsResolver.Resolve(settings, gameId: "ow");
 
-        // The per-game recording-mode override wins over the global hybrid default.
+        // The per-game recording-mode override wins over the global combined default.
         Assert.Equal(RecordingMode.Session, resolved.Mode);
         // Quality fields with an override use the override; fields without one inherit the global.
         Assert.Equal(240, resolved.Fps);
@@ -68,11 +68,11 @@ public class SettingsResolverTests
         {
             game.QualityOverride = new GameQualityOverride { Quality = 3 };
         });
-        settings.Recording.Mode = RecordingMode.Hybrid;
+        settings.Recording.Mode = RecordingMode.SessionWithReplayBuffer;
 
         var resolved = SettingsResolver.Resolve(settings, gameId: "ow");
 
-        Assert.Equal(RecordingMode.Hybrid, resolved.Mode);
+        Assert.Equal(RecordingMode.SessionWithReplayBuffer, resolved.Mode);
         Assert.Equal(3, resolved.Quality);
     }
 
@@ -83,15 +83,14 @@ public class SettingsResolverTests
     public void Resolve_ProducesTheFlatShapeTheRecorderConsumes()
     {
         var settings = new Settings();
-        settings.Recording.Mode = RecordingMode.Session;
-        settings.Buffer.Enabled = true;
+        settings.Recording.Mode = RecordingMode.SessionWithReplayBuffer;
         settings.Buffer.Duration = TimeSpan.FromSeconds(45);
         settings.Audio.Tracks.Add(new AudioTrack { Name = "Game", Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output } } });
 
         var resolved = SettingsResolver.Resolve(settings);
 
         Assert.IsType<ResolvedRecorderSettings>(resolved);
-        Assert.Equal(RecordingMode.Session, resolved.Mode);
+        Assert.Equal(RecordingMode.SessionWithReplayBuffer, resolved.Mode);
         Assert.True(resolved.BufferEnabled);
         Assert.Equal(TimeSpan.FromSeconds(45), resolved.BufferDuration);
         var track = Assert.Single(resolved.AudioTracks);

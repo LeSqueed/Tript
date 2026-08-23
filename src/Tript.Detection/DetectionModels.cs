@@ -24,7 +24,12 @@ public class EventDefinition
     // Without the converter these read as numbers and events.json's "Kill"/"Assist" throw.
     [JsonConverter(typeof(BookmarkTypeConverter))]
     public BookmarkType? BookmarkType { get; set; }
-    public int? LifetimeMs { get; set; }
+
+    // Whether bookmarks from this event should produce an automated session clip. This is kept on
+    // the event definition rather than inferred from BookmarkType: a game may use the same bookmark
+    // vocabulary for positive and negative moments.
+    public bool IncludeInAutoClips { get; set; }
+
     public float? ScreenRegionX { get; set; }
     public float? ScreenRegionY { get; set; }
     public float? ScreenRegionW { get; set; }

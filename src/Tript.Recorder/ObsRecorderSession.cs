@@ -14,6 +14,7 @@ namespace Tript.Recorder;
 public sealed class ObsRecorderSession : IRecorderSession
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
+    private const string ReplayBufferId = "replay_buffer";
     private const string X264Id = "obs_x264";
 
     private const string GameCaptureId = "game_capture";
@@ -131,10 +132,30 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
     {
+        var session = CreateEncodedOutput(settings, FfmpegMuxerId, "recorder output");
+        if (!settings.Mode.UsesReplayBuffer())
+            return session;
+
+        try
+        {
+            var replay = CreateEncodedOutput(settings, ReplayBufferId, "replay buffer",
+                includeCaptureSources: false);
+            return new CombinedRecorderOutput(session, replay);
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
+    }
+
+    private MuxerOutput CreateEncodedOutput(ResolvedRecorderSettings settings, string outputId, string outputName,
+        bool includeCaptureSources = true)
+    {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (!ObsOutput.IsTypeRegistered(FfmpegMuxerId))
-            throw new ObsException($"No loaded module registers the output type '{FfmpegMuxerId}'.");
+        if (!ObsOutput.IsTypeRegistered(outputId))
+            throw new ObsException($"No loaded module registers the output type '{outputId}'.");
 
         // Before anything binds to the mix: obs_reset_video answers CurrentlyActive once an output
         // exists, so the canvas colour space is settled here or not at all.
@@ -156,10 +177,22 @@ public sealed class ObsRecorderSession : IRecorderSession
         if (!ObsEncoder.IsTypeRegistered(FfmpegAacId))
             throw new ObsException($"No loaded module registers the audio encoder '{FfmpegAacId}'.");
 
-        var outputSettings = new ObsSettings();
-        outputSettings.SetString("path", settings.OutputPath);
+        using var outputSettings = new ObsSettings();
+        if (outputId == FfmpegMuxerId)
+        {
+            outputSettings.SetString("path", settings.OutputPath);
+        }
+        else
+        {
+            outputSettings.SetInt("max_time_sec", (long)Math.Max(1, settings.BufferDuration.TotalSeconds));
+            outputSettings.SetInt("max_size_mb", Math.Max(1, (int)(settings.BufferMaxSizeBytes / (1024 * 1024))));
+            outputSettings.SetString("directory", Path.GetDirectoryName(settings.OutputPath));
+            outputSettings.SetString("format", "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss");
+            outputSettings.SetString("extension", "mp4");
+            outputSettings.SetBool("allow_spaces", false);
+        }
 
-        var output = ObsOutput.Create(FfmpegMuxerId, "recorder output", outputSettings);
+        var output = ObsOutput.Create(outputId, outputName, outputSettings);
 
         // The encoders must stay reachable. obs_output_set_video_encoder only records the pointer,
         // while ObsEncoderHandle holds the sole managed reference and releases it from its finalizer.
@@ -208,7 +241,8 @@ public sealed class ObsRecorderSession : IRecorderSession
             if (settings.AudioTracks.Count > 0)
             {
                 var sink = new ObsAudioRoutingSink(output, audio, audioEncoderId: FfmpegAacId, scene: _scene);
-                audioRouting = new AudioRoutingService(sink).Wire(AudioRoutingPlanner.Plan(settings.AudioTracks));
+                audioRouting = new AudioRoutingService(sink).Wire(
+                    AudioRoutingPlanner.Plan(settings.AudioTracks), includeCaptureSources);
             }
             else
             {
@@ -221,7 +255,7 @@ public sealed class ObsRecorderSession : IRecorderSession
                 }
             }
 
-            return new MuxerOutput(output, videoEncoder, audioEncoder, audioRouting);
+            return new MuxerOutput(output, videoEncoder, audioEncoder, audioRouting, outputId == ReplayBufferId);
         }
         catch
         {
@@ -1018,19 +1052,28 @@ public sealed class ObsRecorderSession : IRecorderSession
 // The IRecorderOutput over a real ObsOutput: forwards start, stop and the stop signal, and owns the
 // output and the two encoders wired into it. The encoders are fields rather than locals for the
 // reachability reason documented in CreateOutput.
-    private sealed class MuxerOutput : IRecorderOutput
+    private sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
     {
         private readonly ObsOutput _output;
         private readonly ObsEncoder _videoEncoder;
         private readonly ObsEncoder? _audioEncoder;
         private readonly AudioRouting? _audioRouting;
+        private readonly bool _isReplayBuffer;
+        private readonly object _replayGate = new();
+        private readonly ManualResetEventSlim _replaySaveCompleted = new(true);
+        private Action<string>? _replaySaved;
+        private bool _replaySavePending;
 
-        internal MuxerOutput(ObsOutput output, ObsEncoder videoEncoder, ObsEncoder? audioEncoder, AudioRouting? audioRouting)
+        internal MuxerOutput(ObsOutput output, ObsEncoder videoEncoder, ObsEncoder? audioEncoder,
+            AudioRouting? audioRouting, bool isReplayBuffer)
         {
             _output = output;
             _videoEncoder = videoEncoder;
             _audioEncoder = audioEncoder;
             _audioRouting = audioRouting;
+            _isReplayBuffer = isReplayBuffer;
+            if (_isReplayBuffer)
+                _output.Saved += OnReplaySaved;
         }
 
         public bool IsActive => _output.IsActive;
@@ -1049,15 +1092,165 @@ public sealed class ObsRecorderSession : IRecorderSession
             remove => _output.Stopped -= value;
         }
 
+        public bool SaveReplay(string directory, string format, Action<string> onSaved)
+        {
+            if (!_isReplayBuffer)
+                return false;
+
+            lock (_replayGate)
+            {
+                if (_replaySavePending)
+                    return false;
+
+                using var settings = _output.GetSettings();
+                settings.SetString("directory", directory);
+                settings.SetString("format", format);
+                settings.SetString("extension", "mp4");
+                settings.SetBool("allow_spaces", false);
+                _output.Update(settings);
+                _replaySaved = onSaved;
+                _replaySavePending = true;
+                _replaySaveCompleted.Reset();
+                if (_output.CallProcedure("save"))
+                    return true;
+
+                _replaySaved = null;
+                _replaySavePending = false;
+                _replaySaveCompleted.Set();
+                return false;
+            }
+        }
+
+        private void OnReplaySaved(object? sender, EventArgs args)
+        {
+            try
+            {
+                Action<string>? callback;
+                string? path;
+                lock (_replayGate)
+                {
+                    callback = _replaySaved;
+                    path = callback is null ? null : _output.CallStringProcedure("get_last_replay", "path");
+                    _replaySaved = null;
+                    _replaySavePending = false;
+                }
+
+                if (callback is not null && !string.IsNullOrWhiteSpace(path))
+                    callback(path);
+            }
+            finally
+            {
+                _replaySaveCompleted.Set();
+            }
+        }
+
+        public bool WaitForReplaySave(TimeSpan timeout) => _replaySaveCompleted.Wait(timeout);
+
         // Release order matters: the output first, while its encoder pointers are still valid, then
         // the encoders, then the audio routing — whose dispose deactivates the capture sources only
         // after the output has stopped reading the mixes.
         public void Dispose()
         {
+            if (_isReplayBuffer)
+                _replaySaveCompleted.Wait(Timeout.InfiniteTimeSpan);
+            if (_isReplayBuffer)
+                _output.Saved -= OnReplaySaved;
             _output.Dispose();
             _videoEncoder.Dispose();
             _audioEncoder?.Dispose();
             _audioRouting?.Dispose();
+        }
+    }
+
+    private sealed class CombinedRecorderOutput : IRecorderOutput, IReplayBufferOutput
+    {
+        private readonly MuxerOutput _session;
+        private readonly MuxerOutput _replay;
+        private readonly object _gate = new();
+        private bool _sessionStopped;
+        private bool _replayStopped;
+        private bool _signalled;
+
+        internal CombinedRecorderOutput(MuxerOutput session, MuxerOutput replay)
+        {
+            _session = session;
+            _replay = replay;
+            _session.Stopped += OnSessionStopped;
+            _replay.Stopped += OnReplayStopped;
+        }
+
+        public bool IsActive => _session.IsActive || _replay.IsActive;
+
+        public string? LastError => _session.LastError ?? _replay.LastError;
+
+        public event EventHandler<ObsOutputStopEvent>? Stopped;
+
+        public bool Start()
+        {
+            lock (_gate)
+            {
+                _sessionStopped = false;
+                _replayStopped = false;
+                _signalled = false;
+            }
+
+            if (!_session.Start())
+                return false;
+            if (_replay.Start())
+                return true;
+
+            _session.Stop();
+            return false;
+        }
+
+        public void Stop()
+        {
+            if (_replay.IsActive)
+                _replay.Stop();
+            if (_session.IsActive)
+                _session.Stop();
+        }
+
+        public bool WaitForStop(TimeSpan timeout) =>
+            _session.WaitForStop(timeout) && _replay.WaitForStop(timeout);
+
+        public bool SaveReplay(string directory, string format, Action<string> onSaved) =>
+            _replay.SaveReplay(directory, format, onSaved);
+
+        public bool WaitForReplaySave(TimeSpan timeout) => _replay.WaitForReplaySave(timeout);
+
+        private void OnSessionStopped(object? sender, ObsOutputStopEvent stop)
+        {
+            lock (_gate)
+                _sessionStopped = true;
+            TrySignal(stop);
+        }
+
+        private void OnReplayStopped(object? sender, ObsOutputStopEvent stop)
+        {
+            lock (_gate)
+                _replayStopped = true;
+            TrySignal(stop);
+        }
+
+        private void TrySignal(ObsOutputStopEvent stop)
+        {
+            lock (_gate)
+            {
+                if (_signalled || !_sessionStopped || !_replayStopped)
+                    return;
+                _signalled = true;
+            }
+
+            Stopped?.Invoke(this, stop);
+        }
+
+        public void Dispose()
+        {
+            _session.Stopped -= OnSessionStopped;
+            _replay.Stopped -= OnReplayStopped;
+            _replay.Dispose();
+            _session.Dispose();
         }
     }
 }

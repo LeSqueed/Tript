@@ -517,7 +517,7 @@ internal sealed partial class AppHost : IDisposable
                 {
                     var captureReady = capture.WaitForGameCapture(
                         capture.Policy.GameCaptureTimeout,
-                        () => PushWarning("Waiting for the game window to appear. Recording has not started yet."),
+                        () => PushWarning("Still connecting game capture. Recording will start when the hook is ready."),
                         () => PushWarning(null), waitCancellation.Token);
                     if (!captureReady)
                         return false;

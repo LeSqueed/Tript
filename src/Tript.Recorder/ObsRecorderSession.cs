@@ -397,6 +397,13 @@ public sealed class ObsRecorderSession : IRecorderSession
             settings.SetString(CaptureModeKey, WindowCaptureModeValue);
         }
 
+        // win-capture waits 10 seconds before its first hook attempt when a source becomes visible
+        // at the default Normal rate. Tript already knows the exact executable and waits for a real
+        // captured frame before starting output, so use OBS's Fastest rate (10s * 0.1 = 1s). This
+        // changes only the retry cadence; target-startup protection and indefinite retries remain
+        // inside win-capture.
+        settings.SetInt(HookRateKey, FastestHookRate);
+
         return ObsSource.CreatePrivate(GameCaptureId, "app capture", settings);
     }
 
@@ -404,6 +411,8 @@ public sealed class ObsRecorderSession : IRecorderSession
     // grabbing whatever is fullscreen in the foreground.
     private const string CaptureModeKey = "capture_mode";
     private const string WindowCaptureModeValue = "window";
+    private const string HookRateKey = "hook_rate";
+    private const long FastestHookRate = 3;
 
     // Without this the plugin's default capture_mode is "any_fullscreen": it hooks whichever
     // fullscreen window is foreground and ignores the window string entirely. The value is

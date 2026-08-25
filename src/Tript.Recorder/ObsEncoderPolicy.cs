@@ -103,7 +103,9 @@ internal static class ObsEncoderPolicy
         };
     }
 
-    // The settings UI hides encoders this machine cannot actually use.
+    // The settings UI hides encoders this machine cannot actually use. Include the codecs used by
+    // the HDR planner as well as H.264, otherwise a valid selection such as av1_texture_amf is
+    // displayed as a misleading custom value and is ignored when planning a recording.
     internal static IReadOnlyList<string> EnumerateUsableEncoderIds()
     {
         var ids = new List<string>();
@@ -111,14 +113,14 @@ internal static class ObsEncoderPolicy
             ids.Add(X264Id);
         foreach (var id in ObsEncoder.EnumerateTypeIds())
         {
-            if (!string.Equals(id, X264Id, StringComparison.Ordinal) && IsH264VideoEncoder(id))
+            if (!string.Equals(id, X264Id, StringComparison.Ordinal) && IsSupportedVideoEncoder(id))
                 ids.Add(id);
         }
 
         return ids;
     }
 
-    // H.264 first preserves the SDR default; HDR planning also admits HEVC/AV1 candidates.
+    // H.264 first preserves the SDR default; HEVC and AV1 are also exposed for HDR-capable hardware.
     internal static IReadOnlyList<VideoEncoderCandidate> EnumerateVideoEncoderCandidates()
     {
         var candidates = new List<VideoEncoderCandidate>();
@@ -221,12 +223,12 @@ internal static class ObsEncoderPolicy
     internal static bool IsUsableId(string? id) =>
         !string.IsNullOrWhiteSpace(id) &&
         !string.Equals(id, X264DefaultId, StringComparison.OrdinalIgnoreCase) &&
-        IsH264VideoEncoder(id);
+        IsSupportedVideoEncoder(id);
 
-    private static bool IsH264VideoEncoder(string id) =>
+    private static bool IsSupportedVideoEncoder(string id) =>
         ObsEncoder.IsTypeRegistered(id) &&
         ObsEncoder.GetTypeCodec(id) is { } codec &&
-        codec.Equals("h264", StringComparison.OrdinalIgnoreCase) &&
+        (codec is "h264" or "hevc" or "av1") &&
         ObsEncoder.GetType(id) == ObsEncoderType.Video;
 
     // H.264's quantiser range; the clamp keeps future presets inside plugin bounds.

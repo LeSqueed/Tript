@@ -32,7 +32,7 @@
 # reuses the app host's construction seam and points a native Photino window at the same UI. On
 # Linux it needs the webkit2gtk-4.1 system package (NOT webkitgtk-6.0) — see README. `run` prefers
 # the shell binary when it has been built and falls back to the headless host (which prints the UI
-# URL at http://localhost:2882/).
+# URL at http://localhost:8892/).
 
 CONFIG ?= Debug
 RID ?= linux-x64
@@ -139,6 +139,12 @@ assemble-windows: obs-fetch
 	for module in $(OBS_MODULES); do \
 		cp -r $(OBS_EXTRACTED)/data/obs-plugins/$$module $(WIN_PUBLISH_DIR)/data/obs-plugins/ \
 			2>/dev/null || true; done
+	# win-capture resolves its injection helpers beside the application executable, not from the
+	# module data directory. Without these files the source repeatedly reports "init_pipe" failures.
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_PUBLISH_DIR)/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_PUBLISH_DIR)/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_PUBLISH_DIR)/obs-plugins/64bit/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_PUBLISH_DIR)/obs-plugins/64bit/
 
 	# The subprocess helpers the plugins spawn, resolved from the app process exe path: the muxer
 	# (obs-ffmpeg) and the encoder capability probes (obs-amf-test, obs-nvenc-test, obs-qsv-test).
@@ -241,7 +247,7 @@ run:
 		echo "No shell binary at $(SHELL_BIN); falling back to headless host."; \
 		cd $(PUBLISH_DIR) && ./Tript.App $$([ "$(FAKE_RECORDER)" = "true" ] && echo --fake-recorder) \
 			& echo "Tript is up — open the URL on the host's own READY line above (Ctrl-C to stop)."; \
-		echo "The bare http://localhost:2882/ is refused: the UI needs the per-launch key on that line."; \
+		echo "The bare http://localhost:8892/ is refused: the UI needs the per-launch key on that line."; \
 		wait; \
 	fi
 

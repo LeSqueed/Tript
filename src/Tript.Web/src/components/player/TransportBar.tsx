@@ -34,7 +34,8 @@ export interface TransportBarProps {
   /** Session navigation. Absent when there is only one thing to play. */
   onPrevious?(): void;
   onNext?(): void;
-  canNavigate?: boolean;
+  canNavigatePrevious?: boolean;
+  canNavigateNext?: boolean;
 }
 
 export function TransportBar({
@@ -51,7 +52,8 @@ export function TransportBar({
   onPlaybackRateChange,
   onPrevious,
   onNext,
-  canNavigate = false,
+  canNavigatePrevious = false,
+  canNavigateNext = false,
 }: TransportBarProps) {
   return (
     <div className="transport-bar">
@@ -61,7 +63,7 @@ export function TransportBar({
           size="icon"
           icon="chevronLeft"
           onClick={onPrevious}
-          disabled={!canNavigate}
+          disabled={!canNavigatePrevious}
           aria-label="Previous recording"
         />
       )}
@@ -80,7 +82,7 @@ export function TransportBar({
           size="icon"
           icon="chevronRight"
           onClick={onNext}
-          disabled={!canNavigate}
+          disabled={!canNavigateNext}
           aria-label="Next recording"
         />
       )}

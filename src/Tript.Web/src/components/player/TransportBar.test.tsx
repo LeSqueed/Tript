@@ -79,4 +79,16 @@ describe('TransportBar', () => {
     expect(screen.getByTestId('transport-current').textContent).toBe('1:05');
     expect(screen.getByTestId('transport-duration').textContent).toBe('1:40');
   });
+
+  it('disables previous and next independently', () => {
+    renderBar({
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      canNavigatePrevious: false,
+      canNavigateNext: true,
+    });
+
+    expect((screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

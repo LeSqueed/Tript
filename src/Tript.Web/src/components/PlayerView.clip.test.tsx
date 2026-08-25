@@ -147,8 +147,7 @@ function regionLabels(container: HTMLElement): string[] {
 
 /**
  * Drag a marked segment on the zoomed timeline. The geometry stub makes every rect 100px wide at
- * x=0, and the zoom window is 60s wide (the default window, clamped to the 100s session) — so one
- * pixel is 0.6s and a clientX maps to `window.start + clientX * 0.6`.
+ * x=0, and the default zoom window is the full 100s session, so one pixel is one second.
  */
 function dragRegion(
   container: HTMLElement,
@@ -456,7 +455,7 @@ describe('adjusting a marked segment with the mouse', () => {
     vi.useRealTimers();
   });
 
-  /** Mark [37, 47] with the playhead at 42, so the zoom window is 12s..72s (0.6s per pixel). */
+  /** Mark [37, 47] with the playhead at 42 in the fully zoomed-out 100s window. */
   function markedPlayer(): HTMLElement {
     const container = renderPlayer();
     seekTo(container, 42);
@@ -467,8 +466,8 @@ describe('adjusting a marked segment with the mouse', () => {
 
   it('dragging the body slides the segment and preserves its length', () => {
     const container = markedPlayer();
-    // +10px → +6s.
-    dragRegion(container, 'body', 50, 60);
+    // +6px → +6s.
+    dragRegion(container, 'body', 37, 43);
     expect(regionLabels(container)).toEqual(['Region 0:43–0:53']);
   });
 
@@ -480,15 +479,13 @@ describe('adjusting a marked segment with the mouse', () => {
 
   it('dragging the left edge moves only the start', () => {
     const container = markedPlayer();
-    // clientX 50 → 12 + 50 * 0.6 = 42s.
-    dragRegion(container, 'start', 42, 50);
+    dragRegion(container, 'start', 37, 42);
     expect(regionLabels(container)).toEqual(['Region 0:42–0:47']);
   });
 
   it('dragging the right edge moves only the end', () => {
     const container = markedPlayer();
-    // clientX 70 → 12 + 70 * 0.6 = 54s.
-    dragRegion(container, 'end', 58, 70);
+    dragRegion(container, 'end', 47, 54);
     expect(regionLabels(container)).toEqual(['Region 0:37–0:54']);
   });
 
@@ -533,7 +530,7 @@ describe('adjusting a marked segment with the mouse', () => {
     const container = renderPlayer(client);
     seekTo(container, 42);
     markDefaultSegment();
-    dragRegion(container, 'end', 58, 70);
+    dragRegion(container, 'end', 47, 54);
     openClipDialog();
     fireEvent.click(createButton());
     const creates = client.sent.filter((c) => c.method === 'CreateClip');
@@ -545,7 +542,7 @@ describe('adjusting a marked segment with the mouse', () => {
 
   it('a dragged bound and the same bound typed in the dialog agree', () => {
     const container = markedPlayer();
-    dragRegion(container, 'end', 58, 70);
+    dragRegion(container, 'end', 47, 54);
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     const endField = within(dialog).getByLabelText('Clip 1 end, seconds') as HTMLInputElement;
@@ -684,13 +681,12 @@ describe('editing the looping segment moves the playhead with it', () => {
     act(() => {
       fireEvent.play(video);
     });
-    // Playing at 46, inside [37, 47]. The window follows the playhead, so it is 16s..76s and a
-    // clientX maps to 16 + x * 0.6.
+    // Playing at 46, inside [37, 47]. The full-session window remains unchanged.
     setVideoTime(container, 46);
     expect(currentReadout()).toBe('0:46');
     // Drag the out point back to 43 — behind the playhead. No end crossing will ever be sampled
     // (the end moved through the playhead), so the loop has to close on the edit itself.
-    dragRegion(container, 'end', 52, 45);
+    dragRegion(container, 'end', 47, 43);
     expect(regionLabels(container)).toEqual(['Region 0:37–0:43']);
     expect(currentReadout()).toBe('0:37');
   });
@@ -699,9 +695,8 @@ describe('editing the looping segment moves the playhead with it', () => {
     const container = renderPlayer();
     seekTo(container, 42);
     markDefaultSegment();
-    // Playhead at 42 inside [37, 47]; the window is 12s..72s, so a clientX maps to 12 + x * 0.6.
     // The in point moves to 45, past the playhead, which would leave it outside the segment.
-    dragRegion(container, 'start', 42, 55);
+    dragRegion(container, 'start', 37, 45);
     expect(regionLabels(container)).toEqual(['Region 0:45–0:47']);
     expect(currentReadout()).toBe('0:45');
   });
@@ -712,7 +707,7 @@ describe('editing the looping segment moves the playhead with it', () => {
     markDefaultSegment();
     // Extending the segment backwards to 24 while watching at 42: the playhead is still inside, so
     // yanking it to the new in point would fight the user.
-    dragRegion(container, 'start', 42, 20);
+    dragRegion(container, 'start', 37, 24);
     expect(regionLabels(container)).toEqual(['Region 0:24–0:47']);
     expect(currentReadout()).toBe('0:42');
   });

@@ -16,7 +16,7 @@ import type {
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
 import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
 import type { TimelineRegion } from './player/clipSeam';
-import { clampWindow, zoomWindow, DEFAULT_WINDOW_SECONDS, type WindowState } from './player/timelineModel';
+import { clampWindow, zoomWindow, type WindowState } from './player/timelineModel';
 import { usePlayback } from './player/usePlayback';
 import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
@@ -191,8 +191,19 @@ export function PlayerView({
   // NOTE: the state variable is `viewWindow`, never `window` — `window` is the DOM global and
   // shadowing it would break the keyboard listener below (addEventListener on a WindowState).
   const [viewWindow, setViewWindow] = useState<WindowState>(() =>
-    zoomWindow(0, DEFAULT_WINDOW_SECONDS, duration),
+    zoomWindow(0, duration, duration),
   );
+  const viewWindowItem = useRef(item?.filePath);
+
+  // Each recording opens fully zoomed out. After that, duration updates and playback preserve the
+  // user's chosen zoom level rather than repeatedly resetting it.
+  useEffect(() => {
+    if (viewWindowItem.current === item?.filePath) {
+      return;
+    }
+    viewWindowItem.current = item?.filePath;
+    setViewWindow(zoomWindow(0, duration, duration));
+  }, [item?.filePath, duration]);
 
   // Keep the zoom window inside the session and centred on the playhead. The playhead always stays
   // visible as the session plays; a deliberate window pan/zoom by the user is not fought.
@@ -289,7 +300,7 @@ export function PlayerView({
       if (navigation.length === 0) {
         return;
       }
-      setItemIndex((index) => (index + delta + navigation.length) % navigation.length);
+      setItemIndex((index) => Math.max(0, Math.min(navigation.length - 1, index + delta)));
     },
     [navigation.length],
   );
@@ -667,7 +678,8 @@ export function PlayerView({
           onPlaybackRateChange={setPlaybackRate}
           onPrevious={() => navigate(-1)}
           onNext={() => navigate(1)}
-          canNavigate={navigation.length > 1}
+          canNavigatePrevious={itemIndex > 0}
+          canNavigateNext={itemIndex < navigation.length - 1}
         />
 
         <div className="timeline-stack">

@@ -128,6 +128,7 @@ describe('PlayerView', () => {
     expect(playingItem()).toBe('Session 1');
     expect(container.querySelector('.timeline-bar')).not.toBeNull();
     expect(container.querySelector('.timeline-zoomed')).not.toBeNull();
+    expect(container.querySelector('.timeline-scale')).toBeNull();
     expect(screen.getByTestId('transport-duration').textContent).toBe('1:40');
   });
 
@@ -195,8 +196,8 @@ describe('dual timeline sync', () => {
 
   it('moves the playhead in the zoomed timeline and the full-session bar follows', () => {
     const { container } = renderPlayer();
-    // Initial window {0, 60}: clientX 60 maps to 60% of 60s = 36s.
-    act(() => clickZoomedAt(container, 36, 0, 60));
+    // The initial window is the full 100-second session, so clientX 36 maps to 36s.
+    act(() => clickZoomedAt(container, 36));
     expect(currentReadout()).toBe('0:36');
     const fill = container.querySelector('.timeline-bar-fill') as HTMLElement;
     expect(fill.style.width).toBe('36%');
@@ -207,11 +208,10 @@ describe('dual timeline sync', () => {
     act(() => clickBarAt(container, 42));
     const track = container.querySelector('.timeline-track') as HTMLElement;
     expect(track).not.toBeNull();
-    // The seek recentres the window on 42s: zoomWindow(42, 60, 100) = {12, 60}. The playhead at
-    // 42s sits at (42-12)/60 of the 100px track → 50px.
+    // The fully zoomed-out window remains {0, 100}, so 42s sits at 42px.
     const playhead = track.querySelector('.timeline-playhead') as HTMLElement;
     expect(playhead).not.toBeNull();
-    expect(playhead.style.left).toBe('50px');
+    expect(playhead.style.left).toBe('42px');
   });
 
   it('a video timeupdate moves both timelines', () => {
@@ -280,32 +280,27 @@ describe('zoom model', () => {
 
   it('a wheel zoom-in shrinks the visible window', () => {
     const { container } = renderPlayer();
-    // Initial window {0, 60}: click the zoomed track at clientX 36 (→ 36s). Recentred {36, 60}.
-    act(() => clickZoomedAt(container, 36, 0, 60));
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
-    // 60s × 0.8 = 48s window.
-    expect(zoomWindowSeconds(container)).toBe(48);
+    // 100s × 0.8 = 80s window.
+    expect(zoomWindowSeconds(container)).toBe(80);
   });
 
   it('a wheel zoom-out grows the visible window back', () => {
     const { container } = renderPlayer();
-    act(() => clickZoomedAt(container, 36, 0, 60));
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: 100 });
-    // 48s × 1.25 = 60s window.
-    expect(zoomWindowSeconds(container)).toBe(60);
+    // 80s × 1.25 restores the full extent, where the redundant scale row is hidden.
+    expect(container.querySelector('.timeline-scale')).toBeNull();
   });
 
   it('a full-session bar seek recentres the zoom window on the playhead', () => {
     const { container } = renderPlayer();
     act(() => clickBarAt(container, 80));
-    const scale = container.querySelector('.timeline-scale');
-    // The playhead (80s) must be inside the zoom window after a seek.
-    expect(scale?.textContent).toBeTruthy();
-    // Seek to 80 in a 100s session with a 60s window → {40, 60}, scale shows 0:40 … 1:40.
-    expect(scale?.textContent).toContain('1:40');
+    const playhead = container.querySelector('.timeline-track .timeline-playhead') as HTMLElement;
+    expect(playhead.style.left).toBe('80px');
+    expect(container.querySelector('.timeline-scale')).toBeNull();
   });
 });
 
@@ -320,20 +315,33 @@ describe('navigation', () => {
     vi.useRealTimers();
   });
 
-  it('next moves to the next session, wrapping at the end', () => {
+  it('next moves forward and is disabled at the last session', () => {
     renderPlayer();
-    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
+    const previous = screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement;
+    const next = screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement;
+    expect(previous.disabled).toBe(true);
+    expect(next.disabled).toBe(false);
+    fireEvent.click(next);
     expect(playingItem()).toBe('Session 2');
-    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
+    expect(previous.disabled).toBe(false);
+    fireEvent.click(next);
     expect(playingItem()).toBe('Session 3');
-    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
-    expect(playingItem()).toBe('Session 1');
+    expect(next.disabled).toBe(true);
+    fireEvent.click(next);
+    expect(playingItem()).toBe('Session 3');
   });
 
-  it('previous moves backwards, wrapping at the start', () => {
+  it('previous moves backward and is disabled at the first session', () => {
     renderPlayer();
-    fireEvent.click(screen.getByRole('button', { name: 'Previous recording' }));
-    expect(playingItem()).toBe('Session 3');
+    const previous = screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement;
+    const next = screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement;
+    fireEvent.click(next);
+    expect(playingItem()).toBe('Session 2');
+    fireEvent.click(previous);
+    expect(playingItem()).toBe('Session 1');
+    expect(previous.disabled).toBe(true);
+    fireEvent.click(previous);
+    expect(playingItem()).toBe('Session 1');
   });
 
   it('wires the ToggleFullscreen command to the client', () => {

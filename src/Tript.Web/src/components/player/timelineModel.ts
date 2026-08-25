@@ -6,9 +6,6 @@
 /** The narrowest zoomed window, seconds. */
 export const MIN_WINDOW_SECONDS = 1;
 
-/** The default zoomed window, seconds. */
-export const DEFAULT_WINDOW_SECONDS = 60;
-
 /** The visible zoom window, expressed in seconds into the session. */
 export interface WindowState {
   /** Window start, seconds into the session. */

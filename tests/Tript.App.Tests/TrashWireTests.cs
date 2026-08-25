@@ -54,7 +54,7 @@ public sealed class TrashWireTests
 
         var (trashMethod, trash) = await host.ReceiveAsyncParsed();
         Assert.Equal("trash", trashMethod);
-        Assert.Equal(168, trash.GetProperty("retentionHours").GetInt32());
+        Assert.Equal(24, trash.GetProperty("retentionHours").GetInt32());
 
         var entry = Assert.Single(trash.GetProperty("entries").EnumerateArray().ToList());
         var id = entry.GetProperty("id").GetString()!;
@@ -70,7 +70,7 @@ public sealed class TrashWireTests
         var purgeAt = entry.GetProperty("purgeAt").GetInt64();
         Assert.InRange(deletedAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 120,
             DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120);
-        Assert.Equal(deletedAt + 168 * 3600, purgeAt);
+        Assert.Equal(deletedAt + 24 * 3600, purgeAt);
 
         // ListTrash answers with the same push.
         await host.SendAsync("""{"method":"ListTrash"}""");

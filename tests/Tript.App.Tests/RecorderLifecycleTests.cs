@@ -147,6 +147,37 @@ public sealed class RecorderLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void ManualRecordingOfDetectedGame_StopsWhenItsProcessExits()
+    {
+        _host.TrackDetectedGameStarted("Overwatch.exe");
+
+        Assert.Equal("Overwatch", _host.CurrentDetectedGameId());
+        Assert.True(_host.StartRecording(null));
+        Assert.Equal("Overwatch", _host.CurrentGameId);
+        Assert.True(_host.BackgroundWorkSuspendedForRecording);
+
+        _host.DetectedGameStopped("Overwatch");
+
+        Assert.False(_host.IsRecording);
+        Assert.False(_host.BackgroundWorkSuspendedForRecording);
+        Assert.Null(_host.CurrentDetectedGameId());
+    }
+
+    [Fact]
+    public void AnUnrelatedDetectedProcessExit_DoesNotStopTheRecording()
+    {
+        _host.TrackDetectedGameStarted("Overwatch");
+        Assert.True(_host.StartRecording(null));
+        _host.TrackDetectedGameStarted("doom");
+
+        _host.DetectedGameStopped("doom");
+
+        Assert.True(_host.IsRecording);
+        _host.DetectedGameStopped("Overwatch");
+        Assert.False(_host.IsRecording);
+    }
+
+    [Fact]
     public void StopTimeout_LeavesTheHostRecordingAndDoesNotFinalizeMetadata()
     {
         var session = new FakeRecorderSession();

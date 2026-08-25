@@ -29,7 +29,8 @@ internal sealed class AppController
             // The refusal is reported, not discarded: StartRecording returns false before its
             // state push (recorder busy, a mode it does not record, a start libobs refused), so
             // without this the user presses record and nothing in the UI changes at all.
-            ["StartRecording"] = (_, _) => _host.StartRecordingOrReport(null),
+            ["StartRecording"] = (parameters, _) => _host.StartRecordingOrReport(
+                parameters.Deserialize<StartRecordingParameters>()?.GameId),
             ["StopRecording"] = (_, _) => _host.StopRecordingOrReport(),
             ["ToggleFullscreen"] = (parameters, _) => _host.ToggleFullscreen(
                 parameters.GetPropertyOrDefault("enabled").GetBooleanOr(false)),

@@ -85,6 +85,7 @@ export function RecorderBar({
     connection: connectionState,
     recording,
     game: recordingState?.game?.name ?? recordingState?.game?.id ?? null,
+    detected: recordingState?.game?.detected === true,
     startedAt: typeof recordingState?.startedAt === 'number' ? recordingState.startedAt : null,
   });
 
@@ -116,7 +117,19 @@ export function RecorderBar({
   return (
     <div className="recorder-bar" data-testid="recorder-bar">
       {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">{clipStatus}</span>}
-      <Button variant="ghost" size="small" onClick={() => client.send('StartRecording')}>
+      {state.kind === 'detected' && (
+        <>
+          <span className="rec-dot detected" aria-hidden="true" />
+          <span className="rec-game">Detected: {state.game}</span>
+        </>
+      )}
+      <Button
+        variant="ghost"
+        size="small"
+        onClick={() => recordingState?.game?.detected
+          ? client.send('StartRecording', { gameId: recordingState.game.id })
+          : client.send('StartRecording')}
+      >
         Record
       </Button>
     </div>

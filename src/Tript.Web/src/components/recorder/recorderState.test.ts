@@ -7,6 +7,7 @@ const inputs = (overrides: Partial<Parameters<typeof deriveRecorderState>[0]> = 
   connection: 'connected' as const,
   recording: false,
   game: null,
+  detected: false,
   startedAt: null,
   ...overrides,
 });
@@ -32,6 +33,17 @@ describe('deriveRecorderState', () => {
 
   it('stays neutral when configured auto-detection is idle', () => {
     expect(deriveRecorderState(inputs())).toEqual({ kind: 'idle' });
+  });
+
+  it('reports a running detected game while recording is idle', () => {
+    expect(deriveRecorderState(inputs({ game: 'Counter-Strike 2', detected: true }))).toEqual({
+      kind: 'detected',
+      game: 'Counter-Strike 2',
+    });
+  });
+
+  it('does not claim an undetected game is running', () => {
+    expect(deriveRecorderState(inputs({ game: 'Counter-Strike 2' }))).toEqual({ kind: 'idle' });
   });
 
 });

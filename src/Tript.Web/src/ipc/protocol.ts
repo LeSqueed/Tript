@@ -395,6 +395,10 @@ export interface CreateAutomaticClipsParameters {
   filePath: string;
 }
 
+export interface StartRecordingParameters {
+  gameId: string;
+}
+
 export interface ConvertToSdrParameters {
   id: string;
   contentType: 'clip' | 'highlight';
@@ -557,6 +561,7 @@ export interface NewConnectionParameters {
 
 /** Union of every command's parameter shape. */
 export type CommandParameters =
+  | StartRecordingParameters
   | CreateClipParameters
   | CreateAutomaticClipsParameters
   | ConvertToSdrParameters

@@ -12,12 +12,14 @@
 export type RecorderState =
   | { kind: 'disconnected' }
   | { kind: 'recording'; game: string | null; startedAt: number | null }
+  | { kind: 'detected'; game: string }
   | { kind: 'idle' };
 
 export interface RecorderInputs {
   connection: 'connected' | 'connecting' | 'disconnected';
   recording: boolean;
   game: string | null;
+  detected: boolean;
   /** Unix seconds, from the state push. Null when the backend did not report one. */
   startedAt: number | null;
 }
@@ -30,6 +32,9 @@ export function deriveRecorderState(inputs: RecorderInputs): RecorderState {
   }
   if (inputs.recording) {
     return { kind: 'recording', game: inputs.game, startedAt: inputs.startedAt };
+  }
+  if (inputs.detected && inputs.game) {
+    return { kind: 'detected', game: inputs.game };
   }
   return { kind: 'idle' };
 }

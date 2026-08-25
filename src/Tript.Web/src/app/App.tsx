@@ -17,7 +17,7 @@ import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
 import { itemLabel } from '../components/library/libraryModel';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
-import type { ContentItem } from '../ipc/protocol';
+import type { ContentItem, RecordingState } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
@@ -74,6 +74,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => {
     const remove = client.on('settings', (content) => {
@@ -83,6 +84,12 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     client.send('ListSettings');
     return remove;
   }, [client]);
+
+  useEffect(() => client.on('state', (content) => {
+    const state = (content as { state?: RecordingState }).state;
+    if (state)
+      setRecording(state.recording === true);
+  }), [client]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -349,6 +356,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               onDelete={deletePlayerItem}
               onReviewSession={openSessionReview}
               convertHdrClipsToSdr={convertHdrClipsToSdr}
+              recording={recording}
               highlightCount={items.filter(
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}

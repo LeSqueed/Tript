@@ -9,11 +9,11 @@ namespace Tript.App.Tests;
 public sealed class AppHostCollectionFixtureTests
 {
     [Fact]
-    public void Dispose_RemovesEveryTempRootItCreated()
+    public void Dispose_RemovesOnlyTheTempRootsItCreated()
     {
         var fixture = new AppHostCollectionFixture();
-        var contentRoot = fixture.NewContentRoot(nameof(Dispose_RemovesEveryTempRootItCreated));
-        var settingsPath = fixture.NewSettingsPath(nameof(Dispose_RemovesEveryTempRootItCreated));
+        var contentRoot = fixture.NewContentRoot(nameof(Dispose_RemovesOnlyTheTempRootsItCreated));
+        var settingsPath = fixture.NewSettingsPath(nameof(Dispose_RemovesOnlyTheTempRootsItCreated));
         var settingsRoot = Path.GetDirectoryName(settingsPath)!;
         var sentinelRoot = Path.Combine(Path.GetTempPath(), "tript-app-tests", "sentinel");
 
@@ -26,6 +26,7 @@ public sealed class AppHostCollectionFixtureTests
 
         Assert.False(Directory.Exists(contentRoot));
         Assert.False(Directory.Exists(settingsRoot));
-        Assert.False(Directory.Exists(sentinelRoot));
+        Assert.True(Directory.Exists(sentinelRoot));
+        Directory.Delete(sentinelRoot, recursive: true);
     }
 }

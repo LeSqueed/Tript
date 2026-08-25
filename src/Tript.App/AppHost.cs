@@ -107,6 +107,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly object _automaticClipGate = new();
     private readonly List<Bookmark> _automaticClipBookmarks = [];
     private AutomaticClipJob? _automaticClipJob;
+    private bool _backgroundWorkSuspendedForRecording;
     private CancellationTokenSource? _liveHighlightCancellation;
     private readonly List<Task> _liveHighlightTasks = [];
     private readonly List<LiveHighlightRegion> _liveHighlightRegions = [];
@@ -115,6 +116,8 @@ internal sealed partial class AppHost : IDisposable
     private bool _liveHighlightsEnabled;
     private CancellationTokenSource? _captureWaitCancellation;
     private int _recordingStopRequested;
+    private readonly object _detectedGameGate = new();
+    private readonly List<KeyValuePair<string, string>> _detectedGames = [];
 
     // Replaced wholesale under _gameListGate, never mutated in place: GameList is read from the
     // IPC pool, the detector's timer and the hook probe, and a reader holding the old list must
@@ -142,7 +145,7 @@ internal sealed partial class AppHost : IDisposable
 
         internal int Completed { get; set; }
 
-        internal bool Paused { get; set; }
+        internal bool PausedByUser { get; set; }
     }
 
     private sealed class LiveHighlightRegion
@@ -219,7 +222,7 @@ internal sealed partial class AppHost : IDisposable
         : null;
 
     private string? _currentGameId;
-    private string? _automaticRecordingOwner;
+    private string? _recordingProcessOwner;
 
     // The single root everything content lives under: sessions, clips, the metadata tree and the
     // content server's traversal guard all resolve against it. A configured Recording.OutputDirectory
@@ -233,7 +236,7 @@ internal sealed partial class AppHost : IDisposable
     // The content server serves everything under this root, and it deliberately checks no Origin —
     // a media element sends none, so requiring one would break the app's own player. That is only
     // safe while the root is a folder of recordings. Pointing it at "/" or at the home directory
-    // turns http://localhost:2222/api/content/<path> into a reader for the whole machine, for any
+    // turns http://localhost:8893/api/content/<path> into a reader for the whole machine, for any
     // page open in the user's browser.
     //
     // The rule is deliberately narrow: refuse a root that CONTAINS somewhere sensitive, rather than
@@ -374,7 +377,8 @@ internal sealed partial class AppHost : IDisposable
         lock (_automaticClipGate)
         {
             if (_automaticClipJob is not null)
-                _automaticClipJob.Paused = false;
+                _automaticClipJob.PausedByUser = false;
+            _backgroundWorkSuspendedForRecording = false;
             Monitor.PulseAll(_automaticClipGate);
         }
 #if TRIPT_TRAINING
@@ -456,10 +460,13 @@ internal sealed partial class AppHost : IDisposable
     internal bool StartRecording(string? gameId)
     {
         lock (_recorderGate)
-            return StartRecordingLocked(gameId);
+        {
+            var effectiveGameId = gameId ?? CurrentDetectedGameId() ?? StartupGameId;
+            return StartRecordingLocked(effectiveGameId, DetectedProcessFor(effectiveGameId));
+        }
     }
 
-    private bool StartRecordingLocked(string? gameId)
+    private bool StartRecordingLocked(string? gameId, string? processOwner = null)
     {
         var effectiveGameId = gameId ?? StartupGameId;
 
@@ -489,71 +496,86 @@ internal sealed partial class AppHost : IDisposable
         // while the source is shown, so a game that appears mid-recording is still picked up.
         RetargetGameCapture(effectiveGameId);
 
-        if (_recorderSession is ObsRecorderSession capture &&
-            capture.Policy.IncludesGameCapture && capture.HasGameCaptureSource)
+        var recordingStarted = false;
+        Volatile.Write(ref _recordingProcessOwner, processOwner);
+        SetBackgroundWorkSuspendedForRecording(true);
+        try
         {
-            Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
-                effectiveGameId);
-            // StopRecording publishes its intent before taking the recorder gate. Check again after
-            // publishing the source so a stop that arrived during setup cannot miss this wait.
-            var waitCancellation = new CancellationTokenSource();
-            _captureWaitCancellation = waitCancellation;
-            if (Volatile.Read(ref _recordingStopRequested) != 0)
-                waitCancellation.Cancel();
-            capture.PlaceSourceOnChannel();
-            try
+            if (_recorderSession is ObsRecorderSession capture &&
+                capture.Policy.IncludesGameCapture && capture.HasGameCaptureSource)
             {
-                var captureReady = capture.WaitForGameCapture(
-                    capture.Policy.GameCaptureTimeout,
-                    () => PushWarning("Waiting for the game window to appear. Recording has not started yet."),
-                    () => PushWarning(null), waitCancellation.Token);
-                if (!captureReady)
-                    return false;
+                Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
+                    effectiveGameId);
+                // StopRecording publishes its intent before taking the recorder gate. Check again after
+                // publishing the source so a stop that arrived during setup cannot miss this wait.
+                var waitCancellation = new CancellationTokenSource();
+                _captureWaitCancellation = waitCancellation;
+                if (Volatile.Read(ref _recordingStopRequested) != 0)
+                    waitCancellation.Cancel();
+                capture.PlaceSourceOnChannel();
+                try
+                {
+                    var captureReady = capture.WaitForGameCapture(
+                        capture.Policy.GameCaptureTimeout,
+                        () => PushWarning("Waiting for the game window to appear. Recording has not started yet."),
+                        () => PushWarning(null), waitCancellation.Token);
+                    if (!captureReady)
+                        return false;
+                }
+                finally
+                {
+                    _captureWaitCancellation = null;
+                    PushWarning(null);
+                    capture.ClearSourceFromChannel();
+                    waitCancellation.Dispose();
+                }
             }
-            finally
+
+            if (!_recorder!.Start(resolved))
+                return false;
+            recordingStarted = true;
+
+            _activeOutputPath = resolved.OutputPath;
+            _currentGameId = effectiveGameId;
+            _pendingMetadata = new RecordingMetadata
             {
-                _captureWaitCancellation = null;
-                PushWarning(null);
-                capture.ClearSourceFromChannel();
-                waitCancellation.Dispose();
+                Game = GameList.FirstOrDefault(g => g.Id == effectiveGameId)?.Name ?? effectiveGameId,
+                GameId = effectiveGameId,
+                ContentType = ContentType.Recording,
+                StartTime = DateTime.Now,
+            };
+
+            _sessionTracker.Start(_pendingMetadata.StartTime);
+            lock (_automaticClipGate)
+            {
+                _automaticClipBookmarks.Clear();
+                _liveHighlightRegions.Clear();
+                _liveHighlightBookmarkIds.Clear();
+                _recordingStartUtc = DateTime.UtcNow;
+                _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
+                    && resolved.Mode.UsesReplayBuffer();
+                _liveHighlightCancellation?.Dispose();
+                _liveHighlightCancellation = _liveHighlightsEnabled
+                    ? new CancellationTokenSource()
+                    : null;
+                _liveHighlightTasks.Clear();
+            }
+
+            StartDetection(effectiveGameId);
+
+            PushState(recording: true, effectiveGameId);
+            RequestNotification(NotificationKind.RecordingStarted, "Recording started",
+                string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
+            return true;
+        }
+        finally
+        {
+            if (!recordingStarted)
+            {
+                Volatile.Write(ref _recordingProcessOwner, null);
+                SetBackgroundWorkSuspendedForRecording(false);
             }
         }
-
-        if (!_recorder!.Start(resolved))
-            return false;
-
-        _activeOutputPath = resolved.OutputPath;
-        _currentGameId = effectiveGameId;
-        _pendingMetadata = new RecordingMetadata
-        {
-            Game = GameList.FirstOrDefault(g => g.Id == effectiveGameId)?.Name ?? effectiveGameId,
-            GameId = effectiveGameId,
-            ContentType = ContentType.Recording,
-            StartTime = DateTime.Now,
-        };
-
-        _sessionTracker.Start(_pendingMetadata.StartTime);
-        lock (_automaticClipGate)
-        {
-            _automaticClipBookmarks.Clear();
-            _liveHighlightRegions.Clear();
-            _liveHighlightBookmarkIds.Clear();
-            _recordingStartUtc = DateTime.UtcNow;
-            _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
-                && resolved.Mode.UsesReplayBuffer();
-            _liveHighlightCancellation?.Dispose();
-            _liveHighlightCancellation = _liveHighlightsEnabled
-                ? new CancellationTokenSource()
-                : null;
-            _liveHighlightTasks.Clear();
-        }
-
-        StartDetection(effectiveGameId);
-
-        PushState(recording: true, effectiveGameId);
-        RequestNotification(NotificationKind.RecordingStarted, "Recording started",
-            string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
-        return true;
     }
 
     internal bool StopRecording()
@@ -634,6 +656,7 @@ internal sealed partial class AppHost : IDisposable
     {
         _recorder!.DrainCompletedOutput();
         StopDetection();
+        SetBackgroundWorkSuspendedForRecording(false);
 
         var sourcePath = _activeOutputPath;
         List<Bookmark> automaticBookmarks;
@@ -668,7 +691,7 @@ internal sealed partial class AppHost : IDisposable
         _pendingMetadata = null;
         _activeOutputPath = null;
         _currentGameId = null;
-        _automaticRecordingOwner = null;
+        Volatile.Write(ref _recordingProcessOwner, null);
 
         PushState(recording: false, null);
         RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
@@ -842,57 +865,79 @@ internal sealed partial class AppHost : IDisposable
         // The detector is subscribed straight to the same host methods the IPC path uses, so an
         // auto-recorded session gets the whole lifecycle — metadata sidecar, session tracking, detection
         // and state pushes — rather than a bare recorder Start/Stop.
-        // What the detector can actually report, as catalogue ids — the vocabulary PushState asks it
-        // about. Left empty, `game.detected` on every state push was permanently false.
-        _detectorGameNames.Clear();
-        foreach (var id in WatchableGameIds(GameList))
-            _detectorGameNames.Add(id);
-
         _detector = new ProcessNameGameDetector(executables);
-        _detector.GameStarted += StartAutomaticRecording;
-        _detector.GameStopped += StopAutomaticRecording;
+        _detector.GameStarted += DetectedGameStarted;
+        _detector.GameStopped += DetectedGameStopped;
         _detector.Start();
 
         _fullscreenDetector = new FullscreenGameDetector(executables);
-        _fullscreenDetector.GameStarted += StartAutomaticRecording;
-        _fullscreenDetector.GameStopped += StopAutomaticRecording;
+        _fullscreenDetector.GameStarted += DetectedGameStarted;
+        _fullscreenDetector.GameStopped += DetectedGameStopped;
         _fullscreenDetector.Start();
     }
 
-    private void StartAutomaticRecording(string processName)
+    private void DetectedGameStarted(string processName)
     {
+        var (owner, gameId) = TrackDetectedGameStarted(processName);
+        PushState(IsRecording, CurrentGameId);
         lock (_recorderGate)
-        {
-            if (!StartRecordingLocked(ResolveDetectedGameId(processName)))
-                return;
-
-            _automaticRecordingOwner = ProcessNameGameDetector.NormalizeProcessName(processName);
-        }
+            StartRecordingLocked(gameId, owner);
     }
 
-    private void StopAutomaticRecording(string processName)
+    internal (string Owner, string GameId) TrackDetectedGameStarted(string processName)
     {
         var owner = ProcessNameGameDetector.NormalizeProcessName(processName);
-        if (!string.Equals(_automaticRecordingOwner, owner, StringComparison.OrdinalIgnoreCase))
-            return;
+        var gameId = ResolveDetectedGameId(owner);
+        lock (_detectedGameGate)
+        {
+            _detectedGames.RemoveAll(pair => string.Equals(pair.Key, owner, StringComparison.OrdinalIgnoreCase));
+            _detectedGames.Add(new KeyValuePair<string, string>(owner, gameId));
+        }
 
-        // This cancellation is intentionally outside the recorder gate: an automatic start may be
-        // waiting for game capture while the detector reports that its owning process has exited.
+        return (owner, gameId);
+    }
+
+    internal void DetectedGameStopped(string processName)
+    {
+        var owner = ProcessNameGameDetector.NormalizeProcessName(processName);
+        lock (_detectedGameGate)
+            _detectedGames.RemoveAll(pair => string.Equals(pair.Key, owner, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.Equals(Volatile.Read(ref _recordingProcessOwner), owner, StringComparison.OrdinalIgnoreCase))
+        {
+            PushState(IsRecording, CurrentGameId);
+            return;
+        }
+
+        // This cancellation is intentionally outside the recorder gate: a manual or automatic start
+        // may be waiting for game capture while the detector reports that its owning process exited.
         _captureWaitCancellation?.Cancel();
         lock (_recorderGate)
         {
-            if (string.Equals(_automaticRecordingOwner, owner, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_recordingProcessOwner, owner, StringComparison.OrdinalIgnoreCase))
                 StopRecordingLocked();
         }
     }
 
-    // The catalogue ids a process watcher could report. Pure and separate from WireAutoStart because
-    // that method needs a real recorder, so nothing reachable from a test would otherwise cover it.
-    internal static IReadOnlyList<string> WatchableGameIds(IEnumerable<GameInfo> games) =>
-        games.Where(game => ExecutableOf(game).Length > 0 && game.Id.Length > 0)
-            .Select(game => game.Id)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+    internal string? CurrentDetectedGameId()
+    {
+        lock (_detectedGameGate)
+            return _detectedGames.Count == 0 ? null : _detectedGames[^1].Value;
+    }
+
+    private string? DetectedProcessFor(string gameId)
+    {
+        lock (_detectedGameGate)
+        {
+            for (var index = _detectedGames.Count - 1; index >= 0; index--)
+            {
+                if (string.Equals(_detectedGames[index].Value, gameId, StringComparison.OrdinalIgnoreCase))
+                    return _detectedGames[index].Key;
+            }
+        }
+
+        return null;
+    }
 
     // What the catalogue says this game runs as. Null Executable means the entry predates the field,
     // where the display name was also the process name.
@@ -1493,11 +1538,12 @@ internal sealed partial class AppHost : IDisposable
 
     internal void PushState(bool recording, string? gameId)
     {
-        var game = gameId is null ? null : new GameInfo
+        var representedGameId = gameId ?? (!recording ? CurrentDetectedGameId() : null);
+        var game = representedGameId is null ? null : new GameInfo
         {
-            Id = gameId,
-            Name = GameList.FirstOrDefault(g => g.Id == gameId)?.Name ?? gameId,
-            Detected = _detector is not null && _detectorGameNames.Contains(gameId),
+            Id = representedGameId,
+            Name = GameList.FirstOrDefault(g => g.Id == representedGameId)?.Name ?? representedGameId,
+            Detected = DetectedProcessFor(representedGameId) is not null,
         };
 
         AutomaticClipJob? automaticClipJob;
@@ -1518,14 +1564,14 @@ internal sealed partial class AppHost : IDisposable
                 automaticClips = automaticClipJob is null ? null : new
                 {
                     active = true,
-                    paused = automaticClipJob.Paused,
+                    paused = automaticClipJob.PausedByUser || BackgroundWorkSuspendedForRecording,
                     sourceSessionPath = automaticClipJob.SourceSessionPath,
                     completed = automaticClipJob.Completed,
                     total = automaticClipJob.Total,
                 },
             },
         }, Wire.Options));
-        StateChanged?.Invoke(recording, gameId);
+        StateChanged?.Invoke(recording, representedGameId);
     }
 
     // The machine's active WASAPI endpoints, inputs first then outputs. Each entry carries its
@@ -1544,10 +1590,6 @@ internal sealed partial class AppHost : IDisposable
             return [];
         }
     }
-
-    // The catalogue ids the auto-start detector is watching, so a state push can say whether the
-    // game being recorded is one it found itself.
-    private readonly HashSet<string> _detectorGameNames = new(StringComparer.OrdinalIgnoreCase);
 
     internal void PushSettings()
     {
@@ -2284,8 +2326,10 @@ internal sealed partial class AppHost : IDisposable
         {
             if (_automaticClipJob is null)
                 return;
+            if (_backgroundWorkSuspendedForRecording)
+                return;
 
-            _automaticClipJob.Paused = !_automaticClipJob.Paused;
+            _automaticClipJob.PausedByUser = !_automaticClipJob.PausedByUser;
             Monitor.PulseAll(_automaticClipGate);
         }
 
@@ -2330,7 +2374,8 @@ internal sealed partial class AppHost : IDisposable
                     {
                         lock (_automaticClipGate)
                         {
-                            while (ReferenceEquals(_automaticClipJob, job) && job.Paused)
+                            while (ReferenceEquals(_automaticClipJob, job)
+                                && (job.PausedByUser || _backgroundWorkSuspendedForRecording))
                                 Monitor.Wait(_automaticClipGate);
                         }
 
@@ -2473,6 +2518,12 @@ internal sealed partial class AppHost : IDisposable
         var operationId = string.IsNullOrWhiteSpace(parameters.Id)
             ? $"sdr-{Guid.NewGuid():N}"
             : parameters.Id.Trim();
+        if (BackgroundWorkSuspendedForRecording)
+        {
+            PushConversionProgress(operationId, "error", "SDR conversion is unavailable while recording.");
+            return;
+        }
+
         var source = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
         var relative = source is null ? null
             : Path.GetRelativePath(EffectiveRoot, source).Replace(Path.DirectorySeparatorChar, '/');
@@ -2578,6 +2629,24 @@ internal sealed partial class AppHost : IDisposable
         for (var suffix = 2; File.Exists(candidate) || _reservedClipOutputs.Contains(candidate); suffix++)
             candidate = Path.Combine(directory, $"{stem}-{suffix}.mp4");
         return candidate;
+    }
+
+    internal bool BackgroundWorkSuspendedForRecording
+    {
+        get
+        {
+            lock (_automaticClipGate)
+                return _backgroundWorkSuspendedForRecording;
+        }
+    }
+
+    private void SetBackgroundWorkSuspendedForRecording(bool suspended)
+    {
+        lock (_automaticClipGate)
+        {
+            _backgroundWorkSuspendedForRecording = suspended;
+            Monitor.PulseAll(_automaticClipGate);
+        }
     }
 
     private IClipEngine BuildClipEngine()

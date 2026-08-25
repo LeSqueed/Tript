@@ -24,6 +24,10 @@
   animation: rec-pulse 1.4s ease-in-out infinite;
 }
 
+.rec-dot.detected {
+  background: var(--color-accent);
+}
+
 @keyframes rec-pulse {
   0%,
   100% {

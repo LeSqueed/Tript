@@ -116,6 +116,30 @@ public sealed class ControlSocketBoundsTests
         await host.ShutdownAsync();
     }
 
+    [Fact]
+    public async Task ConvertToSdr_WhileRecording_IsRejectedBeforeMediaWorkStarts()
+    {
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"StartRecording","parameters":{"gameId":"Overwatch"}}""");
+        var (started, _) = await host.ReceiveAsyncParsed();
+        Assert.Equal("state", started);
+
+        await host.SendAsync("""{"method":"ConvertToSdr","parameters":{"id":"sdr-during-recording","contentType":"clip","filePath":"clips/missing.mp4"}}""");
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("importProgress", method);
+        Assert.Equal("sdr-during-recording", content.GetProperty("id").GetString());
+        Assert.Equal("error", content.GetProperty("status").GetString());
+        Assert.Contains("while recording", content.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        await host.SendAsync("""{"method":"StopRecording"}""");
+        await host.ReceiveAsyncParsed();
+        await host.ShutdownAsync();
+    }
+
     // ---- the outbound queue ----
 
     // A client that has stopped reading used to make every Broadcast queue against it forever: the

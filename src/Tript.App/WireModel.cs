@@ -158,6 +158,11 @@ internal sealed class CreateAutomaticClipsParameters
     public string FilePath { get; set; } = string.Empty;
 }
 
+internal sealed class StartRecordingParameters
+{
+    public string? GameId { get; set; }
+}
+
 internal sealed class OpenFileLocationParameters
 {
     public string FilePath { get; set; } = string.Empty;

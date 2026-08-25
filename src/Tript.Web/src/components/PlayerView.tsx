@@ -68,6 +68,7 @@ export interface PlayerViewProps {
   selectedRegionId?: string | null;
   onRegionSelect?(region: TimelineRegion): void;
   convertHdrClipsToSdr?: boolean;
+  recording?: boolean;
 }
 
 export function PlayerView({
@@ -85,6 +86,7 @@ export function PlayerView({
   selectedRegionId: externalSelectedRegionId,
   onRegionSelect: externalOnRegionSelect,
   convertHdrClipsToSdr = false,
+  recording: recordingProp,
 }: PlayerViewProps) {
   // No injected source → own an IPC-backed one for this view's lifetime. It sends ListContent on
   // creation and re-reads the `content` push, so the list is live.
@@ -129,15 +131,18 @@ export function PlayerView({
         : (navigation[itemIndex] ?? navigation[0]);
 
   const [automaticClips, setAutomaticClips] = useState<RecordingState['automaticClips']>(null);
+  const [recordingFromState, setRecordingFromState] = useState(false);
   useEffect(() => client.on('state', (content) => {
     const state = (content as { state?: RecordingState }).state;
     const job = state?.automaticClips;
+    setRecordingFromState(state?.recording === true);
     setAutomaticClips(job?.sourceSessionPath === item?.filePath ? job : null);
   }), [client, item?.filePath]);
 
   const creatingHighlights = item?.contentType === 'recording'
     && (item.automaticClipsProcessing === true || automaticClips?.active === true);
   const highlightsPaused = item?.automaticClipsPaused === true || automaticClips?.paused === true;
+  const recording = recordingProp ?? recordingFromState;
 
   useEffect(() => {
     if (item) {
@@ -598,7 +603,7 @@ export function PlayerView({
   };
 
   const handleConvertToSdr = () => {
-    if (!convertHdrClipsToSdr || item.isHdr !== true || sdrJobId
+    if (recording || !convertHdrClipsToSdr || item.isHdr !== true || sdrJobId
       || (item.contentType !== 'clip' && item.contentType !== 'highlight'))
       return;
     const id = `sdr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -619,6 +624,7 @@ export function PlayerView({
         onDelete={onDelete}
         onReviewSession={onReviewSession}
         convertHdrClipsToSdr={convertHdrClipsToSdr}
+        recording={recording}
         convertingToSdr={sdrJobId !== null}
         onConvertToSdr={handleConvertToSdr}
         conversionError={sdrError}

@@ -107,7 +107,8 @@ internal sealed partial class AppHost
         lock (_automaticClipGate)
         {
             processingSessionPath = _automaticClipJob?.SourceSessionPath;
-            processingPaused = _automaticClipJob?.Paused == true;
+            processingPaused = _automaticClipJob is not null
+                && (_automaticClipJob.PausedByUser || _backgroundWorkSuspendedForRecording);
             processingCompleted = _automaticClipJob?.Completed;
             processingTotal = _automaticClipJob?.Total;
         }

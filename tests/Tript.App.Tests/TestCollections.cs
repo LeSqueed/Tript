@@ -6,7 +6,7 @@ using Xunit;
 namespace Tript.App.Tests;
 
 // The smoke tests each start their own app host child process, and every host binds the same three
-// ports (44030 control socket, 2222 content server, 2882 UI host). Only one host can be up at a
+// ports (8894 control socket, 8893 content server, 8892 UI host). Only one host can be up at a
 // time, so the whole suite is one collection: xunit serializes the classes inside it.
 [CollectionDefinition(Name)]
 public sealed class AppHostCollection : ICollectionFixture<AppHostCollectionFixture>
@@ -41,8 +41,6 @@ public sealed class AppHostCollectionFixture : IDisposable
     {
         foreach (var root in _roots)
             DeleteIfExists(root);
-
-        DeleteIfExists(SuiteRoot);
     }
 
     private static void DeleteIfExists(string path)
@@ -50,6 +48,17 @@ public sealed class AppHostCollectionFixture : IDisposable
         if (!Directory.Exists(path))
             return;
 
-        Directory.Delete(path, recursive: true);
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows())
+        {
+            // Metadata copied from fixture trees can retain a read-only bit on Windows. Normalize
+            // attributes before retrying so collection cleanup does not turn passing tests red.
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(path, recursive: true);
+        }
     }
 }

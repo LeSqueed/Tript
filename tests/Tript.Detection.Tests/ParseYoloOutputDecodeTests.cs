@@ -4,13 +4,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Tript.Detection;
 using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// YoloOutputStrideTests pins the shape of the tensor ParseYoloOutput is handed. This file pins what
+// YoloOutputStrideTests pins the shape of the tensor parser input. This file pins what
 // it does with it, on hand-built tensors whose every value is known.
 //
 // The decode is five independent decisions, and every one of them fails silently when it is wrong:
@@ -26,35 +25,13 @@ namespace Tript.Detection.Tests;
 // the class row, a swapped cx/cy, a dropped /2 — throws nothing and logs nothing. It returns boxes
 // in the wrong place, with the wrong class, for as long as nobody looks at a recording.
 //
-// ParseYoloOutput is private and takes a ReadOnlySpan<float>, so it is bound through
-// MethodInfo.CreateDelegate rather than Invoke: byref-like parameters cannot be boxed into the
-// object[] Invoke takes, but a delegate binds the signature directly.
 public class ParseYoloOutputDecodeTests
 {
-    private delegate List<DetectionResult> ParseDelegate(
-        ReadOnlySpan<float> output, int inputSize, int numClasses);
-
-    // Bound lazily rather than in a field initializer: an Assert thrown while initializing a static
-    // field surfaces as TypeInitializationException on every test in the class, which buries the
-    // message. Lazy<T> rethrows the original exception from whichever test touched it first.
-    private static readonly Lazy<ParseDelegate> LazyParse = new(BindParseYoloOutput);
-
-    private static ParseDelegate Parse => LazyParse.Value;
-
-    private static ParseDelegate BindParseYoloOutput()
-    {
-        var method = typeof(VisualEventDetector).GetMethod(
-            "ParseYoloOutput", BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.True(method != null,
-            "VisualEventDetector.ParseYoloOutput is gone or no longer a private static method. " +
-            "The decode contract below is not being checked against anything.");
-
-        return (ParseDelegate)method!.CreateDelegate(typeof(ParseDelegate));
-    }
+    private static List<DetectionResult> Parse(ReadOnlySpan<float> output, int inputSize, int numClasses)
+        => DetectionFramePreprocessor.ParseYoloOutputForInput(output, inputSize, inputSize, numClasses);
 
     // Values are given per row, in the order the tensor stores them, so this builder describes the
-    // channel-major layout by concatenation rather than by repeating ParseYoloOutput's own index
+    // channel-major layout by concatenation rather than by repeating the parser's own index
     // arithmetic — which would make any offset mutation agree with itself.
     private sealed record Anchor(float Cx, float Cy, float W, float H, float[] Confidences);
 

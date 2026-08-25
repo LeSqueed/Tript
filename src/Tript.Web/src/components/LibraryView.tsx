@@ -9,16 +9,13 @@ import type { ConnectionState } from '../ipc/websocketClient';
 import type { ContentItem, DeleteContentParameters } from '../ipc/protocol';
 import {
   Button,
-  Field,
-  SegmentedControl,
-  SelectField,
-  TextField,
-  Toggle,
   type SelectOption,
 } from '../components/ui/controls';
 import { ContentCard } from './library/ContentCard';
 import { RecordingGroup, type GroupActions } from './library/RecordingGroup';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
+import { LibraryPagination } from './library/LibraryPagination';
+import { LibraryToolbar } from './library/LibraryToolbar';
 import {
   addSelection,
   allSelected,
@@ -44,9 +41,7 @@ import {
   pageCountFor,
   UNKNOWN_GAME_LABEL,
   type ContentTypeFilter,
-  type DateRangeFilter,
   type LibraryQuery,
-  type LibrarySort,
 } from './library/libraryModel';
 import type { TrashController } from './trash/useTrash';
 import { TrashList } from './trash/TrashList';
@@ -317,29 +312,17 @@ export function LibraryView({
           available while the Trash type is selected. */}
       {showingTrash && trash ? (
         <>
-          <div className="library-toolbar library-toolbar--trash">
-            <SegmentedControl
-              label="Show"
-              value={query.type}
-              segments={typeSegments}
-              onChange={(value) => updateQuery({ type: value })}
-            />
-            <div className="library-trash-filters">
-              <Field label="Game">
-                <SelectField value={query.game} onChange={(value) => updateQuery({ game: value })} options={gameOptions} />
-              </Field>
-              <Field label="Date">
-                <SelectField value={query.range} onChange={(value) => updateQuery({ range: value as DateRangeFilter })} options={DATE_OPTIONS} />
-              </Field>
-              <Field label="Sort">
-                <SelectField value={query.sort} onChange={(value) => updateQuery({ sort: value as LibrarySort })} options={SORT_OPTIONS} />
-              </Field>
-              <Field label="Search">
-                <TextField value={query.search} onChange={(value) => updateQuery({ search: value })} placeholder="Title or game" />
-              </Field>
-               {trashFiltered && <Button variant="ghost" className="library-clear" onClick={clearFilters}>Clear filters</Button>}
-            </div>
-          </div>
+          <LibraryToolbar
+            query={query}
+            typeSegments={typeSegments}
+            gameOptions={gameOptions}
+            dateOptions={DATE_OPTIONS}
+            sortOptions={SORT_OPTIONS}
+            showingTrash={showingTrash}
+            filtered={trashFiltered}
+            onQueryChange={updateQuery}
+            onClearFilters={clearFilters}
+          />
           <TrashList
             trash={trash}
             nowSeconds={nowSeconds}
@@ -350,58 +333,17 @@ export function LibraryView({
         </>
       ) : (
       <>
-      <div className="library-toolbar">
-        {/* Content type is one-of-N. Favourites is an independent boolean and lives with the other
-            filters — inside this group it read, and was announced, as a fourth exclusive type. */}
-        <SegmentedControl
-          label="Show"
-          value={query.type}
-          segments={typeSegments}
-          onChange={(value) => updateQuery({ type: value })}
-        />
-
-        <div className="library-filters">
-          <Field label="Game">
-            <SelectField
-              value={query.game}
-              onChange={(value) => updateQuery({ game: value })}
-              options={gameOptions}
-            />
-          </Field>
-          <Field label="Date">
-            <SelectField
-              value={query.range}
-              onChange={(value) => updateQuery({ range: value as DateRangeFilter })}
-              options={DATE_OPTIONS}
-            />
-          </Field>
-          <Field label="Sort">
-            <SelectField
-              value={query.sort}
-              onChange={(value) => updateQuery({ sort: value as LibrarySort })}
-              options={SORT_OPTIONS}
-            />
-          </Field>
-          <Field label="Search">
-            <TextField
-              value={query.search}
-              onChange={(value) => updateQuery({ search: value })}
-              placeholder="Title or game"
-            />
-          </Field>
-
-          <Toggle
-            checked={query.favoriteOnly}
-            onChange={(checked) => updateQuery({ favoriteOnly: checked })}
-            label="Favourites only"
-          />
-          {view.filtered && (
-            <Button variant="ghost" className="library-clear"  onClick={clearFilters}>
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </div>
+      <LibraryToolbar
+        query={query}
+        typeSegments={typeSegments}
+        gameOptions={gameOptions}
+        dateOptions={DATE_OPTIONS}
+        sortOptions={SORT_OPTIONS}
+        showingTrash={showingTrash}
+        filtered={view.filtered}
+        onQueryChange={updateQuery}
+        onClearFilters={clearFilters}
+      />
 
       {view.totalCount > 0 && (
         <div className="library-selection" data-testid="library-selection">
@@ -568,29 +510,11 @@ export function LibraryView({
       )}
 
       {showPagination && (
-        <nav className="library-pagination" aria-label="Library pages">
-          <Button variant="ghost"
-            
-            onClick={() => goToPage((groupView && !groupView.filtered ? latestPage : page) - 1)}
-            disabled={(groupView && !groupView.filtered ? latestPage : page) <= 1}
-            icon="chevronLeft"
-            aria-label="Previous page"
-          >
-            Prev
-          </Button>
-          <span className="library-page-indicator" data-testid="library-page">
-             Page {groupView && !groupView.filtered ? latestPage : page} of {latestPageCount}
-          </span>
-          <Button variant="ghost"
-            
-            onClick={() => goToPage((groupView && !groupView.filtered ? latestPage : page) + 1)}
-            disabled={(groupView && !groupView.filtered ? latestPage : page) >= latestPageCount}
-            icon="chevronRight"
-            aria-label="Next page"
-          >
-            Next
-          </Button>
-        </nav>
+        <LibraryPagination
+          page={groupView && !groupView.filtered ? latestPage : page}
+          pageCount={latestPageCount}
+          onPageChange={goToPage}
+        />
       )}
 
       </>

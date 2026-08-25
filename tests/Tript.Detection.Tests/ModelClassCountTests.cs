@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// The class count used to come from events.json's entry count, while ParseYoloOutput strides the
+// The class count used to come from events.json's entry count, while the YOLO parser strides the
 // output tensor by 4 + numClasses. Adding or removing a single events.json entry without retraining
 // therefore shifted every read and decoded every box to garbage — no exception, no log.
 public class ModelClassCountTests

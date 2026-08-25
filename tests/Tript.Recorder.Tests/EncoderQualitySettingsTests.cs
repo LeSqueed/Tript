@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Tript.Recorder;
 using Tript.Settings;
 using Xunit;
 
@@ -61,7 +62,7 @@ public sealed class EncoderQualitySettingsTests
     [InlineData(10, 20)]
     [InlineData(18, 16)]
     public void TheQualityPresets_LandInTheUsefulH264Band(int quality, int expectedQuantiser) =>
-        Assert.Equal(expectedQuantiser, ObsRecorderSession.MapQualityToQuantiser(quality));
+        Assert.Equal(expectedQuantiser, ObsEncoderPolicy.MapQualityToQuantiser(quality));
 
     // The product claim behind the table: the top two presets are in the part of the scale where H.264
     // is visually good (16 near-transparent, 20 very good), and no preset is anywhere near the smeared
@@ -69,14 +70,14 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void TheTopPresets_AreInTheGoodRangeAndNoPresetIsSmeared()
     {
-        var high = ObsRecorderSession.MapQualityToQuantiser(10);
-        var max = ObsRecorderSession.MapQualityToQuantiser(18);
+        var high = ObsEncoderPolicy.MapQualityToQuantiser(10);
+        var max = ObsEncoderPolicy.MapQualityToQuantiser(18);
 
         Assert.InRange(high, 16, 22);
         Assert.InRange(max, 14, 18);
 
         foreach (var preset in new[] { 3, 5, 10, 18 })
-            Assert.InRange(ObsRecorderSession.MapQualityToQuantiser(preset), 14, 28);
+            Assert.InRange(ObsEncoderPolicy.MapQualityToQuantiser(preset), 14, 28);
     }
 
     // Monotonic across the whole scale: a higher quality number never produces a higher quantiser.
@@ -85,10 +86,10 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void TheScale_IsMonotonic_HigherQualityIsNeverAHigherQuantiser()
     {
-        var previous = ObsRecorderSession.MapQualityToQuantiser(1);
+        var previous = ObsEncoderPolicy.MapQualityToQuantiser(1);
         for (var quality = 2; quality <= 20; quality++)
         {
-            var current = ObsRecorderSession.MapQualityToQuantiser(quality);
+            var current = ObsEncoderPolicy.MapQualityToQuantiser(quality);
             Assert.True(current <= previous,
                 $"quality {quality} produced quantiser {current}, worse than {previous} at quality {quality - 1}");
             previous = current;
@@ -100,7 +101,7 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void EachPreset_IsStrictlyBetterThanTheOneBelowIt()
     {
-        var presets = new[] { 3, 5, 10, 18 }.Select(ObsRecorderSession.MapQualityToQuantiser).ToArray();
+        var presets = new[] { 3, 5, 10, 18 }.Select(ObsEncoderPolicy.MapQualityToQuantiser).ToArray();
 
         for (var i = 1; i < presets.Length; i++)
             Assert.True(presets[i] < presets[i - 1], $"preset {i} at {presets[i]} is not better than {presets[i - 1]}");
@@ -117,13 +118,13 @@ public sealed class EncoderQualitySettingsTests
     [InlineData(int.MinValue)]
     [InlineData(int.MaxValue)]
     public void AnOutOfRangeQuality_StillProducesAValidQuantiser(int quality) =>
-        Assert.InRange(ObsRecorderSession.MapQualityToQuantiser(quality), 0, 51);
+        Assert.InRange(ObsEncoderPolicy.MapQualityToQuantiser(quality), 0, 51);
 
     [Fact]
     public void TheScaleEnds_ClampRatherThanExtrapolate()
     {
-        Assert.Equal(ObsRecorderSession.MapQualityToQuantiser(1), ObsRecorderSession.MapQualityToQuantiser(-100));
-        Assert.Equal(ObsRecorderSession.MapQualityToQuantiser(20), ObsRecorderSession.MapQualityToQuantiser(100));
+        Assert.Equal(ObsEncoderPolicy.MapQualityToQuantiser(1), ObsEncoderPolicy.MapQualityToQuantiser(-100));
+        Assert.Equal(ObsEncoderPolicy.MapQualityToQuantiser(20), ObsEncoderPolicy.MapQualityToQuantiser(100));
     }
 
     // ---- which modes a family accepts ----
@@ -133,7 +134,7 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void X264_OffersCrfCbrAndVbrButNotCqp()
     {
-        var modes = ObsRecorderSession.SupportedRateControlModes("obs_x264");
+        var modes = ObsEncoderPolicy.SupportedRateControlModes("obs_x264");
 
         Assert.Equal(new[] { RateControlMode.Crf, RateControlMode.Cbr, RateControlMode.Vbr }, modes);
         Assert.DoesNotContain(RateControlMode.Cqp, modes);
@@ -149,7 +150,7 @@ public sealed class EncoderQualitySettingsTests
     public void TheDocumentedHardwareFamilies_OfferCqpCbrAndVbr(string encoderId) =>
         Assert.Equal(
             new[] { RateControlMode.Cqp, RateControlMode.Cbr, RateControlMode.Vbr },
-            ObsRecorderSession.SupportedRateControlModes(encoderId));
+            ObsEncoderPolicy.SupportedRateControlModes(encoderId));
 
     // VAAPI is held to the two modes actually
     // evidenced: CQP (what the recorder has always written) and CBR. VBR is withheld deliberately —
@@ -161,7 +162,7 @@ public sealed class EncoderQualitySettingsTests
     public void TheVaapiFamily_OffersCqpAndCbrOnly(string encoderId) =>
         Assert.Equal(
             new[] { RateControlMode.Cqp, RateControlMode.Cbr },
-            ObsRecorderSession.SupportedRateControlModes(encoderId));
+            ObsEncoderPolicy.SupportedRateControlModes(encoderId));
 
     // An id no table describes still records. CBR is the one mode every documented family accepts and
     // most of them default to, so offering it alongside constant quality is not a guess; anything
@@ -172,7 +173,7 @@ public sealed class EncoderQualitySettingsTests
     public void AnUnknownFamily_OffersConstantQualityAndCbr(string encoderId) =>
         Assert.Equal(
             new[] { RateControlMode.Cqp, RateControlMode.Cbr },
-            ObsRecorderSession.SupportedRateControlModes(encoderId));
+            ObsEncoderPolicy.SupportedRateControlModes(encoderId));
 
     // ---- coercion: the property that lets a settings file travel between machines ----
 
@@ -184,7 +185,7 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(EveryIdAndMode))]
     public void TheModeWritten_IsNeverCrfUnlessTheEncoderIsX264(string encoderId, RateControlMode requested)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, requested);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, requested);
 
         if (encoderId != "obs_x264")
             Assert.NotEqual("CRF", resolved.Mode);
@@ -196,7 +197,7 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(EveryIdAndMode))]
     public void TheModeWritten_IsAlwaysOneTheFamilyAccepts(string encoderId, RateControlMode requested)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, requested);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, requested);
 
         string[] accepted;
         if (encoderId == "obs_x264")
@@ -214,11 +215,11 @@ public sealed class EncoderQualitySettingsTests
     [Theory]
     [MemberData(nameof(NonX264EncoderIds))]
     public void CrfRequestedOnAHardwareEncoder_BecomesThatFamilysConstantQuantiserMode(string encoderId) =>
-        Assert.Equal(RateControlMode.Cqp, ObsRecorderSession.CoerceRateControlMode(encoderId, RateControlMode.Crf));
+        Assert.Equal(RateControlMode.Cqp, ObsEncoderPolicy.CoerceRateControlMode(encoderId, RateControlMode.Crf));
 
     [Fact]
     public void CqpRequestedOnX264_BecomesCrf() =>
-        Assert.Equal(RateControlMode.Crf, ObsRecorderSession.CoerceRateControlMode("obs_x264", RateControlMode.Cqp));
+        Assert.Equal(RateControlMode.Crf, ObsEncoderPolicy.CoerceRateControlMode("obs_x264", RateControlMode.Cqp));
 
     // A mode the family does not accept falls back to constant quality rather than to another
     // rate-targeted mode: constant quality needs only the quality profile, which every settings object
@@ -228,9 +229,9 @@ public sealed class EncoderQualitySettingsTests
     [InlineData("some_future_h264_encoder")]
     public void VbrRequestedWhereItIsNotOffered_FallsBackToConstantQuality(string encoderId)
     {
-        Assert.Equal(RateControlMode.Cqp, ObsRecorderSession.CoerceRateControlMode(encoderId, RateControlMode.Vbr));
+        Assert.Equal(RateControlMode.Cqp, ObsEncoderPolicy.CoerceRateControlMode(encoderId, RateControlMode.Vbr));
 
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, RateControlMode.Vbr);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, RateControlMode.Vbr);
         Assert.Equal("CQP", resolved.Mode);
         Assert.Null(resolved.BitrateKey);
     }
@@ -240,8 +241,8 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void CbrIsAcceptedByEveryFamily(string encoderId)
     {
-        Assert.Equal(RateControlMode.Cbr, ObsRecorderSession.CoerceRateControlMode(encoderId, RateControlMode.Cbr));
-        Assert.Equal(RateControlMode.Cbr, ObsRecorderSession.CoerceRateControlMode("obs_x264", RateControlMode.Cbr));
+        Assert.Equal(RateControlMode.Cbr, ObsEncoderPolicy.CoerceRateControlMode(encoderId, RateControlMode.Cbr));
+        Assert.Equal(RateControlMode.Cbr, ObsEncoderPolicy.CoerceRateControlMode("obs_x264", RateControlMode.Cbr));
     }
 
     // ---- which keys each mode writes ----
@@ -256,7 +257,7 @@ public sealed class EncoderQualitySettingsTests
     [InlineData("some_future_h264_encoder", "CQP", "cqp")]
     public void ConstantQuality_WritesTheFamilysQuantiserKeyOnly(string encoderId, string mode, string quantiserKey)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, RateControlMode.Cqp);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, RateControlMode.Cqp);
 
         Assert.Equal(mode, resolved.Mode);
         Assert.Equal(quantiserKey, resolved.QuantiserKey);
@@ -274,7 +275,7 @@ public sealed class EncoderQualitySettingsTests
     [InlineData("ffmpeg_vaapi")]
     public void Cbr_WritesTheBitrateAndNoCeiling(string encoderId)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, RateControlMode.Cbr);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, RateControlMode.Cbr);
 
         Assert.Equal("CBR", resolved.Mode);
         Assert.Equal("bitrate", resolved.BitrateKey);
@@ -292,7 +293,7 @@ public sealed class EncoderQualitySettingsTests
     [InlineData("obs_x264", null)]
     public void Vbr_WritesTheCeilingOnlyWhereTheFamilyHasOne(string encoderId, string? maxBitrateKey)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, RateControlMode.Vbr);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, RateControlMode.Vbr);
 
         Assert.Equal("VBR", resolved.Mode);
         Assert.Equal("bitrate", resolved.BitrateKey);
@@ -305,11 +306,11 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void X264Vbr_WritesBothTheQuantiserAndTheBitrate()
     {
-        var x264 = ObsRecorderSession.ResolveRateControl("obs_x264", RateControlMode.Vbr);
+        var x264 = ObsEncoderPolicy.ResolveRateControl("obs_x264", RateControlMode.Vbr);
         Assert.Equal("crf", x264.QuantiserKey);
         Assert.Equal("bitrate", x264.BitrateKey);
 
-        var nvenc = ObsRecorderSession.ResolveRateControl("obs_nvenc_h264_tex", RateControlMode.Vbr);
+        var nvenc = ObsEncoderPolicy.ResolveRateControl("obs_nvenc_h264_tex", RateControlMode.Vbr);
         Assert.Null(nvenc.QuantiserKey);
         Assert.Equal("bitrate", nvenc.BitrateKey);
     }
@@ -320,7 +321,7 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(EveryIdAndMode))]
     public void EveryKeyWritten_IsOneTheFamiliesName(string encoderId, RateControlMode requested)
     {
-        var resolved = ObsRecorderSession.ResolveRateControl(encoderId, requested);
+        var resolved = ObsEncoderPolicy.ResolveRateControl(encoderId, requested);
 
         if (resolved.QuantiserKey is { } quantiser)
             Assert.Contains(quantiser, new[] { "crf", "cqp", "qp" });
@@ -339,9 +340,9 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void TheBitrate_IsClampedIntoTheRangeEveryFamilyAccepts()
     {
-        Assert.Equal(15_000, ObsRecorderSession.ClampBitrateKbps(15_000));
-        Assert.Equal(ObsRecorderSession.MinBitrateKbps, ObsRecorderSession.ClampBitrateKbps(1));
-        Assert.Equal(ObsRecorderSession.MaxBitrateKbps, ObsRecorderSession.ClampBitrateKbps(int.MaxValue));
+        Assert.Equal(15_000, ObsEncoderPolicy.ClampBitrateKbps(15_000));
+        Assert.Equal(ObsEncoderPolicy.MinBitrateKbps, ObsEncoderPolicy.ClampBitrateKbps(1));
+        Assert.Equal(ObsEncoderPolicy.MaxBitrateKbps, ObsEncoderPolicy.ClampBitrateKbps(int.MaxValue));
     }
 
     // A missing or nonsense bitrate takes the default rather than the floor: clamping 0 up to 50 kbps
@@ -351,22 +352,22 @@ public sealed class EncoderQualitySettingsTests
     [InlineData(-1)]
     [InlineData(int.MinValue)]
     public void AnUnsetBitrate_TakesTheDefaultRatherThanTheFloor(int bitrateKbps) =>
-        Assert.Equal(ObsRecorderSession.DefaultBitrateKbps, ObsRecorderSession.ClampBitrateKbps(bitrateKbps));
+        Assert.Equal(ObsEncoderPolicy.DefaultBitrateKbps, ObsEncoderPolicy.ClampBitrateKbps(bitrateKbps));
 
     [Fact]
     public void TheVbrCeiling_IsDerivedWhenUnsetAndNeverBelowTheTarget()
     {
         // Unset: 1.5x the target.
-        Assert.Equal(15_000, ObsRecorderSession.ResolveMaxBitrateKbps(10_000, 0));
+        Assert.Equal(15_000, ObsEncoderPolicy.ResolveMaxBitrateKbps(10_000, 0));
 
         // Explicit and sane: used as given.
-        Assert.Equal(30_000, ObsRecorderSession.ResolveMaxBitrateKbps(20_000, 30_000));
+        Assert.Equal(30_000, ObsEncoderPolicy.ResolveMaxBitrateKbps(20_000, 30_000));
 
         // Explicit and below the target: a ceiling under the floor is meaningless, so the target wins.
-        Assert.Equal(20_000, ObsRecorderSession.ResolveMaxBitrateKbps(20_000, 5_000));
+        Assert.Equal(20_000, ObsEncoderPolicy.ResolveMaxBitrateKbps(20_000, 5_000));
 
         // Never out of range for the tightest family.
-        Assert.Equal(ObsRecorderSession.MaxBitrateKbps, ObsRecorderSession.ResolveMaxBitrateKbps(90_000, int.MaxValue));
+        Assert.Equal(ObsEncoderPolicy.MaxBitrateKbps, ObsEncoderPolicy.ResolveMaxBitrateKbps(90_000, int.MaxValue));
     }
 
     // ---- guards ----
@@ -377,12 +378,12 @@ public sealed class EncoderQualitySettingsTests
     [Fact]
     public void ANullOrEmptyId_IsRejectedByEveryEntryPoint()
     {
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.SupportedRateControlModes(null!));
-        Assert.Throws<ArgumentException>(() => ObsRecorderSession.SupportedRateControlModes(string.Empty));
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.CoerceRateControlMode(null!, RateControlMode.Cqp));
-        Assert.Throws<ArgumentException>(() => ObsRecorderSession.CoerceRateControlMode(string.Empty, RateControlMode.Cqp));
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.ResolveRateControl(null!, RateControlMode.Cqp));
-        Assert.Throws<ArgumentException>(() => ObsRecorderSession.ResolveRateControl(string.Empty, RateControlMode.Cqp));
+        Assert.Throws<ArgumentNullException>(() => ObsEncoderPolicy.SupportedRateControlModes(null!));
+        Assert.Throws<ArgumentException>(() => ObsEncoderPolicy.SupportedRateControlModes(string.Empty));
+        Assert.Throws<ArgumentNullException>(() => ObsEncoderPolicy.CoerceRateControlMode(null!, RateControlMode.Cqp));
+        Assert.Throws<ArgumentException>(() => ObsEncoderPolicy.CoerceRateControlMode(string.Empty, RateControlMode.Cqp));
+        Assert.Throws<ArgumentNullException>(() => ObsEncoderPolicy.ResolveRateControl(null!, RateControlMode.Cqp));
+        Assert.Throws<ArgumentException>(() => ObsEncoderPolicy.ResolveRateControl(string.Empty, RateControlMode.Cqp));
     }
 
     // An enum value from a settings file written by a build with more modes than this one: the JSON
@@ -394,8 +395,8 @@ public sealed class EncoderQualitySettingsTests
 
         // Coercion answers first: an unknown value is not in any family's supported list, so it lands
         // on constant quality like any other unsupported request.
-        Assert.Equal(RateControlMode.Cqp, ObsRecorderSession.CoerceRateControlMode("ffmpeg_vaapi", unknownMode));
-        Assert.Equal("CQP", ObsRecorderSession.ResolveRateControl("ffmpeg_vaapi", unknownMode).Mode);
+        Assert.Equal(RateControlMode.Cqp, ObsEncoderPolicy.CoerceRateControlMode("ffmpeg_vaapi", unknownMode));
+        Assert.Equal("CQP", ObsEncoderPolicy.ResolveRateControl("ffmpeg_vaapi", unknownMode).Mode);
     }
 
     // The list the settings UI offers is never empty: an encoder with no offerable mode would leave the
@@ -404,7 +405,7 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void EveryFamilyOffersAtLeastConstantQuality(string encoderId)
     {
-        var modes = ObsRecorderSession.SupportedRateControlModes(encoderId);
+        var modes = ObsEncoderPolicy.SupportedRateControlModes(encoderId);
 
         Assert.NotEmpty(modes);
         Assert.Contains(RateControlMode.Cqp, modes);
@@ -416,7 +417,7 @@ public sealed class EncoderQualitySettingsTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void TheOfferedModes_AreDistinct(string encoderId)
     {
-        var modes = ObsRecorderSession.SupportedRateControlModes(encoderId);
+        var modes = ObsEncoderPolicy.SupportedRateControlModes(encoderId);
 
         Assert.Equal<IEnumerable<RateControlMode>>(modes.Distinct(), modes);
     }

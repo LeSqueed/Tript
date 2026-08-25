@@ -33,7 +33,7 @@ public class NearBlackTests
     [Fact]
     public void IsNearBlack_AllZeroFrame_IsNearBlack()
     {
-        Assert.True(VisualEventDetector.IsNearBlack(Frame(), W, H));
+        Assert.True(DetectionFramePreprocessor.IsNearBlack(Frame(), W, H));
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class NearBlackTests
     {
         var bgra = ReferenceImplementations.SyntheticBgra(W, H, 5);
 
-        Assert.False(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public class NearBlackTests
         var bgra = Frame();
         Light(bgra, 0, 0, W / 2, H / 2);
 
-        Assert.False(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
     // The tolerance is zero bright samples: one probe above the luma threshold is enough.
@@ -60,7 +60,7 @@ public class NearBlackTests
         var bgra = Frame();
         Light(bgra, Stride, Stride, 1, 1);
 
-        Assert.False(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
     // Documents a deliberate limitation, not a bug. The 16px stride probes 1/256 of the frame, so a
@@ -73,7 +73,7 @@ public class NearBlackTests
         Assert.NotEqual(0, y % Stride);
         Light(bgra, W / 2, y, 1, 1);
 
-        Assert.True(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.True(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
     // Upper bound on what the check can miss: a region spanning less than the stride on
@@ -84,7 +84,7 @@ public class NearBlackTests
         var bgra = Frame();
         Light(bgra, 1, 1, Stride - 1, Stride - 1);
 
-        Assert.True(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.True(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
     // Covers exactly 10 probes. A tolerance of 10 bright samples waved this through despite
@@ -95,6 +95,6 @@ public class NearBlackTests
         var bgra = Frame();
         Light(bgra, 0, Stride, Stride * 10, Stride);
 
-        Assert.False(VisualEventDetector.IsNearBlack(bgra, W, H));
+        Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 }

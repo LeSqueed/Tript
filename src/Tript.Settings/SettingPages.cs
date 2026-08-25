@@ -31,7 +31,7 @@ public sealed class RecordingSettings
 
     // The quality profile applied when a game has no override of its own. The app's own 1..20
     // scale, higher being better; the recorder maps it onto the H.264 quantiser scale the resolved
-    // encoder family reads (ObsRecorderSession.MapQualityToQuantiser).
+    // encoder family reads.
     public int Quality { get; set; } = 10;
 
     // How the encoder is told to spend its bits. Cqp is the default because it means "constant
@@ -46,8 +46,7 @@ public sealed class RecordingSettings
     public int BitrateKbps { get; set; } = 15_000;
 
     // The VBR ceiling, in kbps, or 0 for "derive it from the target". Only the families that
-    // document a ceiling key receive it (NVENC and QSV have max_bitrate; AMF has none at all, and
-    // x264's ceiling is its VBV pair) — see ObsRecorderSession for which key each family reads.
+    // document a ceiling key receive it: NVENC and QSV have max_bitrate, while AMF and x264 do not.
     public int MaxBitrateKbps { get; set; }
 
     // Whether to record in HDR when the captured display is in HDR mode. On by default because the

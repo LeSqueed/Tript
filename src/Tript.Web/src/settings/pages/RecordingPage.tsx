@@ -22,7 +22,7 @@ const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
 /**
  * The quality profile applied when a game has no override of its own. The numbers are the backend's
  * 1..20 scale; the recorder maps them onto the H.264 quantiser scale the resolved encoder family
- * reads (`ObsRecorderSession.MapQualityToQuantiser`), so these four presets land at CRF/QP 28, 23, 20
+ * reads, so these four presets land at CRF/QP 28, 23, 20
  * and 16 — the band where H.264 game footage is worth keeping.
  */
 const QUALITY_OPTIONS: SelectOption[] = [
@@ -60,7 +60,7 @@ const FALLBACK_ENCODER = 'obs_x264';
 /**
  * The settings model's encoder default. It is a placeholder meaning "the backend decides" — the real
  * software id is `obs_x264` — so it is neither labelled as x264 nor treated as a family whose
- * rate-control vocabulary is known (`ObsRecorderSession.ResolveVideoEncoderId` prefers a hardware
+ * rate-control vocabulary is known (the backend prefers a hardware
  * encoder when one is registered, so what this resolves to is not knowable from the frontend).
  */
 const BACKEND_DECIDES_ENCODER = 'x264';
@@ -76,7 +76,7 @@ function nativeDirectoryExample(): { placeholder: string; defaultLabel: string }
 type EncoderFamily = 'x264' | 'vaapi' | 'nvenc' | 'amf' | 'qsv' | 'unknown';
 
 /**
- * Which family an encoder id belongs to, mirroring `ObsRecorderSession.ClassifyFamily`: x264 matched
+ * Which family an encoder id belongs to, mirroring the backend encoder policy: x264 matched
  * exactly and the rest by substring, because each hardware family ships several ids while "contains
  * x264" would also catch a third-party id that merely mentions it.
  */
@@ -116,7 +116,7 @@ const FAMILY_LABELS: Record<EncoderFamily, string> = {
 
 /**
  * The modes each family accepts, in the order they are offered. Mirrored from
- * `ObsRecorderSession.SupportedRateControlModes`, which is the authority — see the file header for
+ * the backend encoder policy, which is the authority — see the file header for
  * why this copy is a convenience rather than the safety property.
  */
 const RATE_CONTROL_MODES: Record<EncoderFamily, RateControlMode[]> = {
@@ -259,7 +259,7 @@ function rateControlOptions(encoderId: string): SelectOption[] {
 /**
  * The mode the recording will actually use: the stored one when the selected encoder's family accepts
  * it, else that family's constant-quality mode — exactly the coercion
- * `ObsRecorderSession.CoerceRateControlMode` performs. Showing the coerced value is what keeps the
+ * backend encoder policy performs. Showing the coerced value is what keeps the
  * page honest: the alternative is a selector displaying CRF while the recorder writes CQP.
  */
 function effectiveRateControl(stored: RateControlMode | undefined, encoderId: string): RateControlMode {

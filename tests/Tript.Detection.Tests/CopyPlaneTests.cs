@@ -52,7 +52,7 @@ public class CopyPlaneTests
         var src = Source(RowBytes);
         var dst = new byte[RowBytes * Height];
 
-        VisualEventDetector.CopyPlane(src, RowBytes, dst, RowBytes, Height);
+        DetectionFramePreprocessor.CopyPlane(src, RowBytes, dst, RowBytes, Height);
 
         Assert.Equal(Expected(), dst);
     }
@@ -66,7 +66,7 @@ public class CopyPlaneTests
         var src = Source(stride);
         var dst = new byte[RowBytes * Height];
 
-        VisualEventDetector.CopyPlane(src, stride, dst, RowBytes, Height);
+        DetectionFramePreprocessor.CopyPlane(src, stride, dst, RowBytes, Height);
 
         Assert.Equal(Expected(), dst);
         Assert.DoesNotContain((byte)0xEE, dst);
@@ -79,10 +79,10 @@ public class CopyPlaneTests
         const int Padded = RowBytes + 128;
 
         var tightDst = new byte[RowBytes * Height];
-        VisualEventDetector.CopyPlane(Source(RowBytes), RowBytes, tightDst, RowBytes, Height);
+        DetectionFramePreprocessor.CopyPlane(Source(RowBytes), RowBytes, tightDst, RowBytes, Height);
 
         var paddedDst = new byte[RowBytes * Height];
-        VisualEventDetector.CopyPlane(Source(Padded), Padded, paddedDst, RowBytes, Height);
+        DetectionFramePreprocessor.CopyPlane(Source(Padded), Padded, paddedDst, RowBytes, Height);
 
         Assert.Equal(tightDst, paddedDst);
     }
@@ -95,7 +95,7 @@ public class CopyPlaneTests
         var src = Source(RowBytes);
         var dst = new byte[RowBytes * Height + 4096];
 
-        VisualEventDetector.CopyPlane(src, RowBytes, dst, RowBytes, Height);
+        DetectionFramePreprocessor.CopyPlane(src, RowBytes, dst, RowBytes, Height);
 
         Assert.Equal(Expected(), dst[..(RowBytes * Height)]);
     }

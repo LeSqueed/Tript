@@ -237,7 +237,7 @@ export interface SettingsMessageContent {
   cause?: string;
   /**
    * The H.264 encoder ids this machine's runtime actually registered, settled on the backend
-   * (`ObsRecorderSession.EnumerateUsableEncoderIds`). It rides the settings push as a **sibling**
+   * from the backend encoder policy. It rides the settings push as a **sibling**
    * of `settings` rather than as a field of the recording page, because it is a property of the
    * running machine and not a persisted setting — the backend's recording page has no such
    * property, so a nested copy would be round-tripped into its extension data and written to disk.

@@ -37,7 +37,7 @@ public sealed class RateControlKeyTests
     // merely contains "obs_x264" is not x264 — see TheModeIsNeverCrf_ForAnyNonX264Id.
     [Fact]
     public void X264_GetsCrfAndTheCrfKey() =>
-        Assert.Equal(("CRF", "crf"), ObsRecorderSession.ResolveRateControlKeys("obs_x264"));
+        Assert.Equal(("CRF", "crf"), ObsEncoderPolicy.ResolveRateControlKeys("obs_x264"));
 
     // The Windows hardware families. All four accept "CQP" and all four name the quantiser "cqp":
     // NVENC under both key sets, AMF and QSV. These are the ids the Windows build resolves to in
@@ -49,7 +49,7 @@ public sealed class RateControlKeyTests
     [InlineData("h264_texture_amf")]
     [InlineData("obs_qsv11_v2")]
     public void TheWindowsHardwareEncoders_GetCqpAndTheCqpKey(string encoderId) =>
-        Assert.Equal(("CQP", "cqp"), ObsRecorderSession.ResolveRateControlKeys(encoderId));
+        Assert.Equal(("CQP", "cqp"), ObsEncoderPolicy.ResolveRateControlKeys(encoderId));
 
     // VAAPI is the exception among the hardware families, and the reason the exception was missed:
     // it accepts "CQP" like the others but names the quantiser "qp", not "cqp". The specification's
@@ -58,7 +58,7 @@ public sealed class RateControlKeyTests
     [InlineData("ffmpeg_vaapi")]
     [InlineData("ffmpeg_vaapi_tex")]
     public void TheVaapiEncoders_GetCqpAndThePlainQpKey(string encoderId) =>
-        Assert.Equal(("CQP", "qp"), ObsRecorderSession.ResolveRateControlKeys(encoderId));
+        Assert.Equal(("CQP", "qp"), ObsEncoderPolicy.ResolveRateControlKeys(encoderId));
 
     // The substring match is OrdinalIgnoreCase, so the family is recognised however a plugin cases its
     // id. Worth pinning rather than assuming: an Ordinal match here would send "FFMPEG_VAAPI" down the
@@ -69,7 +69,7 @@ public sealed class RateControlKeyTests
     [InlineData("Ffmpeg_VaApi")]
     [InlineData("av1_ffmpeg_VAAPI_tex")]
     public void TheVaapiMatch_IgnoresCase(string encoderId) =>
-        Assert.Equal(("CQP", "qp"), ObsRecorderSession.ResolveRateControlKeys(encoderId));
+        Assert.Equal(("CQP", "qp"), ObsEncoderPolicy.ResolveRateControlKeys(encoderId));
 
     // The crash condition, asserted as a property over the whole id space rather than one id at a
     // time. No H.264 family other than x264 lists "CRF" among its accepted rate_control values, so
@@ -79,7 +79,7 @@ public sealed class RateControlKeyTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void TheModeIsNeverCrf_ForAnyNonX264Id(string encoderId)
     {
-        var (rateControl, _) = ObsRecorderSession.ResolveRateControlKeys(encoderId);
+        var (rateControl, _) = ObsEncoderPolicy.ResolveRateControlKeys(encoderId);
 
         Assert.NotEqual("CRF", rateControl);
     }
@@ -91,7 +91,7 @@ public sealed class RateControlKeyTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void TheModeIsAlwaysCqp_ForAnyNonX264Id(string encoderId)
     {
-        var (rateControl, _) = ObsRecorderSession.ResolveRateControlKeys(encoderId);
+        var (rateControl, _) = ObsEncoderPolicy.ResolveRateControlKeys(encoderId);
 
         Assert.Equal("CQP", rateControl);
     }
@@ -103,7 +103,7 @@ public sealed class RateControlKeyTests
     [MemberData(nameof(NonX264EncoderIds))]
     public void TheQualityKey_IsAlwaysOneTheFamiliesName(string encoderId)
     {
-        var (_, qualityKey) = ObsRecorderSession.ResolveRateControlKeys(encoderId);
+        var (_, qualityKey) = ObsEncoderPolicy.ResolveRateControlKeys(encoderId);
 
         Assert.Contains(qualityKey, new[] { "cqp", "qp" });
     }
@@ -114,7 +114,7 @@ public sealed class RateControlKeyTests
     [Fact]
     public void ANullOrEmptyId_IsRejected()
     {
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.ResolveRateControlKeys(null!));
-        Assert.Throws<ArgumentException>(() => ObsRecorderSession.ResolveRateControlKeys(string.Empty));
+        Assert.Throws<ArgumentNullException>(() => ObsEncoderPolicy.ResolveRateControlKeys(null!));
+        Assert.Throws<ArgumentException>(() => ObsEncoderPolicy.ResolveRateControlKeys(string.Empty));
     }
 }

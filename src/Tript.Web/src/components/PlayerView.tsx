@@ -13,7 +13,6 @@ import type {
   TrainingEventDefinition,
   TrainingSampleMessage,
 } from '../ipc/protocol';
-import { contentUrl, thumbnailUrl } from '../ipc/endpoints';
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
 import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
 import type { TimelineRegion } from './player/clipSeam';
@@ -22,6 +21,8 @@ import { usePlayback } from './player/usePlayback';
 import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
 import { TransportBar } from './player/TransportBar';
+import { PlayerHeader } from './player/PlayerHeader';
+import { PlaybackSurface } from './player/PlaybackSurface';
 import { useClipDialog } from './player/useClipDialog';
 import { ClipDialog } from './player/clipDialog';
 import { computeEditSeek, computeLoopDecision } from './player/clipLoop';
@@ -576,7 +577,6 @@ export function PlayerView({
     );
   }
 
-  const videoSrc = contentUrl(item.filePath);
   const handleAutomaticClips = () => {
     if (creatingHighlights) {
       client.send('PauseAutomaticClips');
@@ -587,76 +587,36 @@ export function PlayerView({
 
   return (
     <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
-      <div className="player-header">
-        <Button variant="ghost" size="small" icon="chevronLeft" onClick={onBack}>
-          Back
-        </Button>
-        <span className="player-header-title">{item.title?.trim() || item.fileName}</span>
-        {item.contentType === 'recording' && (
-          <Button variant="ghost" size="small" onClick={handleAutomaticClips}>
-            {creatingHighlights ? (highlightsPaused ? 'Resume highlights' : 'Pause highlights') : 'Create highlights'}
-          </Button>
-        )}
-        {item.contentType === 'recording' && highlightCount > 0 && onReviewSession && (
-          <Button variant="ghost" size="small" onClick={() => onReviewSession(item)}>
-            View highlights ({highlightCount})
-          </Button>
-        )}
-        {item.automated && onDelete && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="player-header-delete"
-            icon="trash"
-            onClick={() => onDelete(item)}
-            aria-label="Move highlight to trash"
-            title="Move highlight to trash"
-          />
-        )}
-      </div>
-      <div className="video-frame">
-        <video
-          ref={videoRef}
-          className="video-element"
-          // No `controls`: the browser paints those over the picture. The transport row below the
-          // video is the control surface. tabIndex keeps the element keyboard-reachable, which
-          // `controls` used to provide — the overlay's focus trap matches it by tabindex.
-           tabIndex={0}
-           aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
-           src={videoSrc}
-           poster={thumbnailUrl(item.filePath)}
-           autoPlay
-           playsInline
-           onClick={playback.togglePlayPause}
-          onTimeUpdate={(event) => playback.onVideoTimeUpdate(event.currentTarget.currentTime)}
-           onDurationChange={(event) => playback.onVideoDuration(event.currentTarget.duration)}
-           onPlay={() => {
-             setHasStartedPlayback(true);
-             playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
-            playback.onVideoPlay();
-          }}
-          onPause={() => {
-            playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
-            playback.onVideoPause();
-          }}
-           onEnded={playback.onVideoEnded}
-           onError={() => setHasStartedPlayback(false)}
-         />
-         {!hasStartedPlayback && !playing && (
-           <button
-             type="button"
-             className="player-start-overlay"
-             aria-label="Play recording"
-              onClick={(event) => {
-                event.stopPropagation();
-                playback.togglePlayPause();
-              }}
-           >
-             <span className="player-start-icon" aria-hidden="true">&#9654;</span>
-             <span>Play recording</span>
-           </button>
-         )}
-       </div>
+      <PlayerHeader
+        item={item}
+        creatingHighlights={creatingHighlights}
+        highlightsPaused={highlightsPaused}
+        highlightCount={highlightCount}
+        onBack={onBack}
+        onAutomaticClips={handleAutomaticClips}
+        onDelete={onDelete}
+        onReviewSession={onReviewSession}
+      />
+      <PlaybackSurface
+        item={item}
+        videoRef={videoRef}
+        playing={playing}
+        hasStartedPlayback={hasStartedPlayback}
+        onTogglePlayPause={playback.togglePlayPause}
+        onTimeUpdate={playback.onVideoTimeUpdate}
+        onDurationChange={playback.onVideoDuration}
+        onPlay={() => {
+          setHasStartedPlayback(true);
+          playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
+          playback.onVideoPlay();
+        }}
+        onPause={() => {
+          playback.onVideoTimeUpdate(videoRef.current?.currentTime ?? 0);
+          playback.onVideoPause();
+        }}
+        onEnded={playback.onVideoEnded}
+        onError={() => setHasStartedPlayback(false)}
+      />
 
       {/* The console does not name the item: whatever is holding the player already does — the
           overlay's header, or the route's topbar heading. */}

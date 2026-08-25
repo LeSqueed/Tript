@@ -82,7 +82,7 @@ public sealed class ResolvedRecorderSettings
 
     // How the encoder spends its bits, and the kbps figures the rate-targeted modes use. The
     // recorder validates the mode against the encoder family it actually resolved and coerces an
-    // unsupported one; a resolved value is a request, not a promise (ObsRecorderSession).
+    // unsupported one; a resolved value is a request, not a promise.
     public RateControlMode RateControl { get; set; }
 
     public int BitrateKbps { get; set; }

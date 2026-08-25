@@ -49,10 +49,10 @@ public class RegionGroupingTests
         var b = Region(1, 0.15f, 0.0f, 0.20f, 0.1f);
         var c = Region(2, 0.30f, 0.0f, 0.20f, 0.1f);
 
-        Assert.Single(VisualEventDetector.BuildRegionGroups([a, b, c]));
-        Assert.Single(VisualEventDetector.BuildRegionGroups([c, b, a]));
-        Assert.Single(VisualEventDetector.BuildRegionGroups([a, c, b]));
-        Assert.Single(VisualEventDetector.BuildRegionGroups([b, a, c]));
+        Assert.Single(DetectionFramePreprocessor.BuildRegionGroups([a, b, c]));
+        Assert.Single(DetectionFramePreprocessor.BuildRegionGroups([c, b, a]));
+        Assert.Single(DetectionFramePreprocessor.BuildRegionGroups([a, c, b]));
+        Assert.Single(DetectionFramePreprocessor.BuildRegionGroups([b, a, c]));
     }
 
     [Fact]
@@ -61,24 +61,24 @@ public class RegionGroupingTests
         var a = Region(0, 0.0f, 0.0f, 0.1f, 0.1f);
         var b = Region(1, 0.8f, 0.8f, 0.1f, 0.1f);
 
-        Assert.Equal(2, VisualEventDetector.BuildRegionGroups([a, b]).Count);
+        Assert.Equal(2, DetectionFramePreprocessor.BuildRegionGroups([a, b]).Count);
     }
 
     [Fact]
     public void Real_overwatch_events_still_produce_three_groups()
     {
-        Assert.Equal(3, VisualEventDetector.BuildRegionGroups(OverwatchDefinitions()).Count);
+        Assert.Equal(3, DetectionFramePreprocessor.BuildRegionGroups(OverwatchDefinitions()).Count);
     }
 
     [Fact]
     public void Real_overwatch_grouping_is_order_independent()
     {
-        var forward = CropRects(VisualEventDetector.BuildRegionGroups(OverwatchDefinitions()));
+        var forward = CropRects(DetectionFramePreprocessor.BuildRegionGroups(OverwatchDefinitions()));
 
         var reversed = OverwatchDefinitions();
         reversed.Reverse();
 
-        Assert.Equal(forward, CropRects(VisualEventDetector.BuildRegionGroups(reversed)));
+        Assert.Equal(forward, CropRects(DetectionFramePreprocessor.BuildRegionGroups(reversed)));
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class RegionGroupingTests
         // rectangles production no longer uses. Compared as integer crop rects because
         // group 1's width computes as 0.21669999f against the literal 0.2167f — a
         // 1.5e-08 artifact of 0.1028f + 0.1236f - 0.0097f that truncates away.
-        var fromAlgorithm = CropRects(VisualEventDetector.BuildRegionGroups(OverwatchDefinitions()));
+        var fromAlgorithm = CropRects(DetectionFramePreprocessor.BuildRegionGroups(OverwatchDefinitions()));
 
         var fromFixture = ReferenceImplementations.OverwatchGroups
             .Select(g => ((int)(g.X * W), (int)(g.Y * H), (int)(g.W * W), (int)(g.H * H)))

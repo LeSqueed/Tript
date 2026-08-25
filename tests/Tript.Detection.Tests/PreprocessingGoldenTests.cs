@@ -25,7 +25,7 @@ public class PreprocessingGoldenTests
         var bgra = ReferenceImplementations.SyntheticBgra(W, H, seed);
 
         var expected = ReferenceImplementations.BgraToGray(bgra, W, H);
-        var actual = VisualEventDetector.BgraToGray(bgra, W, H);
+        var actual = DetectionFramePreprocessor.BgraToGray(bgra, W, H);
 
         // Production rents from ArrayPool, so the buffer may be longer than w*h.
         Assert.True(actual.Length >= W * H);
@@ -55,8 +55,8 @@ public class PreprocessingGoldenTests
         var expected = ReferenceImplementations.CropAndResizeGray(
             expectedGray, W, H, cropX, cropY, cropW, cropH, ModelInput, ModelInput);
 
-        var actualGray = VisualEventDetector.BgraToGray(bgra, W, H);
-        var actual = VisualEventDetector.CropAndResizeGray(
+        var actualGray = DetectionFramePreprocessor.BgraToGray(bgra, W, H);
+        var actual = DetectionFramePreprocessor.CropAndResizeGray(
             actualGray, W, H, cropX, cropY, cropW, cropH, ModelInput, ModelInput);
 
         Assert.True(actual.Length >= ModelInput * ModelInput);
@@ -90,8 +90,8 @@ public class PreprocessingGoldenTests
         var expected = ReferenceImplementations.CropAndResizeGray(
             fullGray, W, H, cropX, cropY, cropW, cropH, ModelInput, ModelInput);
 
-        var crop = VisualEventDetector.CropBgraToGray(bgra, W, cropX, cropY, cropW, cropH);
-        var actual = VisualEventDetector.ResizeGray(crop, cropW, cropH, ModelInput, ModelInput);
+        var crop = DetectionFramePreprocessor.CropBgraToGray(bgra, W, cropX, cropY, cropW, cropH);
+        var actual = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH, ModelInput, ModelInput);
 
         Assert.True(actual.Length >= ModelInput * ModelInput);
         Assert.Equal(
@@ -109,7 +109,7 @@ public class PreprocessingGoldenTests
         var expected = ReferenceImplementations.BuildInputTensor(gray, ModelInput);
 
         var actual = new float[pixels * 3];
-        VisualEventDetector.FillInputTensor(gray, actual, ModelInput);
+        DetectionFramePreprocessor.FillInputTensor(gray, actual, ModelInput);
 
         // Identical arithmetic on identical inputs, so exact float equality is the contract.
         Assert.Equal(expected, actual);

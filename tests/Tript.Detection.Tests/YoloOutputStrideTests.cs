@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// ParseYoloOutput reads the detect head as (4 + numClasses) contiguous rows of numDetections floats,
+// The YOLO parser reads the detect head as (4 + numClasses) contiguous rows of numDetections floats,
 // with numDetections derived as output.Length / (4 + numClasses):
 //
 //     cx = output[i]                        w  = output[2 * numDetections + i]
@@ -25,13 +25,13 @@ namespace Tript.Detection.Tests;
 //
 //   * numClasses comes from the exported graph (ModelClassCountTests pins that), and the anchor
 //     count the length-based derivation recovers really is the graph's;
-//   * the span ParseYoloOutput is handed is exactly the tensor, not a longer pooled buffer — its
+//   * the span handed to the parser is exactly the tensor, not a longer pooled buffer — its
 //     length is the dividend of that derivation;
 //   * the layout is channel-major with the four box rows first, which is what makes row 4 onwards
 //     confidences rather than geometry.
 //
 // These run against the shipped model's real output, which is the only place that contract exists.
-// What ParseYoloOutput does once the stride is right — the row offsets, the cutoff, argmax, the
+// What the parser does once the stride is right — the row offsets, the cutoff, argmax, the
 // centre-to-corner conversion — is pinned on hand-built tensors in ParseYoloOutputDecodeTests.
 // Loads its own session rather than ModelService's cached one: test classes run in parallel and
 // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
@@ -40,7 +40,7 @@ public class YoloOutputStrideTests
     private const string GameId = "Overwatch";
     private const int ModelInput = 640;
 
-    // Mirrors ParseYoloOutput's own arithmetic, so a change to the row layout has to be made here too.
+    // Mirrors the parser's own arithmetic, so a change to the row layout has to be made here too.
     private const int YoloBoxChannels = 4;
 
     private sealed record ShippedOutput(Tensor<float> Tensor, float[] Values, int NumClasses, int Anchors);
@@ -51,7 +51,7 @@ public class YoloOutputStrideTests
     {
         var modelPath = ModelService.GetModelPath(GameId);
         Assert.True(File.Exists(modelPath),
-            $"ONNX model not found at {modelPath}. These tests pin the tensor layout ParseYoloOutput " +
+            $"ONNX model not found at {modelPath}. These tests pin the tensor layout the YOLO parser " +
             "walks and cannot be checked without the real model. They must fail, not skip.");
         return modelPath;
     }
@@ -65,12 +65,12 @@ public class YoloOutputStrideTests
 
         // A real inference on a real frame-shaped input. Zeros would exercise the same layout, but a
         // near-black frame is exactly what DetectionLoop refuses to run, so noise keeps the output
-        // representative of what ParseYoloOutput actually sees.
+        // representative of what the YOLO parser actually sees.
         var gray = new byte[ModelInput * ModelInput];
         new Random(7).NextBytes(gray);
 
         var buffer = new float[ModelInput * ModelInput * 3];
-        VisualEventDetector.FillInputTensor(gray, buffer, ModelInput);
+        DetectionFramePreprocessor.FillInputTensor(gray, buffer, ModelInput);
 
         var input = new DenseTensor<float>(buffer.AsMemory(), new[] { 1, 3, ModelInput, ModelInput });
         var container = new List<NamedOnnxValue>
@@ -123,7 +123,7 @@ public class YoloOutputStrideTests
         });
     }
 
-    // RunInferenceOnGray hands ParseYoloOutput dense.Buffer.Span when the output is a DenseTensor, to
+    // RunInferenceOnGray hands the YOLO parser dense.Buffer.Span when the output is a DenseTensor, to
     // avoid copying the whole tensor per region per cycle. That shortcut is only equivalent to
     // ToArray() while the buffer is exactly the tensor: a longer one would inflate output.Length and
     // therefore numDetections, shifting every read.
@@ -141,7 +141,7 @@ public class YoloOutputStrideTests
 
     // The layout itself. Rows 4 and up are per-class confidences, which the detect head sigmoids,
     // so every value in them sits within [0, 1]; the four rows before them are box geometry in
-    // input pixels, which is why ParseYoloOutput divides them by inputSize.
+    // input pixels, which is why the YOLO parser divides them by inputSize.
     [Fact]
     public void ClassRowsAreConfidences_AndBoxRowsAreInputPixels_AtTheDerivedStride()
     {
@@ -155,7 +155,7 @@ public class YoloOutputStrideTests
             }
 
             Assert.True(Max(output.Values.AsSpan(0, YoloBoxChannels * anchors)) > 1f,
-                "Box rows are already normalized — ParseYoloOutput divides them by the model input " +
+                "Box rows are already normalized — the YOLO parser divides them by the model input " +
                 "size and would shrink every box to nothing.");
 
             // One row early: the box row pulled in carries pixel-space values, so the bound above

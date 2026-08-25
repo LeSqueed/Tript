@@ -31,7 +31,7 @@ public class VisualEventDetectorTests
         // 0.587*255 = 149.685 -> 149   (255, 0, 0)  : 0.114*255 =  29.070 ->  29
         byte[] expected = [72, 37, 149, 29];
 
-        var gray = VisualEventDetector.BgraToGray(bgra, w, h);
+        var gray = DetectionFramePreprocessor.BgraToGray(bgra, w, h);
 
         // ArrayPool-rented: the buffer may be longer than w*h, so slice before asserting.
         Assert.True(gray.Length >= w * h);

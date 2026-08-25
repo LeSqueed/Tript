@@ -53,7 +53,7 @@ public class FullFrameGroupTests
         var definitions = OverwatchDefinitions();
         definitions.Add(FullFrameDef(7));
 
-        var groups = VisualEventDetector.BuildRegionGroups(definitions);
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
 
         Assert.Equal(4, groups.Count);
         Assert.Contains(groups, g => g.X == 0f && g.Y == 0f && g.W == 1f && g.H == 1f);
@@ -77,9 +77,9 @@ public class FullFrameGroupTests
     {
         var definitions = OverwatchDefinitions();
         definitions.Add(FullFrameDef(7));
-        var groups = VisualEventDetector.BuildRegionGroups(definitions);
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
 
-        var converted = VisualEventDetector.CountGrayscalePixels(groups, frameW, frameH);
+        var converted = DetectionFramePreprocessor.CountGrayscalePixels(groups, frameW, frameH);
 
         Assert.True(converted <= frameW * frameH,
             $"converted {converted} pixels, frame holds {frameW * frameH}");
@@ -90,11 +90,11 @@ public class FullFrameGroupTests
     {
         var definitions = OverwatchDefinitions();
         definitions.Add(FullFrameDef(7));
-        var groups = VisualEventDetector.BuildRegionGroups(definitions);
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
 
-        Assert.Equal(VisualEventDetector.GrayscaleStrategy.WholeFrameOnce,
-            VisualEventDetector.SelectGrayscaleStrategy(groups));
-        Assert.Equal(W * H, VisualEventDetector.CountGrayscalePixels(groups, W, H));
+        Assert.Equal(GrayscaleStrategy.WholeFrameOnce,
+            DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
+        Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     // The only shipped config must keep the per-group path; this fix is for the case it does
@@ -102,11 +102,11 @@ public class FullFrameGroupTests
     [Fact]
     public void Overwatch_config_keeps_the_per_group_path()
     {
-        var groups = VisualEventDetector.BuildRegionGroups(OverwatchDefinitions());
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(OverwatchDefinitions());
 
-        Assert.Equal(VisualEventDetector.GrayscaleStrategy.PerGroupCrop,
-            VisualEventDetector.SelectGrayscaleStrategy(groups));
-        Assert.Equal(390_526, VisualEventDetector.CountGrayscalePixels(groups, W, H));
+        Assert.Equal(GrayscaleStrategy.PerGroupCrop,
+            DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
+        Assert.Equal(390_526, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     // Overlapping groups can pass full coverage without any one of them being full-frame.
@@ -119,9 +119,9 @@ public class FullFrameGroupTests
             new() { X = 0.1f, Y = 0.05f, W = 0.8f, H = 0.9f },
         };
 
-        Assert.Equal(VisualEventDetector.GrayscaleStrategy.WholeFrameOnce,
-            VisualEventDetector.SelectGrayscaleStrategy(groups));
-        Assert.Equal(W * H, VisualEventDetector.CountGrayscalePixels(groups, W, H));
+        Assert.Equal(GrayscaleStrategy.WholeFrameOnce,
+            DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
+        Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     // The same guarantee CropThenGray_equals_GrayThenCrop gives the real regions, extended to a
@@ -131,21 +131,21 @@ public class FullFrameGroupTests
     {
         var definitions = OverwatchDefinitions();
         definitions.Add(FullFrameDef(7));
-        var groups = VisualEventDetector.BuildRegionGroups(definitions);
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
         var bgra = ReferenceImplementations.SyntheticBgra(W, H, 23);
 
         Assert.Contains(groups, g => g.W == 1f && g.H == 1f);
 
-        var frameGray = VisualEventDetector.BgraToGray(bgra, W, H);
+        var frameGray = DetectionFramePreprocessor.BgraToGray(bgra, W, H);
 
         foreach (var group in groups)
         {
-            Assert.True(VisualEventDetector.TryGetCropRect(group, W, H,
+            Assert.True(DetectionFramePreprocessor.TryGetCropRect(group, W, H,
                 out var cropX, out var cropY, out var cropW, out var cropH));
 
-            var perGroupCrop = VisualEventDetector.CropBgraToGray(bgra, W, cropX, cropY, cropW, cropH);
-            var perGroup = VisualEventDetector.ResizeGray(perGroupCrop, cropW, cropH, ModelInput, ModelInput);
-            var wholeFrame = VisualEventDetector.CropAndResizeGray(
+            var perGroupCrop = DetectionFramePreprocessor.CropBgraToGray(bgra, W, cropX, cropY, cropW, cropH);
+            var perGroup = DetectionFramePreprocessor.ResizeGray(perGroupCrop, cropW, cropH, ModelInput, ModelInput);
+            var wholeFrame = DetectionFramePreprocessor.CropAndResizeGray(
                 frameGray, W, H, cropX, cropY, cropW, cropH, ModelInput, ModelInput);
 
             Assert.Equal(
@@ -161,7 +161,7 @@ public class FullFrameGroupTests
     {
         var group = new RegionGroup { X = 0f, Y = 0f, W = 1f, H = 1f };
 
-        Assert.True(VisualEventDetector.TryGetCropRect(group, W, H,
+        Assert.True(DetectionFramePreprocessor.TryGetCropRect(group, W, H,
             out var cropX, out var cropY, out var cropW, out var cropH));
 
         Assert.Equal(0, cropX);

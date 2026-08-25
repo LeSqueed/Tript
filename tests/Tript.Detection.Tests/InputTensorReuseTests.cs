@@ -69,7 +69,7 @@ public class InputTensorReuseTests
 
             float[] RunWithSeed(int seed)
             {
-                VisualEventDetector.FillInputTensor(SyntheticGray(seed), buffer, ModelInput);
+                DetectionFramePreprocessor.FillInputTensor(SyntheticGray(seed), buffer, ModelInput);
                 using var results = session.Run(container, outputNames, runOptions);
                 return results[0].AsTensor<float>().ToArray();
             }

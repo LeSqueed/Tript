@@ -48,7 +48,7 @@ public class InputTensorVectorTests
         var expected = ReferenceImplementations.BuildInputTensor(gray, 16);
 
         var actual = new float[256 * 3];
-        VisualEventDetector.FillInputTensor(gray, actual, 16, useVectorPath: true);
+        DetectionFramePreprocessor.FillInputTensor(gray, actual, 16, useVectorPath: true);
 
         AssertBitIdentical(expected, actual, "vector path, all 256 byte values");
     }
@@ -60,7 +60,7 @@ public class InputTensorVectorTests
         var expected = ReferenceImplementations.BuildInputTensor(gray, 16);
 
         var actual = new float[256 * 3];
-        VisualEventDetector.FillInputTensor(gray, actual, 16, useVectorPath: false);
+        DetectionFramePreprocessor.FillInputTensor(gray, actual, 16, useVectorPath: false);
 
         AssertBitIdentical(expected, actual, "scalar fallback, all 256 byte values");
     }
@@ -75,9 +75,9 @@ public class InputTensorVectorTests
         var byDefault = new float[256 * 3];
         var vector = new float[256 * 3];
         var scalar = new float[256 * 3];
-        VisualEventDetector.FillInputTensor(gray, byDefault, 16);
-        VisualEventDetector.FillInputTensor(gray, vector, 16, useVectorPath: true);
-        VisualEventDetector.FillInputTensor(gray, scalar, 16, useVectorPath: false);
+        DetectionFramePreprocessor.FillInputTensor(gray, byDefault, 16);
+        DetectionFramePreprocessor.FillInputTensor(gray, vector, 16, useVectorPath: true);
+        DetectionFramePreprocessor.FillInputTensor(gray, scalar, 16, useVectorPath: false);
 
         AssertBitIdentical(scalar, byDefault, "default entry point vs scalar");
         AssertBitIdentical(scalar, vector, "vector path vs scalar");
@@ -109,8 +109,8 @@ public class InputTensorVectorTests
 
         var vector = new float[pixels * 3];
         var scalar = new float[pixels * 3];
-        VisualEventDetector.FillInputTensor(gray, vector, inputSize, useVectorPath: true);
-        VisualEventDetector.FillInputTensor(gray, scalar, inputSize, useVectorPath: false);
+        DetectionFramePreprocessor.FillInputTensor(gray, vector, inputSize, useVectorPath: true);
+        DetectionFramePreprocessor.FillInputTensor(gray, scalar, inputSize, useVectorPath: false);
 
         AssertBitIdentical(expected, vector, $"vector path at inputSize {inputSize} (tail {pixels % 4})");
         AssertBitIdentical(expected, scalar, $"scalar fallback at inputSize {inputSize}");
@@ -133,7 +133,7 @@ public class InputTensorVectorTests
 
             var expected = ReferenceImplementations.BuildInputTensor(gray, InputSize);
             var actual = new float[Pixels * 3];
-            VisualEventDetector.FillInputTensor(gray, actual, InputSize, useVectorPath: true);
+            DetectionFramePreprocessor.FillInputTensor(gray, actual, InputSize, useVectorPath: true);
 
             AssertBitIdentical(expected, actual, $"tail element holding byte {b}");
         }
@@ -145,9 +145,9 @@ public class InputTensorVectorTests
     public void UndersizedBuffers_Throw()
     {
         Assert.Throws<ArgumentException>(() =>
-            VisualEventDetector.FillInputTensor(new byte[15], new float[16 * 3], 4));
+            DetectionFramePreprocessor.FillInputTensor(new byte[15], new float[16 * 3], 4));
         Assert.Throws<ArgumentException>(() =>
-            VisualEventDetector.FillInputTensor(new byte[16], new float[16 * 3 - 1], 4));
+            DetectionFramePreprocessor.FillInputTensor(new byte[16], new float[16 * 3 - 1], 4));
     }
 
     // Production buffers come from ArrayPool and are routinely longer than the frame needs.
@@ -161,7 +161,7 @@ public class InputTensorVectorTests
 
         var expected = ReferenceImplementations.BuildInputTensor(gray, InputSize);
         var actual = new float[Pixels * 3];
-        VisualEventDetector.FillInputTensor(gray, actual, InputSize, useVectorPath: true);
+        DetectionFramePreprocessor.FillInputTensor(gray, actual, InputSize, useVectorPath: true);
 
         AssertBitIdentical(expected, actual, "oversized source buffer");
     }

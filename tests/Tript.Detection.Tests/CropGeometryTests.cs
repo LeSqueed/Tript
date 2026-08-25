@@ -18,7 +18,7 @@ public class CropGeometryTests
 
     private static byte[] Output(byte[] crop, int cropW, int cropH)
     {
-        var dst = VisualEventDetector.ResizeGray(crop, cropW, cropH, Dst, Dst);
+        var dst = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH, Dst, Dst);
         // ArrayPool-rented, so the buffer may be longer than the destination.
         Assert.True(dst.Length >= Dst * Dst);
         return dst.AsSpan(0, Dst * Dst).ToArray();
@@ -69,7 +69,7 @@ public class CropGeometryTests
         const int frameH = 1000;
         var group = new RegionGroup { X = 0.25f, Y = 0.25f, W = 0.5f, H = 0.5f };
 
-        Assert.True(VisualEventDetector.TryGetCropRect(group, frameW, frameH,
+        Assert.True(DetectionFramePreprocessor.TryGetCropRect(group, frameW, frameH,
             out var cropX, out var cropY, out var cropW, out var cropH));
         Assert.Equal((250, 250, 500, 500), (cropX, cropY, cropW, cropH));
 
@@ -78,7 +78,7 @@ public class CropGeometryTests
             new() { X = 0.25f, Y = 0.25f, Width = 0.5f, Height = 0.5f }
         };
 
-        VisualEventDetector.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
+        DetectionFramePreprocessor.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
 
         var det = detections[0];
         Assert.Equal(0.375, det.X, 4);
@@ -97,7 +97,7 @@ public class CropGeometryTests
         const int frameH = 1000;
         var group = new RegionGroup { X = 0.75f, Y = 0.5f, W = 0.5f, H = 0.75f };
 
-        Assert.True(VisualEventDetector.TryGetCropRect(group, frameW, frameH,
+        Assert.True(DetectionFramePreprocessor.TryGetCropRect(group, frameW, frameH,
             out var cropX, out var cropY, out var cropW, out var cropH));
         Assert.Equal((750, 500, 250, 500), (cropX, cropY, cropW, cropH));
 
@@ -107,7 +107,7 @@ public class CropGeometryTests
             new() { X = 0f, Y = 0f, Width = 1f, Height = 1f }
         };
 
-        VisualEventDetector.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
+        DetectionFramePreprocessor.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
 
         var det = detections[0];
         Assert.Equal(0.75, det.X, 4);
@@ -130,7 +130,7 @@ public class CropGeometryTests
         const int frameH = 1080;
         var group = new RegionGroup { X = 0f, Y = 0f, W = 1f, H = 1f };
 
-        Assert.True(VisualEventDetector.TryGetCropRect(group, frameW, frameH,
+        Assert.True(DetectionFramePreprocessor.TryGetCropRect(group, frameW, frameH,
             out var cropX, out var cropY, out var cropW, out var cropH));
 
         var detections = new List<DetectionResult>
@@ -138,7 +138,7 @@ public class CropGeometryTests
             new() { X = 0.125f, Y = 0.75f, Width = 0.3f, Height = 0.2f }
         };
 
-        VisualEventDetector.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
+        DetectionFramePreprocessor.MapDetectionsToFullFrame(detections, cropX, cropY, cropW, cropH, frameW, frameH);
 
         var det = detections[0];
         Assert.Equal(0.125, det.X, 4);

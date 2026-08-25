@@ -36,26 +36,26 @@ public static class ModelPredictionService
         {
             NamedOnnxValue.CreateFromTensor(metadata.InputName, inputTensor),
         };
-        var groups = VisualEventDetector.BuildRegionGroups(definitions.ToList());
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions.ToList());
         var detections = new List<DetectionResult>();
 
         foreach (var group in groups)
         {
-            if (!VisualEventDetector.TryGetCropRect(group, image.Width, image.Height,
+            if (!DetectionFramePreprocessor.TryGetCropRect(group, image.Width, image.Height,
                     out var cropX, out var cropY, out var cropW, out var cropH))
                 continue;
 
-            var resized = VisualEventDetector.CropAndResizeGray(image.Pixels, image.Width, image.Height,
+            var resized = DetectionFramePreprocessor.CropAndResizeGray(image.Pixels, image.Width, image.Height,
                 cropX, cropY, cropW, cropH, inputWidth, inputHeight);
             try
             {
-                VisualEventDetector.FillInputTensor(resized, inputBuffer, inputWidth, inputHeight, useVectorPath: false);
+                DetectionFramePreprocessor.FillInputTensor(resized, inputBuffer, inputWidth, inputHeight, useVectorPath: false);
                 using var results = session.Run(inputs, [metadata.OutputName]);
                 var tensor = results[0].AsTensor<float>();
                 var output = tensor is DenseTensor<float> dense ? dense.Buffer.Span : tensor.ToArray().AsSpan();
-                var groupDetections = VisualEventDetector.ParseYoloOutputForInput(output,
+                var groupDetections = DetectionFramePreprocessor.ParseYoloOutputForInput(output,
                     inputWidth, inputHeight, classCount);
-                VisualEventDetector.MapDetectionsToFullFrame(groupDetections, cropX, cropY, cropW, cropH,
+                DetectionFramePreprocessor.MapDetectionsToFullFrame(groupDetections, cropX, cropY, cropW, cropH,
                     image.Width, image.Height);
                 detections.AddRange(groupDetections);
             }

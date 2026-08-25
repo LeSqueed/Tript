@@ -171,13 +171,13 @@ describe('createIpcClient', () => {
       const client = createIpcClient({ createSocket: factory, reconnectBaseDelayMs: 50 });
       client.connect();
 
-      expect(MockWebSocket.instances[0].url).toBe('ws://localhost:44030/?k=deadbeef');
+      expect(MockWebSocket.instances[0].url).toBe('ws://localhost:8894/?k=deadbeef');
 
       MockWebSocket.instances[0].serverOpen();
       MockWebSocket.instances[0].serverClose();
       vi.advanceTimersByTime(50);
 
-      expect(MockWebSocket.instances[1].url).toBe('ws://localhost:44030/?k=deadbeef');
+      expect(MockWebSocket.instances[1].url).toBe('ws://localhost:8894/?k=deadbeef');
     } finally {
       captureSessionToken('');
     }
@@ -188,6 +188,6 @@ describe('createIpcClient', () => {
     const client = createIpcClient({ createSocket: factory });
     client.connect();
 
-    expect(MockWebSocket.instances[0].url).toBe('ws://localhost:44030/');
+    expect(MockWebSocket.instances[0].url).toBe('ws://localhost:8894/');
   });
 });

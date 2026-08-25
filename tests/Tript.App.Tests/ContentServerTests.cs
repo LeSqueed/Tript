@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The content server (http://localhost:2222/) serves the recorded files with range-request support
+// The content server (http://localhost:8893/) serves the recorded files with range-request support
 // and refuses any path that escapes the content root. These tests hit the running app host over
 // HTTP, the same way the frontend does.
 [Collection(AppHostCollection.Name)]

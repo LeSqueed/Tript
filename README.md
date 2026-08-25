@@ -6,7 +6,7 @@ Tript is a clean-room screen recorder that watches for a supported game to be de
 
 There are two ways to run Tript — same app host, different front end:
 
-- **Headless** (`Tript.App`): no window. The host serves the UI over HTTP on port 2882 and prints the
+- **Headless** (`Tript.App`): no window. The host serves the UI over HTTP on port 8892 and prints the
   URL to open — including the per-launch key, without which every request is refused (see below). No
   browser is opened.
 - **Desktop shell** (`Tript.Shell`): a native window via Photino hosting the same React UI, pointed at
@@ -127,7 +127,7 @@ host, the control socket and the content server alike. It lives only in memory a
 process.
 
 The desktop shell passes it to its own window in-process, so there is nothing to do. The **headless**
-host prints the URL to open on its `READY` line; open that, not a bare `http://localhost:2882/`,
+host prints the URL to open on its `READY` line; open that, not a bare `http://localhost:8892/`,
 which is answered with 403. `vite dev` runs on **2883** so it no longer collides with the host, but it cannot mint a
 key, so it is only good for rendering the UI in isolation: it serves the SPA and the app reports a
 missing key rather than retrying a socket that would never be accepted.

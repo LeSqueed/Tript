@@ -4,8 +4,8 @@ import react from '@vitejs/plugin-react';
 
 // Single configuration used by `vite dev`, `vite build` and `vitest`.
 //
-// The dev/preview server runs on 2883, NOT on the app host's 2882 (src/Tript.App/LocalPorts.cs):
-// both bind the same loopback port, so on 2882 only one of them could ever be up — and the whole
+// The dev/preview server runs on 2883, NOT on the app host's 8892 (src/Tript.App/LocalPorts.cs):
+// both bind the same loopback port, so on 8892 only one of them could ever be up — and the whole
 // point of the dev server is to have it running against the real backend.
 //
 // What `vite dev` is good for is the UI in isolation. It cannot talk to a running backend: the host

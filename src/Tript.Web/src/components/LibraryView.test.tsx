@@ -117,7 +117,7 @@ describe('LibraryView grid', () => {
   it('lazy-loads grid thumbnails, and loads the hero eagerly', () => {
     renderLibrary([session, clip]);
     const images = screen.getAllByRole('presentation') as HTMLImageElement[];
-    expect(images[0].getAttribute('src')).toBe('http://localhost:2222/api/thumbnail/sessions/cs2.mp4');
+    expect(images[0].getAttribute('src')).toBe('http://localhost:8893/api/thumbnail/sessions/cs2.mp4');
     // The hero is the picture the user came to look at; it must not wait for an intersection.
     expect(images[0].getAttribute('loading')).toBe('eager');
     // Everything else: a library is unbounded, and a thousand cards must not become a thousand

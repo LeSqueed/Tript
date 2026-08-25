@@ -33,7 +33,7 @@ function readFromRepo(repoRelativePath: string): string {
   return readFileSync(join(REPO_ROOT, repoRelativePath), 'utf8');
 }
 
-// `internal const int Ui = 2882;` — the declaration, not a mention of the number elsewhere.
+// `internal const int Ui = 8892;` — the declaration, not a mention of the number elsewhere.
 function backendPort(name: string): number {
   const match = new RegExp(String.raw`\b${name}\s*=\s*(\d+)\s*;`).exec(readFromRepo(LOCAL_PORTS_CS));
   if (match === null)
@@ -65,7 +65,7 @@ describe('the loopback ports pinned against the backend', () => {
   // control socket's Origin allowlist. It never bought that: the host serves the SPA only to a
   // request carrying the per-launch key, which `vite dev` cannot mint, so a dev server reaches the
   // "missing key" notice and no further whatever port it is on. What it did buy was a collision —
-  // the app host and the dev server both binding 2882, so a developer could not have the real
+  // the app host and the dev server both binding 8892, so a developer could not have the real
   // backend up while using the dev server, which is the one arrangement that setup exists for.
   //
   // So the pin is inverted: the dev/preview port must be one the app does NOT bind.

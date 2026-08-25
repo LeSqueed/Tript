@@ -52,8 +52,8 @@ public sealed class WindowsStartupRegistrationTests
     [Fact]
     public void BuildLibraryUrl_AlwaysStartsInTheLibraryWithoutChangingTheLaunchToken()
     {
-        Assert.Equal("http://localhost:2882/?k=token#library",
-            Tript.Shell.Program.BuildLibraryUrl("http://localhost:2882/?k=token"));
+        Assert.Equal("http://localhost:8892/?k=token#library",
+            Tript.Shell.Program.BuildLibraryUrl("http://localhost:8892/?k=token"));
     }
 
     [Fact]

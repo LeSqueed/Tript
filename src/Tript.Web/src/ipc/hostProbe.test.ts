@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifyProbeStatus, hostProbeUrl, probeHost } from './hostProbe';
 import { captureSessionToken } from './sessionToken';
 
-const ORIGIN = 'http://localhost:2882';
+const ORIGIN = 'http://localhost:8892';
 
 afterEach(() => {
   captureSessionToken('');
@@ -27,7 +27,7 @@ describe('classifyProbeStatus', () => {
 describe('hostProbeUrl', () => {
   it("carries the page's key, so a 403 is about the key and not about its absence", () => {
     captureSessionToken('?k=deadbeef');
-    expect(hostProbeUrl(ORIGIN)).toBe('http://localhost:2882/?k=deadbeef');
+    expect(hostProbeUrl(ORIGIN)).toBe('http://localhost:8892/?k=deadbeef');
   });
 });
 

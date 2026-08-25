@@ -3,7 +3,7 @@
 // The IPC client: a typed WebSocket client over the control socket.
 //
 // Responsibilities:
-//   - Connect to the control socket (ws://localhost:44030/).
+//   - Connect to the control socket (ws://localhost:8894/).
 //   - Send commands in the envelope shape (serializeCommand).
 //   - Receive backend → frontend messages and dispatch them by method (createDispatcher).
 //   - Reconnect on close/error, with backoff.

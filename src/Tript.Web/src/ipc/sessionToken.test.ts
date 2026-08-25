@@ -65,14 +65,14 @@ describe('the captured token', () => {
 describe('withSessionToken', () => {
   it('appends the token as a query parameter', () => {
     captureSessionToken(`?k=${TOKEN}`);
-    expect(withSessionToken('http://localhost:2222/api/content/a.mp4')).toBe(
-      `http://localhost:2222/api/content/a.mp4?k=${TOKEN}`,
+    expect(withSessionToken('http://localhost:8893/api/content/a.mp4')).toBe(
+      `http://localhost:8893/api/content/a.mp4?k=${TOKEN}`,
     );
   });
 
   it('leaves an already percent-encoded path untouched', () => {
     captureSessionToken(`?k=${TOKEN}`);
-    const url = withSessionToken('http://localhost:2222/api/content/my%23clip.mp4');
+    const url = withSessionToken('http://localhost:8893/api/content/my%23clip.mp4');
 
     expect(new URL(url).pathname).toBe('/api/content/my%23clip.mp4');
     expect(new URL(url).searchParams.get('k')).toBe(TOKEN);
@@ -80,12 +80,12 @@ describe('withSessionToken', () => {
 
   it('carries the token on a WebSocket URL, the only channel a handshake has', () => {
     captureSessionToken(`?k=${TOKEN}`);
-    expect(withSessionToken('ws://localhost:44030/')).toBe(`ws://localhost:44030/?k=${TOKEN}`);
+    expect(withSessionToken('ws://localhost:8894/')).toBe(`ws://localhost:8894/?k=${TOKEN}`);
   });
 
   it('keeps existing query parameters and does not duplicate the token', () => {
     captureSessionToken(`?k=${TOKEN}`);
-    const url = withSessionToken(`http://localhost:2222/api/content/a.mp4?t=3&k=stale`);
+    const url = withSessionToken(`http://localhost:8893/api/content/a.mp4?t=3&k=stale`);
 
     expect(new URL(url).searchParams.getAll('k')).toEqual([TOKEN]);
     expect(new URL(url).searchParams.get('t')).toBe('3');
@@ -93,8 +93,8 @@ describe('withSessionToken', () => {
 
   it('returns the URL unchanged when there is no token, rather than sending an empty one', () => {
     captureSessionToken('');
-    expect(withSessionToken('http://localhost:2222/api/content/a.mp4')).toBe(
-      'http://localhost:2222/api/content/a.mp4',
+    expect(withSessionToken('http://localhost:8893/api/content/a.mp4')).toBe(
+      'http://localhost:8893/api/content/a.mp4',
     );
   });
 });

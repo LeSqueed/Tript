@@ -12,9 +12,9 @@ namespace Tript.App;
 // across that boundary; a test pins the two together instead.
 internal static class LocalPorts
 {
-    internal const int Ui = 2882;
-    internal const int Content = 2222;
-    internal const int ControlSocket = 44030;
+    internal const int Ui = 8892;
+    internal const int Content = 8893;
+    internal const int ControlSocket = 8894;
 
     // What a browser presents as the Origin of a page served by the UI host. Both loopback spellings,
     // because which one appears depends on how the user reached the UI.

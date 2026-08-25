@@ -5,10 +5,10 @@
 import { withSessionToken } from './sessionToken';
 
 /** WebSocket control socket — bidirectional command and state channel. */
-export const CONTROL_SOCKET_URL = 'ws://localhost:44030/';
+export const CONTROL_SOCKET_URL = 'ws://localhost:8894/';
 
 /** Content server root — /api/content (range-request video streaming), /api/thumbnail. */
-export const CONTENT_SERVER_URL = 'http://localhost:2222/';
+export const CONTENT_SERVER_URL = 'http://localhost:8893/';
 
 /** Protocol version carried on NewConnection; a frontend/backend mismatch must fail loudly. */
 export const PROTOCOL_VERSION = 1;

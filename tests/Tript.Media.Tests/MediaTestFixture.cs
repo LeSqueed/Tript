@@ -31,6 +31,22 @@ internal static class MediaTestFixture
     static MediaTestFixture()
     {
         Directory.CreateDirectory(ScratchRoot);
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => DeleteScratchRoot();
+    }
+
+    private static void DeleteScratchRoot()
+    {
+        try
+        {
+            Directory.Delete(ScratchRoot, recursive: true);
+            var parent = Path.GetDirectoryName(ScratchRoot);
+            if (parent is not null && Directory.Exists(parent) && Directory.GetFileSystemEntries(parent).Length == 0)
+                Directory.Delete(parent);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup of generated media fixtures.
+        }
     }
 
     internal static string Run(string ffmpeg, IReadOnlyList<string> args)

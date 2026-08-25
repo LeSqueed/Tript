@@ -54,7 +54,7 @@ public sealed class GrowingFileStreamingTests
         var writer = Task.Run(async () =>
         {
             await using var stream = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            while (!stop.IsCancellationRequested)
+            for (var index = 0; index < 256 && !stop.IsCancellationRequested; index++)
             {
                 await stream.WriteAsync(chunk, CancellationToken.None);
                 await stream.FlushAsync(CancellationToken.None);

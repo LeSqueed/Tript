@@ -16,19 +16,40 @@ public sealed class AppHostCollection : ICollectionFixture<AppHostCollectionFixt
 
 // A per-collection fixture that hands each test a unique temp directory. The fixture itself holds
 // no process; the driver is per-test so a failure cannot leak a host across tests.
-public sealed class AppHostCollectionFixture
+public sealed class AppHostCollectionFixture : IDisposable
 {
+    private static readonly string SuiteRoot = Path.Combine(Path.GetTempPath(), "tript-app-tests");
+    private readonly List<string> _roots = [];
+
     internal string NewContentRoot(string testName)
     {
-        var path = Path.Combine(Path.GetTempPath(), "tript-app-tests", testName, Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(SuiteRoot, testName, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
+        _roots.Add(path);
         return path;
     }
 
     internal string NewSettingsPath(string testName)
     {
-        var path = Path.Combine(Path.GetTempPath(), "tript-app-tests", testName, Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var path = Path.Combine(SuiteRoot, testName, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        _roots.Add(path);
         return Path.Combine(path, "settings.json");
+    }
+
+    public void Dispose()
+    {
+        foreach (var root in _roots)
+            DeleteIfExists(root);
+
+        DeleteIfExists(SuiteRoot);
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        Directory.Delete(path, recursive: true);
     }
 }

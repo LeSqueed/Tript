@@ -67,6 +67,7 @@ export interface PlayerViewProps {
   regions?: TimelineRegion[];
   selectedRegionId?: string | null;
   onRegionSelect?(region: TimelineRegion): void;
+  convertHdrClipsToSdr?: boolean;
 }
 
 export function PlayerView({
@@ -83,6 +84,7 @@ export function PlayerView({
   regions: externalRegions,
   selectedRegionId: externalSelectedRegionId,
   onRegionSelect: externalOnRegionSelect,
+  convertHdrClipsToSdr = false,
 }: PlayerViewProps) {
   // No injected source → own an IPC-backed one for this view's lifetime. It sends ListContent on
   // creation and re-reads the `content` push, so the list is live.
@@ -156,6 +158,16 @@ export function PlayerView({
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
   const [hasStartedPlayback, setHasStartedPlayback] = useState(false);
+  const [sdrJobId, setSdrJobId] = useState<string | null>(null);
+  const [sdrError, setSdrError] = useState<string | null>(null);
+
+  useEffect(() => client.on('importProgress', (content) => {
+    const message = content as { id?: string; status?: string; error?: string };
+    if (message.id !== sdrJobId || (message.status !== 'done' && message.status !== 'error'))
+      return;
+    setSdrJobId(null);
+    setSdrError(message.status === 'error' ? message.error ?? 'SDR conversion failed.' : null);
+  }), [client, sdrJobId]);
 
   useEffect(() => {
     setHasStartedPlayback(false);
@@ -585,6 +597,16 @@ export function PlayerView({
     }
   };
 
+  const handleConvertToSdr = () => {
+    if (!convertHdrClipsToSdr || item.isHdr !== true || sdrJobId
+      || (item.contentType !== 'clip' && item.contentType !== 'highlight'))
+      return;
+    const id = `sdr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setSdrError(null);
+    setSdrJobId(id);
+    client.send('ConvertToSdr', { id, contentType: item.contentType, filePath: item.filePath });
+  };
+
   return (
     <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
       <PlayerHeader
@@ -596,6 +618,10 @@ export function PlayerView({
         onAutomaticClips={handleAutomaticClips}
         onDelete={onDelete}
         onReviewSession={onReviewSession}
+        convertHdrClipsToSdr={convertHdrClipsToSdr}
+        convertingToSdr={sdrJobId !== null}
+        onConvertToSdr={handleConvertToSdr}
+        conversionError={sdrError}
       />
       <PlaybackSurface
         item={item}

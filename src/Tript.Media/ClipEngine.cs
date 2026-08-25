@@ -26,7 +26,8 @@ public sealed class ClipEngine : IClipEngine
 
         var (sourceInfo, regions) = Validate(request);
 
-        if (request.PreferStreamCopy && request.Mode == ClipMode.Combine && regions.Count == 1)
+        if (request.PreferStreamCopy && !request.ForceSdr
+            && request.Mode == ClipMode.Combine && regions.Count == 1)
             return CreateStreamCopy(request, regions[0]);
 
         return request.Mode == ClipMode.Combine
@@ -47,6 +48,12 @@ public sealed class ClipEngine : IClipEngine
             throw new ClipSourceException("At least one region is required to create a clip.");
         if (string.IsNullOrWhiteSpace(request.OutputPath))
             throw new ClipSourceException("An output path is required.");
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (string.Equals(Path.GetFullPath(request.SourcePath), Path.GetFullPath(request.OutputPath), comparison))
+            throw new ClipSourceException("The clip output must not overwrite its source file.");
 
         var sourceInfo = _probe.Probe(request.SourcePath);
 
@@ -74,14 +81,14 @@ public sealed class ClipEngine : IClipEngine
     // all segments — a mix of HDR and SDR source segments has no single colour volume to preserve,
     // so preservation is disabled for the whole clip.
     private static ColorPlan ResolveColorPlan(MediaInfo sourceInfo, IReadOnlyList<ClipRegion> regions,
-        string encoderFamily)
+        string encoderFamily, bool forceSdr)
     {
         var allShareTransfer = regions
             .Select(_ => sourceInfo.ColorTransfer)
             .Distinct(StringComparer.Ordinal)
             .Count() == 1;
 
-        var canPreserve = sourceInfo.IsHdr && allShareTransfer && CanCarry10Bit(encoderFamily);
+        var canPreserve = sourceInfo.IsHdr && !forceSdr && allShareTransfer && CanCarry10Bit(encoderFamily);
 
         if (canPreserve)
         {
@@ -96,7 +103,7 @@ public sealed class ClipEngine : IClipEngine
             };
         }
 
-        var toneMapping = sourceInfo.IsHdr;
+        var toneMapping = sourceInfo.IsHdr && (forceSdr || !CanCarry10Bit(encoderFamily));
         var mixedSdr = !sourceInfo.IsHdr && IsMixedTransfer(sourceInfo, regions);
 
         return new ColorPlan
@@ -157,7 +164,7 @@ public sealed class ClipEngine : IClipEngine
         var outputPath = Path.GetFullPath(request.OutputPath);
         EnsureOutputDirectory(outputPath);
 
-        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily);
+        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily, request.ForceSdr);
         var audioTrackCount = sourceInfo.AudioStreamCount;
         var regionCount = regions.Count;
 
@@ -273,7 +280,7 @@ public sealed class ClipEngine : IClipEngine
         var outputDirectory = Path.GetFullPath(request.OutputPath);
         Directory.CreateDirectory(outputDirectory);
 
-        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily);
+        var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily, request.ForceSdr);
         var audioTrackCount = sourceInfo.AudioStreamCount;
 
         var results = new List<string>();

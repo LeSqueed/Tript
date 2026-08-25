@@ -135,6 +135,42 @@ internal sealed class ClipTitleStore
         }
     }
 
+    internal bool SaveHdrStatus(string clipFileName, bool isHdr)
+    {
+        lock (_writeGate)
+        {
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten)
+                return false;
+            var record = existing.Record ?? new ClipTitleRecord();
+            record.IsHdr = isHdr;
+            return Write(clipFileName, record);
+        }
+    }
+
+    internal bool SaveConvertedFrom(string sourceFileName, string outputFileName)
+    {
+        lock (_writeGate)
+        {
+            var output = Read(outputFileName);
+            if (output.MustNotBeOverwritten)
+                return false;
+            var source = Read(sourceFileName).Record;
+            var record = source is null ? new ClipTitleRecord() : new ClipTitleRecord
+            {
+                Title = source.Title,
+                Favorite = source.Favorite,
+                DurationSeconds = source.DurationSeconds,
+                IsAutomatic = source.IsAutomatic,
+                SourceSessionPath = source.SourceSessionPath,
+                ClipStartTime = source.ClipStartTime,
+                ClipEndTime = source.ClipEndTime,
+            };
+            record.IsHdr = false;
+            return Write(outputFileName, record);
+        }
+    }
+
     // Persists the relationship and timeline bounds for a generated highlight. Manual clips do not
     // receive these fields, which keeps them out of the session-specific highlight view.
     internal bool SaveAutomatic(string clipFileName, string sourceSessionPath,
@@ -221,6 +257,8 @@ internal sealed class ClipTitleRecord
     // been read yet. Null is serialized away (SettingsSerialization ignores nulls), so a record
     // written before this field existed still loads and still round-trips.
     public double? DurationSeconds { get; set; }
+
+    public bool? IsHdr { get; set; }
 
     public bool IsAutomatic { get; set; }
 

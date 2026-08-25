@@ -21,12 +21,13 @@ internal static class ColorChain
     // metadata, which on a YUV frame trips zscale ("YUV color family cannot have RGB matrix
     // coefficients"). Measured on ffmpeg n9.
     public const string ToneMapChain =
-        "zscale=t=linear:npl=100,"
+        "zscale=t=linear:npl=75,"
         + "format=gbrpf32le,"
         + "zscale=p=bt709,"
         + "tonemap=hable:desat=0,"
         + "zscale=t=bt709:m=bt709:r=tv,"
-        + "format=yuv420p";
+        + "format=yuv420p,"
+        + "eq=contrast=1.05:saturation=1.05:gamma=0.99";
 
     // The SDR-with-mixed-segments path: no tone mapping, just an explicit yuv420p.
     public const string ForceYuv420p = "format=yuv420p";

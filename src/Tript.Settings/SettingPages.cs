@@ -70,11 +70,8 @@ public sealed class RecordingSettings
     // How long a deleted recording stays in the trash before it is purged for good. Zero or less
     // disables the automatic purge, so entries stay until they are emptied by hand.
     //
-    // A week, not a day. The trash only ever holds what the user chose to delete, so the cost of
-    // keeping it is bounded by their own actions, while the cost of purging too early is a recording
-    // that cannot be got back. Twenty-four hours does not survive "I deleted it Friday and noticed
-    // on Monday", which is the case a trash exists for.
-    public int TrashRetentionHours { get; set; } = 168;
+    // Kept as a setting so the retention policy can be exposed to users without changing storage.
+    public int TrashRetentionHours { get; set; } = 24;
 }
 
 // The buffer page, its own first-class settings surface even though the buffer itself is
@@ -177,6 +174,9 @@ public sealed class GeneralSettings
     public MinimizeBehavior MinimizeBehavior { get; set; } = MinimizeBehavior.Taskbar;
 
     public CloseBehavior CloseBehavior { get; set; } = CloseBehavior.Exit;
+
+    // Controls new clip output only. Existing recordings and clips are never changed by this flag.
+    public bool ConvertHdrClipsToSdr { get; set; }
 
     public NotificationSettings Notifications { get; set; } = new();
 }

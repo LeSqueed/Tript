@@ -3,6 +3,8 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.ComponentModel;
+using System.Diagnostics;
 using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
@@ -120,6 +122,9 @@ internal sealed partial class AppHost : IDisposable
     private readonly object _gameListGate = new();
     private List<GameInfo> _catalogueGames = [];
     private IClipEngine? _clipEngine;
+    private readonly object _sdrConversionGate = new();
+    private readonly HashSet<string> _sdrConversions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _reservedClipOutputs = new(StringComparer.OrdinalIgnoreCase);
 
     // The bin is swept at startup and once an hour after it, so a host that stays up for days still
     // honours the retention.
@@ -220,6 +225,8 @@ internal sealed partial class AppHost : IDisposable
     // content server's traversal guard all resolve against it. A configured Recording.OutputDirectory
     // wins; empty falls back to the content root, and a settings change updates it in place.
     internal string EffectiveRoot { get; private set; }
+
+    internal bool ConvertHdrClipsToSdr => _settingsStore.Load().General.ConvertHdrClipsToSdr;
 
     // Why a recording directory is refused, or null when it is fine.
     //
@@ -2456,6 +2463,121 @@ internal sealed partial class AppHost : IDisposable
                 }, Wire.Options));
             }
         });
+    }
+
+    internal void ConvertToSdr(ConvertToSdrParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.FilePath))
+            return;
+
+        var operationId = string.IsNullOrWhiteSpace(parameters.Id)
+            ? $"sdr-{Guid.NewGuid():N}"
+            : parameters.Id.Trim();
+        var source = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
+        var relative = source is null ? null
+            : Path.GetRelativePath(EffectiveRoot, source).Replace(Path.DirectorySeparatorChar, '/');
+        var topLevel = relative is null ? string.Empty : TopLevelDirectory(relative);
+        if (source is null || !File.Exists(source) || topLevel is not ("clips" or "highlights"))
+        {
+            PushConversionProgress(operationId, "error", "That file is not a clip or highlight inside the recording folder.");
+            return;
+        }
+
+        MediaProbe? probe;
+        try
+        {
+            probe = LibraryProbe;
+            if (probe is null)
+                throw new InvalidOperationException("Media tools are unavailable.");
+            var info = probe.Probe(source);
+            if (!info.IsHdr)
+                throw new InvalidOperationException("The selected file is already SDR.");
+            if (!double.IsFinite(info.DurationSeconds) || info.DurationSeconds <= 0)
+                throw new InvalidOperationException("The selected file has no usable duration.");
+
+            string output;
+            lock (_sdrConversionGate)
+            {
+                if (!_sdrConversions.Add(source))
+                {
+                    PushConversionProgress(operationId, "error", "An SDR conversion is already running for this file.");
+                    return;
+                }
+                output = NextSdrPath(source);
+                _reservedClipOutputs.Add(output);
+            }
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    PushConversionProgress(operationId, "importing", null);
+                    _clipEngine ??= BuildClipEngine();
+                    var results = _clipEngine.CreateClips(new ClipRequest
+                    {
+                        OperationId = operationId,
+                        SourcePath = source,
+                        Regions = [ClipRegion.FromSeconds(0, info.DurationSeconds)],
+                        Mode = ClipMode.Combine,
+                        OutputPath = output,
+                        EncoderFamily = "libx264",
+                        ForceSdr = true,
+                    });
+                    var converted = results[0];
+                    if (!_clipTitles.SaveConvertedFrom(Path.GetFileName(source), Path.GetFileName(converted)))
+                        throw new InvalidOperationException("The SDR file was created, but its metadata could not be saved.");
+
+                    PushConversionProgress(operationId, "done", new ContentItem
+                    {
+                        ContentType = parameters.ContentType,
+                        FileName = Path.GetFileName(converted),
+                        FilePath = Path.GetRelativePath(EffectiveRoot, converted).Replace(Path.DirectorySeparatorChar, '/'),
+                        IsHdr = false,
+                    });
+                    PushContent();
+                }
+                catch (Exception exception)
+                {
+                    PushConversionProgress(operationId, "error", exception.Message);
+                    try { if (File.Exists(output)) File.Delete(output); }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+                finally
+                {
+                    lock (_sdrConversionGate)
+                    {
+                        _sdrConversions.Remove(source);
+                        _reservedClipOutputs.Remove(output);
+                    }
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            PushConversionProgress(operationId, "error", exception.Message);
+        }
+    }
+
+    private void PushConversionProgress(string id, string status, object? content)
+    {
+        if (status == "error")
+        {
+            PushClipError(id, content?.ToString() ?? "SDR conversion failed.");
+            return;
+        }
+
+        _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new { id, status, content }, Wire.Options));
+    }
+
+    private string NextSdrPath(string source)
+    {
+        var directory = Path.GetDirectoryName(source)!;
+        var stem = Path.GetFileNameWithoutExtension(source) + "-sdr";
+        var candidate = Path.Combine(directory, stem + ".mp4");
+        for (var suffix = 2; File.Exists(candidate) || _reservedClipOutputs.Contains(candidate); suffix++)
+            candidate = Path.Combine(directory, $"{stem}-{suffix}.mp4");
+        return candidate;
     }
 
     private IClipEngine BuildClipEngine()

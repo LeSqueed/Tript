@@ -39,6 +39,8 @@ internal sealed class AppController
             ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
             ["CreateClip"] = (parameters, _) => CreateClip(parameters),
+            ["ConvertToSdr"] = (parameters, _) => _host.ConvertToSdr(
+                parameters.Deserialize<ConvertToSdrParameters>()),
             ["CreateAutomaticClips"] = (parameters, _) => _host.CreateAutomaticClips(
                 parameters.Deserialize<CreateAutomaticClipsParameters>()),
             ["PauseAutomaticClips"] = (_, _) => _host.ToggleAutomaticClipPause(),
@@ -79,7 +81,8 @@ internal sealed class AppController
             },
             ["ApplyVideoPreset"] = (_, _) => { /* No presets in the alpha. */ },
             ["ApplyClipPreset"] = (_, _) => { /* No presets in the alpha. */ },
-            ["OpenFileLocation"] = (_, _) => { /* No file manager integration in the alpha. */ },
+            ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
+                parameters.Deserialize<OpenFileLocationParameters>()),
             ["CopyFileToClipboard"] = (_, _) => { /* No clipboard integration in the alpha. */ },
             ["OpenInBrowser"] = (_, _) => { /* No browser integration in the alpha. */ },
             ["StorageWarningConfirm"] = (_, _) => { /* No storage warnings raised. */ },
@@ -158,6 +161,7 @@ internal sealed class AppController
             return;
         }
 
+        request.ForceSdr = _host.ConvertHdrClipsToSdr;
         _host.CreateClip(request);
     }
 

@@ -94,6 +94,8 @@ export interface ContentItem {
   automaticClipsPaused?: boolean;
   automaticClipsCompleted?: number;
   automaticClipsTotal?: number;
+  /** True for PQ/HLG video; absent means HDR status is not established. */
+  isHdr?: boolean;
 }
 
 export interface BookmarkItem {
@@ -393,6 +395,12 @@ export interface CreateAutomaticClipsParameters {
   filePath: string;
 }
 
+export interface ConvertToSdrParameters {
+  id: string;
+  contentType: 'clip' | 'highlight';
+  filePath: string;
+}
+
 export interface ClipSegment {
   startTime: number;
   endTime: number;
@@ -551,6 +559,7 @@ export interface NewConnectionParameters {
 export type CommandParameters =
   | CreateClipParameters
   | CreateAutomaticClipsParameters
+  | ConvertToSdrParameters
   | DeleteContentParameters
   | DeleteMultipleContentParameters
   | RestoreTrashParameters
@@ -602,6 +611,7 @@ export type CommandName =
   | 'BrowseTrainingFolder'
   | 'CreateClip'
   | 'CreateAutomaticClips'
+  | 'ConvertToSdr'
   | 'PauseAutomaticClips'
   | 'CancelClip'
   | 'DeleteContent'

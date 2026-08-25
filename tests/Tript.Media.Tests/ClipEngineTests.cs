@@ -317,8 +317,9 @@ public class ClipEngineTests
             "-ss", "0", "-i", source,
             "-frames:v", "1",
             "-filter_complex",
-            "[0:v]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
-            + "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[v]",
+            "[0:v]zscale=t=linear:npl=75,format=gbrpf32le,zscale=p=bt709,"
+            + "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,"
+            + "eq=contrast=1.05:saturation=1.05:gamma=0.99[v]",
             "-map", "[v]",
             "-c:v", "libx264",
             reference,
@@ -328,6 +329,46 @@ public class ClipEngineTests
             MediaTestFixture.Binaries.Ffmpeg, output, reference, 640, 360, "hdr-tm-ref");
         Assert.True(psnrToReference > 40.0,
             $"tone-mapped output should match the canonical chain, got {psnrToReference} dB vs reference");
+    }
+
+    [Fact]
+    public void CreateClips_HdrSource_ForceSdrOverridesPreservation()
+    {
+        var source = MediaTestFixture.CreateHdrSource("hdr-force-sdr.mkv");
+        var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-hdr-force-sdr");
+
+        var output = Assert.Single(NewEngine().CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0, 2)],
+            Mode = ClipMode.Separate,
+            OutputPath = outputDir,
+            ForceSdr = true,
+        }));
+
+        Assert.Equal("h264", Probe("v:0", "codec_name", output));
+        Assert.Equal("yuv420p", Probe("v:0", "pix_fmt", output));
+        Assert.Equal("bt709", Probe("v:0", "color_transfer", output));
+        Assert.Equal("bt709", Probe("v:0", "color_primaries", output));
+        Assert.Equal("bt709", Probe("v:0", "color_space", output));
+    }
+
+    [Fact]
+    public void CreateClips_RefusesOutputThatWouldOverwriteSource()
+    {
+        var source = MediaTestFixture.CreateHdrSource("hdr-no-overwrite.mkv");
+
+        var exception = Assert.Throws<ClipSourceException>(() => NewEngine().CreateClips(new ClipRequest
+        {
+            SourcePath = source,
+            Regions = [ClipRegion.FromSeconds(0, 1)],
+            Mode = ClipMode.Combine,
+            OutputPath = source,
+            ForceSdr = true,
+        }));
+
+        Assert.Contains("overwrite", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(source));
     }
 
     // The preserve path needs a 10-bit-carrying codec. The engine's default software path is

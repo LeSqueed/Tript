@@ -23,19 +23,17 @@ public static class AutomaticClipPlanner
             return [];
 
         var merged = new List<ClipRegion>(candidates.Count);
-        var currentTrigger = candidates[0];
-        var current = RegionFor(currentTrigger);
+        var current = RegionFor(candidates[0]);
         foreach (var candidate in candidates.Skip(1))
         {
-            if (candidate - currentTrigger <= PostRoll)
+            // Merge whenever the candidate's pre-roll reaches the current region.
+            if (RegionFor(candidate).Start <= current.End)
             {
                 current = current with { End = candidate + PostRoll };
-                currentTrigger = candidate;
                 continue;
             }
 
             merged.Add(current);
-            currentTrigger = candidate;
             current = RegionFor(candidate);
         }
 

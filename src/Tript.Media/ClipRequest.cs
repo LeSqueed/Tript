@@ -35,6 +35,9 @@ public sealed class ClipRequest
     // 10-bit and therefore preserves a uniform HDR source.
     public string EncoderFamily { get; init; } = "libx265";
 
+    // Forces HDR sources through the SDR tone-map path without changing the source file.
+    public bool ForceSdr { get; set; }
+
     // Replay-buffer highlights already contain encoded media. Automatic callers can use a
     // stream-copy trim to avoid re-encoding the recording while it is still active.
     public bool PreferStreamCopy { get; init; }

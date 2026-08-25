@@ -33,6 +33,11 @@
   white-space: nowrap;
 }
 
+.player-header-error {
+  color: var(--color-danger, #c2410c);
+  font-size: var(--text-small);
+}
+
 .player-header-delete {
   margin-left: auto;
 }

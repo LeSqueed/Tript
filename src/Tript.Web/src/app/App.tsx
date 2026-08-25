@@ -73,6 +73,16 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
   const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
+  const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
+
+  useEffect(() => {
+    const remove = client.on('settings', (content) => {
+      const settings = (content as { settings?: { general?: { convertHdrClipsToSdr?: boolean } } }).settings;
+      setConvertHdrClipsToSdr(settings?.general?.convertHdrClipsToSdr === true);
+    });
+    client.send('ListSettings');
+    return remove;
+  }, [client]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -338,6 +348,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               onBack={backFromPlayer}
               onDelete={deletePlayerItem}
               onReviewSession={openSessionReview}
+              convertHdrClipsToSdr={convertHdrClipsToSdr}
               highlightCount={items.filter(
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using Tript.App.Content;
 using Tript.App.Ipc;
@@ -15,6 +17,44 @@ internal sealed partial class AppHost
     private const int DurationProbeBudget = 12;
 
     internal string ContentRoot => EffectiveRoot;
+
+    internal void OpenFileLocation(OpenFileLocationParameters? parameters)
+    {
+        if (parameters is null || string.IsNullOrWhiteSpace(parameters.FilePath))
+            return;
+
+        var path = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
+        if (path is null || !File.Exists(path))
+        {
+            PushError("That file is not inside the recording folder or no longer exists.");
+            return;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{path.Replace("\"", string.Empty)}\"",
+                    UseShellExecute = true,
+                });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start("open", $"-R \"{path.Replace("\"", string.Empty)}\"");
+            }
+            else
+            {
+                Process.Start("xdg-open", Path.GetDirectoryName(path)!);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            PushError($"The file location could not be opened: {exception.Message}");
+        }
+    }
 
     internal void PushContent()
     {
@@ -149,6 +189,7 @@ internal sealed partial class AppHost
             {
                 var record = _clipTitles.LoadRecord(file.Name);
                 item.SourceSessionPath = record?.SourceSessionPath;
+                item.IsHdr = record?.IsHdr;
                 if (record?.IsAutomatic == true)
                 {
                     contentType = "highlight";
@@ -171,6 +212,22 @@ internal sealed partial class AppHost
             {
                 probeBudget--;
                 item.DurationSeconds = TryReadDuration(file, relative, contentType == "recording");
+            }
+
+            if (contentType is "clip" or "highlight" && item.IsHdr is null
+                && probeBudget > 0 && !IsUnprobeable(file.FullName) && LibraryProbe is { } probe)
+            {
+                probeBudget--;
+                try
+                {
+                    item.IsHdr = probe.Probe(file.FullName).IsHdr;
+                    _clipTitles.SaveHdrStatus(file.Name, item.IsHdr.Value);
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"Tript.App: could not read HDR metadata of '{relative}': {exception.Message}");
+                    MarkUnprobeable(file.FullName);
+                }
             }
 
             items.Add(item);

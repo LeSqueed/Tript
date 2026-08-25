@@ -217,6 +217,7 @@ export interface GeneralSettings {
   startupVisibility: StartupVisibility;
   minimizeBehavior: MinimizeBehavior;
   closeBehavior: CloseBehavior;
+  convertHdrClipsToSdr?: boolean;
   notifications: NotificationSettings;
   [key: string]: unknown;
 }

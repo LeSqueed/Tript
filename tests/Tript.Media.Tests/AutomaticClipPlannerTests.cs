@@ -36,19 +36,14 @@ public sealed class AutomaticClipPlannerTests
     }
 
     [Fact]
-    public void Plan_DoesNotMergeTriggersMoreThanTenSecondsApartEvenWhenWindowsOverlap()
+    public void Plan_MergesTriggersWhenTheirWindowsOverlap()
     {
         var regions = AutomaticClipPlanner.Plan([
             TimeSpan.FromSeconds(30),
             TimeSpan.FromSeconds(45),
         ]);
 
-        Assert.Equal(
-            [
-                new ClipRegion(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(40)),
-                new ClipRegion(TimeSpan.FromSeconds(35), TimeSpan.FromSeconds(55)),
-            ],
-            regions);
+        Assert.Equal([new ClipRegion(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(55))], regions);
     }
 
     [Fact]

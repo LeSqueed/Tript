@@ -134,11 +134,11 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     // The trash retention is a stored setting with no UI yet, so the round trip is the only thing
-    // holding it: a default of a week on a fresh model, and whatever the user set after a reload.
+    // holding it: a one-day default on a fresh model, and whatever the user set after a reload.
     [Fact]
     public void SaveThenLoad_RoundTripsTheTrashRetention()
     {
-        Assert.Equal(168, _store.Load().Recording.TrashRetentionHours);
+        Assert.Equal(24, _store.Load().Recording.TrashRetentionHours);
 
         _store.Load().Recording.TrashRetentionHours = 72;
         _store.Save();

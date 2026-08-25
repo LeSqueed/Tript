@@ -63,6 +63,16 @@ export function GeneralPage({
         </Field>
       </section>
 
+      <section className="settings-section" aria-labelledby="general-clips-heading">
+        <h3 className="subheading" id="general-clips-heading">Clips</h3>
+        <Toggle
+          checked={settings.convertHdrClipsToSdr === true}
+          onChange={(checked) => update(page, { convertHdrClipsToSdr: checked })}
+          label="Convert HDR clips to SDR"
+        />
+        <p className="muted small">Tone-map new clips from HDR footage to BT.709 SDR. Original recordings remain unchanged.</p>
+      </section>
+
       <section className="settings-section" aria-labelledby="general-window-heading">
         <h3 className="subheading" id="general-window-heading">Window and tray</h3>
         <Field label="Minimize button" hint="The native minimize button can leave Tript available in the tray.">

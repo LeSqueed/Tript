@@ -91,6 +91,8 @@ internal sealed class ContentItem
     public int? AutomaticClipsCompleted { get; set; }
 
     public int? AutomaticClipsTotal { get; set; }
+
+    public bool? IsHdr { get; set; }
 }
 
 internal sealed class GameInfo
@@ -153,6 +155,18 @@ internal sealed class CreateClipParameters
 
 internal sealed class CreateAutomaticClipsParameters
 {
+    public string FilePath { get; set; } = string.Empty;
+}
+
+internal sealed class OpenFileLocationParameters
+{
+    public string FilePath { get; set; } = string.Empty;
+}
+
+internal sealed class ConvertToSdrParameters
+{
+    public string Id { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "clip";
     public string FilePath { get; set; } = string.Empty;
 }
 

@@ -22,6 +22,8 @@ export type IconName =
   | 'settings'
   | 'library'
   | 'clip'
+  | 'pencil'
+  | 'folder'
   | 'close';
 
 const SOLID = { fill: 'currentColor', stroke: 'none' } as const;
@@ -79,6 +81,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M8.4 8.4L19 16.6M8.4 15.6L19 7.4" />
     </>
   ),
+  pencil: (
+    <>
+      <path d="M4 20l4.2-1 10.6-10.6a2.1 2.1 0 0 0-3-3L5.2 16z" />
+      <path d="M13.8 7.4l3 3M4 20h5" />
+    </>
+  ),
+  folder: <path d="M3.5 7.5v10a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-7l-2-3h-4a2 2 0 0 0-2 2z" />,
   close: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
 };
 

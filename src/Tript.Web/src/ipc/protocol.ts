@@ -190,6 +190,29 @@ export interface StateMessage {
   cause?: ChangeCause;
 }
 
+export type GameModelStage =
+  | 'checking'
+  | 'downloading'
+  | 'verifying'
+  | 'installing'
+  | 'ready'
+  | 'error'
+  | 'unsupported';
+
+export interface GameModelStatus {
+  gameId: string;
+  stage: GameModelStage;
+  revision?: number;
+  completedBytes?: number;
+  totalBytes?: number;
+  message?: string;
+}
+
+/** Complete model-status snapshot. Entries omitted from a later message are no longer current. */
+export interface ModelStatusMessage {
+  models: GameModelStatus[];
+}
+
 // ---------------------------------------------------------------------------
 // Import / update progress
 // ---------------------------------------------------------------------------
@@ -665,6 +688,7 @@ export type CommandName =
 export type MessageName =
   | 'settings'
   | 'state'
+  | 'modelStatus'
   | 'content'
   | 'trash'
   | 'importProgress'

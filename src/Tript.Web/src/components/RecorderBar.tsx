@@ -12,13 +12,57 @@
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { ConnectionState } from '../ipc/websocketClient';
-import type { RecordingState } from '../ipc/protocol';
+import type { GameModelStatus, ModelStatusMessage, RecordingState, StateMessage } from '../ipc/protocol';
 import { Button } from './ui/controls';
 import { deriveRecorderState, formatElapsed } from './recorder/recorderState';
 
-interface StateMessageContent {
-  state: RecordingState;
-  cause?: string;
+function ModelStatusIndicator({ status }: { status?: GameModelStatus }) {
+  if (!status || status.stage === 'ready') {
+    return null;
+  }
+
+  if (status.stage === 'error' || status.stage === 'unsupported') {
+    const label = status.stage === 'error' ? 'Model error' : 'Model unsupported';
+    return (
+      <span className={`rec-model-status ${status.stage}`} role="status" data-testid="model-status">
+        {status.message ? `${label}: ${status.message}` : label}
+      </span>
+    );
+  }
+
+  const labels = {
+    checking: 'Checking model…',
+    downloading: 'Downloading model…',
+    verifying: 'Verifying model…',
+    installing: 'Installing model…',
+  } as const;
+  const hasPercentage = status.stage === 'downloading'
+    && typeof status.totalBytes === 'number'
+    && status.totalBytes > 0;
+  const percentage = hasPercentage
+    ? Math.round(Math.min(1, Math.max(0, (status.completedBytes ?? 0) / status.totalBytes!)) * 100)
+    : null;
+  const text = percentage === null ? labels[status.stage] : `Model ${percentage}%`;
+  const accessibleLabel = percentage === null
+    ? labels[status.stage].replace('…', '')
+    : `Downloading game model: ${percentage}%`;
+
+  return (
+    <span
+      className={`rec-model-status active ${percentage === null ? 'indeterminate' : ''}`}
+      role="progressbar"
+      aria-label={accessibleLabel}
+      aria-valuemin={percentage === null ? undefined : 0}
+      aria-valuemax={percentage === null ? undefined : 100}
+      aria-valuenow={percentage ?? undefined}
+      data-testid="model-status"
+    >
+      <span className="rec-model-progress" aria-hidden="true">
+        <span style={{ width: percentage === null ? '45%' : `${percentage}%` }} />
+      </span>
+      {text}
+    </span>
+  );
 }
 
 export function RecorderBar({
@@ -32,15 +76,25 @@ export function RecorderBar({
   nowSeconds?: number;
 }) {
   const [recordingState, setRecordingState] = useState<RecordingState | null>(null);
+  const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [clipJobs, setClipJobs] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(() => Date.now() / 1000);
 
   useEffect(() => {
     return client.on('state', (content) => {
-      const message = content as StateMessageContent;
+      const message = content as StateMessage;
       const state = message?.state;
       if (state && typeof state === 'object' && 'recording' in state) {
         setRecordingState(state);
+      }
+    });
+  }, [client]);
+
+  useEffect(() => {
+    return client.on('modelStatus', (content) => {
+      const message = content as ModelStatusMessage;
+      if (Array.isArray(message?.models)) {
+        setModelStatuses(message.models);
       }
     });
   }, [client]);
@@ -71,6 +125,7 @@ export function RecorderBar({
       ? `Highlights paused (${automaticClips.completed}/${automaticClips.total})`
       : `Creating highlights (${automaticClips.completed}/${automaticClips.total})`
     : 'Creating clips…';
+  const modelStatus = modelStatuses.find((status) => status.gameId === recordingState?.game?.id);
 
   // One tick a second, and only while there is a clock to advance.
   useEffect(() => {
@@ -107,6 +162,7 @@ export function RecorderBar({
         </span>
         {state.game && <span className="rec-game">{state.game}</span>}
         {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">{clipStatus}</span>}
+        <ModelStatusIndicator status={modelStatus} />
         <Button variant="ghost" size="small" onClick={() => client.send('StopRecording')}>
           Stop
         </Button>
@@ -121,6 +177,7 @@ export function RecorderBar({
         <>
           <span className="rec-dot detected" aria-hidden="true" />
           <span className="rec-game">Detected: {state.game}</span>
+          <ModelStatusIndicator status={modelStatus} />
         </>
       )}
       <Button

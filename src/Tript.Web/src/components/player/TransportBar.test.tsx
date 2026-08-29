@@ -88,7 +88,26 @@ describe('TransportBar', () => {
       canNavigateNext: true,
     });
 
-    expect((screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Previous item' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Next item' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows review position and favorite state', () => {
+    const onToggleFavorite = vi.fn();
+    renderBar({ itemPosition: { current: 2, total: 5 }, favorite: true, onToggleFavorite });
+
+    expect(screen.getByLabelText('Item 2 of 5').textContent).toBe('2 of 5');
+    const favorite = screen.getByRole('button', { name: 'Remove from favorites' });
+    expect(favorite.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(favorite);
+    expect(onToggleFavorite).toHaveBeenCalledOnce();
+  });
+
+  it('puts trash beside the frequent review actions', () => {
+    const onDelete = vi.fn();
+    renderBar({ onDelete });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    expect(onDelete).toHaveBeenCalledOnce();
   });
 });

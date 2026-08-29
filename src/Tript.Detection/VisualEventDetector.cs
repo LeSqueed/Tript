@@ -97,7 +97,28 @@ public class VisualEventDetector : IDisposable
 
             try
             {
-                session = ModelService.LoadModel(gameId);
+                List<EventDefinition> definitions;
+                while (true)
+                {
+                    session = ModelService.LoadModel(gameId);
+                    definitions = ModelService.LoadEventDefinitions(gameId);
+                    var metadata = OnnxModelInspector.Inspect(session, ModelService.GetModelPath(gameId));
+                    var apiMismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
+                    if (apiMismatch is null)
+                        break;
+
+                    ModelService.UnloadModel(gameId);
+                    session = null;
+                    if (!ModelService.RejectCurrentBundle(gameId, out var rejectedPath))
+                    {
+                        throw new InvalidDataException(
+                            $"Model API v1 compatibility failed for {gameId}: {apiMismatch}");
+                    }
+
+                    Log.Warning(
+                        "VisualEventDetector: skipping incompatible model bundle {ModelPath} for {GameId}: {Mismatch}",
+                        rejectedPath, gameId, apiMismatch);
+                }
 
                 // Reused across every region of every cycle: a fresh float[640*640*3] per inference is
                 // 4.9 MB straight to the LOH.
@@ -110,7 +131,6 @@ public class VisualEventDetector : IDisposable
                     NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor)
                 };
 
-                var definitions = ModelService.LoadEventDefinitions(gameId);
                 var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
                 var regionGroups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
                 var grayscaleStrategy = DetectionFramePreprocessor.SelectGrayscaleStrategy(regionGroups);

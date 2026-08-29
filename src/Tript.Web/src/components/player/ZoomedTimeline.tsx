@@ -16,6 +16,7 @@ import {
   type WindowState,
 } from './timelineModel';
 import { bookmarkColor } from './bookmarks';
+import { releasePointerFocus } from '../ui/pointerFocus';
 
 export interface ZoomedTimelineProps {
   currentTime: number;
@@ -281,7 +282,10 @@ export function ZoomedTimeline({
             }
             onPointerDown={(event) => onRegionPointerDown(event, region)}
             onPointerMove={onRegionPointerMove}
-            onPointerUp={endRegionDrag}
+            onPointerUp={(event) => {
+              endRegionDrag(event);
+              releasePointerFocus(event);
+            }}
             onPointerCancel={(event) => {
               endRegionDrag(event);
               regionDragMovedRef.current = false;
@@ -327,6 +331,7 @@ export function ZoomedTimeline({
               style={{ left, background: bookmarkColor(bookmark.type) }}
               aria-label={`${bookmark.type} at ${formatTime(bookmark.time)}`}
               onClick={() => onSeek(bookmark.time)}
+              onPointerUp={releasePointerFocus}
               onPointerEnter={() =>
                 setBubble({ left, text: bookmarkBubbleText(bookmark) })
               }

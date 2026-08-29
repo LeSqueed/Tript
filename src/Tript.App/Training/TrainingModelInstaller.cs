@@ -27,7 +27,7 @@ internal static class TrainingModelInstaller
         var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
             File.ReadAllText(workspace.EventsPath), JsonOptions) ?? [];
         var metadata = OnnxModelInspector.Inspect(modelSourcePath);
-        var mismatch = ModelEventCompatibility.FindMismatch(definitions, metadata);
+        var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
         if (mismatch is not null)
             throw new InvalidDataException($"The model cannot be installed: {mismatch}");
 
@@ -43,7 +43,7 @@ internal static class TrainingModelInstaller
             File.Copy(modelSourcePath, staging.ModelPath);
             File.Copy(workspace.EventsPath, staging.EventsPath);
             var stagedMetadata = OnnxModelInspector.Inspect(staging.ModelPath);
-            var stagedMismatch = ModelEventCompatibility.FindMismatch(definitions, stagedMetadata);
+            var stagedMismatch = ModelApiV1Compatibility.FindMismatch(definitions, stagedMetadata);
             if (stagedMismatch is not null)
                 throw new InvalidDataException($"The staged model cannot be installed: {stagedMismatch}");
 

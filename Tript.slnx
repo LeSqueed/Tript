@@ -7,6 +7,7 @@
     <Project Path="src/Tript.Recorder/Tript.Recorder.csproj" />
     <Project Path="src/Tript.RecorderHarness/Tript.RecorderHarness.csproj" />
     <Project Path="src/Tript.Media/Tript.Media.csproj" />
+    <Project Path="src/Tript.ModelValidator/Tript.ModelValidator.csproj" />
     <Project Path="src/Tript.App/Tript.App.csproj" />
     <Project Path="src/Tript.Shell/Tript.Shell.csproj" />
   </Folder>

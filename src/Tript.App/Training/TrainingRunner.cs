@@ -70,13 +70,46 @@ internal sealed class TrainingRunner
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             }) ?? [];
-        var mismatch = ModelEventCompatibility.FindMismatch(definitions, metadata);
+        var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
         if (mismatch is not null)
             throw new InvalidDataException($"The trained model and events.json do not match: {mismatch}");
+
+        ValidateKnownSamples(workspace, modelPath, definitions);
 
         var selectedDevice = device == "auto" ? "auto (see training progress)" : device;
         progress($"VALIDATED input={metadata.InputWidth}x{metadata.InputHeight} classes={metadata.ClassCount}");
         return new TrainingRunResult(modelPath, imageSize, selectedDevice);
+    }
+
+    private static void ValidateKnownSamples(TrainingWorkspace workspace, string modelPath,
+        IReadOnlyList<EventDefinition> definitions)
+    {
+        var samples = new TrainingSampleStore(workspace).List();
+        var required = definitions
+            .Where(definition => definition.BookmarkType is not null)
+            .Append(definitions.MaxBy(definition => definition.ClassId)!)
+            .DistinctBy(definition => definition.ClassId);
+
+        foreach (var definition in required)
+        {
+            var candidates = samples
+                .Where(sample => sample.Labels.Any(label => label.ClassId == definition.ClassId))
+                .Take(3)
+                .ToList();
+            if (candidates.Count == 0)
+                throw new InvalidDataException(
+                    $"No labeled sample exists to validate '{definition.Name}' (class {definition.ClassId}).");
+
+            var detected = candidates.Any(sample => ModelPredictionService.Predict(modelPath,
+                    File.ReadAllBytes(Path.Combine(workspace.SamplesPath, sample.ImageFile)), definitions)
+                .Any(result => result.ClassId == definition.ClassId));
+            if (!detected)
+            {
+                throw new InvalidDataException(
+                    $"The trained model failed the sample check for '{definition.Name}' " +
+                    $"(class {definition.ClassId}); it was not installed.");
+            }
+        }
     }
 
     internal void Cancel()

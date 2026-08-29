@@ -16,6 +16,7 @@ import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
 import { itemLabel } from '../components/library/libraryModel';
+import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem, RecordingState } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
@@ -75,6 +76,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ item: ContentItem; advancePlayer: boolean } | null>(null);
 
   useEffect(() => {
     const remove = client.on('settings', (content) => {
@@ -169,12 +171,20 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setRoute('player');
   }, []);
 
-  const deletePlayerItem = useCallback((item: ContentItem) => {
-    if (!item.automated) {
-      return;
-    }
+  const toggleFavorite = useCallback((item: ContentItem) => {
+    client.send('ToggleFavorite', {
+      contentType: item.contentType,
+      filePath: item.filePath,
+      favorite: item.favorite !== true,
+    });
+  }, [client]);
 
-    client.send('DeleteContent', { contentType: item.contentType, fileName: item.filePath });
+  const adoptPlayerItem = useCallback((item: ContentItem) => {
+    setPlayerItem(item);
+    setPlayerTitle(itemLabel(item));
+  }, []);
+
+  const advanceAfterPlayerDelete = useCallback((item: ContentItem) => {
     const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
     const deletedIndex = playerNavigation.findIndex((candidate) => candidate.filePath === item.filePath);
     const replacement = remaining[deletedIndex] ?? remaining[deletedIndex - 1];
@@ -187,22 +197,44 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       setPlayerTitle('');
       setRoute(playerReturnRoute);
     }
-  }, [client, playerNavigation, playerReturnRoute]);
+  }, [playerNavigation, playerReturnRoute]);
 
-  useEffect(() => {
-    if (route !== 'player') {
+  const deleteItem = useCallback((item: ContentItem, permanent: boolean, advancePlayer: boolean) => {
+    client.send('DeleteContent', {
+      contentType: item.contentType,
+      fileName: item.filePath,
+      ...(permanent ? { permanent: true } : {}),
+    });
+    if (advancePlayer) {
+      advanceAfterPlayerDelete(item);
+    }
+  }, [client, advanceAfterPlayerDelete]);
+
+  const requestPlayerDelete = useCallback((item: ContentItem) => {
+    if (playerReturnRoute === 'session') {
+      deleteItem(item, false, true);
       return;
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
-        event.preventDefault();
-        closePlayer();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [route, closePlayer]);
+    setPendingDelete({ item, advancePlayer: true });
+  }, [deleteItem, playerReturnRoute]);
+
+  const requestSessionDelete = useCallback((item: ContentItem) => {
+    setPendingDelete({ item, advancePlayer: false });
+  }, []);
+
+  const confirmDelete = useCallback((permanent: boolean) => {
+    if (pendingDelete) {
+      deleteItem(pendingDelete.item, permanent, pendingDelete.advancePlayer);
+    }
+    setPendingDelete(null);
+  }, [deleteItem, pendingDelete]);
+
+  const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? {
+    title: `Delete ${itemLabel(pendingDelete.item)}?`,
+    names: [itemLabel(pendingDelete.item)],
+    confirmLabel: 'Move to trash',
+    retentionHours: trash.retentionHours,
+  } : null;
 
   useLayoutEffect(() => {
     if (playerItem !== null) {
@@ -223,12 +255,18 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     if (!playerItem) {
       return;
     }
-    if (!items.some((candidate) => candidate.filePath === playerItem.filePath)) {
+    const currentItem = items.find((candidate) => candidate.filePath === playerItem.filePath);
+    if (!currentItem) {
       closePlayer();
       return;
     }
+    setPlayerItem(currentItem);
+    setPlayerTitle(itemLabel(currentItem));
     setPlayerNavigation((previous) =>
-      previous.filter((candidate) => items.some((current) => current.filePath === candidate.filePath)),
+      previous.flatMap((candidate) => {
+        const current = items.find((item) => item.filePath === candidate.filePath);
+        return current ? [current] : [];
+      }),
     );
   }, [items, playerItem, closePlayer]);
 
@@ -353,14 +391,15 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               item={playerItem}
               navigationItems={playerNavigation}
               onBack={backFromPlayer}
-              onDelete={deletePlayerItem}
+              onDelete={requestPlayerDelete}
+              onToggleFavorite={toggleFavorite}
               onReviewSession={openSessionReview}
               convertHdrClipsToSdr={convertHdrClipsToSdr}
               recording={recording}
               highlightCount={items.filter(
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}
-              onItemChange={(item) => setPlayerTitle(itemLabel(item))}
+              onItemChange={adoptPlayerItem}
             />
           )}
           {route === 'session' && sessionReview && (
@@ -370,12 +409,21 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               client={client}
               onBack={showLibrary}
               onOpen={openSessionClip}
+              onToggleFavorite={toggleFavorite}
+              onDelete={requestSessionDelete}
             />
           )}
           {route === 'settings' && <SettingsView client={client} />}
           {route === 'training' && trainingEnabled && <TrainingView client={client} />}
         </div>
       </main>
+      {deleteConfirmation && (
+        <ConfirmDeleteDialog
+          confirmation={deleteConfirmation}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </div>
   );
 }

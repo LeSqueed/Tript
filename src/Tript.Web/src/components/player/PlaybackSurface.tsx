@@ -3,6 +3,7 @@
 import type { RefObject } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import { contentUrl, thumbnailUrl } from '../../ipc/endpoints';
+import { releasePointerFocus } from '../ui/pointerFocus';
 
 interface PlaybackSurfaceProps {
   item: ContentItem;
@@ -62,6 +63,7 @@ export function PlaybackSurface({
             event.stopPropagation();
             onTogglePlayPause();
           }}
+          onPointerUp={releasePointerFocus}
         >
           <span className="player-start-icon" aria-hidden="true">&#9654;</span>
           <span>Play recording</span>

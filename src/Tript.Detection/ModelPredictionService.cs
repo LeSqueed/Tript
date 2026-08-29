@@ -18,17 +18,13 @@ public static class ModelPredictionService
         var image = PngImageDecoder.Decode(png);
         using var session = new InferenceSession(modelPath);
         var metadata = OnnxModelInspector.Inspect(session, modelPath);
-        if (metadata.InputChannels != 3 || metadata.InputWidth is not int inputWidth
-            || metadata.InputHeight is not int inputHeight || inputWidth <= 0 || inputHeight <= 0)
-        {
-            throw new InvalidDataException("The model must use a static three-channel image input.");
-        }
-        if (!OnnxModelInspector.TryDeriveClassCount(metadata.OutputDimensions, out var classCount))
-            throw new InvalidDataException("The model output does not declare a static YOLO class count.");
-
-        var mismatch = ModelEventCompatibility.FindMismatch(definitions.ToList(), classCount, metadata.ClassNames);
+        var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
         if (mismatch is not null)
             throw new InvalidDataException($"The model and training events do not match: {mismatch}");
+
+        var inputWidth = metadata.InputWidth!.Value;
+        var inputHeight = metadata.InputHeight!.Value;
+        var classCount = metadata.ClassCount!.Value;
 
         var inputBuffer = new float[checked(inputWidth * inputHeight * 3)];
         var inputTensor = new DenseTensor<float>(inputBuffer.AsMemory(), [1, 3, inputHeight, inputWidth]);

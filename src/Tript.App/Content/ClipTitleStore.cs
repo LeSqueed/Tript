@@ -148,6 +148,24 @@ internal sealed class ClipTitleStore
         }
     }
 
+    // Persists the game attribution on a clip. The clip record now carries its own copy so the tag
+    // survives the source session being deleted; records written before this existed are backfilled
+    // by the listing pass when a session or path still resolves one.
+    internal bool SaveGame(string clipFileName, string? game, string? gameId)
+    {
+        lock (_writeGate)
+        {
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten)
+                return false;
+
+            var record = existing.Record ?? new ClipTitleRecord();
+            record.Game = string.IsNullOrWhiteSpace(game) ? null : game;
+            record.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId;
+            return Write(clipFileName, record);
+        }
+    }
+
     internal bool SaveConvertedFrom(string sourceFileName, string outputFileName)
     {
         lock (_writeGate)
@@ -165,6 +183,8 @@ internal sealed class ClipTitleStore
                 SourceSessionPath = source.SourceSessionPath,
                 ClipStartTime = source.ClipStartTime,
                 ClipEndTime = source.ClipEndTime,
+                Game = source.Game,
+                GameId = source.GameId,
             };
             record.IsHdr = false;
             return Write(outputFileName, record);
@@ -263,6 +283,12 @@ internal sealed class ClipTitleRecord
     public bool IsAutomatic { get; set; }
 
     public string? SourceSessionPath { get; set; }
+
+    // The game attribution, copied at creation so deleting the source session no longer erases the
+    // tag. Older records omit both and fall back to inheritance / backfill at list time.
+    public string? Game { get; set; }
+
+    public string? GameId { get; set; }
 
     public double? ClipStartTime { get; set; }
 

@@ -689,6 +689,84 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    // The clip record now carries the game itself, so an SDR-converted copy inherits the tag from
+    // its source record just like it inherits the title and the duration.
+    [SkippableFact]
+    public void ClipTitleStore_SaveGame_RoundTripsGameAndSurvivesSdrConversion()
+    {
+        var store = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(store.SaveAutomatic("session-1-highlight-a.mp4", "Overwatch/sessions/session-1.mp4", 10, 20));
+        Assert.True(store.SaveGame("session-1-highlight-a.mp4", "Overwatch", "Overwatch"));
+
+        var record = store.LoadRecord("session-1-highlight-a.mp4");
+        Assert.Equal("Overwatch", record!.Game);
+        Assert.Equal("Overwatch", record.GameId);
+
+        Assert.True(store.SaveConvertedFrom("session-1-highlight-a.mp4", "session-1-highlight-a-sdr.mp4"));
+        var converted = store.LoadRecord("session-1-highlight-a-sdr.mp4");
+        Assert.Equal("Overwatch", converted!.Game);
+        Assert.Equal("Overwatch", converted.GameId);
+    }
+
+    // A highlight that predates the game field still keeps it once it has been stored on the clip
+    // record itself — even when the source session is gone, because deletion cascades only the
+    // recording's own metadata record.
+    [SkippableFact]
+    public async Task ListContent_ClipKeepsItsStoredGame_WhenTheSourceSessionIsGone()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "session-1-highlight-a.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("session-1-highlight-a.mp4", "sessions/session-1.mp4", 10, 20));
+        Assert.True(clipTitles.SaveGame("session-1-highlight-a.mp4", "Overwatch", "Overwatch"));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        Assert.Equal("Overwatch", GameOf(items, "session-1-highlight-a.mp4"));
+
+        await host.ShutdownAsync();
+    }
+
+    // Older highlight records have no game field at all. The per-game recording layout puts the
+    // highlight at "<gameId>/highlights/<name>.mp4" and links it to "<gameId>/sessions/<name>.mp4",
+    // so even after the session is deleted the game can be named from the path and written onto the
+    // record once — keeping the tag for every later listing.
+    [SkippableFact]
+    public async Task ListContent_BackfillsGameOntoAnOldHighlight_FromItsPerGamePath()
+    {
+        var highlights = Path.Combine(_contentRoot, "Overwatch", "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "session-1-highlight-live-abc.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("session-1-highlight-live-abc.mp4",
+            "Overwatch/sessions/session-1.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+        Assert.Equal("Overwatch", GameOf(items, "session-1-highlight-live-abc.mp4"));
+
+        var record = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"))
+            .LoadRecord("session-1-highlight-live-abc.mp4");
+        Assert.Equal("Overwatch", record!.Game);
+        Assert.Equal("Overwatch", record.GameId);
+
+        await host.ShutdownAsync();
+    }
+
     // The frontend paginates over this list, so the order must be newest first and must be total —
     // two items with the same timestamp may not swap places between two pushes (List.Sort is
     // unstable, and the directory enumeration order is the file system's).

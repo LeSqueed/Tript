@@ -33,13 +33,28 @@
   white-space: nowrap;
 }
 
+.player-header-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.player-header-heading .player-header-title-input {
+  width: min(360px, 35vw);
+  height: 32px;
+}
+
+.player-header-title-action.btn-icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
 .player-header-error {
   color: var(--color-danger, #c2410c);
   font-size: var(--text-small);
-}
-
-.player-header-delete {
-  margin-left: auto;
 }
 
 .player-view-fullscreen {
@@ -152,9 +167,26 @@
  * ------------------------------------------------------------------------- */
 
 .transport-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
+}
+
+.transport-primary,
+.transport-secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.transport-primary {
+  flex-wrap: wrap;
+}
+
+.transport-secondary {
+  justify-content: flex-end;
 }
 
 .transport-volume {
@@ -177,12 +209,19 @@
   color: var(--color-muted-strong);
 }
 
-.transport-sep {
-  opacity: 0.5;
+.transport-position {
+  padding: 3px var(--space-2);
+  border: 1px solid var(--color-base-300);
+  border-radius: 999px;
+  color: var(--color-muted-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.transport-spacer {
-  flex: 1;
+.transport-sep {
+  opacity: 0.5;
 }
 
 /* ---------------------------------------------------------------------------
@@ -460,6 +499,28 @@
 }
 
 @media (max-width: 760px) {
+  .player-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .player-header-heading {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  .transport-bar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .transport-secondary {
+    justify-content: space-between;
+    border-top: var(--border);
+    padding-top: var(--space-2);
+  }
+
   .player-footer {
     align-items: stretch;
   }
@@ -467,6 +528,16 @@
   .player-clip-mode,
   .player-footer > .muted {
     flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .transport-volume input[type='range'] {
+    display: none;
+  }
+
+  .player-console {
+    padding-inline: 10px;
   }
 }
 

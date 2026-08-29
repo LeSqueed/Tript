@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tript game model manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "games"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "games": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gameId", "releases"],
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["modelApiVersion", "revision", "url", "sizeBytes", "sha256"],
+              "properties": {
+                "modelApiVersion": { "type": "integer", "minimum": 1 },
+                "revision": { "type": "integer", "minimum": 1 },
+                "minimumAppVersion": { "type": "string" },
+                "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+                "sizeBytes": { "type": "integer", "minimum": 1 },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

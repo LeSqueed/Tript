@@ -48,7 +48,9 @@ def main() -> int:
         "epochs": args.epochs,
         "imgsz": args.size,
         "batch": 32 if device != "cpu" else 16,
-        "patience": 20,
+        # The UI's epoch value is authoritative. Ultralytics otherwise stops after its patience
+        # window, which can terminate a requested 100-epoch run less than halfway through.
+        "patience": 0,
         "device": device,
         "workers": max(1, (os.cpu_count() or 8) // 2),
         "project": str(run_root),

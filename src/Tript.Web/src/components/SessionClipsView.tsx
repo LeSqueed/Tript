@@ -14,12 +14,16 @@ export function SessionClipsView({
   client,
   onBack,
   onOpen,
+  onToggleFavorite,
+  onDelete,
 }: {
   recording: ContentItem;
   clips: ContentItem[];
   client: IpcClient;
   onBack(): void;
   onOpen(item: ContentItem, navigation: ContentItem[]): void;
+  onToggleFavorite(item: ContentItem): void;
+  onDelete(item: ContentItem): void;
 }) {
   const [automaticClips, setAutomaticClips] = useState<RecordingState['automaticClips']>(null);
 
@@ -69,6 +73,8 @@ export function SessionClipsView({
               key={clip.filePath}
               item={clip}
               onOpen={(selected) => onOpen(selected, ordered)}
+              onToggleFavorite={onToggleFavorite}
+              onDelete={onDelete}
             />
           ))}
         </div>

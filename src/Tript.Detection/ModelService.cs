@@ -13,9 +13,7 @@ public static class ModelService
     // "models" rather than "training": these are the shipped runtime assets, not a training workspace.
     public static readonly string BasePath = Path.Combine(AppContext.BaseDirectory, "data", "models");
 
-#if TRIPT_TRAINING
-    private static string? _userModelRoot;
-#endif
+    private static string[] _userModelRoots = [];
 
     // An InferenceSession is ~10 MB of native memory shared by every detector on the same game, so
     // it is refcounted rather than owned by whoever asked last. Lazy gives exactly one construction
@@ -30,6 +28,7 @@ public static class ModelService
     private static readonly object _modelsLock = new();
     private static readonly ConcurrentDictionary<string, List<EventDefinition>> _definitions =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _rejectedBundles = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -80,10 +79,10 @@ public static class ModelService
             return false;
         }
 
-        var modelPath = Path.Combine(gamePath, "model.onnx");
-        if (!File.Exists(modelPath))
+        if (!IsCompleteModelBundle(gamePath))
         {
-            Log.Debug("Model directory {GamePath} has no model.onnx", gamePath);
+            Log.Debug("Model directory {GamePath} does not contain a complete model.onnx/events.json bundle",
+                gamePath);
             return false;
         }
 
@@ -225,6 +224,7 @@ public static class ModelService
         if (!ModelRoots().Any(Directory.Exists))
             return null;
 
+        string? incompleteMatch = null;
         foreach (var root in ModelRoots())
         {
             if (!Directory.Exists(root))
@@ -233,12 +233,26 @@ public static class ModelService
             foreach (var directory in Directory.EnumerateDirectories(root))
             {
                 if (Path.GetFileName(directory).Equals(gameId, StringComparison.OrdinalIgnoreCase))
-                    return directory;
+                {
+                    lock (_modelsLock)
+                    {
+                        if (_rejectedBundles.Contains(Path.GetFullPath(directory)))
+                            continue;
+                    }
+                    if (IsCompleteModelBundle(directory))
+                        return directory;
+
+                    incompleteMatch ??= directory;
+                }
             }
         }
 
-        return null;
+        return incompleteMatch;
     }
+
+    private static bool IsCompleteModelBundle(string directory)
+        => File.Exists(Path.Combine(directory, "model.onnx"))
+            && File.Exists(Path.Combine(directory, "events.json"));
 
     private static string[] GetAvailableGameIds()
     {
@@ -253,10 +267,8 @@ public static class ModelService
 
     private static IEnumerable<string> ModelRoots()
     {
-#if TRIPT_TRAINING
-        if (_userModelRoot is not null)
-            yield return _userModelRoot;
-#endif
+        foreach (var root in _userModelRoots)
+            yield return root;
         yield return BasePath;
     }
 
@@ -272,36 +284,70 @@ public static class ModelService
         return Path.Combine(GetGamePath(gameId), "model.onnx");
     }
 
-#if TRIPT_TRAINING
     public static void ConfigureUserModelRoot(string root)
     {
         if (string.IsNullOrWhiteSpace(root))
             throw new ArgumentException("A user model root is required.", nameof(root));
 
-        _userModelRoot = Path.GetFullPath(root);
+        ConfigureModelRoots(root);
+    }
+
+    public static void ConfigureModelRoots(params string[] roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        if (roots.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("Model roots cannot be empty.", nameof(roots));
+
+        _userModelRoots = roots
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        lock (_modelsLock)
+            _rejectedBundles.Clear();
+    }
+
+    // Rejects the currently selected bundle for this process and reports whether a lower-priority
+    // complete bundle can take over. Used when runtime contract validation finds that a custom
+    // bundle is internally inconsistent; the files remain available for training and repair.
+    internal static bool RejectCurrentBundle(string gameId, out string rejectedPath)
+    {
+        var directory = FindGameDirectory(gameId);
+        if (directory is null)
+        {
+            rejectedPath = string.Empty;
+            return false;
+        }
+
+        rejectedPath = Path.GetFullPath(directory);
+        lock (_modelsLock)
+            _rejectedBundles.Add(rejectedPath);
+        _definitions.TryRemove(gameId, out _);
+        return FindGameDirectory(gameId) is not null;
     }
 
     public static void InvalidateModel(string gameId)
     {
+        var key = CanonicalGameId(gameId);
         InferenceSession? released = null;
         lock (_modelsLock)
         {
-            if (_models.TryGetValue(gameId, out var handle))
+            _rejectedBundles.RemoveWhere(path =>
+                string.Equals(Path.GetFileName(path), gameId, StringComparison.OrdinalIgnoreCase));
+            if (_models.TryGetValue(key, out var handle))
             {
                 if (handle.RefCount > 0)
                     throw new InvalidOperationException($"The model for {gameId} is still in use.");
 
-                _models.Remove(gameId);
+                _models.Remove(key);
                 if (handle.Session.IsValueCreated)
                     released = handle.Session.Value;
             }
 
-            _definitions.TryRemove(gameId, out _);
+            _definitions.TryRemove(key, out _);
         }
 
         released?.Dispose();
     }
-#endif
 }
 
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import type { ContentItem } from '../../ipc/protocol';
-import { Button } from '../ui/controls';
+import { useEffect, useRef, useState } from 'react';
+import { Button, TextField } from '../ui/controls';
 
 interface PlayerHeaderProps {
   item: ContentItem;
@@ -10,7 +11,8 @@ interface PlayerHeaderProps {
   highlightCount: number;
   onBack?: () => void;
   onAutomaticClips: () => void;
-  onDelete?: (item: ContentItem) => void;
+  onRename?: (item: ContentItem, title: string) => void;
+  onOpenFileLocation?: (item: ContentItem) => void;
   onReviewSession?: (recording: ContentItem) => void;
   convertHdrClipsToSdr?: boolean;
   recording?: boolean;
@@ -26,7 +28,8 @@ export function PlayerHeader({
   highlightCount,
   onBack,
   onAutomaticClips,
-  onDelete,
+  onRename,
+  onOpenFileLocation,
   onReviewSession,
   convertHdrClipsToSdr = false,
   recording = false,
@@ -34,15 +37,82 @@ export function PlayerHeader({
   onConvertToSdr,
   conversionError,
 }: PlayerHeaderProps) {
+  const cancellingRename = useRef(false);
+  const displayTitle = item.title?.trim() || item.fileName;
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [title, setTitle] = useState(displayTitle);
   const canConvertToSdr = convertHdrClipsToSdr && item.isHdr === true
     && (item.contentType === 'clip' || item.contentType === 'highlight');
+
+  useEffect(() => {
+    setEditingTitle(false);
+    setTitle(displayTitle);
+  }, [item.filePath, displayTitle]);
+
+  const commitRename = () => {
+    setEditingTitle(false);
+    const nextTitle = title.trim();
+    if (!cancellingRename.current && nextTitle !== displayTitle) {
+      onRename?.(item, nextTitle);
+    }
+    cancellingRename.current = false;
+  };
 
   return (
     <div className="player-header">
       <Button variant="ghost" size="small" icon="chevronLeft" onClick={onBack}>
         Back
       </Button>
-      <span className="player-header-title">{item.title?.trim() || item.fileName}</span>
+      <div className="player-header-heading">
+        {editingTitle ? (
+          <TextField
+            className="player-header-title-input"
+            value={title}
+            onChange={setTitle}
+            autoFocus
+            aria-label="Video title"
+            onFocus={(event) => event.currentTarget.select()}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur();
+              } else if (event.key === 'Escape') {
+                cancellingRename.current = true;
+                setTitle(displayTitle);
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        ) : (
+          <span className="player-header-title" title={displayTitle}>{displayTitle}</span>
+        )}
+        {onRename && !editingTitle && (
+          <Button
+            variant="ghost"
+            size="icon"
+            icon="pencil"
+            className="player-header-title-action"
+            onClick={() => {
+              cancellingRename.current = false;
+              setTitle(displayTitle);
+              setEditingTitle(true);
+            }}
+            aria-label="Rename video"
+            title="Rename video"
+          />
+        )}
+        {onOpenFileLocation && (
+          <Button
+            variant="ghost"
+            size="icon"
+            icon="folder"
+            className="player-header-title-action"
+            onClick={() => onOpenFileLocation(item)}
+            aria-label="Show video in folder"
+            title="Show video in folder"
+          />
+        )}
+      </div>
       {canConvertToSdr && (
         <Button
           variant="ghost"
@@ -66,17 +136,6 @@ export function PlayerHeader({
         <Button variant="ghost" size="small" onClick={() => onReviewSession(item)}>
           View highlights ({highlightCount})
         </Button>
-      )}
-      {item.automated && onDelete && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="player-header-delete"
-          icon="trash"
-          onClick={() => onDelete(item)}
-          aria-label="Move highlight to trash"
-          title="Move highlight to trash"
-        />
       )}
     </div>
   );

@@ -1,0 +1,10 @@
+{
+  "$schema": "model-manifest.schema.json",
+  "schemaVersion": 1,
+  "games": [
+    {
+      "gameId": "Overwatch",
+      "releases": []
+    }
+  ]
+}

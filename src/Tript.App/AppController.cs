@@ -133,6 +133,7 @@ internal sealed class AppController
         _host.PushState(_host.IsRecording, _host.CurrentGameId);
         _host.PushSettings();
         _host.PushGameList();
+        _host.PushModelStatus();
 
         // The recovery prompt, when there are orphaned files. Run after the state push so the
         // frontend has its content model before the prompt arrives.

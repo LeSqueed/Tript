@@ -162,7 +162,7 @@ describe('PlayerView', () => {
     const { container } = renderPlayer();
     act(() => clickBarAt(container, 80));
     expect(currentReadout()).toBe('1:20');
-    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
     expect(playingItem()).toBe('Session 2');
     expect(currentReadout()).toBe('0:00');
   });
@@ -178,8 +178,43 @@ describe('PlayerView', () => {
       />,
     );
     expect(playingItem()).toBe('Result clip');
-    fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
     expect(playingItem()).toBe('Session 2');
+  });
+
+  it('shows position in the review set and favorites the current item', () => {
+    const onToggleFavorite = vi.fn();
+    const current = { ...session(2, 'sessions/b.mp4'), favorite: true };
+    render(
+      <PlayerView
+        client={mockClient()}
+        source={source}
+        item={current}
+        navigationItems={[session(1, 'sessions/a.mp4'), current, session(3, 'sessions/c.mp4')]}
+        onToggleFavorite={onToggleFavorite}
+      />,
+    );
+
+    expect(screen.getByLabelText('Item 2 of 3').textContent).toBe('2 of 3');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from favorites' }));
+    expect(onToggleFavorite).toHaveBeenCalledWith(current);
+  });
+
+  it('toggles favorite with F while player shortcuts are active', () => {
+    const onToggleFavorite = vi.fn();
+    const current = session(1, 'sessions/a.mp4');
+    render(
+      <PlayerView
+        client={mockClient()}
+        source={source}
+        item={current}
+        navigationItems={[current]}
+        onToggleFavorite={onToggleFavorite}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(onToggleFavorite).toHaveBeenCalledWith(current);
   });
 });
 
@@ -286,6 +321,29 @@ describe('zoom model', () => {
     expect(zoomWindowSeconds(container)).toBe(80);
   });
 
+  it('stays fully zoomed out when the media reports a longer real duration', () => {
+    const { container } = renderPlayer();
+    const video = container.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 240 });
+    fireEvent.durationChange(video);
+
+    expect(screen.getByTestId('transport-duration').textContent).toBe('4:00');
+    expect(container.querySelector('.timeline-scale')).toBeNull();
+  });
+
+  it('preserves a user zoom when the real duration arrives', () => {
+    const { container } = renderPlayer();
+    const zoomed = container.querySelector('.timeline-zoomed') as Element;
+    fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
+    expect(zoomWindowSeconds(container)).toBe(80);
+
+    const video = container.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 240 });
+    fireEvent.durationChange(video);
+
+    expect(zoomWindowSeconds(container)).toBe(80);
+  });
+
   it('a wheel zoom-out grows the visible window back', () => {
     const { container } = renderPlayer();
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
@@ -317,8 +375,8 @@ describe('navigation', () => {
 
   it('next moves forward and is disabled at the last session', () => {
     renderPlayer();
-    const previous = screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement;
-    const next = screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement;
+    const previous = screen.getByRole('button', { name: 'Previous item' }) as HTMLButtonElement;
+    const next = screen.getByRole('button', { name: 'Next item' }) as HTMLButtonElement;
     expect(previous.disabled).toBe(true);
     expect(next.disabled).toBe(false);
     fireEvent.click(next);
@@ -333,8 +391,8 @@ describe('navigation', () => {
 
   it('previous moves backward and is disabled at the first session', () => {
     renderPlayer();
-    const previous = screen.getByRole('button', { name: 'Previous recording' }) as HTMLButtonElement;
-    const next = screen.getByRole('button', { name: 'Next recording' }) as HTMLButtonElement;
+    const previous = screen.getByRole('button', { name: 'Previous item' }) as HTMLButtonElement;
+    const next = screen.getByRole('button', { name: 'Next item' }) as HTMLButtonElement;
     fireEvent.click(next);
     expect(playingItem()).toBe('Session 2');
     fireEvent.click(previous);
@@ -362,6 +420,33 @@ describe('navigation', () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it('pointer actions release focus so the next Space controls playback', () => {
+    renderPlayer();
+    const video = document.querySelector('video') as HTMLVideoElement;
+    vi.spyOn(video, 'paused', 'get').mockReturnValue(true);
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+    const fullscreen = screen.getByRole('button', { name: 'Toggle fullscreen' });
+    fullscreen.focus();
+    fireEvent.pointerUp(fullscreen);
+    expect(document.activeElement).not.toBe(fullscreen);
+
+    fireEvent.keyDown(window, { code: 'Space' });
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('Space stands down while a button owns keyboard focus', () => {
+    renderPlayer();
+    const video = document.querySelector('video') as HTMLVideoElement;
+    vi.spyOn(video, 'paused', 'get').mockReturnValue(true);
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+    const fullscreen = screen.getByRole('button', { name: 'Toggle fullscreen' });
+    fullscreen.focus();
+
+    fireEvent.keyDown(fullscreen, { code: 'Space' });
+    expect(document.activeElement).toBe(fullscreen);
+    expect(play).not.toHaveBeenCalled();
+  });
+
   it('keyboard: arrow keys seek', () => {
     const { container } = renderPlayer();
     act(() => {
@@ -370,6 +455,71 @@ describe('navigation', () => {
     expect(currentReadout()).toBe('0:05');
     const fill = container.querySelector('.timeline-bar-fill') as HTMLElement;
     expect(fill.style.width).toBe('5%');
+  });
+
+  it('keyboard: Shift+arrows navigate without replacing plain-arrow seeking', () => {
+    renderPlayer();
+    fireEvent.keyDown(window, { key: 'ArrowRight', shiftKey: true });
+    expect(playingItem()).toBe('Session 2');
+    expect(currentReadout()).toBe('0:00');
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft', shiftKey: true });
+    expect(playingItem()).toBe('Session 1');
+  });
+
+  it('preserves paused state while navigating', () => {
+    renderPlayer();
+    const video = document.querySelector('video') as HTMLVideoElement;
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('preserves playing state while navigating', () => {
+    renderPlayer();
+    const video = document.querySelector('video') as HTMLVideoElement;
+    fireEvent.play(video);
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('keyboard: Delete trashes the current item once', () => {
+    const onDelete = vi.fn();
+    const current = session(1, 'sessions/a.mp4');
+    render(
+      <PlayerView
+        client={mockClient()}
+        source={source}
+        item={current}
+        navigationItems={[current]}
+        onDelete={onDelete}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    fireEvent.keyDown(window, { key: 'Delete', repeat: true });
+    expect(onDelete).toHaveBeenCalledOnce();
+    expect(onDelete).toHaveBeenCalledWith(current);
+  });
+
+  it('Escape clears a pending clip start before leaving the player', () => {
+    const onBack = vi.fn();
+    render(<PlayerView client={mockClient()} source={source} onBack={onBack} />);
+    const video = document.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 100 });
+    fireEvent.durationChange(video);
+    fireEvent.keyDown(window, { key: 'i' });
+    expect(screen.getByRole('button', { name: 'Clear the clip start' })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: 'Clear the clip start' })).toBeNull();
+    expect(onBack).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onBack).toHaveBeenCalledOnce();
   });
 
   it('a video play event updates the play state', () => {
@@ -468,7 +618,7 @@ describe('region selection seam (T9)', () => {
       fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '2' } });
     });
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Next recording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
     });
     const video = document.querySelector('video') as HTMLVideoElement;
     expect(video.defaultPlaybackRate).toBeCloseTo(2);

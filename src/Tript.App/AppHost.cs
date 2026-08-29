@@ -8,6 +8,7 @@ using System.Diagnostics;
 using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
+using Tript.App.Models;
 using Tript.Core;
 using Tript.Detection;
 using Tript.Media;
@@ -60,6 +61,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly ThumbnailStore _thumbnails;
     private readonly TrashStore _trash;
     private readonly GameCatalog _gameCatalog;
+    private readonly GameModelManager? _modelManager;
 
     // Located at most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on
     // both binaries, which is four processes, and the answer cannot change while the host runs.
@@ -169,7 +171,7 @@ internal sealed partial class AppHost : IDisposable
     // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
-        TimeSpan? recorderStopTimeout = null)
+        TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false)
     {
         _options = options;
         _settingsStore = settingsStore;
@@ -178,6 +180,25 @@ internal sealed partial class AppHost : IDisposable
         _primaryDisplay = primaryDisplay;
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
+
+        if (enableModelDelivery)
+        {
+#if TRIPT_TRAINING
+            var customRoot = TrainingPaths.InstalledModelsPath;
+            bool HasCustomModel(string gameId)
+            {
+                var gamePath = Path.Combine(customRoot, GameModelPaths.ValidateGameId(gameId));
+                return File.Exists(Path.Combine(gamePath, "model.onnx")) &&
+                    File.Exists(Path.Combine(gamePath, "events.json"));
+            }
+#else
+            Func<string, bool>? HasCustomModel = null;
+#endif
+            _modelManager = new GameModelManager(ActivateDownloadedModelAsync,
+                bundledManifestPath: Path.Combine(AppContext.BaseDirectory, "data", "model-manifest.json"),
+                hasCustomModel: HasCustomModel);
+            _modelManager.StatusChanged += OnModelStatusChanged;
+        }
 
         EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
 
@@ -393,6 +414,12 @@ internal sealed partial class AppHost : IDisposable
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
 
+        if (_modelManager is not null)
+        {
+            _modelManager.StatusChanged -= OnModelStatusChanged;
+            _modelManager.Dispose();
+        }
+
         // Preserve recording metadata when possible, but never let a dead recorder block shutdown.
         try
         {
@@ -469,6 +496,7 @@ internal sealed partial class AppHost : IDisposable
     private bool StartRecordingLocked(string? gameId, string? processOwner = null)
     {
         var effectiveGameId = gameId ?? StartupGameId;
+        EnsureManagedModel(effectiveGameId);
 
         // Detector teardown owns the callback barrier; do not admit new recording starts while it is
         // being dismantled.
@@ -880,6 +908,7 @@ internal sealed partial class AppHost : IDisposable
     {
         var (owner, gameId) = TrackDetectedGameStarted(processName);
         PushState(IsRecording, CurrentGameId);
+        EnsureManagedModel(gameId);
         lock (_recorderGate)
             StartRecordingLocked(gameId, owner);
     }
@@ -983,6 +1012,55 @@ internal sealed partial class AppHost : IDisposable
                 StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
+    // The game a clip cut from this session belongs to. The session's on-disk metadata record is
+    // authoritative; for the session being recorded right now the in-memory pending record is used,
+    // because the on-disk record is only written when the recording stops.
+    private (string? Game, string? GameId) ResolveGameForSession(string sourceSessionPath)
+    {
+        var sessionFile = Path.GetFileName(sourceSessionPath);
+        if (!string.IsNullOrWhiteSpace(sessionFile))
+        {
+            var metadata = _metadata.Load(sessionFile);
+            if (metadata is not null)
+            {
+                var game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
+                var gameId = string.IsNullOrWhiteSpace(metadata.GameId)
+                    ? ResolveLegacyGameId(game)
+                    : metadata.GameId;
+                if (game is not null || gameId is not null)
+                    return (game, gameId);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_activeOutputPath)
+            && string.Equals(Path.GetFileName(_activeOutputPath), sessionFile,
+                StringComparison.OrdinalIgnoreCase)
+            && _pendingMetadata is not null)
+        {
+            var pendingGame = string.IsNullOrWhiteSpace(_pendingMetadata.Game) ? null : _pendingMetadata.Game;
+            var pendingGameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
+                ? ResolveLegacyGameId(pendingGame)
+                : _pendingMetadata.GameId;
+            if (pendingGame is not null || pendingGameId is not null)
+                return (pendingGame, pendingGameId);
+        }
+
+        return (null, null);
+    }
+
+    // Persists the game attribution on freshly created clips so the tag survives the source session
+    // being deleted later. The on-disk session metadata is usually already present (highlights from a
+    // completed recording); the pending record covers the session that is being recorded live.
+    private void AttachGameToClips(IEnumerable<string> clipFiles, string sourceSessionPath)
+    {
+        var (game, gameId) = ResolveGameForSession(sourceSessionPath);
+        if (game is null && gameId is null)
+            return;
+
+        foreach (var clipFile in clipFiles)
+            _clipTitles.SaveGame(Path.GetFileName(clipFile), game, gameId);
+    }
+
     private void StartDetection(string gameId)
     {
         _detectionHost?.Stop();
@@ -1008,6 +1086,64 @@ internal sealed partial class AppHost : IDisposable
         _detectionHost?.Stop();
         _detectionHost?.Dispose();
         _detectionHost = null;
+    }
+
+    private void EnsureManagedModel(string gameId)
+    {
+        lock (_recorderGate)
+        {
+            if (_shuttingDown)
+                return;
+        }
+
+        if (_modelManager is null || !_gameCatalog.Entries.Any(game =>
+                string.Equals(game.GameId, gameId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        _ = _modelManager.EnsureModelAsync(gameId);
+    }
+
+    private Task ActivateDownloadedModelAsync(string gameId, string stagedPath,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_recorderGate)
+        {
+            if (_shuttingDown)
+                throw new OperationCanceledException(cancellationToken);
+
+            var restart = IsRecording && string.Equals(_currentGameId, gameId,
+                StringComparison.OrdinalIgnoreCase);
+            if (restart)
+                StopDetection();
+
+            try
+            {
+                ModelService.InvalidateModel(gameId);
+                GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, GameModelPaths.ModelsRoot);
+                if (restart)
+                    StartDetection(gameId);
+            }
+            catch
+            {
+                if (restart)
+                    StartDetection(gameId);
+                throw;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void OnModelStatusChanged(IReadOnlyList<GameModelStatus> statuses) =>
+        _ipc.Broadcast("modelStatus", new GameModelStatusMessage { Models = statuses });
+
+    internal void PushModelStatus()
+    {
+        if (_modelManager is not null)
+            OnModelStatusChanged(_modelManager.Snapshot());
     }
 
     private void RememberAutomaticClipBookmark(Bookmark bookmark)
@@ -1196,6 +1332,7 @@ internal sealed partial class AppHost : IDisposable
                 metadataSaved &= _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
                     region.Start.TotalSeconds, region.End.TotalSeconds);
             }
+            AttachGameToClips(results, sourceSessionPath);
             if (!metadataSaved)
             {
                 foreach (var result in results)
@@ -2401,6 +2538,7 @@ internal sealed partial class AppHost : IDisposable
                             _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
                                 region.Start.TotalSeconds, region.End.TotalSeconds);
                         }
+                        AttachGameToClips(results, sourceSessionPath);
 
                         lock (_automaticClipGate)
                             job.Completed++;
@@ -2480,6 +2618,7 @@ internal sealed partial class AppHost : IDisposable
                 {
                     foreach (var result in results)
                         _clipTitles.SaveSourceSession(Path.GetFileName(result), request.SourceSessionPath);
+                    AttachGameToClips(results, request.SourceSessionPath);
                 }
 
                 _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new

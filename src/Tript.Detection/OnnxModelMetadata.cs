@@ -16,9 +16,13 @@ public sealed class OnnxModelMetadata
 
     public required string InputName { get; init; }
 
+    public required Type InputElementType { get; init; }
+
     public required IReadOnlyList<int> InputDimensions { get; init; }
 
     public required string OutputName { get; init; }
+
+    public required Type OutputElementType { get; init; }
 
     public required IReadOnlyList<int> OutputDimensions { get; init; }
 
@@ -70,8 +74,10 @@ public static class OnnxModelInspector
         {
             ModelPath = modelPath,
             InputName = input.Key,
+            InputElementType = input.Value.ElementType,
             InputDimensions = input.Value.Dimensions.ToArray(),
             OutputName = output.Key,
+            OutputElementType = output.Value.ElementType,
             OutputDimensions = output.Value.Dimensions.ToArray(),
             ClassNames = ParseClassNames(rawNames),
         };

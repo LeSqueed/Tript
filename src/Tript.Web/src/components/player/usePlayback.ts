@@ -20,6 +20,8 @@ export interface PlaybackState {
   /** Seek the playhead. Safe from any timeline; clamps to the duration. */
   seek(time: number): void;
   togglePlayPause(): void;
+  /** Preserve the current play/pause intent across the next item-key change. */
+  prepareItemChange(shouldPlay: boolean): void;
   /** React to the <video> element's own position changes (timeupdate). */
   onVideoTimeUpdate(time: number): void;
   /** React to the <video> element's metadata. */
@@ -42,6 +44,7 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
   // overwrite a duration the media already reported.
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
+  const nextItemShouldPlay = useRef<boolean | null>(null);
   const duration = mediaDuration ?? Math.max(0, fallbackDuration);
   const durationKnown = mediaDuration !== null;
 
@@ -51,14 +54,18 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
   useEffect(() => {
     setCurrentTime(0);
     setMediaDuration(null);
+    const shouldPlay = nextItemShouldPlay.current ?? true;
+    nextItemShouldPlay.current = null;
     setPlaying(false);
     const video = videoRef.current;
     if (video) {
       video.currentTime = 0;
       video.pause();
-      void video.play().catch(() => {
-        // Browser autoplay policies may require the existing play overlay to be clicked.
-      });
+      if (shouldPlay) {
+        void video.play().catch(() => {
+          // Browser autoplay policies may require the existing play overlay to be clicked.
+        });
+      }
     }
   }, [itemKey]);
 
@@ -92,6 +99,9 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
     playing,
     seek,
     togglePlayPause,
+    prepareItemChange(shouldPlay: boolean): void {
+      nextItemShouldPlay.current = shouldPlay;
+    },
     onVideoTimeUpdate(time: number): void {
       setCurrentTime(time);
     },

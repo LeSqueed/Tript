@@ -9,6 +9,7 @@ import type { BookmarkItem } from '../../ipc/protocol';
 import { clamp, positionToTime } from './timelineModel';
 import type { WindowState } from './timelineModel';
 import { bookmarkColor } from './bookmarks';
+import { releasePointerFocus } from '../ui/pointerFocus';
 
 export interface FullSessionBarProps {
   currentTime: number;
@@ -76,6 +77,7 @@ export function FullSessionBar({
               event.stopPropagation();
               onSeek(bookmark.time);
             }}
+            onPointerUp={releasePointerFocus}
           />
         );
       })}

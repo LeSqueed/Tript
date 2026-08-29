@@ -6,8 +6,9 @@
 // settings/ with a settings- class prefix, which is why the player hand-rolled raw controls beside
 // it and looked unstyled.
 
-import type { InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes } from 'react';
+import { useRef, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from 'react';
 import { Icon, type IconName } from './Icon';
+import { releasePointerFocus } from './pointerFocus';
 
 /* ---------------------------------------------------------------- buttons */
 
@@ -61,6 +62,7 @@ export function Button({
       type={type}
       className={classes.join(' ')}
       onClick={onClick}
+      onPointerUp={releasePointerFocus}
       disabled={disabled}
       title={title}
     >
@@ -121,6 +123,7 @@ export function SelectField({
   /** Narrower padding for a control sitting inside a dense row, like the transport. */
   compact?: boolean;
 } & Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange'>) {
+  const pointerSelection = useRef(false);
   return (
     <select
       {...rest}
@@ -133,7 +136,19 @@ export function SelectField({
         .filter(Boolean)
         .join(' ')}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onPointerDown={() => {
+        pointerSelection.current = true;
+      }}
+      onBlur={() => {
+        pointerSelection.current = false;
+      }}
+      onChange={(event) => {
+        onChange(event.target.value);
+        if (pointerSelection.current) {
+          pointerSelection.current = false;
+          event.currentTarget.blur();
+        }
+      }}
     >
       {options.map((option) => (
         <option key={option.value} value={option.value}>
@@ -174,6 +189,7 @@ export function Slider({
       step={step}
       value={value}
       onChange={(e) => onChange(Number(e.currentTarget.value))}
+      onPointerUp={releasePointerFocus}
     />
   );
 }
@@ -194,7 +210,13 @@ export function Toggle({
 }) {
   return (
     <label className={disabled ? 'toggle is-disabled' : 'toggle'}>
-      <input disabled={disabled} type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
+      <input
+        disabled={disabled}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.currentTarget.checked)}
+        onPointerUp={releasePointerFocus}
+      />
       <span className="toggle-track" aria-hidden="true">
         <span className="toggle-knob" />
       </span>
@@ -250,6 +272,7 @@ export function SegmentedControl<T extends string>({
             tabIndex={selected ? 0 : -1}
             className={selected ? 'segment is-active' : 'segment'}
             onClick={() => onChange(segment.value)}
+            onPointerUp={releasePointerFocus}
             onKeyDown={(event) => {
               if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
                 event.preventDefault();
@@ -285,6 +308,7 @@ export function Checkbox({
       className={rest.className ? `checkbox ${rest.className}` : 'checkbox'}
       checked={checked}
       onChange={(e) => onChange(e.currentTarget.checked)}
+      onPointerUp={releasePointerFocus}
     />
   );
 }
@@ -311,6 +335,7 @@ export function RadioOption({
         value={value}
         checked={checked}
         onChange={() => onChange(value)}
+        onPointerUp={releasePointerFocus}
       />
       <span>{label}</span>
     </label>

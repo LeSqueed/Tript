@@ -204,6 +204,20 @@
   font-size: 0.9rem;
 }
 
+@media (max-width: 760px) {
+  .session-clips-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .session-clips-header > div {
+    order: -1;
+    flex-basis: 100%;
+    min-width: 0;
+  }
+}
+
 .session-clips-processing {
   margin: -12px 0 24px;
   color: var(--color-accent, #a8e6cf);

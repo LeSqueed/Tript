@@ -366,11 +366,29 @@ describe('marking segments from the player (in/out points)', () => {
     // No in point was set and nothing was marked: only the dialog's own proposal is on the timeline.
     expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
     expect(regionLabels(container)).toEqual(['Region 0:37–0:47']);
-    // The very same key outside the field does fire — so the assertions above are not vacuous.
+    // The dialog suppresses player shortcuts even when a synthetic event targets the window.
+    act(() => {
+      fireEvent.keyDown(window, { key: 'i' });
+    });
+    expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close clip dialog' }));
+    // Once the modal closes, the same shortcut controls the player again.
     act(() => {
       fireEvent.keyDown(window, { key: 'i' });
     });
     expect(screen.getByTestId('timeline-mark-in')).toBeTruthy();
+  });
+
+  it('I/O/M stand down while a button owns keyboard focus', () => {
+    const container = renderPlayer();
+    seekTo(container, 42);
+    const markInButton = screen.getByRole('button', { name: 'Set the clip start' });
+    markInButton.focus();
+    fireEvent.keyDown(markInButton, { key: 'i' });
+    fireEvent.keyDown(markInButton, { key: 'm' });
+    fireEvent.keyDown(markInButton, { key: 'o' });
+    expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
+    expect(regionLabels(container)).toEqual([]);
   });
 
   it('marks made in the player survive opening the dialog, and add up', () => {

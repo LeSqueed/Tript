@@ -186,5 +186,6 @@ public class ModelClassCountTests
 
         var metadata = OnnxModelInspector.Inspect(modelPath);
         Assert.Null(ModelEventCompatibility.FindMismatch(definitions, metadata));
+        Assert.Null(ModelApiV1Compatibility.FindMismatch(definitions, metadata));
     }
 }

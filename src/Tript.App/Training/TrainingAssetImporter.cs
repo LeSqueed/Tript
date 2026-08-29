@@ -49,7 +49,7 @@ internal static class TrainingAssetImporter
         if (File.Exists(sourceModelPath))
         {
             modelMetadata = OnnxModelInspector.Inspect(sourceModelPath);
-            var mismatch = ModelEventCompatibility.FindMismatch(definitions, modelMetadata);
+            var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, modelMetadata);
             if (mismatch is not null)
                 throw new InvalidDataException($"The model and events.json do not match: {mismatch}");
         }

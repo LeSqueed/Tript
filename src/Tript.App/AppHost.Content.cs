@@ -204,6 +204,15 @@ internal sealed partial class AppHost
                     item.Title = record.Title;
                 item.Favorite = record?.Favorite ?? false;
                 item.DurationSeconds = record?.DurationSeconds;
+                if (record is not null
+                    && (!string.IsNullOrWhiteSpace(record.Game) || !string.IsNullOrWhiteSpace(record.GameId)))
+                {
+                    // The record's own attribution wins — it survives the source session being gone.
+                    item.Game = string.IsNullOrWhiteSpace(record.Game) ? null : record.Game;
+                    item.GameId = string.IsNullOrWhiteSpace(record.GameId)
+                        ? ResolveLegacyGameId(item.Game)
+                        : record.GameId;
+                }
                 clips.Add(item);
             }
 
@@ -236,8 +245,14 @@ internal sealed partial class AppHost
 
         foreach (var clip in clips)
         {
-            clip.Game = InheritedGame(clip, gamesByRecordingPath, gamesByRecording);
-            clip.GameId = InheritedFrom(clip, gameIdsByRecordingPath, gameIdsByRecording);
+            // A record that already carries its own attribution keeps it; everything else inherits
+            // from the source session (which may record the tag on the fly in BackfillClipGame).
+            if (clip.Game is null && clip.GameId is null)
+            {
+                clip.Game = InheritedGame(clip, gamesByRecordingPath, gamesByRecording);
+                clip.GameId = InheritedFrom(clip, gameIdsByRecordingPath, gameIdsByRecording);
+            }
+            BackfillClipGame(clip);
             clip.AudioTracks = InheritedFrom(clip, tracksByRecordingPath, tracksByRecording);
         }
 
@@ -280,6 +295,64 @@ internal sealed partial class AppHost
         }
 
         return inherited;
+    }
+
+    // A clip that has no stored game and no surviving source session can still name its game when the
+    // per-game recording layout put it (and the session it came from) under "<gameId>/highlights/".
+    // The container directories are never games, so only a real catalogue id is accepted.
+    private static string? GameSegmentFromPath(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        var segment = relativePath.Split(new[] { '/', '\\' }, 2)[0];
+        return segment is "sessions" or "clips" or "highlights" or "metadata" or ".trash"
+            ? null
+            : segment;
+    }
+
+    // Pins the game attribution onto a clip whose record predates the field: once the tag is known
+    // from any source, persist it so the next listing reads it straight from the record. Safe to run
+    // on every pass — a record that already carries the tag is left alone.
+    private void BackfillClipGame(ContentItem clip)
+    {
+        var game = clip.Game;
+        var gameId = clip.GameId;
+
+        if (gameId is null && !string.IsNullOrWhiteSpace(game))
+            gameId = ResolveLegacyGameId(game);
+
+        if (game is null && gameId is null)
+        {
+            var segment = GameSegmentFromPath(clip.SourceSessionPath)
+                ?? GameSegmentFromPath(clip.FilePath);
+            if (segment is not null)
+            {
+                var known = GameList.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, segment, StringComparison.OrdinalIgnoreCase));
+                if (known is not null)
+                {
+                    gameId = known.Id;
+                    game = known.Name;
+                }
+            }
+        }
+
+        if (game is null && gameId is null)
+            return;
+
+        clip.Game = game;
+        clip.GameId = gameId;
+
+        var fileName = string.IsNullOrWhiteSpace(clip.FileName)
+            ? null
+            : Path.GetFileName(clip.FileName);
+        if (fileName is null)
+            return;
+
+        var record = _clipTitles.LoadRecord(fileName);
+        if (record is not null && string.IsNullOrWhiteSpace(record.Game) && string.IsNullOrWhiteSpace(record.GameId))
+            _clipTitles.SaveGame(fileName, game, gameId);
     }
 
     private static List<AudioTrackInfo>? ToAudioTrackInfo(RecordingMetadata metadata)

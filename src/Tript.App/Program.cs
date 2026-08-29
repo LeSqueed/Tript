@@ -7,6 +7,7 @@ using Tript.App.Training;
 #endif
 using Tript.Detection;
 using Tript.App;
+using Tript.App.Models;
 using Tript.Obs;
 using Tript.Settings;
 
@@ -64,7 +65,9 @@ internal static class Program
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
 
 #if TRIPT_TRAINING
-        ModelService.ConfigureUserModelRoot(TrainingPaths.InstalledModelsPath);
+        ModelService.ConfigureModelRoots(TrainingPaths.InstalledModelsPath, GameModelPaths.ModelsRoot);
+#else
+        ModelService.ConfigureUserModelRoot(GameModelPaths.ModelsRoot);
 #endif
 
         // Detected once per launch: the fresh-install resolution default, and the "(display)" option the
@@ -87,7 +90,8 @@ internal static class Program
         // The recorder and the detector agree on what is being recorded through the core registry.
         var tracker = new RecordingSessionTracker().Register();
 
-        return new AppHost(options, store, runtime, tracker, primaryDisplay);
+        return new AppHost(options, store, runtime, tracker, primaryDisplay,
+            enableModelDelivery: !options.FakeRecorder);
     }
 
     // On Windows libobs's obs_startup calls CoInitializeEx(COINIT_APARTMENTTHREADED) and treats a

@@ -71,6 +71,24 @@ const CLIP_1 = {
   fileSizeBytes: 33338,
 };
 
+const HIGHLIGHT_1 = {
+  contentType: 'clip',
+  fileName: 'highlight-1.mp4',
+  filePath: 'clips/highlight-1.mp4',
+  title: 'First highlight',
+  automated: true,
+  sourceSessionPath: SESSION_1.filePath,
+  clipStartTime: 10,
+};
+
+const HIGHLIGHT_2 = {
+  ...HIGHLIGHT_1,
+  fileName: 'highlight-2.mp4',
+  filePath: 'clips/highlight-2.mp4',
+  title: 'Second highlight',
+  clipStartTime: 20,
+};
+
 /**
  * A mock backend that honours the ListContent contract: the backend does NOT include content in its
  * NewConnection push, it answers every ListContent command with a `content` push. The frontend's IPC
@@ -241,6 +259,79 @@ describe('App shell', () => {
     const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(within(nav).getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe('page');
     expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
+  });
+
+  it('refreshes the open player item when content metadata changes', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.getByRole('button', { name: 'Add to favorites' })).toBeTruthy();
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [CLIP_1, SESSION_2, { ...SESSION_1, favorite: true }] },
+      }));
+    });
+
+    expect(screen.getByRole('button', { name: 'Remove from favorites' })).toBeTruthy();
+  });
+
+  it('keeps the navigated item current across later content pushes', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
+    const selected = document.querySelector('video')?.getAttribute('aria-label');
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [CLIP_1, { ...SESSION_2, favorite: true }, SESSION_1] },
+      }));
+    });
+
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toBe(selected);
+  });
+
+  it('confirms trash from a normal player entry', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    const dialog = screen.getByTestId('confirm-delete');
+    expect(within(dialog).getByText('Delete Session 1?')).toBeTruthy();
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame)).some((frame) => frame.method === 'DeleteContent')).toBe(false);
+
+    fireEvent.click(within(dialog).getByTestId('confirm-delete-confirm'));
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'recording', fileName: SESSION_1.filePath },
+    });
+  });
+
+  it('trashes immediately and advances while reviewing session highlights', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    expect(screen.queryByTestId('confirm-delete')).toBeNull();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Second highlight');
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'clip', fileName: HIGHLIGHT_1.filePath },
+    });
   });
 
   it('returns from the player route to the library', () => {

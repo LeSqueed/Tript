@@ -57,6 +57,7 @@ export interface PlayerViewProps {
   navigationItems?: ContentItem[];
   onItemChange?(item: ContentItem): void;
   onDelete?(item: ContentItem): void;
+  onToggleFavorite?(item: ContentItem): void;
   onReviewSession?(recording: ContentItem): void;
   highlightCount?: number;
   onBack?(): void;
@@ -79,6 +80,7 @@ export function PlayerView({
   navigationItems,
   onItemChange,
   onDelete,
+  onToggleFavorite,
   onReviewSession,
   highlightCount = 0,
   onBack,
@@ -178,6 +180,10 @@ export function PlayerView({
     setHasStartedPlayback(false);
   }, [item?.filePath]);
 
+  const handleToggleFavorite = useCallback(() => {
+    if (item) onToggleFavorite?.(item);
+  }, [item, onToggleFavorite]);
+
   // The bound every marked segment lives inside — the media's own duration, and nothing else.
   // MEASURED BUG (this is the hole this resolution closes): `duration` above starts at
   // `fallbackDuration`, so on a session with no `endTime` the player believed the video was 120s
@@ -194,6 +200,7 @@ export function PlayerView({
     zoomWindow(0, duration, duration),
   );
   const viewWindowItem = useRef(item?.filePath);
+  const viewWindowAdjusted = useRef(false);
 
   // Each recording opens fully zoomed out. After that, duration updates and playback preserve the
   // user's chosen zoom level rather than repeatedly resetting it.
@@ -202,14 +209,22 @@ export function PlayerView({
       return;
     }
     viewWindowItem.current = item?.filePath;
+    viewWindowAdjusted.current = false;
     setViewWindow(zoomWindow(0, duration, duration));
   }, [item?.filePath, duration]);
 
   // Keep the zoom window inside the session and centred on the playhead. The playhead always stays
   // visible as the session plays; a deliberate window pan/zoom by the user is not fought.
   useEffect(() => {
-    setViewWindow((prev) => zoomWindow(currentTime, prev.seconds, duration));
+    setViewWindow((prev) => viewWindowAdjusted.current
+      ? zoomWindow(currentTime, prev.seconds, duration)
+      : zoomWindow(0, duration, duration));
   }, [currentTime, duration]);
+
+  const setAdjustedViewWindow = useCallback((next: WindowState) => {
+    viewWindowAdjusted.current = true;
+    setViewWindow(next);
+  }, []);
 
   // The clip dialog owns the region list while it is open. When the seam caller supplies its own
   // regions/selection/handler (the read-only region view), those win; otherwise the dialog's
@@ -300,9 +315,10 @@ export function PlayerView({
       if (navigation.length === 0) {
         return;
       }
+      playback.prepareItemChange(playing);
       setItemIndex((index) => Math.max(0, Math.min(navigation.length - 1, index + delta)));
     },
-    [navigation.length],
+    [navigation.length, playback, playing],
   );
 
   const captureTrainingFrame = useCallback(() => {
@@ -484,15 +500,39 @@ export function PlayerView({
   // suppression.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="slider"]')) {
+      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const target = eventTarget && eventTarget !== document.body ? eventTarget : activeElement;
+      if (document.querySelector('[role="dialog"]')
+        || target?.closest('button, a[href], input, textarea, select, [contenteditable="true"], [role="slider"], [role="radio"]')) {
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      const onButton = target?.closest('button') != null;
       const key = event.key.toLowerCase();
+      if (event.repeat && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (markInTime !== null) {
+          setMarkInTime(null);
+        } else {
+          onBack?.();
+        }
+        return;
+      }
+      if (key === 'delete' && item && onDelete) {
+        event.preventDefault();
+        onDelete(item);
+        return;
+      }
+      if (key === 'f' && onToggleFavorite) {
+        event.preventDefault();
+        handleToggleFavorite();
+        return;
+      }
       if (key === 'i') {
         event.preventDefault();
         markIn();
@@ -508,12 +548,15 @@ export function PlayerView({
         markSegmentAtPlayhead();
         return;
       }
-      if (onButton) {
-        return;
-      }
       if (event.code === 'Space') {
         event.preventDefault();
         playback.togglePlayPause();
+      } else if (event.shiftKey && event.key === 'ArrowLeft') {
+        event.preventDefault();
+        navigate(-1);
+      } else if (event.shiftKey && event.key === 'ArrowRight') {
+        event.preventDefault();
+        navigate(1);
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
         seek(currentTime - 5);
@@ -524,7 +567,7 @@ export function PlayerView({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead]);
+  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead, onToggleFavorite, handleToggleFavorite, item, onDelete, navigate, markInTime, onBack]);
 
   // Segment looping: while the playhead is inside the selected marked segment and playing, when it
   // crosses the segment's end, seek back to the segment's start. The decision is pure
@@ -623,6 +666,18 @@ export function PlayerView({
     client.send('ConvertToSdr', { id, contentType: item.contentType, filePath: item.filePath });
   };
 
+  const handleRename = (renamedItem: ContentItem, title: string) => {
+    client.send('RenameContent', {
+      contentType: renamedItem.contentType,
+      fileName: renamedItem.filePath,
+      title,
+    });
+  };
+
+  const handleOpenFileLocation = (locationItem: ContentItem) => {
+    client.send('OpenFileLocation', { filePath: locationItem.filePath });
+  };
+
   return (
     <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
       <PlayerHeader
@@ -632,7 +687,8 @@ export function PlayerView({
         highlightCount={highlightCount}
         onBack={onBack}
         onAutomaticClips={handleAutomaticClips}
-        onDelete={onDelete}
+        onRename={handleRename}
+        onOpenFileLocation={handleOpenFileLocation}
         onReviewSession={onReviewSession}
         convertHdrClipsToSdr={convertHdrClipsToSdr}
         recording={recording}
@@ -680,6 +736,10 @@ export function PlayerView({
           onNext={() => navigate(1)}
           canNavigatePrevious={itemIndex > 0}
           canNavigateNext={itemIndex < navigation.length - 1}
+          itemPosition={navigation.length > 1 ? { current: itemIndex + 1, total: navigation.length } : undefined}
+          favorite={item.favorite === true}
+          onToggleFavorite={onToggleFavorite ? handleToggleFavorite : undefined}
+          onDelete={onDelete ? () => onDelete(item) : undefined}
         />
 
         <div className="timeline-stack">
@@ -705,7 +765,7 @@ export function PlayerView({
             regions={regions}
             selectedRegionId={selectedRegionId}
             markInTime={canAdjustRegions ? markInTime : null}
-            onWindowChange={setViewWindow}
+            onWindowChange={setAdjustedViewWindow}
             onSeek={seek}
             onRegionSelect={onRegionSelect}
             onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}

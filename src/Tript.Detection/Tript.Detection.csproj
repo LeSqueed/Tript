@@ -13,7 +13,9 @@
     </AssemblyAttribute>
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- Keep the bundled fallback during the downloader migration. Thin releases set
+       BundleDetectionModels=false once their manifest assets have been published. -->
+  <ItemGroup Condition="'$(BundleDetectionModels)' != 'false'">
     <Content Include="$(MSBuildThisFileDirectory)..\..\data\models\**\*.onnx" LinkBase="data\models">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

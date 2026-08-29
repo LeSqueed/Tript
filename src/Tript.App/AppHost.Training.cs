@@ -96,7 +96,7 @@ internal sealed partial class AppHost
         }
 
         var workspace = EnsureTrainingWorkspace(gameId);
-        var definitions = workspace.LoadRuntimeDefinitions();
+        var definitions = workspace.LoadDefinitions();
         var samples = new TrainingSampleStore(workspace).List();
         var dataset = new
         {
@@ -104,8 +104,9 @@ internal sealed partial class AppHost
             validationImages = CountTrainingImages(workspace.DatasetPath, "val"),
         };
         OnnxModelMetadata? metadata = null;
-        var modelPath = ResolveTrainingModelPath(
-            ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
+        var modelPath = File.Exists(workspace.ModelPath)
+            ? workspace.ModelPath
+            : ModelService.GetModelPath(workspace.GameId);
         if (File.Exists(modelPath))
         {
             try
@@ -322,10 +323,6 @@ internal sealed partial class AppHost
         {
             var serializedEvents = JsonSerializer.SerializeToUtf8Bytes(orderedEvents, options);
             TrainingSampleStore.WriteAtomically(workspace.EventsPath, serializedEvents);
-
-            var runtimeEventsPath = TrainingPaths.InstalledEventsPath(parameters.GameId);
-            Directory.CreateDirectory(Path.GetDirectoryName(runtimeEventsPath)!);
-            TrainingSampleStore.WriteAtomically(runtimeEventsPath, serializedEvents);
         }
         catch
         {
@@ -368,13 +365,12 @@ internal sealed partial class AppHost
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
         if (!File.Exists(imagePath))
             throw new FileNotFoundException("The training sample image is missing.", imagePath);
-        var modelPath = ResolveTrainingModelPath(
-            ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
+        var modelPath = ModelService.GetModelPath(workspace.GameId);
         if (!File.Exists(modelPath))
-            throw new InvalidOperationException("No trained model is available for label suggestions.");
+            throw new InvalidOperationException("No live model is available for label suggestions.");
 
         var detections = ModelPredictionService.Predict(modelPath,
-            File.ReadAllBytes(imagePath), workspace.LoadDefinitions());
+            File.ReadAllBytes(imagePath), ModelService.LoadEventDefinitions(workspace.GameId));
         var suggestions = TrainingLabelSuggestionFilter.Merge(sample.Labels, detections);
         _ipc.Broadcast("trainingLabelSuggestions", JsonSerializer.SerializeToElement(new
         {

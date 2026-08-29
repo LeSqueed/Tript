@@ -36,6 +36,10 @@ export interface TransportBarProps {
   onNext?(): void;
   canNavigatePrevious?: boolean;
   canNavigateNext?: boolean;
+  itemPosition?: { current: number; total: number };
+  favorite?: boolean;
+  onToggleFavorite?(): void;
+  onDelete?(): void;
 }
 
 export function TransportBar({
@@ -54,20 +58,26 @@ export function TransportBar({
   onNext,
   canNavigatePrevious = false,
   canNavigateNext = false,
+  itemPosition,
+  favorite = false,
+  onToggleFavorite,
+  onDelete,
 }: TransportBarProps) {
   return (
     <div className="transport-bar">
-      {onPrevious && (
+      <div className="transport-primary">
+        {onPrevious && (
         <Button
           variant="ghost"
           size="icon"
           icon="chevronLeft"
           onClick={onPrevious}
           disabled={!canNavigatePrevious}
-          aria-label="Previous recording"
+          aria-label="Previous item"
+          title="Previous item (Shift+Left)"
         />
-      )}
-      <Button
+        )}
+        <Button
         variant="ghost"
         size="icon"
         icon={playing ? 'pause' : 'play'}
@@ -75,33 +85,61 @@ export function TransportBar({
         // The name says what pressing it will do, the way native controls do — and it is the only
         // thing carrying that state now the button has no text.
         aria-label={playing ? 'Pause' : 'Play'}
-      />
-      {onNext && (
+        />
+        {onNext && (
         <Button
           variant="ghost"
           size="icon"
           icon="chevronRight"
           onClick={onNext}
           disabled={!canNavigateNext}
-          aria-label="Next recording"
+          aria-label="Next item"
+          title="Next item (Shift+Right)"
         />
-      )}
-      <span className="transport-time">
+        )}
+        {itemPosition && (
+        <span className="transport-position" aria-label={`Item ${itemPosition.current} of ${itemPosition.total}`}>
+          {itemPosition.current} of {itemPosition.total}
+        </span>
+        )}
+        {onToggleFavorite && (
+        <Button
+          variant="ghost"
+          size="icon"
+          icon="star"
+          iconFilled={favorite}
+          active={favorite}
+          onClick={onToggleFavorite}
+          aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-pressed={favorite}
+          title={`${favorite ? 'Remove from' : 'Add to'} favorites (F)`}
+        />
+        )}
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            icon="trash"
+            onClick={onDelete}
+            aria-label="Move to trash"
+            title="Move to trash (Delete)"
+          />
+        )}
+        <span className="transport-time">
         <span data-testid="transport-current">{formatTime(currentTime)}</span>
         <span className="transport-sep"> / </span>
         <span data-testid="transport-duration">{formatTime(duration)}</span>
-      </span>
-
-      <span className="transport-spacer" />
-
-      <SelectField
+        </span>
+      </div>
+      <div className="transport-secondary">
+        <SelectField
         compact
         aria-label="Playback speed"
         value={String(playbackRate)}
         options={RATE_OPTIONS}
         onChange={(value) => onPlaybackRateChange(Number(value))}
-      />
-      <div className="transport-volume">
+        />
+        <div className="transport-volume">
         <Button
           variant="ghost"
           size="icon"
@@ -110,14 +148,15 @@ export function TransportBar({
           aria-label={muted ? 'Unmute' : 'Mute'}
         />
         <Slider aria-label="Volume" value={muted ? 0 : volume} onChange={onVolumeChange} />
-      </div>
-      <Button
+        </div>
+        <Button
         variant="ghost"
         size="icon"
         icon="fullscreen"
         onClick={onToggleFullscreen}
         aria-label="Toggle fullscreen"
-      />
+        />
+      </div>
     </div>
   );
 }

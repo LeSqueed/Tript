@@ -1880,6 +1880,9 @@ internal sealed partial class AppHost : IDisposable
         var previousGameKeys = _settingsStore.Load().Game.GameList
             .Select(game => (game.Id, game.Executable, game.ExecutablePath))
             .ToList();
+        var previousGameNames = _settingsStore.Load().Game.GameList
+            .Select(game => (game.Id, game.Name))
+            .ToList();
         SettingsModel settings;
         string? failure;
         bool saved;
@@ -1928,11 +1931,19 @@ internal sealed partial class AppHost : IDisposable
         var gameKeysNow = settings.Game.GameList
             .Select(game => (game.Id, game.Executable, game.ExecutablePath))
             .ToList();
-        if (!previousGameKeys.SequenceEqual(gameKeysNow))
+        var gameNamesNow = settings.Game.GameList
+            .Select(game => (game.Id, game.Name))
+            .ToList();
+        var gameKeysChanged = !previousGameKeys.SequenceEqual(gameKeysNow);
+        var gameNamesChanged = !previousGameNames.SequenceEqual(gameNamesNow);
+        if (gameKeysChanged || gameNamesChanged)
         {
-            RebuildDetectionTargets();
             PushGameList();
+            if (gameKeysChanged)
+                RebuildDetectionTargets();
         }
+        if (gameNamesChanged)
+            PushContent();
 
         var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, settings));
         if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))

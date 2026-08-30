@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.Json;
+using Tript.App.Content;
 using Tript.Core;
 using Tript.Settings;
 using Xunit;
@@ -181,6 +182,115 @@ public sealed class GameCustomSettingsTests : IDisposable
         // targets that would start a recording.
         _host.IgnoreGameCandidate(@"C:\Tools\some.bin");
         Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
+    }
+
+    [Fact]
+    public void RenamingACustomGame_UpdatesExistingLibraryItems_OnTheNextListing()
+    {
+        var exe = ExecutablePath("forza.exe");
+        File.WriteAllText(exe, "not a real PE; only the path matters");
+
+        // A recording already listed under the custom game. Its metadata carries the display name
+        // and the stable custom GameId, the way a recording made before the rename does.
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        File.WriteAllText(Path.Combine(sessions, "session-1.mp4"), "recording");
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/session-1.mp4",
+            Game = "Forza",
+            GameId = "custom-forza",
+        });
+
+        try
+        {
+            Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+            {
+                game = new
+                {
+                    gameList = new[]
+                    {
+                        new { id = "custom-forza", name = "Forza", executablePath = exe },
+                    },
+                },
+            })));
+
+            var before = Assert.Single(_host.ListContent(), item => item.GameId == "custom-forza");
+            Assert.Equal("Forza", before.Game);
+
+            // The rename keeps the stable GameId; only the display name changes.
+            Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+            {
+                game = new
+                {
+                    gameList = new[]
+                    {
+                        new { id = "custom-forza", name = "Forza Horizon 6", executablePath = exe },
+                    },
+                },
+            })));
+
+            var game = Assert.Single(_host.GameList, candidate => candidate.Id == "custom-forza");
+            Assert.Equal("Forza Horizon 6", game.Name);
+
+            // Existing library items keep pointing at the renamed game, and now carry its current
+            // display name — a rename must propagate to every recording already tagged with it.
+            var after = Assert.Single(_host.ListContent(), item => item.GameId == "custom-forza");
+            Assert.Equal("Forza Horizon 6", after.Game);
+        }
+        finally
+        {
+            File.Delete(exe);
+        }
+    }
+
+    [Fact]
+    public void RemovingACustomGame_LeavesExistingLibraryItems_WithTheirLastKnownName()
+    {
+        var exe = ExecutablePath("forza.exe");
+        File.WriteAllText(exe, "not a real PE; only the path matters");
+
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        File.WriteAllText(Path.Combine(sessions, "session-1.mp4"), "recording");
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/session-1.mp4",
+            Game = "Forza",
+            GameId = "custom-forza",
+        });
+
+        try
+        {
+            Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+            {
+                game = new
+                {
+                    gameList = new[]
+                    {
+                        new { id = "custom-forza", name = "Forza", executablePath = exe },
+                    },
+                },
+            })));
+
+            Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+            {
+                game = new
+                {
+                    gameList = Array.Empty<object>(),
+                },
+            })));
+
+            // No game carries the id anymore; the item keeps the name it was last recorded under.
+            var item = Assert.Single(_host.ListContent(), candidate => candidate.GameId == "custom-forza");
+            Assert.Equal("Forza", item.Game);
+        }
+        finally
+        {
+            File.Delete(exe);
+        }
     }
 
     [Fact]

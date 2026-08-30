@@ -256,6 +256,9 @@ internal sealed partial class AppHost
             clip.AudioTracks = InheritedFrom(clip, tracksByRecordingPath, tracksByRecording);
         }
 
+        foreach (var item in items)
+            item.Game = ResolveLibraryGameName(item.Game, item.GameId);
+
         items.Sort((left, right) =>
         {
             var byDate = (right.StartTime ?? 0).CompareTo(left.StartTime ?? 0);
@@ -263,6 +266,26 @@ internal sealed partial class AppHost
         });
 
         return items;
+    }
+
+    // The library shows the catalogue's current name for a game its items are tagged with. The
+    // metadata record keeps the name it was recorded under as a snapshot; when that snapshot's
+    // stable GameId is still a game in the catalogue — a custom game the user renamed — the current
+    // display name wins, so a rename updates every existing recording and clip. A GameId that matches
+    // nothing (the game was removed, a recovery-time attribution) keeps the stored snapshot.
+    private string? ResolveLibraryGameName(string? storedName, string? gameId)
+    {
+        if (string.IsNullOrWhiteSpace(gameId))
+            return storedName;
+
+        foreach (var game in GameList)
+        {
+            if (!string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase))
+                continue;
+            return string.IsNullOrWhiteSpace(game.Name) ? storedName : game.Name;
+        }
+
+        return storedName;
     }
 
     private static string? InheritedGame(ContentItem clip,

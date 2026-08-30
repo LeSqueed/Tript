@@ -293,6 +293,7 @@ public sealed class GameCustomSettingsTests : IDisposable
         }
     }
 
+#if TRIPT_TRAINING
     [Fact]
     public void TrainingList_ForAGameWithoutEventDefinitions_DoesNotThrow()
     {
@@ -321,6 +322,7 @@ public sealed class GameCustomSettingsTests : IDisposable
             File.Delete(exe);
         }
     }
+#endif
 
     [Fact]
     public void NormalizePickedExecutable_AcceptsOnlyExistingExecutables()

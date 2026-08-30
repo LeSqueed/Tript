@@ -1257,7 +1257,18 @@ internal sealed partial class AppHost : IDisposable
         PushState(IsRecording, CurrentGameId);
         EnsureManagedModel(gameId);
         lock (_recorderGate)
+        {
             StartRecordingLocked(gameId, owner);
+            // The start clears the process owner when it does not become a recording (the game-capture
+            // hook never attached, the mode is refused, or the attempt otherwise failed). A process
+            // that is still running never fires GameStopped, so without this the detected badge would
+            // linger for the life of the process even though nothing recorded.
+            if (Volatile.Read(ref _recordingProcessOwner) is null)
+            {
+                _detectedGames.Remove(owner);
+                PushState(IsRecording, CurrentGameId);
+            }
+        }
     }
 
     internal (string Owner, string GameId) TrackDetectedGameStarted(DetectedGameProcess process)
@@ -1301,6 +1312,11 @@ internal sealed partial class AppHost : IDisposable
                 && _detectedGames.LatestOwner(nextGameId) is { } nextOwner)
             {
                 StartRecordingLocked(nextGameId, nextOwner);
+                if (Volatile.Read(ref _recordingProcessOwner) is null)
+                {
+                    _detectedGames.Remove(nextOwner);
+                    PushState(IsRecording, CurrentGameId);
+                }
             }
         }
     }

@@ -32,6 +32,12 @@ internal sealed class DetectedGameTracker
         }
     }
 
+    internal void Remove(string owner)
+    {
+        lock (_gate)
+            _processes.RemoveAll(pair => string.Equals(pair.Key, owner, StringComparison.Ordinal));
+    }
+
     internal string? LatestGameId()
     {
         lock (_gate)

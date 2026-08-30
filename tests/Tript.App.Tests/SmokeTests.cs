@@ -122,12 +122,17 @@ public sealed class SmokeTests : IDisposable
         await DrainPushes(host, 3);
 
         await host.SendAsync(
-            """{"method":"UpdateSettings","parameters":{"settings":{"recording":{"quality":5}}}}""");
+            """{"method":"UpdateSettings","parameters":{"requestId":"settings-1","settings":{"recording":{"quality":5}}}}""");
 
         var (method, content) = await host.ReceiveAsyncParsed();
         Assert.Equal("settings", method);
         var quality = content.GetProperty("settings").GetProperty("recording").GetProperty("quality").GetInt32();
         Assert.Equal(5, quality);
+
+        var (resultMethod, result) = await host.ReceiveAsyncParsed();
+        Assert.Equal("settingsUpdateResult", resultMethod);
+        Assert.Equal("settings-1", result.GetProperty("requestId").GetString());
+        Assert.True(result.GetProperty("success").GetBoolean());
 
         // The change persisted to the settings file, not just the push.
         var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath));

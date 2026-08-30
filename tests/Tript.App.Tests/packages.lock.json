@@ -153,6 +153,7 @@
           "Serilog": "[4.4.0, )",
           "Tript.Core": "[1.0.0, )",
           "Tript.Detection": "[1.0.0, )",
+          "Tript.GameDiscovery": "[1.0.0, )",
           "Tript.Media": "[1.0.0, )",
           "Tript.Obs": "[1.0.0, )",
           "Tript.Recorder": "[1.0.0, )",
@@ -170,6 +171,9 @@
           "Tript.Core": "[1.0.0, )",
           "Tript.Obs": "[1.0.0, )"
         }
+      },
+      "tript.gamediscovery": {
+        "type": "Project"
       },
       "tript.media": {
         "type": "Project",
@@ -201,6 +205,21 @@
           "Photino.NET": "[4.0.16, )",
           "Tript.App": "[1.0.0, )"
         }
+      }
+    },
+    "net10.0/win-x64": {
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.28.0",
+        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
+        }
+      },
+      "Photino.Native": {
+        "type": "Transitive",
+        "resolved": "4.0.22",
+        "contentHash": "VIHipEOe4CZ7HElZE8zTwcvANOsCZ2yak/4nQ4LXzjdlwIjdbY8htmHfNR6rRPgWlCfTfT349GCa6V6Id2/Xyg=="
       }
     },
     "net10.0-windows10.0.19041": {
@@ -355,6 +374,7 @@
           "Serilog": "[4.4.0, )",
           "Tript.Core": "[1.0.0, )",
           "Tript.Detection": "[1.0.0, )",
+          "Tript.GameDiscovery": "[1.0.0, )",
           "Tript.Media": "[1.0.0, )",
           "Tript.Obs": "[1.0.0, )",
           "Tript.Recorder": "[1.0.0, )",
@@ -372,6 +392,9 @@
           "Tript.Core": "[1.0.0, )",
           "Tript.Obs": "[1.0.0, )"
         }
+      },
+      "tript.gamediscovery": {
+        "type": "Project"
       },
       "tript.media": {
         "type": "Project",
@@ -403,6 +426,21 @@
           "Photino.NET": "[4.0.16, )",
           "Tript.App": "[1.0.0, )"
         }
+      }
+    },
+    "net10.0-windows10.0.19041/win-x64": {
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.28.0",
+        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
+        }
+      },
+      "Photino.Native": {
+        "type": "Transitive",
+        "resolved": "4.0.22",
+        "contentHash": "VIHipEOe4CZ7HElZE8zTwcvANOsCZ2yak/4nQ4LXzjdlwIjdbY8htmHfNR6rRPgWlCfTfT349GCa6V6Id2/Xyg=="
       }
     }
   }

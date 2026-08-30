@@ -4,8 +4,9 @@
 // page; the audio page drives the multi-track model (track count, source→track routing, per-source
 // volume).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
+import type { SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
 import { BufferPage } from '../settings/pages/BufferPage';
@@ -23,9 +24,17 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'game', label: 'Game' },
 ];
 
-export function SettingsView({ client }: { client: IpcClient }) {
+export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClient; builtInGameIds?: readonly string[] }) {
   const [page, setPage] = useState<SettingsPageName>('general');
+  const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const controller = useSettings(client);
+
+  useEffect(() => client.on('selectedGameExecutable', (content) => {
+    const selected = content as Partial<SelectedGameExecutableMessage> | null;
+    if (typeof selected?.requestId === 'string' && (typeof selected.filePath === 'string' || selected.filePath === null)) {
+      setSelectedGameExecutable(selected as SelectedGameExecutableMessage);
+    }
+  }), [client]);
 
   return (
     <section className="settings-view">
@@ -101,6 +110,10 @@ export function SettingsView({ client }: { client: IpcClient }) {
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
+            builtInGameIds={builtInGameIds}
+            selectedGameExecutable={selectedGameExecutable}
+            settingsUpdateResult={controller.settingsUpdateResult}
+            onBrowseExecutable={(requestId) => client.send('SelectGameExecutable', { requestId })}
           />
           )}
           {page === 'general' && (

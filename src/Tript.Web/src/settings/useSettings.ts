@@ -12,6 +12,7 @@ import type {
   SettingsMessageContent,
   SettingsModel,
 } from './settingsModel';
+import type { SettingsUpdateResultMessage } from '../ipc/protocol';
 import { readAvailableDisplays, readDisplayFallbackWarning } from './displayModel';
 
 export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game' | 'general';
@@ -64,7 +65,8 @@ const DEFAULT_SETTINGS: SettingsModel = {
 export interface SettingsController {
   settings: SettingsModel;
   /** Send a page-scoped partial update. The whole page object is sent, never the full settings. */
-  update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => void;
+  update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
+  settingsUpdateResult: SettingsUpdateResultMessage | null;
   /** True when the backend has pushed at least one settings message. */
   hasSettings: boolean;
   /** The cause of the most recent settings push, if any. */
@@ -125,8 +127,8 @@ export function useSettings(client: IpcClient): SettingsController {
   const [displayResolution, setDisplayResolution] = useState<DisplayResolution | undefined>(undefined);
   const [availableDisplays, setAvailableDisplays] = useState<DisplayInfo[] | null>(null);
   const [displayFallbackWarning, setDisplayFallbackWarning] = useState<DisplayFallbackWarning | null>(null);
+  const [settingsUpdateResult, setSettingsUpdateResult] = useState<SettingsUpdateResultMessage | null>(null);
   const pendingCauses = useRef(new Set<string>());
-  const causeSerial = useRef(0);
 
   useEffect(() => {
     const unsubscribe = client.on('settings', (content) => {
@@ -173,11 +175,46 @@ export function useSettings(client: IpcClient): SettingsController {
     return unsubscribe;
   }, [client]);
 
+  useEffect(() => client.on('settingsUpdateResult', (content) => {
+    const result = content as Partial<SettingsUpdateResultMessage> | null;
+    if (typeof result?.requestId === 'string' && typeof result.success === 'boolean') {
+      pendingCauses.current.delete(result.requestId);
+      setSettingsUpdateResult({
+        requestId: result.requestId,
+        success: result.success,
+        error: typeof result.error === 'string' ? result.error : null,
+      });
+    }
+  }), [client]);
+
+  useEffect(() => client.onStateChange((state) => {
+    if (state === 'connected' || pendingCauses.current.size === 0) {
+      return;
+    }
+
+    const requestId = Array.from(pendingCauses.current).at(-1)!;
+    pendingCauses.current.clear();
+    setSettingsUpdateResult({
+      requestId,
+      success: false,
+      error: 'The settings update was interrupted by a lost connection.',
+    });
+  }), [client]);
+
   const update = useMemo(
     () => (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => {
-      const cause = `tript:${page}:${++causeSerial.current}`;
+      const cause = `tript:${page}:${crypto.randomUUID()}`;
+      if (client.state !== 'connected') {
+        setSettingsUpdateResult({
+          requestId: cause,
+          success: false,
+          error: 'Connect to Tript before saving settings.',
+        });
+        return cause;
+      }
       pendingCauses.current.add(cause);
-      client.send('UpdateSettings', { settings: { [PAGE_KEY[page]]: patch } });
+      client.send('UpdateSettings', { requestId: cause, settings: { [PAGE_KEY[page]]: patch } });
+      return cause;
     },
     [client],
   );
@@ -185,6 +222,7 @@ export function useSettings(client: IpcClient): SettingsController {
   return {
     settings,
     update,
+    settingsUpdateResult,
     hasSettings,
     lastCause,
     externalPushCount,

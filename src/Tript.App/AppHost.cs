@@ -11,6 +11,7 @@ using Tript.App.Ipc;
 using Tript.App.Models;
 using Tript.Core;
 using Tript.Detection;
+using Tript.GameDiscovery;
 using Tript.Media;
 using Tript.Obs;
 using Tript.Recorder;
@@ -41,6 +42,7 @@ internal sealed partial class AppHost : IDisposable
 
     private readonly AppOptions _options;
     private readonly SettingsStore _settingsStore;
+    private readonly object _settingsUpdateGate = new();
     private readonly ObsRuntime? _runtime;
     private readonly RecordingSessionTracker _sessionTracker;
 
@@ -103,6 +105,15 @@ internal sealed partial class AppHost : IDisposable
     private bool _stopFinalizationPending;
     private ProcessNameGameDetector? _detector;
     private FullscreenGameDetector? _fullscreenDetector;
+    private readonly GameDiscoveryService? _discovery;
+    private readonly IDiscoveryFileSystem _discoveryFileSystem = new PhysicalDiscoveryFileSystem();
+    private readonly object _inventoryGate = new();
+    private GameInventory _inventory = new([], []);
+    private readonly SemaphoreSlim _discoveryScanSemaphore = new(1, 1);
+    private readonly CancellationTokenSource _discoveryCancellation = new();
+    private Task _discoveryTask = Task.CompletedTask;
+    private readonly object _ignoredCandidateGate = new();
+    private readonly HashSet<string> _ignoredCandidatePaths = new(StringComparer.OrdinalIgnoreCase);
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
@@ -118,8 +129,7 @@ internal sealed partial class AppHost : IDisposable
     private bool _liveHighlightsEnabled;
     private CancellationTokenSource? _captureWaitCancellation;
     private int _recordingStopRequested;
-    private readonly object _detectedGameGate = new();
-    private readonly List<KeyValuePair<string, string>> _detectedGames = [];
+    private readonly DetectedGameTracker _detectedGames = new();
 
     // Replaced wholesale under _gameListGate, never mutated in place: GameList is read from the
     // IPC pool, the detector's timer and the hook probe, and a reader holding the old list must
@@ -179,6 +189,9 @@ internal sealed partial class AppHost : IDisposable
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
+        _discovery = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
+            ? GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider())
+            : null;
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
 
         if (enableModelDelivery)
@@ -319,8 +332,11 @@ internal sealed partial class AppHost : IDisposable
     }
 
     private static string ResolveEffectiveRoot(AppOptions options, SettingsStore settingsStore)
+        => ResolveEffectiveRoot(options, settingsStore.Load());
+
+    private static string ResolveEffectiveRoot(AppOptions options, SettingsModel settings)
     {
-        var configured = settingsStore.Load().Recording.OutputDirectory;
+        var configured = settings.Recording.OutputDirectory;
         return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
     }
 
@@ -366,6 +382,7 @@ internal sealed partial class AppHost : IDisposable
             // process. Console, not the log — the log is a file that outlives the launch.
             Console.WriteLine($"READY {UiUrl}");
             Console.Out.Flush();
+            StartDiscoveryScan();
 
             // No browser is opened — the desktop shell renders the UI in its own window.
             if (_ipc.ShutdownWasRequested)
@@ -395,6 +412,7 @@ internal sealed partial class AppHost : IDisposable
         // Refuse new starts before anything is torn down. The detector's Dispose deliberately does
         // not block behind an in-flight handler, so a GameStarted can still arrive after it returns.
         _captureWaitCancellation?.Cancel();
+        _discoveryCancellation.Cancel();
         lock (_automaticClipGate)
         {
             if (_automaticClipJob is not null)
@@ -408,6 +426,18 @@ internal sealed partial class AppHost : IDisposable
 #endif
         lock (_recorderGate)
             _shuttingDown = true;
+
+        try
+        {
+            _discoveryTask.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "AppHost: launcher game discovery did not settle cleanly during shutdown.");
+        }
 
         _trashPurgeTimer?.Dispose();
         _detectionHost?.Dispose();
@@ -866,6 +896,73 @@ internal sealed partial class AppHost : IDisposable
         UpdateSettings(patch);
     }
 
+    // ---- native game executable picker ----
+
+    internal Func<string?>? GameExecutablePicker { get; set; }
+
+    internal void RequestGameExecutable(string requestId)
+    {
+        var picker = GameExecutablePicker;
+        string? pickedPath;
+        if (picker is null)
+        {
+            pickedPath = null;
+        }
+        else
+        {
+            try
+            {
+                pickedPath = picker();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Tript.App: the game executable picker failed: {exception.Message}");
+                pickedPath = null;
+            }
+        }
+
+        var normalized = NormalizePickedExecutable(pickedPath);
+        if (normalized is not null)
+        {
+            _ipc.Broadcast("selectedGameExecutable", JsonSerializer.SerializeToElement(
+                new { requestId, filePath = normalized }, Wire.Options));
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pickedPath))
+            PushError("That is not an executable file; choose a .exe before saving.");
+        _ipc.Broadcast("selectedGameExecutable", JsonSerializer.SerializeToElement(
+            new { requestId, filePath = (string?)null }, Wire.Options));
+    }
+
+    internal static string? NormalizePickedExecutable(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(path.Trim());
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException
+            or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        if (!File.Exists(normalized))
+            return null;
+
+        if (OperatingSystem.IsWindows()
+            && !string.Equals(Path.GetExtension(normalized), ".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
     // ---- detection ----
 
     private void WireAutoStart()
@@ -879,94 +976,338 @@ internal sealed partial class AppHost : IDisposable
         if (_recorder is null)
             return;
 
-        // Executables, not display names: the detector matches the running process list, and a game
-        // whose display name differs from its executable ("Counter-Strike 2" / cs2.exe) would never
-        // be seen if the name were watched instead.
-        var executables = _gameCatalog.Entries
-            .Select(entry => entry.Executable)
-            .Where(name => name.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (executables.Count == 0)
-            return;
+        var targets = BuildDetectionTargets();
 
-        // The detector is subscribed straight to the same host methods the IPC path uses, so an
-        // auto-recorded session gets the whole lifecycle — metadata sidecar, session tracking, detection
-        // and state pushes — rather than a bare recorder Start/Stop.
-        _detector = new ProcessNameGameDetector(executables);
+        _detector = new ProcessNameGameDetector(targets);
         _detector.GameStarted += DetectedGameStarted;
         _detector.GameStopped += DetectedGameStopped;
         _detector.Start();
 
-        _fullscreenDetector = new FullscreenGameDetector(executables);
-        _fullscreenDetector.GameStarted += DetectedGameStarted;
-        _fullscreenDetector.GameStopped += DetectedGameStopped;
+        _fullscreenDetector = new FullscreenGameDetector(targets);
+        _fullscreenDetector.CandidateFound += OnFullscreenCandidateFound;
+        _fullscreenDetector.CandidateCleared += OnFullscreenCandidateCleared;
         _fullscreenDetector.Start();
+
     }
 
-    private void DetectedGameStarted(string processName)
+    private void StartDiscoveryScan()
     {
-        var (owner, gameId) = TrackDetectedGameStarted(processName);
+        if (_detector is not null && _discovery is not null && _discoveryTask.IsCompleted
+            && !_discoveryCancellation.IsCancellationRequested)
+            _discoveryTask = Task.Run(() => ScanDiscoveryAsync(_discoveryCancellation.Token));
+    }
+
+    private List<GameDetectionTarget> BuildDetectionTargets()
+    {
+        var targets = new List<GameDetectionTarget>();
+        foreach (var game in GameList)
+        {
+            if (string.IsNullOrWhiteSpace(game.Executable))
+                continue;
+
+            if (!game.BuiltIn)
+            {
+                var customPath = NormalizePickedExecutable(game.ExecutablePath);
+                if (customPath is not null)
+                    targets.Add(new GameDetectionTarget(game.Id, game.Executable,
+                        ProcessNameGameDetector.NormalizePath(customPath)));
+                continue;
+            }
+
+            var discoveredPath = DiscoveredProcessPath(game.Id, game.Executable);
+            targets.Add(discoveredPath is null
+                ? new GameDetectionTarget(game.Id, game.Executable)
+                : new GameDetectionTarget(game.Id, game.Executable, discoveredPath));
+        }
+
+        return targets;
+    }
+
+    private string? DiscoveredProcessPath(string gameId, string executable)
+    {
+        GameInventory inventory;
+        lock (_inventoryGate)
+            inventory = _inventory;
+        if (inventory.Games.IsDefaultOrEmpty)
+            return null;
+
+        var entry = _gameCatalog.EntryById(gameId);
+        var normalizedExecutable = ProcessNameGameDetector.NormalizeProcessName(executable);
+
+        foreach (var installed in inventory.Games)
+        {
+            if (entry is not null && entry.HasStoreProduct(installed.Store, installed.ProductId.Value))
+            {
+                return installed.TryResolveCatalogueExecutable(
+                    _discoveryFileSystem, entry.Executable, out var resolved)
+                    ? ProcessNameGameDetector.NormalizePath(resolved)
+                    : null;
+            }
+
+            if (entry is not null && (entry.StoreProducts is null || entry.StoreProducts.Count == 0))
+            {
+                if (installed.TryResolveCatalogueExecutable(
+                    _discoveryFileSystem, entry.Executable, out var resolved))
+                {
+                    return ProcessNameGameDetector.NormalizePath(resolved);
+                }
+
+                if (MatchingExecutablePath(installed, normalizedExecutable) is { } matched)
+                    return matched;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? MatchingExecutablePath(InstalledGame installed, string normalizedExecutable)
+    {
+        foreach (var path in installed.ExecutablePaths)
+        {
+            if (path.Length == 0)
+                continue;
+            var file = Path.GetFileName(path);
+            if (string.Equals(ProcessNameGameDetector.NormalizeProcessName(file), normalizedExecutable,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return ProcessNameGameDetector.NormalizePath(path);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task ScanDiscoveryAsync(CancellationToken cancellationToken)
+    {
+        if (_discovery is null)
+            return;
+
+        try
+        {
+            await _discoveryScanSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            try
+            {
+                var inventory = await _discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (_inventoryGate)
+                    _inventory = inventory;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception,
+                    "AppHost: launcher game discovery failed; detection continues on the packaged catalogue and custom games.");
+                return;
+            }
+
+            if (_disposed || cancellationToken.IsCancellationRequested)
+                return;
+
+            var previousPaths = GameList.Select(game => (game.Id, game.ExecutablePath)).ToList();
+            ReloadGameList();
+            var discoveredPaths = GameList.Select(game => (game.Id, game.ExecutablePath)).ToList();
+            if (!previousPaths.SequenceEqual(discoveredPaths))
+            {
+                RebuildDetectionTargets();
+                PushGameList();
+            }
+        }
+        finally
+        {
+            _discoveryScanSemaphore.Release();
+        }
+    }
+
+    private void RebuildDetectionTargets()
+    {
+        var targets = BuildDetectionTargets();
+        _detector?.UpdateTargets(targets);
+        _fullscreenDetector?.UpdateKnownTargets(targets);
+    }
+
+    private void OnFullscreenCandidateFound(FullscreenGameCandidate candidate)
+    {
+        var normalized = ProcessNameGameDetector.NormalizePath(candidate.ExecutablePath);
+        if (normalized is null)
+            return;
+
+        lock (_ignoredCandidateGate)
+        {
+            if (_ignoredCandidatePaths.Contains(normalized))
+                return;
+        }
+
+        _ipc.Broadcast("gameCandidate", JsonSerializer.SerializeToElement(new
+        {
+            pid = candidate.ProcessId,
+            executable = candidate.Executable,
+            executablePath = normalized,
+        }, Wire.Options));
+    }
+
+    private void OnFullscreenCandidateCleared(FullscreenGameCandidate candidate)
+    {
+        var normalized = ProcessNameGameDetector.NormalizePath(candidate.ExecutablePath);
+        if (normalized is null)
+            return;
+
+        _ipc.Broadcast("gameCandidateCleared", JsonSerializer.SerializeToElement(new
+        {
+            executablePath = normalized,
+        }, Wire.Options));
+    }
+
+    internal void IgnoreGameCandidate(string? executablePath, string? requestId = null)
+    {
+        var normalized = ProcessNameGameDetector.NormalizePath(executablePath);
+        if (normalized is null)
+        {
+            PushGameCandidateActionResult(requestId, executablePath ?? string.Empty, "ignore", false,
+                "The executable path is invalid.");
+            return;
+        }
+
+        lock (_ignoredCandidateGate)
+            _ignoredCandidatePaths.Add(normalized);
+        PushGameCandidateActionResult(requestId, normalized, "ignore", true, null);
+    }
+
+    internal void AddGameCandidate(string? name, string? executablePath, string? requestId = null)
+    {
+        lock (_settingsUpdateGate)
+            AddGameCandidateLocked(name, executablePath, requestId);
+    }
+
+    private void AddGameCandidateLocked(string? name, string? executablePath, string? requestId)
+    {
+        var normalized = NormalizePickedExecutable(executablePath);
+        if (normalized is null)
+        {
+            const string error = "That executable no longer exists; select it again before adding the game.";
+            PushError(error);
+            PushGameCandidateActionResult(requestId, executablePath ?? string.Empty, "add", false, error);
+            return;
+        }
+
+        var displayName = string.IsNullOrWhiteSpace(name)
+            ? Path.GetFileNameWithoutExtension(normalized)
+            : name.Trim();
+        var saved = _settingsStore.TryUpdate(settings =>
+        {
+            settings.Game.GameList.Add(new GameSetting
+            {
+                Id = $"custom-{Guid.NewGuid():N}",
+                Name = displayName,
+                ExecutablePath = normalized,
+                Integrations = new GameIntegrationSettings { Enabled = false },
+            });
+            return ValidateGameList(settings.Game.GameList, out var validationError)
+                ? null
+                : validationError;
+        }, out _, out var failure);
+
+        if (!saved)
+        {
+            var error = $"That game was not added: {failure ?? "the settings file could not be written."}";
+            PushError(error);
+            PushSettings();
+            PushGameCandidateActionResult(requestId, normalized, "add", false, error);
+            return;
+        }
+
+        ReloadGameList();
+        RebuildDetectionTargets();
+        PushGameList();
+        PushSettings();
+        lock (_ignoredCandidateGate)
+            _ignoredCandidatePaths.Add(normalized);
+        PushGameCandidateActionResult(requestId, normalized, "add", true, null);
+    }
+
+    private void PushGameCandidateActionResult(string? requestId, string executablePath, string action,
+        bool success, string? error)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+            return;
+
+        _ipc.Broadcast("gameCandidateActionResult", JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            executablePath,
+            action,
+            success,
+            error,
+        }, Wire.Options));
+    }
+
+    private void DetectedGameStarted(DetectedGameProcess process)
+    {
+        var (owner, gameId) = TrackDetectedGameStarted(process);
         PushState(IsRecording, CurrentGameId);
         EnsureManagedModel(gameId);
         lock (_recorderGate)
             StartRecordingLocked(gameId, owner);
     }
 
-    internal (string Owner, string GameId) TrackDetectedGameStarted(string processName)
+    internal (string Owner, string GameId) TrackDetectedGameStarted(DetectedGameProcess process)
     {
-        var owner = ProcessNameGameDetector.NormalizeProcessName(processName);
-        var gameId = ResolveDetectedGameId(owner);
-        lock (_detectedGameGate)
-        {
-            _detectedGames.RemoveAll(pair => string.Equals(pair.Key, owner, StringComparison.OrdinalIgnoreCase));
-            _detectedGames.Add(new KeyValuePair<string, string>(owner, gameId));
-        }
-
-        return (owner, gameId);
+        return (_detectedGames.Add(process), process.GameId);
     }
 
-    internal void DetectedGameStopped(string processName)
-    {
-        var owner = ProcessNameGameDetector.NormalizeProcessName(processName);
-        lock (_detectedGameGate)
-            _detectedGames.RemoveAll(pair => string.Equals(pair.Key, owner, StringComparison.OrdinalIgnoreCase));
+    internal static string DetecteeOwner(DetectedGameProcess process) => DetectedGameTracker.OwnerOf(process);
 
-        if (!string.Equals(Volatile.Read(ref _recordingProcessOwner), owner, StringComparison.OrdinalIgnoreCase))
+    internal void DetectedGameStopped(DetectedGameProcess process)
+    {
+        var owner = DetecteeOwner(process);
+        var replacement = _detectedGames.RemoveAndFindReplacement(process);
+
+        if (!string.Equals(Volatile.Read(ref _recordingProcessOwner), owner, StringComparison.Ordinal))
         {
             PushState(IsRecording, CurrentGameId);
             return;
         }
 
-        // This cancellation is intentionally outside the recorder gate: a manual or automatic start
-        // may be waiting for game capture while the detector reports that its owning process exited.
-        _captureWaitCancellation?.Cancel();
+        if (replacement is null)
+            _captureWaitCancellation?.Cancel();
+
         lock (_recorderGate)
         {
-            if (string.Equals(_recordingProcessOwner, owner, StringComparison.OrdinalIgnoreCase))
-                StopRecordingLocked();
-        }
-    }
+            if (!string.Equals(_recordingProcessOwner, owner, StringComparison.Ordinal))
+                return;
 
-    internal string? CurrentDetectedGameId()
-    {
-        lock (_detectedGameGate)
-            return _detectedGames.Count == 0 ? null : _detectedGames[^1].Value;
-    }
-
-    private string? DetectedProcessFor(string gameId)
-    {
-        lock (_detectedGameGate)
-        {
-            for (var index = _detectedGames.Count - 1; index >= 0; index--)
+            replacement ??= _detectedGames.LatestOwner(process.GameId);
+            if (replacement is not null)
             {
-                if (string.Equals(_detectedGames[index].Value, gameId, StringComparison.OrdinalIgnoreCase))
-                    return _detectedGames[index].Key;
+                Volatile.Write(ref _recordingProcessOwner, replacement);
+                PushState(IsRecording, CurrentGameId);
+                return;
+            }
+
+            if (!StopRecordingLocked())
+                return;
+
+            if (_detectedGames.LatestGameId() is { } nextGameId
+                && _detectedGames.LatestOwner(nextGameId) is { } nextOwner)
+            {
+                StartRecordingLocked(nextGameId, nextOwner);
             }
         }
-
-        return null;
     }
+
+    internal string? CurrentDetectedGameId() => _detectedGames.LatestGameId();
+
+    private string? DetectedProcessFor(string gameId) => _detectedGames.LatestOwner(gameId);
 
     // What the catalogue says this game runs as. Null Executable means the entry predates the field,
     // where the display name was also the process name.
@@ -1495,65 +1836,111 @@ internal sealed partial class AppHost : IDisposable
 
     // ---- settings ----
 
-    internal bool UpdateSettings(JsonElement? patch)
+    internal bool UpdateSettings(JsonElement? patch, string? requestId = null)
+    {
+        lock (_settingsUpdateGate)
+            return UpdateSettingsLocked(patch, requestId);
+    }
+
+    private bool UpdateSettingsLocked(JsonElement? patch, string? requestId)
     {
         if (patch is null)
+        {
+            PushSettingsUpdateResult(requestId, false, "The settings update was empty.");
             return false;
+        }
 
-        var settings = _settingsStore.Load();
-        var previousOutputDirectory = settings.Recording.OutputDirectory;
+        var previousGameKeys = _settingsStore.Load().Game.GameList
+            .Select(game => (game.Id, game.Executable, game.ExecutablePath))
+            .ToList();
+        SettingsModel settings;
+        string? failure;
+        bool saved;
         try
         {
-            ApplyPatch(settings, patch.Value);
-            var catalogueIds = _gameCatalog.Entries
-                .Select(entry => entry.GameId)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            settings.Game.GameList = settings.Game.GameList
-                .Where(game => catalogueIds.Contains(game.Id))
-                .ToList();
+            saved = _settingsStore.TryUpdate(candidate =>
+            {
+                ApplyPatch(candidate, patch.Value);
+                if (!ValidateGameList(candidate.Game.GameList, out var validationError,
+                    requireExistingExecutables: PatchUpdatesGameList(patch.Value)))
+                    return validationError;
+
+                string effectiveRoot;
+                try
+                {
+                    effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, candidate));
+                }
+                catch (Exception exception) when (exception is ArgumentException or IOException
+                    or NotSupportedException or PathTooLongException)
+                {
+                    return "the recording directory is not a usable path.";
+                }
+
+                return UnsafeRecordingRoot(effectiveRoot) is { } refusal
+                    ? $"the recording directory was refused because {refusal}."
+                    : CreateRecordingRoot(effectiveRoot);
+            }, out settings, out failure);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return false;
+            settings = _settingsStore.Load();
+            failure = exception.Message;
+            saved = false;
         }
 
-        _settingsStore.Save();
+        if (!saved)
+        {
+            var error = $"Those settings were not saved: {failure ?? "the settings file could not be written."}";
+            PushError(error);
+            PushSettings();
+            PushSettingsUpdateResult(requestId, false, error);
+            return true;
+        }
 
-        // The catalogue is built from these settings, so this is the one moment it can change.
         ReloadGameList();
+        var gameKeysNow = settings.Game.GameList
+            .Select(game => (game.Id, game.Executable, game.ExecutablePath))
+            .ToList();
+        if (!previousGameKeys.SequenceEqual(gameKeysNow))
+        {
+            RebuildDetectionTargets();
+            PushGameList();
+        }
 
-        // A changed OutputDirectory takes effect without a restart: the effective root, the content
-        // server's guard root and the metadata store are all rebuilt.
-        var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, _settingsStore));
+        var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, settings));
         if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))
         {
-            if (UnsafeRecordingRoot(effectiveRoot) is { } refusal)
-            {
-                // The previous root stays; adopting this one half-way would leave the stores and the
-                // content server disagreeing about where content lives. The setting goes back with
-                // it: a refused directory left in the file would be shown as the recording folder by
-                // the push below, and adopted unguarded by the next launch.
-                settings.Recording.OutputDirectory = previousOutputDirectory;
-                _settingsStore.Save();
-
-                Console.Error.WriteLine($"Tript.App: refused recording directory '{effectiveRoot}': {refusal}");
-                PushError($"That folder was not used as the recording directory: {refusal}");
-                PushSettings();
-                return true;
-            }
-
             EffectiveRoot = effectiveRoot;
             _content.UpdateRoot(effectiveRoot);
             _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             _clipTitles.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
             _thumbnails.UpdateRoot(ThumbnailRootFor(effectiveRoot));
             _trash.UpdateRoot(TrashRootFor(effectiveRoot));
-            Directory.CreateDirectory(effectiveRoot);
         }
 
         SettingsChanged?.Invoke(settings);
         PushSettings();
+        PushSettingsUpdateResult(requestId, true, null);
         return true;
+    }
+
+    private static string? CreateRecordingRoot(string path)
+    {
+        Directory.CreateDirectory(path);
+        return null;
+    }
+
+    private void PushSettingsUpdateResult(string? requestId, bool success, string? error)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+            return;
+
+        _ipc.Broadcast("settingsUpdateResult", JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            success,
+            error,
+        }, Wire.Options));
     }
 
     private static void ApplyPatch(SettingsModel settings, JsonElement patch)
@@ -1586,6 +1973,12 @@ internal sealed partial class AppHost : IDisposable
             }
         }
     }
+
+    private static bool PatchUpdatesGameList(JsonElement patch) =>
+        patch.ValueKind == JsonValueKind.Object
+        && patch.TryGetProperty("game", out var game)
+        && game.ValueKind == JsonValueKind.Object
+        && game.TryGetProperty("gameList", out _);
 
     private static void ApplyObjectPatch(object page, JsonElement patch)
     {
@@ -1653,8 +2046,125 @@ internal sealed partial class AppHost : IDisposable
     internal void ReloadGameList()
     {
         var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson);
+        AttachDiscoveredProcessPaths(games);
         lock (_gameListGate)
             _catalogueGames = games;
+    }
+
+    // The frontend sees where a packaged game is installed once the launcher inventory confirms it:
+    // the exact path is what the detection targets pin, so the wire list and the targets agree.
+    private void AttachDiscoveredProcessPaths(List<GameInfo> games)
+    {
+        GameInventory inventory;
+        lock (_inventoryGate)
+            inventory = _inventory;
+        if (inventory.Games.IsDefaultOrEmpty)
+            return;
+
+        foreach (var game in games)
+        {
+            if (!game.BuiltIn || !string.IsNullOrWhiteSpace(game.ExecutablePath))
+                continue;
+
+            var discovered = DiscoveredProcessPath(game.Id, game.Executable ?? string.Empty);
+            if (discovered is not null)
+                game.ExecutablePath = discovered;
+        }
+    }
+
+    internal bool ValidateGameList(IReadOnlyList<GameSetting> gameList, out string? failure,
+        bool requireExistingExecutables = false)
+    {
+        failure = null;
+        var packagedIds = _gameCatalog.Entries
+            .Select(entry => entry.GameId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var gameIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var customPaths = new HashSet<string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal);
+
+        foreach (var game in gameList)
+        {
+            if (string.IsNullOrWhiteSpace(game.Id))
+            {
+                failure = "a game is missing its identity.";
+                return false;
+            }
+
+            if (!gameIds.Add(game.Id))
+            {
+                failure = $"two games share the identity '{game.Id}'.";
+                return false;
+            }
+
+            if (packagedIds.Contains(game.Id))
+            {
+                if (!string.IsNullOrWhiteSpace(game.ExecutablePath))
+                {
+                    failure = $"'{game.Id}' is a packaged game; its executable identity cannot be changed.";
+                    return false;
+                }
+
+                continue;
+            }
+
+            try
+            {
+                GameModelPaths.ValidateGameId(game.Id);
+            }
+            catch (ArgumentException)
+            {
+                failure = $"'{game.Id}' is not a safe game identity.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(game.Name))
+            {
+                failure = "a custom game is missing its name.";
+                return false;
+            }
+
+            var path = game.ExecutablePath?.Trim();
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            {
+                failure = $"'{game.Id}' needs an exact absolute executable path.";
+                return false;
+            }
+
+            string normalizedPath;
+            try
+            {
+                normalizedPath = Path.GetFullPath(path);
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException
+                or NotSupportedException or PathTooLongException)
+            {
+                failure = $"'{game.Id}' has an unusable executable path.";
+                return false;
+            }
+
+            if (!customPaths.Add(normalizedPath))
+            {
+                failure = $"two custom games use the same executable: '{path}'.";
+                return false;
+            }
+
+            if (requireExistingExecutables && !File.Exists(normalizedPath))
+            {
+                failure = $"'{game.Id}' points to an executable that does not exist.";
+                return false;
+            }
+
+            if (OperatingSystem.IsWindows()
+                && !string.Equals(Path.GetExtension(normalizedPath), ".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                failure = $"'{game.Id}' must point to an .exe.";
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // A plain read. The getter used to reload whenever the catalogue was empty, which made a user who
@@ -1731,12 +2241,6 @@ internal sealed partial class AppHost : IDisposable
     internal void PushSettings()
     {
         var settings = _settingsStore.Load();
-        var catalogueIds = _gameCatalog.Entries
-            .Select(entry => entry.GameId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        settings.Game.GameList = settings.Game.GameList
-            .Where(game => catalogueIds.Contains(game.Id))
-            .ToList();
         var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
         // A fact about this machine, not a persisted setting, so it is settled per push and a device
         // unplugged after a save is not stuck in the settings file. Injected into the serialized element

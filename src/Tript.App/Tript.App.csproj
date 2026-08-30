@@ -44,5 +44,6 @@
     <ProjectReference Include="../Tript.Recorder/Tript.Recorder.csproj" />
     <ProjectReference Include="../Tript.Settings/Tript.Settings.csproj" />
     <ProjectReference Include="../Tript.Media/Tript.Media.csproj" />
+    <ProjectReference Include="../Tript.GameDiscovery/Tript.GameDiscovery.csproj" />
   </ItemGroup>
 </Project>

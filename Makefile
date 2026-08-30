@@ -269,7 +269,7 @@ run:
 # meant make stopped at the first failure and the entire frontend suite was silently skipped
 # whenever anything on the .NET side failed.
 UNIT_TEST_PROJECTS := tests/Tript.App.Tests tests/Tript.Detection.Tests tests/Tript.Media.Tests \
-	tests/Tript.Recorder.Tests tests/Tript.Settings.Tests
+	tests/Tript.Recorder.Tests tests/Tript.Settings.Tests tests/Tript.GameDiscovery.Tests
 
 test:
 	@fail=0; \

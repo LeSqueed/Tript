@@ -7,34 +7,61 @@ using Serilog;
 
 namespace Tript.Recorder;
 
-// Finds an unlisted game only when its foreground window fills a monitor. This is deliberately a
-// fallback: the packaged catalogue remains the source of stable identities for supported games.
-public sealed class FullscreenGameDetector : IGameDetector
+public sealed record FullscreenGameCandidate(
+    int ProcessId,
+    string Executable,
+    string ExecutablePath,
+    DateTimeOffset? ProcessStartTime = null);
+
+public sealed class FullscreenGameDetector : IDisposable
 {
     private const uint MonitorDefaultToNearest = 2;
-    private readonly HashSet<string> _knownExecutables;
     private readonly TimeSpan _pollInterval;
+    private readonly Func<FullscreenGameCandidate?> _candidateProbe;
     private readonly object _gate = new();
+    private readonly SerializedDetectorCallbackQueue _callbacks =
+        new("Tript fullscreen detector callbacks");
+    private KnownTargetSet _knownTargets;
+    private long _targetVersion;
     private Timer? _timer;
-    private int _activeProcessId;
-    private string _activeExecutable = string.Empty;
+    private FullscreenGameCandidate? _activeCandidate;
+    private FullscreenGameCandidate? _pendingCandidate;
+    private int _pendingPolls;
     private bool _disposed;
     private int _ticking;
 
-    public FullscreenGameDetector(IEnumerable<string> knownExecutables,
+    public FullscreenGameDetector(
+        IEnumerable<GameDetectionTarget> knownTargets,
+        TimeSpan? pollInterval = null)
+        : this(knownTargets, ProbeCandidate, pollInterval)
+    {
+    }
+
+    internal FullscreenGameDetector(
+        IEnumerable<GameDetectionTarget> knownTargets,
+        Func<FullscreenGameCandidate?> candidateProbe,
         TimeSpan? pollInterval = null)
     {
-        ArgumentNullException.ThrowIfNull(knownExecutables);
-        _knownExecutables = knownExecutables
-            .Select(ProcessNameGameDetector.NormalizeProcessName)
-            .Where(name => name.Length > 0)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ArgumentNullException.ThrowIfNull(candidateProbe);
+        _knownTargets = CreateKnownTargetSet(knownTargets);
+        _candidateProbe = candidateProbe;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(1);
     }
 
-    public event Action<string>? GameStarted;
+    public event Action<FullscreenGameCandidate>? CandidateFound;
 
-    public event Action<string>? GameStopped;
+    public event Action<FullscreenGameCandidate>? CandidateCleared;
+
+    public void UpdateKnownTargets(IEnumerable<GameDetectionTarget> knownTargets)
+    {
+        var replacement = CreateKnownTargetSet(knownTargets);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _knownTargets = replacement;
+            _targetVersion++;
+        }
+    }
 
     public void Start()
     {
@@ -53,10 +80,22 @@ public sealed class FullscreenGameDetector : IGameDetector
     {
         lock (_gate)
         {
+            if (_disposed)
+                return;
             _disposed = true;
             _timer?.Dispose();
             _timer = null;
         }
+        _callbacks.Dispose();
+    }
+
+    internal void PollOnce() => OnTick(null);
+
+    internal void WaitForCallbacks() => _callbacks.WaitUntilIdle();
+
+    internal bool IsDisposed
+    {
+        get { lock (_gate) return _disposed; }
     }
 
     private void OnTick(object? state)
@@ -80,106 +119,190 @@ public sealed class FullscreenGameDetector : IGameDetector
 
     private void Poll()
     {
-        int activePid;
+        long targetVersion;
         lock (_gate)
         {
             if (_disposed)
                 return;
-            activePid = _activeProcessId;
+            targetVersion = _targetVersion;
         }
 
-        if (activePid != 0)
-        {
-            if (IsProcessRunning(activePid))
-                return;
-
-            string stoppedExecutable;
-            lock (_gate)
-            {
-                if (_activeProcessId != activePid)
-                    return;
-
-                _activeProcessId = 0;
-                stoppedExecutable = _activeExecutable;
-                _activeExecutable = string.Empty;
-            }
-            RaiseStopped(stoppedExecutable);
-            return;
-        }
-
-        if (!TryGetFullscreenProcess(out var processId, out var executable))
-            return;
-
-        if (_knownExecutables.Contains(executable))
-            return;
+        var probed = NormalizeCandidate(_candidateProbe());
+        FullscreenGameCandidate? cleared = null;
+        FullscreenGameCandidate? found = null;
 
         lock (_gate)
         {
-            if (_disposed || _activeProcessId != 0)
+            if (_disposed || targetVersion != _targetVersion)
                 return;
-            _activeProcessId = processId;
-            _activeExecutable = executable;
+
+            if (probed is not null && IsKnown(probed, _knownTargets))
+                probed = null;
+
+            if (_activeCandidate is not null && SameCandidate(_activeCandidate, probed))
+            {
+                _pendingCandidate = null;
+                _pendingPolls = 0;
+                return;
+            }
+
+            if (_activeCandidate is not null)
+            {
+                cleared = _activeCandidate;
+                _activeCandidate = null;
+            }
+
+            if (probed is null)
+            {
+                _pendingCandidate = null;
+                _pendingPolls = 0;
+            }
+            else if (SameCandidate(_pendingCandidate, probed))
+            {
+                _pendingPolls++;
+                if (_pendingPolls >= 2)
+                {
+                    found = probed;
+                    _activeCandidate = probed;
+                    _pendingCandidate = null;
+                    _pendingPolls = 0;
+                }
+            }
+            else
+            {
+                _pendingCandidate = probed;
+                _pendingPolls = 1;
+            }
         }
 
-        RaiseStarted(executable);
+        if (cleared is not null)
+            Enqueue(CandidateCleared, cleared, targetVersion);
+        if (found is not null)
+            Enqueue(CandidateFound, found, targetVersion);
     }
 
-    private static bool IsProcessRunning(int processId)
+    private static FullscreenGameCandidate? NormalizeCandidate(FullscreenGameCandidate? candidate)
     {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
+        if (candidate is null || candidate.ProcessId <= 0)
+            return null;
+
+        var path = ProcessNameGameDetector.NormalizePath(candidate.ExecutablePath);
+        if (path is null || IsSystemExecutable(path))
+            return null;
+
+        var executable = ProcessNameGameDetector.NormalizeProcessName(Path.GetFileName(path));
+
+        return executable.Length == 0
+            ? null
+            : new FullscreenGameCandidate(
+                candidate.ProcessId, executable, path, candidate.ProcessStartTime);
     }
 
-    private static bool TryGetFullscreenProcess(out int processId, out string executable)
-    {
-        processId = 0;
-        executable = string.Empty;
+    private static bool IsKnown(FullscreenGameCandidate candidate, KnownTargetSet targets)
+        => targets.Paths.Contains(candidate.ExecutablePath)
+            || targets.Executables.Contains(candidate.Executable);
 
+    private static KnownTargetSet CreateKnownTargetSet(IEnumerable<GameDetectionTarget> knownTargets)
+    {
+        ArgumentNullException.ThrowIfNull(knownTargets);
+        var paths = new HashSet<string>(PathComparer);
+        var executables = new HashSet<string>(PathComparer);
+
+        foreach (var target in knownTargets)
+        {
+            ArgumentNullException.ThrowIfNull(target);
+            var path = ProcessNameGameDetector.NormalizePath(target.ExecutablePath);
+            if (!string.IsNullOrWhiteSpace(target.ExecutablePath) && path is null)
+                throw new ArgumentException("A target executable path must be valid.", nameof(knownTargets));
+
+            if (path is not null)
+                paths.Add(path);
+            else
+            {
+                var executable = ProcessNameGameDetector.NormalizeProcessName(target.Executable);
+                if (executable.Length > 0)
+                    executables.Add(executable);
+            }
+        }
+
+        return new KnownTargetSet(paths, executables);
+    }
+
+    private static FullscreenGameCandidate? ProbeCandidate()
+    {
         var window = GetForegroundWindow();
-        if (window == IntPtr.Zero || !IsWindowVisible(window)
-            || !IsWindowFullscreen(window))
-        {
-            return false;
-        }
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || !IsWindowFullscreen(window))
+            return null;
 
         GetWindowThreadProcessId(window, out var nativeProcessId);
         if (nativeProcessId == 0 || nativeProcessId == Environment.ProcessId)
-            return false;
+            return null;
 
         try
         {
             using var process = Process.GetProcessById((int)nativeProcessId);
             var path = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(path) || IsSystemExecutable(path))
-                return false;
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
 
-            var name = Path.GetFileName(path);
-            var normalized = ProcessNameGameDetector.NormalizeProcessName(name);
-            if (normalized.Length == 0)
-                return false;
-
-            processId = (int)nativeProcessId;
-            executable = normalized;
-            return true;
+            return new FullscreenGameCandidate(
+                (int)nativeProcessId,
+                ProcessNameGameDetector.NormalizeProcessName(Path.GetFileName(path)),
+                path,
+                process.StartTime.ToUniversalTime());
         }
         catch (Exception exception) when (exception is ArgumentException
             or InvalidOperationException or System.ComponentModel.Win32Exception
             or NotSupportedException)
         {
-            return false;
+            return null;
         }
     }
+
+    private void Enqueue(
+        Action<FullscreenGameCandidate>? handlers,
+        FullscreenGameCandidate candidate,
+        long generation)
+    {
+        if (handlers is null)
+            return;
+
+        _callbacks.Enqueue(() => Raise(handlers, candidate, generation));
+    }
+
+    private void Raise(
+        Action<FullscreenGameCandidate> handlers,
+        FullscreenGameCandidate candidate,
+        long generation)
+    {
+        foreach (Action<FullscreenGameCandidate> handler in handlers.GetInvocationList())
+        {
+            lock (_gate)
+            {
+                if (_disposed || generation != _targetVersion)
+                    return;
+            }
+            try
+            {
+                handler(candidate);
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception,
+                    "FullscreenGameDetector: a candidate subscriber threw; the watch continues.");
+            }
+        }
+    }
+
+    private static bool SameCandidate(
+        FullscreenGameCandidate? left,
+        FullscreenGameCandidate? right)
+        => ReferenceEquals(left, right)
+            || left is not null && right is not null
+                && left.ProcessId == right.ProcessId
+                && left.ProcessStartTime == right.ProcessStartTime
+                && PathComparer.Equals(left.Executable, right.Executable)
+                && PathComparer.Equals(left.ExecutablePath, right.ExecutablePath);
 
     internal static bool IsSystemExecutable(string path)
     {
@@ -217,7 +340,10 @@ public sealed class FullscreenGameDetector : IGameDetector
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
         var normalizedPath = Path.GetFullPath(path);
-        return normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return normalizedPath.StartsWith(normalizedRoot, comparison);
     }
 
     private static bool IsWindowFullscreen(IntPtr window)
@@ -241,29 +367,11 @@ public sealed class FullscreenGameDetector : IGameDetector
 
     private static bool NearlyEqual(int left, int right) => Math.Abs(left - right) <= 1;
 
-    private void RaiseStarted(string executable)
-    {
-        try
-        {
-            GameStarted?.Invoke(executable);
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "FullscreenGameDetector: a subscriber threw on game start.");
-        }
-    }
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 
-    private void RaiseStopped(string executable)
-    {
-        try
-        {
-            GameStopped?.Invoke(executable);
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "FullscreenGameDetector: a subscriber threw on game stop.");
-        }
-    }
+    private sealed record KnownTargetSet(HashSet<string> Paths, HashSet<string> Executables);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();

@@ -3,21 +3,94 @@
 
 namespace Tript.Recorder;
 
-// The auto-start seam. The recorder starts when a supported game is detected running and stops when
-// it is no longer detected — it is the consumer of detection, not the detector: a real process
-// watcher (WMI watchers and foreground hook on Windows, /proc polling on Linux, per the games-
-// catalogue spec) publishes here, and the recorder reacts.
+public sealed record GameDetectionTarget(string GameId, string Executable, string? ExecutablePath = null);
+
+public sealed record DetectedGameProcess(
+    string GameId,
+    int ProcessId,
+    string Executable,
+    string ExecutablePath,
+    DateTimeOffset? ProcessStartTime = null);
+
 public interface IGameDetector : IDisposable
 {
-    // Fires when a supported game starts running. The name is the session's game name — the
-    // catalogue name when detection came from the catalogue, the per-game name when a GameSetting
-    // forced it.
-    event Action<string>? GameStarted;
+    event Action<DetectedGameProcess>? GameStarted;
 
-    // Fires when a detected game is no longer running. The normalized process name identifies the
-    // detector transition, so another game's stop cannot end the active recording.
-    event Action<string>? GameStopped;
+    event Action<DetectedGameProcess>? GameStopped;
 
-    // Begins watching. May be called once; Start again is a no-op.
     void Start();
+}
+
+internal sealed class SerializedDetectorCallbackQueue : IDisposable
+{
+    private readonly object _gate = new();
+    private readonly Queue<Action> _callbacks = [];
+    private readonly Thread _worker;
+    private bool _disposed;
+    private bool _active;
+
+    internal SerializedDetectorCallbackQueue(string name)
+    {
+        _worker = new Thread(Run) { IsBackground = true, Name = name };
+        _worker.Start();
+    }
+
+    internal void Enqueue(Action callback)
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _callbacks.Enqueue(callback);
+            Monitor.Pulse(_gate);
+        }
+    }
+
+    internal void WaitUntilIdle()
+    {
+        lock (_gate)
+        {
+            while (!_disposed && (_active || _callbacks.Count > 0))
+                Monitor.Wait(_gate);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _disposed = true;
+            _callbacks.Clear();
+            Monitor.PulseAll(_gate);
+        }
+
+        if (Thread.CurrentThread != _worker)
+            _worker.Join();
+    }
+
+    private void Run()
+    {
+        while (true)
+        {
+            Action callback;
+            lock (_gate)
+            {
+                while (!_disposed && _callbacks.Count == 0)
+                    Monitor.Wait(_gate);
+                if (_disposed)
+                    return;
+                callback = _callbacks.Dequeue();
+                _active = true;
+            }
+
+            callback();
+
+            lock (_gate)
+            {
+                _active = false;
+                if (_callbacks.Count == 0)
+                    Monitor.PulseAll(_gate);
+            }
+        }
+    }
 }

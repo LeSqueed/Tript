@@ -179,6 +179,8 @@ export interface GameIntegrationSettings {
 export interface GameSetting {
   id: string;
   name: string;
+  /** The exact executable path for a user-defined game. */
+  executablePath?: string | null;
   /**
    * The process name the recorder watches for and attaches game capture to. Absent or null means
    * "the same as `name`", which is what every settings file written before this field existed says.

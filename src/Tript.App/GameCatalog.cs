@@ -2,11 +2,24 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.Json;
+using Tript.GameDiscovery;
 using Tript.Recorder;
 
 namespace Tript.App;
 
-internal sealed record GameCatalogEntry(string GameId, string Executable);
+internal sealed record GameCatalogEntry(
+    string GameId,
+    string Executable,
+    string? Name = null,
+    IReadOnlyList<GameStoreProduct>? StoreProducts = null)
+{
+    internal bool HasStoreProduct(GameStore store, string productId)
+        => StoreProducts is { } products &&
+            products.Any(p => string.Equals(p.Store, store.ToString(), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(p.ProductId, productId, StringComparison.OrdinalIgnoreCase));
+}
+
+internal sealed record GameStoreProduct(string Store, string ProductId);
 
 internal sealed class GameCatalog
 {
@@ -16,6 +29,10 @@ internal sealed class GameCatalog
     }
 
     internal IReadOnlyList<GameCatalogEntry> Entries { get; }
+
+    internal GameCatalogEntry? EntryById(string gameId)
+        => Entries.FirstOrDefault(entry =>
+            string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
 
     internal static GameCatalog Load(string path)
     {
@@ -48,6 +65,18 @@ internal sealed class GameCatalog
             if (!executables.Add(ProcessNameGameDetector.NormalizeProcessName(entry.Executable)))
                 throw new InvalidDataException(
                     $"Game catalogue contains duplicate executable '{entry.Executable}'.");
+
+            if (entry.StoreProducts is null)
+                continue;
+
+            foreach (var product in entry.StoreProducts)
+            {
+                if (string.IsNullOrWhiteSpace(product.Store) || string.IsNullOrWhiteSpace(product.ProductId))
+                {
+                    throw new InvalidDataException(
+                        $"Game catalogue entry '{entry.GameId}' has a store product with a blank store or product id.");
+                }
+            }
         }
     }
 }

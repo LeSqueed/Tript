@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+namespace Tript.GameDiscovery;
+
+public static class PathSafety
+{
+    public static bool TryCanonicalize(IDiscoveryFileSystem fileSystem, string path, out string canonicalPath)
+    {
+        canonicalPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        try
+        {
+            canonicalPath = TrimTrailingSeparators(fileSystem.GetFullPath(path.Trim().Trim('"')));
+            return Path.IsPathFullyQualified(canonicalPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    public static bool TryResolveLexicallyContained(
+        IDiscoveryFileSystem fileSystem,
+        string root,
+        string candidate,
+        out string fullPath)
+    {
+        fullPath = string.Empty;
+        if (!TryCanonicalize(fileSystem, root, out var canonicalRoot) || string.IsNullOrWhiteSpace(candidate))
+            return false;
+
+        try
+        {
+            var combined = Path.IsPathFullyQualified(candidate)
+                ? candidate
+                : Path.Combine(canonicalRoot, candidate.Replace('/', Path.DirectorySeparatorChar));
+            var canonicalCandidate = TrimTrailingSeparators(fileSystem.GetFullPath(combined));
+            var prefix = canonicalRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? canonicalRoot
+                : canonicalRoot + Path.DirectorySeparatorChar;
+            if (!canonicalCandidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            fullPath = canonicalCandidate;
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static string TrimTrailingSeparators(string path)
+    {
+        var rootLength = Path.GetPathRoot(path)?.Length ?? 0;
+        return path.Length > rootLength
+            ? path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            : path;
+    }
+}

@@ -66,6 +66,41 @@ public sealed class SettingsStore
         }
     }
 
+    public bool TryUpdate(Func<Settings, string?> update, out Settings settings, out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        lock (_gate)
+        {
+            var current = Load();
+            var candidate = SettingsSerialization.Deserialize(SettingsSerialization.Serialize(current))
+                ?? new Settings();
+
+            try
+            {
+                error = update(candidate);
+                if (error is not null)
+                {
+                    settings = current;
+                    return false;
+                }
+
+                _provider.WriteRaw(SettingsSerialization.Serialize(candidate));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                settings = current;
+                error = exception.Message;
+                return false;
+            }
+
+            _settings = candidate;
+            settings = candidate;
+            error = null;
+            return true;
+        }
+    }
+
     private static object GetPage(Settings settings, SettingsPage page) => page switch
     {
         SettingsPage.Recording => settings.Recording,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -26,12 +27,25 @@ public sealed class GameSetting
     // which is exactly how it behaved when Name did both jobs.
     public string? Executable { get; set; }
 
-    // Never written to the settings file: this is Executable-or-Name, not a stored value. Callers
-    // that need to compare it against a running process name normalize it first
-    // (ProcessNameGameDetector.NormalizeProcessName) — the `.exe` is optional on both sides.
+    // The exact executable path a custom game runs from, e.g. "C:\Games\Example\game.exe". Custom
+    // games match only this path, so an unrelated process that shares the file name can never be
+    // mistaken for the game. Packaged games never carry this: their installations come from the
+    // launcher inventory or their basename.
+    public string? ExecutablePath { get; set; }
+
+    // Never written to the settings file: this is the path's file name, Executable, or Name — not a
+    // stored value. Callers that need to compare it against a running process name normalize it
+    // first (ProcessNameGameDetector.NormalizeProcessName) — the `.exe` is optional on both sides.
     [JsonIgnore]
     public string EffectiveExecutable
-        => string.IsNullOrWhiteSpace(Executable) ? Name : Executable.Trim();
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(ExecutablePath))
+                return Path.GetFileName(ExecutablePath.Trim());
+            return string.IsNullOrWhiteSpace(Executable) ? Name : Executable.Trim();
+        }
+    }
 
     public string? IconId { get; set; }
 

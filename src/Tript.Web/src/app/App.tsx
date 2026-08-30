@@ -10,6 +10,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { WarningBanner } from '../components/WarningBanner';
 import { ConnectionBanner } from '../components/ConnectionBanner';
 import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
+import { GameCandidateBanner } from '../components/GameCandidateBanner';
 import { LibraryView } from '../components/LibraryView';
 import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
@@ -18,7 +19,7 @@ import { useTrash } from '../components/trash/useTrash';
 import { itemLabel } from '../components/library/libraryModel';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
-import type { ContentItem, RecordingState } from '../ipc/protocol';
+import type { ContentItem, GameInfo, RecordingState } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
@@ -29,6 +30,8 @@ import { TrainingView } from '../components/TrainingView';
 import './app.css';
 
 export type Route = 'library' | 'session' | 'settings' | 'player' | 'training';
+
+const FALLBACK_BUILT_IN_GAME_IDS = ['Overwatch'] as const;
 
 type PhotinoShellWindow = Window & {
   external?: {
@@ -77,6 +80,23 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
   const [recording, setRecording] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ item: ContentItem; advancePlayer: boolean } | null>(null);
+  const [builtInGameIds, setBuiltInGameIds] = useState<readonly string[]>(FALLBACK_BUILT_IN_GAME_IDS);
+
+  useEffect(() => {
+    const remove = client.on('gameList', (content) => {
+      const list = Array.isArray(content) ? (content as GameInfo[]) : [];
+      const builtIn = list
+        .filter((game) => game.builtIn === true && typeof game.id === 'string')
+        .map((game) => String(game.id));
+      if (builtIn.length > 0) {
+        setBuiltInGameIds(builtIn);
+      }
+    });
+    if (connectionState === 'connected') {
+      client.send('ListGames');
+    }
+    return remove;
+  }, [client, connectionState]);
 
   useEffect(() => {
     const remove = client.on('settings', (content) => {
@@ -364,6 +384,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
         <ErrorBanner client={client} />
         <WarningBanner client={client} />
         <DisplayFallbackBanner client={client} />
+        <GameCandidateBanner client={client} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}
@@ -413,7 +434,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               onDelete={requestSessionDelete}
             />
           )}
-          {route === 'settings' && <SettingsView client={client} />}
+          {route === 'settings' && <SettingsView client={client} builtInGameIds={builtInGameIds} />}
           {route === 'training' && trainingEnabled && <TrainingView client={client} />}
         </div>
       </main>

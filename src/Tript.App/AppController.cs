@@ -70,15 +70,26 @@ internal sealed class AppController
             // one — so by then that push is long gone and the page would render on its own defaults
             // until the user's first edit triggered one.
             ["ListSettings"] = (_, _) => _host.PushSettings(),
-            ["UpdateSettings"] = (parameters, _) => _host.UpdateSettings(
-                parameters.Deserialize<UpdateSettingsParameters>()?.Settings),
+            ["UpdateSettings"] = (parameters, _) =>
+            {
+                var parsed = parameters.Deserialize<UpdateSettingsParameters>();
+                _host.UpdateSettings(parsed?.Settings, parsed?.RequestId);
+            },
             ["SetVideoLocation"] = (_, _) => _host.RequestVideoLocation(),
             ["BrowseTrainingFolder"] = (_, _) => _host.RequestTrainingFolder(),
             ["SetCacheLocation"] = (_, _) => { /* No native folder picker in the alpha. */ },
-            ["SelectGameExecutable"] = (_, client) =>
+            ["SelectGameExecutable"] = (parameters, _) => _host.RequestGameExecutable(
+                parameters.Deserialize<SelectGameExecutableParameters>()?.RequestId ?? string.Empty),
+            ["AddGameCandidate"] = (parameters, _) =>
             {
-                // The picker command's reply is a message; the alpha has no picker, so nothing is
-                // sent.
+                var parsed = parameters.Deserialize<AddGameCandidateParameters>();
+                if (parsed is not null)
+                    _host.AddGameCandidate(parsed.Name, parsed.ExecutablePath, parsed.RequestId);
+            },
+            ["IgnoreGameCandidate"] = (parameters, _) =>
+            {
+                var parsed = parameters.Deserialize<GameCandidateParameters>();
+                _host.IgnoreGameCandidate(parsed?.ExecutablePath, parsed?.RequestId);
             },
             ["ApplyVideoPreset"] = (_, _) => { /* No presets in the alpha. */ },
             ["ApplyClipPreset"] = (_, _) => { /* No presets in the alpha. */ },

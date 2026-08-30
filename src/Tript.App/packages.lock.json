@@ -41,6 +41,9 @@
           "Tript.Obs": "[1.0.0, )"
         }
       },
+      "tript.gamediscovery": {
+        "type": "Project"
+      },
       "tript.media": {
         "type": "Project",
         "dependencies": {

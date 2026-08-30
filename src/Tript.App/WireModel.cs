@@ -107,6 +107,14 @@ internal sealed class GameInfo
     // Null only for a catalogue entry that carries no executable at all.
     public string? Executable { get; set; }
 
+    // The exact executable path a custom game matches, or the launcher-confirmed path of a packaged
+    // game. Null when the game is matched by basename (the packaged overlay entries).
+    public string? ExecutablePath { get; set; }
+
+    // True when the identity comes from the packaged catalogue, false for a user-defined custom
+    // game. The frontend uses this to keep packaged identities immutable.
+    public bool BuiltIn { get; set; }
+
     public bool Detected { get; set; }
 }
 
@@ -280,6 +288,29 @@ internal sealed class DeleteBookmarkParameters
 internal sealed class UpdateSettingsParameters
 {
     public System.Text.Json.JsonElement Settings { get; set; }
+
+    public string RequestId { get; set; } = string.Empty;
+}
+
+internal sealed class SelectGameExecutableParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+}
+
+internal sealed class GameCandidateParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string ExecutablePath { get; set; } = string.Empty;
+}
+
+internal sealed class AddGameCandidateParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string? Name { get; set; }
+
+    public string ExecutablePath { get; set; } = string.Empty;
 }
 
 internal sealed class ToggleFullscreenParameters

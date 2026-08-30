@@ -376,6 +376,7 @@ internal static class Program
         // WindowCreated callback ordering across the Windows and Linux Photino backends.
         host.FolderPicker = () => PickRecordingFolder(window, host);
         host.TrainingFolderPicker = () => PickTrainingFolder(window);
+        host.GameExecutablePicker = () => PickExecutable(window);
 
         // Install the host's native folder picker once the window exists. Photino fires the
         // WindowCreated handler inside WaitForClose, after it has created the native window
@@ -385,6 +386,7 @@ internal static class Program
         {
             host.FolderPicker = () => PickRecordingFolder(window, host);
             host.TrainingFolderPicker = () => PickTrainingFolder(window);
+            host.GameExecutablePicker = () => PickExecutable(window);
             tray?.SetRecordingState(host.IsRecording, host.CurrentGameId);
             if (activationPending)
             {
@@ -547,6 +549,34 @@ internal static class Program
 
         if (!completed.Wait(TimeSpan.FromMinutes(5)))
             throw new TimeoutException("The native folder picker did not return.");
+        return result;
+    }
+
+    // Runs the native "select an executable" dialog and returns the chosen path, or null when the
+    // user cancels. Same marshalling rule as PickFolder: ShowOpenFile must run on the window's UI
+    // thread, and the Browse button arrives on an IPC thread.
+    private static string? PickExecutable(PhotinoWindow window)
+    {
+        string? result = null;
+        using var completed = new ManualResetEventSlim(false);
+        window.Invoke(() =>
+        {
+            try
+            {
+                var picked = window.ShowOpenFile("Select game executable",
+                    ExistingFolderOrParent(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+                    multiSelect: false);
+                if (picked.Length > 0)
+                    result = picked[0];
+            }
+            finally
+            {
+                completed.Set();
+            }
+        });
+
+        if (!completed.Wait(TimeSpan.FromMinutes(5)))
+            throw new TimeoutException("The native executable picker did not return.");
         return result;
     }
 }

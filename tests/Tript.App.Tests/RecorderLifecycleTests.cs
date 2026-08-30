@@ -149,14 +149,15 @@ public sealed class RecorderLifecycleTests : IDisposable
     [Fact]
     public void ManualRecordingOfDetectedGame_StopsWhenItsProcessExits()
     {
-        _host.TrackDetectedGameStarted("Overwatch.exe");
+        var process = new DetectedGameProcess("Overwatch", 4001, "Overwatch", @"C:\Games\Overwatch\Overwatch.exe");
+        _host.TrackDetectedGameStarted(process);
 
         Assert.Equal("Overwatch", _host.CurrentDetectedGameId());
         Assert.True(_host.StartRecording(null));
         Assert.Equal("Overwatch", _host.CurrentGameId);
         Assert.True(_host.BackgroundWorkSuspendedForRecording);
 
-        _host.DetectedGameStopped("Overwatch");
+        _host.DetectedGameStopped(process);
 
         Assert.False(_host.IsRecording);
         Assert.False(_host.BackgroundWorkSuspendedForRecording);
@@ -166,14 +167,64 @@ public sealed class RecorderLifecycleTests : IDisposable
     [Fact]
     public void AnUnrelatedDetectedProcessExit_DoesNotStopTheRecording()
     {
-        _host.TrackDetectedGameStarted("Overwatch");
+        var overwatch = new DetectedGameProcess("Overwatch", 4001, "Overwatch", @"C:\Games\Overwatch\Overwatch.exe");
+        var doom = new DetectedGameProcess("doom", 4002, "doom", @"C:\Games\Doom\doom.exe");
+        _host.TrackDetectedGameStarted(overwatch);
         Assert.True(_host.StartRecording(null));
-        _host.TrackDetectedGameStarted("doom");
+        _host.TrackDetectedGameStarted(doom);
 
-        _host.DetectedGameStopped("doom");
+        _host.DetectedGameStopped(doom);
 
         Assert.True(_host.IsRecording);
-        _host.DetectedGameStopped("Overwatch");
+        _host.DetectedGameStopped(overwatch);
+        Assert.False(_host.IsRecording);
+    }
+
+    [Fact]
+    public void RecordingOwnership_TransfersToAnotherProcessOfTheSameGame()
+    {
+        var first = new DetectedGameProcess("Overwatch", 4001, "Overwatch",
+            @"C:\Games\Overwatch\Overwatch.exe", DateTimeOffset.UtcNow);
+        var second = new DetectedGameProcess("Overwatch", 4002, "Overwatch",
+            @"C:\Games\Overwatch\Overwatch.exe", DateTimeOffset.UtcNow.AddSeconds(1));
+        _host.TrackDetectedGameStarted(first);
+        Assert.True(_host.StartRecording(null));
+        _host.TrackDetectedGameStarted(second);
+
+        _host.DetectedGameStopped(first);
+
+        Assert.True(_host.IsRecording);
+        Assert.Equal("Overwatch", _host.CurrentDetectedGameId());
+        _host.DetectedGameStopped(second);
+        Assert.False(_host.IsRecording);
+    }
+
+    [Fact]
+    public void ProcessStartTime_DistinguishesPidReuse()
+    {
+        var path = @"C:\Games\Overwatch\Overwatch.exe";
+        var first = new DetectedGameProcess("Overwatch", 4001, "Overwatch", path,
+            DateTimeOffset.FromUnixTimeSeconds(1));
+        var replacement = first with { ProcessStartTime = DateTimeOffset.FromUnixTimeSeconds(2) };
+
+        Assert.NotEqual(AppHost.DetecteeOwner(first), AppHost.DetecteeOwner(replacement));
+    }
+
+    [Fact]
+    public void RecordingMovesToAnAlreadyRunningDifferentGame()
+    {
+        var overwatch = new DetectedGameProcess("Overwatch", 4001, "Overwatch",
+            @"C:\Games\Overwatch\Overwatch.exe");
+        var doom = new DetectedGameProcess("doom", 4002, "doom", @"C:\Games\Doom\doom.exe");
+        _host.TrackDetectedGameStarted(overwatch);
+        Assert.True(_host.StartRecording(null));
+        _host.TrackDetectedGameStarted(doom);
+
+        _host.DetectedGameStopped(overwatch);
+
+        Assert.True(_host.IsRecording);
+        Assert.Equal("doom", _host.CurrentGameId);
+        _host.DetectedGameStopped(doom);
         Assert.False(_host.IsRecording);
     }
 

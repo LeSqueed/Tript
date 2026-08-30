@@ -249,7 +249,29 @@ export interface RecoveryPromptMessage {
 }
 
 export interface SelectedGameExecutableMessage {
-  filePath: string;
+  requestId: string;
+  filePath: string | null;
+}
+
+export interface SettingsUpdateResultMessage {
+  requestId: string;
+  success: boolean;
+  error?: string | null;
+}
+
+/** A fullscreen application that is not a known or custom game, offered as an add-game candidate. */
+export interface GameCandidateMessage {
+  pid: number;
+  executable: string;
+  executablePath: string;
+}
+
+export interface GameCandidateActionResultMessage {
+  requestId: string;
+  executablePath: string;
+  action: 'add' | 'ignore';
+  success: boolean;
+  error?: string | null;
 }
 
 /**
@@ -492,6 +514,24 @@ export interface ApplyClipPresetParameters {
 export interface UpdateSettingsParameters {
   /** A partial settings object. `gameIntegrations` is an observed key. */
   settings: Partial<Settings>;
+  requestId: string;
+}
+
+export interface SelectGameExecutableParameters {
+  requestId: string;
+}
+
+/** Add a fullscreen-suggested (or manually chosen) executable as a persisted custom game. */
+export interface AddGameCandidateParameters {
+  requestId: string;
+  name?: string;
+  executablePath: string;
+}
+
+/** Dismiss the add-game suggestion for an executable for the rest of the session. */
+export interface IgnoreGameCandidateParameters {
+  requestId: string;
+  executablePath: string;
 }
 
 export interface OpenFileLocationParameters {
@@ -599,6 +639,9 @@ export type CommandParameters =
   | ApplyVideoPresetParameters
   | ApplyClipPresetParameters
   | UpdateSettingsParameters
+  | SelectGameExecutableParameters
+  | AddGameCandidateParameters
+  | IgnoreGameCandidateParameters
   | OpenFileLocationParameters
   | CopyFileToClipboardParameters
   | OpenInBrowserParameters
@@ -658,6 +701,8 @@ export type CommandName =
   | 'SetVideoLocation'
   | 'SetCacheLocation'
   | 'SelectGameExecutable'
+  | 'AddGameCandidate'
+  | 'IgnoreGameCandidate'
   | 'ApplyVideoPreset'
   | 'ApplyClipPreset'
   // Shell and OS integration
@@ -699,6 +744,10 @@ export type MessageName =
   | 'storageWarning'
   | 'recoveryPrompt'
   | 'selectedGameExecutable'
+  | 'settingsUpdateResult'
+  | 'gameCandidate'
+  | 'gameCandidateCleared'
+  | 'gameCandidateActionResult'
   | 'gameList'
   | 'error'
   | 'warning'

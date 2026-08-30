@@ -133,13 +133,19 @@ internal sealed class AppOptions
     }
 
     // The game list pushed on every NewConnection and broadcast when it changes. Stable game identity
-    // comes from the packaged project catalogue; settings only provide display names and overrides.
+    // comes from the packaged project catalogue; settings provide display names, overrides, and the
+    // user's custom games. Packaged entries keep their catalogue executable and cannot be replaced by
+    // settings; custom entries are the settings entries whose IDs are not packaged, and they carry an
+    // exact executable path when the user chose one.
     internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
         string? overrideJson)
     {
         var games = new List<GameInfo>();
+        var packagedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var entry in catalog.Entries)
         {
+            packagedIds.Add(entry.GameId);
             var setting = settings.Game.GameList.FirstOrDefault(game =>
                 string.Equals(game.Id, entry.GameId, StringComparison.OrdinalIgnoreCase));
             games.Add(new GameInfo
@@ -147,6 +153,25 @@ internal sealed class AppOptions
                 Id = entry.GameId,
                 Name = string.IsNullOrWhiteSpace(setting?.Name) ? entry.GameId : setting.Name,
                 Executable = entry.Executable,
+                BuiltIn = true,
+                Detected = false,
+            });
+        }
+
+        foreach (var setting in settings.Game.GameList)
+        {
+            if (packagedIds.Contains(setting.Id) || string.IsNullOrWhiteSpace(setting.Id))
+                continue;
+
+            games.Add(new GameInfo
+            {
+                Id = setting.Id,
+                Name = string.IsNullOrWhiteSpace(setting.Name) ? setting.Id : setting.Name,
+                Executable = setting.EffectiveExecutable,
+                ExecutablePath = string.IsNullOrWhiteSpace(setting.ExecutablePath)
+                    ? null
+                    : setting.ExecutablePath.Trim(),
+                BuiltIn = false,
                 Detected = false,
             });
         }

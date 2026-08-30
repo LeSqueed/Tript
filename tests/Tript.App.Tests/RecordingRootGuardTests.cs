@@ -197,6 +197,23 @@ public sealed class RecordingRootGuardTests : IDisposable
             onDisk.RootElement.GetProperty("recording").GetProperty("outputDirectory").GetString());
     }
 
+    [Fact]
+    public void AnUncreatableDirectory_IsNotCommitted()
+    {
+        var accepted = Path.Combine(_contentRoot, "picked-recordings");
+        Assert.True(PointRootAt(accepted));
+        var file = Path.Combine(_contentRoot, "not-a-directory");
+        File.WriteAllText(file, "occupied");
+
+        Assert.True(PointRootAt(file));
+
+        Assert.Equal(accepted, _store.Load().Recording.OutputDirectory);
+        Assert.Equal(accepted, _host.EffectiveRoot);
+        using var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+        Assert.Equal(accepted,
+            onDisk.RootElement.GetProperty("recording").GetProperty("outputDirectory").GetString());
+    }
+
     private bool PointRootAt(string directory) =>
         _host.UpdateSettings(JsonSerializer.SerializeToElement(new
         {

@@ -165,6 +165,22 @@ describe('App shell', () => {
     expect(screen.getByTestId('library-groups')).toBeTruthy();
   });
 
+  it('requests games once and does not request them again in response to gameList', () => {
+    renderApp();
+    connect();
+    const socket = activeSocket();
+    const listGamesCount = () => socket.sent
+      .map((frame) => JSON.parse(frame) as { method?: string })
+      .filter((frame) => frame.method === 'ListGames').length;
+
+    expect(listGamesCount()).toBe(1);
+    act(() => socket.serverMessage(JSON.stringify({
+      method: 'gameList',
+      content: [{ id: 'Overwatch', name: 'Overwatch', detected: false, builtIn: true }],
+    })));
+    expect(listGamesCount()).toBe(1);
+  });
+
   it('honours a settings startup fragment without changing normal navigation', () => {
     window.location.hash = '#settings';
     renderApp();

@@ -6,49 +6,60 @@ using Serilog;
 
 namespace Tript.Recorder;
 
-// The minimal process-watcher the alpha ships: polls the running process list on a timer and raises
-// the detector events when a process whose name matches the known-game list appears or disappears.
-// This is deliberately not the full detection ladder from the games-catalogue spec — no executable
-// path patterns, no Steam/Proton resolution, no blacklist — it is the seam made real so the
-// recorder can be exercised end to end.
 public sealed class ProcessNameGameDetector : IGameDetector
 {
     private readonly TimeSpan _pollInterval;
-    private readonly string[] _gameNames;
-
+    private readonly Func<IReadOnlyList<ProcessSnapshot>> _processProbe;
     private readonly object _gate = new();
-    private readonly HashSet<string> _running = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SerializedDetectorCallbackQueue _callbacks =
+        new("Tript process detector callbacks");
+    private readonly Dictionary<int, DetectedGameProcess> _running = [];
+    private TargetSet _targets;
+    private long _targetVersion;
     private Timer? _timer;
     private bool _disposed;
-
-    // System.Threading.Timer does not suppress re-entry, and a subscriber can block for seconds.
-    // A tick that lands while the previous one is still running is dropped rather than queued.
     private int _ticking;
 
-    public ProcessNameGameDetector(IEnumerable<string> gameNames, TimeSpan? pollInterval = null)
+    public ProcessNameGameDetector(
+        IEnumerable<GameDetectionTarget> targets,
+        TimeSpan? pollInterval = null)
+        : this(targets, ProbeProcesses, pollInterval)
     {
-        ArgumentNullException.ThrowIfNull(gameNames);
+    }
 
-        _gameNames = gameNames.Select(NormalizeProcessName).Where(name => name.Length > 0).ToArray();
+    internal ProcessNameGameDetector(
+        IEnumerable<GameDetectionTarget> targets,
+        Func<IReadOnlyList<ProcessSnapshot>> processProbe,
+        TimeSpan? pollInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(processProbe);
+        _targets = CreateTargetSet(targets);
+        _processProbe = processProbe;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
     }
 
-    public event Action<string>? GameStarted;
+    public event Action<DetectedGameProcess>? GameStarted;
 
-    public event Action<string>? GameStopped;
+    public event Action<DetectedGameProcess>? GameStopped;
+
+    public void UpdateTargets(IEnumerable<GameDetectionTarget> targets)
+    {
+        var replacement = CreateTargetSet(targets);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _targets = replacement;
+            _targetVersion++;
+        }
+    }
 
     public void Start()
     {
         lock (_gate)
         {
-            if (_disposed)
+            if (_disposed || _timer is not null)
                 return;
 
-            if (_timer is not null)
-                return;
-
-            // The first poll runs immediately so a game already running when the app starts is
-            // detected without waiting a full interval.
             _timer = new Timer(OnTick, null, TimeSpan.Zero, _pollInterval);
         }
     }
@@ -57,10 +68,22 @@ public sealed class ProcessNameGameDetector : IGameDetector
     {
         lock (_gate)
         {
+            if (_disposed)
+                return;
             _disposed = true;
             _timer?.Dispose();
             _timer = null;
         }
+        _callbacks.Dispose();
+    }
+
+    internal void PollOnce() => OnTick(null);
+
+    internal void WaitForCallbacks() => _callbacks.WaitUntilIdle();
+
+    internal bool IsDisposed
+    {
+        get { lock (_gate) return _disposed; }
     }
 
     private void OnTick(object? state)
@@ -74,7 +97,6 @@ public sealed class ProcessNameGameDetector : IGameDetector
         }
         catch (Exception exception)
         {
-            // Same reason as Raise: nothing may escape a timer callback.
             Log.Warning(exception, "ProcessNameGameDetector: a poll failed; the watch continues.");
         }
         finally
@@ -85,85 +107,241 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
     private void Poll()
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            foreach (var process in Process.GetProcesses())
-            {
-                // Each Process wraps an OS handle on Windows; a poll every few seconds that keeps
-                // them all is a handle leak until the finalizers run.
-                using (process)
-                    names.Add(NormalizeProcessName(process.ProcessName));
-            }
-        }
-        catch
-        {
-            // A process list snapshot is best-effort; a failure to read it is not a reason to stop
-            // watching. The next tick retries.
-            return;
-        }
-
-        foreach (var game in _gameNames)
-        {
-            if (names.Contains(game))
-                seen.Add(game);
-        }
-
-        // The transitions are decided under the lock and raised outside it. A subscriber can block
-        // for seconds (stopping a recording does), and holding _gate across that blocks Dispose and
-        // every other tick behind it.
-        List<string> started;
-        List<string> stopped;
+        TargetSet targets;
+        long targetVersion;
         lock (_gate)
         {
             if (_disposed)
                 return;
-
-            started = seen.Except(_running).ToList();
-            var gone = _running.Except(seen).ToArray();
-            stopped = gone.ToList();
-
-            foreach (var game in started)
-                _running.Add(game);
-
-            foreach (var game in gone)
-                _running.Remove(game);
+            targets = _targets;
+            targetVersion = _targetVersion;
         }
 
-        foreach (var game in started)
-            Raise(() => GameStarted?.Invoke(game));
+        var seen = new Dictionary<int, DetectedGameProcess>();
+        foreach (var process in _processProbe())
+        {
+            if (process.ProcessId <= 0)
+                continue;
 
-        foreach (var game in stopped)
-            Raise(() => GameStopped?.Invoke(game));
+            var executable = NormalizeProcessName(process.Executable);
+            var path = NormalizePath(process.ExecutablePath);
+            if (executable.Length == 0)
+                continue;
+
+            NormalizedTarget? target = null;
+            if (path is not null && targets.ByPath.TryGetValue(path, out var pathTarget))
+                target = pathTarget;
+            else if (targets.ByExecutable.TryGetValue(executable, out var nameTarget))
+                target = nameTarget;
+
+            if (target is not null)
+                seen[process.ProcessId] = new DetectedGameProcess(
+                    target.GameId, process.ProcessId, executable, path ?? string.Empty,
+                    process.ProcessStartTime);
+            else if (path is null && TryKeepPathMatch(process, executable, targets, out var tracked))
+                seen[process.ProcessId] = tracked;
+        }
+
+        List<DetectedGameProcess> started;
+        List<DetectedGameProcess> stopped;
+        lock (_gate)
+        {
+            if (_disposed || targetVersion != _targetVersion)
+                return;
+
+            stopped = _running.Values
+                .Where(current => !seen.TryGetValue(current.ProcessId, out var next)
+                    || !SameDetection(current, next))
+                .ToList();
+            started = seen.Values
+                .Where(next => !_running.TryGetValue(next.ProcessId, out var current)
+                    || !SameDetection(current, next))
+                .ToList();
+
+            _running.Clear();
+            foreach (var process in seen.Values)
+                _running.Add(process.ProcessId, process);
+        }
+
+        Enqueue(GameStopped, stopped, targetVersion);
+        Enqueue(GameStarted, started, targetVersion);
     }
 
-    // A subscriber that throws must not take the process with it. These run on a timer callback,
-    // where an escaping exception is unhandled and terminates the process — and the app's own
-    // subscribers are StartRecording and StopRecording, which reach libobs and the file system.
-    private static void Raise(Action raise)
+    private bool TryKeepPathMatch(
+        ProcessSnapshot snapshot,
+        string executable,
+        TargetSet targets,
+        out DetectedGameProcess tracked)
     {
+        lock (_gate)
+        {
+            if (_running.TryGetValue(snapshot.ProcessId, out tracked!)
+                && SameProcessIdentity(tracked.ProcessStartTime, snapshot.ProcessStartTime)
+                && ExecutableComparer.Equals(tracked.Executable, executable)
+                && targets.ByPath.TryGetValue(tracked.ExecutablePath, out var target)
+                && target.GameId == tracked.GameId)
+                return true;
+        }
+
+        tracked = null!;
+        return false;
+    }
+
+    private static IReadOnlyList<ProcessSnapshot> ProbeProcesses()
+    {
+        var snapshots = new List<ProcessSnapshot>();
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                string executable;
+                int processId;
+                try
+                {
+                    executable = process.ProcessName;
+                    processId = process.Id;
+                }
+                catch (Exception exception) when (exception is ArgumentException
+                    or InvalidOperationException or System.ComponentModel.Win32Exception
+                    or NotSupportedException)
+                {
+                    continue;
+                }
+
+                DateTimeOffset? startTime = null;
+                string? path = null;
+                try { startTime = process.StartTime.ToUniversalTime(); }
+                catch (Exception exception) when (IsInspectionFailure(exception)) { }
+                try { path = process.MainModule?.FileName; }
+                catch (Exception exception) when (IsInspectionFailure(exception)) { }
+                snapshots.Add(new ProcessSnapshot(processId, executable, path, startTime));
+            }
+        }
+        return snapshots;
+    }
+
+    private void Enqueue(
+        Action<DetectedGameProcess>? handlers,
+        IEnumerable<DetectedGameProcess> processes,
+        long generation)
+    {
+        if (handlers is null)
+            return;
+
+        foreach (var process in processes)
+            _callbacks.Enqueue(() => Raise(handlers, process, generation));
+    }
+
+    private void Raise(
+        Action<DetectedGameProcess> handlers,
+        DetectedGameProcess process,
+        long generation)
+    {
+        foreach (Action<DetectedGameProcess> handler in handlers.GetInvocationList())
+        {
+            lock (_gate)
+            {
+                if (_disposed || generation != _targetVersion)
+                    return;
+            }
+            try
+            {
+                handler(process);
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception,
+                    "ProcessNameGameDetector: a subscriber threw; the watch continues.");
+            }
+        }
+    }
+
+    private static bool IsInspectionFailure(Exception exception)
+        => exception is ArgumentException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or NotSupportedException;
+
+    private static bool SameProcessIdentity(DateTimeOffset? left, DateTimeOffset? right)
+        => left.HasValue && right.HasValue && left == right;
+
+    private static bool SameDetection(DetectedGameProcess left, DetectedGameProcess right)
+        => left.ProcessId == right.ProcessId
+            && left.ProcessStartTime == right.ProcessStartTime
+            && left.GameId == right.GameId
+            && ExecutableComparer.Equals(left.Executable, right.Executable)
+            && PathComparer.Equals(left.ExecutablePath, right.ExecutablePath);
+
+    private static TargetSet CreateTargetSet(IEnumerable<GameDetectionTarget> targets)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        var byPath = new Dictionary<string, NormalizedTarget>(PathComparer);
+        var byExecutable = new Dictionary<string, NormalizedTarget>(ExecutableComparer);
+
+        foreach (var target in targets)
+        {
+            ArgumentNullException.ThrowIfNull(target);
+            ArgumentException.ThrowIfNullOrWhiteSpace(target.GameId);
+            ArgumentException.ThrowIfNullOrWhiteSpace(target.Executable);
+
+            var executable = NormalizeProcessName(target.Executable);
+            if (executable.Length == 0)
+                throw new ArgumentException("A target executable must contain a file name.", nameof(targets));
+
+            var path = NormalizePath(target.ExecutablePath);
+            if (!string.IsNullOrWhiteSpace(target.ExecutablePath) && path is null)
+                throw new ArgumentException("A target executable path must be valid.", nameof(targets));
+
+            var normalized = new NormalizedTarget(target.GameId);
+            if (path is not null)
+                byPath.TryAdd(path, normalized);
+            else
+                byExecutable.TryAdd(executable, normalized);
+        }
+
+        return new TargetSet(byPath, byExecutable);
+    }
+
+    internal static string? NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
         try
         {
-            raise();
+            return Path.GetFullPath(path.Trim());
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is ArgumentException or IOException
+            or NotSupportedException)
         {
-            Log.Warning(exception, "ProcessNameGameDetector: a subscriber threw; the watch continues.");
+            return null;
         }
     }
 
-    // The executable-name vocabulary the catalogue carries uses extensions; the process list does
-    // not on Linux. Normalizing here means a catalogue entry and a running process agree on the
-    // comparison regardless of platform. Public because the names this detector reports back are
-    // normalized too, so anything matching one against a catalogue entry has to spell it the same
-    // way rather than guess whether a `.exe` is on either side.
     public static string NormalizeProcessName(string name)
     {
-        var trimmed = name.Trim();
-        return trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            ? trimmed[..^4]
-            : trimmed;
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var fileName = Path.GetFileName(name.Trim());
+        return fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^4]
+            : fileName;
     }
+
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
+    private static StringComparer ExecutableComparer => PathComparer;
+
+    private sealed record NormalizedTarget(string GameId);
+
+    private sealed record TargetSet(
+        IReadOnlyDictionary<string, NormalizedTarget> ByPath,
+        IReadOnlyDictionary<string, NormalizedTarget> ByExecutable);
 }
+
+internal sealed record ProcessSnapshot(
+    int ProcessId,
+    string Executable,
+    string? ExecutablePath = null,
+    DateTimeOffset? ProcessStartTime = null);

@@ -68,9 +68,17 @@ public sealed class GameExecutableRoutingTests : IDisposable
     {
         Catalogue(new GameSetting { Id = "cs2", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
-        var game = Assert.Single(_host.GameList);
-        Assert.Equal("Overwatch", game.Name);
-        Assert.Equal("Overwatch.exe", game.Executable);
+        var games = _host.GameList;
+        var overwatch = Assert.Single(games, game => game.Id == "Overwatch");
+        Assert.Equal("Overwatch", overwatch.Name);
+        Assert.Equal("Overwatch.exe", overwatch.Executable);
+
+        // The settings entry survives as a custom game rather than being discarded, but it never
+        // replaces the packaged identity.
+        var cs2 = Assert.Single(games, game => game.Id == "cs2");
+        Assert.Equal("Counter-Strike 2", cs2.Name);
+        Assert.Equal("cs2.exe", cs2.Executable);
+        Assert.False(cs2.BuiltIn);
     }
 
     // The gameList push spells it `executable`, camelCase like every other field on the wire.
@@ -98,7 +106,24 @@ public sealed class GameExecutableRoutingTests : IDisposable
     {
         Catalogue(new GameSetting { Id = "cs2-id", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
-        Assert.Equal("cs2", _host.ResolveDetectedGameId("cs2"));
+        Assert.Equal("cs2-id", _host.ResolveDetectedGameId("cs2"));
+    }
+
+    // A custom game with an exact path still resolves through its basename route, so detection and
+    // game capture agree without ever leaking the machine-specific path into the identity.
+    [Fact]
+    public void ACustomGameWithAnExactPath_ResolvesToItsStableId()
+    {
+        Catalogue(new GameSetting
+        {
+            Id = "custom-doom",
+            Name = "Doom",
+            ExecutablePath = @"C:\Games\Doom\doom.exe",
+        });
+
+        Assert.Equal("custom-doom", _host.ResolveDetectedGameId("doom"));
+        // Game capture hooks the executable's basename, never the machine-specific path.
+        Assert.Equal("doom", _host.GameCaptureName("custom-doom"));
     }
 
     // The detector strips a trailing .exe from both sides, so an entry may spell the executable

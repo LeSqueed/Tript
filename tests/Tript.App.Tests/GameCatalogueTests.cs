@@ -64,9 +64,9 @@ public sealed class GameCatalogueTests : IDisposable
         Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
         Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
 
-        // An explicit reload still replaces the snapshot, but the source remains the project list.
+        // An explicit reload still replaces the snapshot, and it now reflects the custom entry too.
         _host.ReloadGameList();
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Name);
+        Assert.Equal(["Overwatch", "Doom"], _host.GameList.Select(game => game.Id));
     }
 
     // The reload the property used to do is still done where it belongs: a settings change is the
@@ -75,16 +75,26 @@ public sealed class GameCatalogueTests : IDisposable
     public void ASettingsChange_ReloadsTheCatalogue()
     {
         Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
+        var doom = Path.Combine(_contentRoot, "doom.exe");
+        var quake = Path.Combine(_contentRoot, "quake.exe");
+        File.WriteAllText(doom, "doom");
+        File.WriteAllText(quake, "quake");
 
         Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
         {
             game = new
             {
-                gameList = new[] { new { id = "Doom", name = "Doom" }, new { id = "Quake", name = "Quake" } },
+                gameList = new[]
+                {
+                    new { id = "custom-doom", name = "Doom", executablePath = doom },
+                    new { id = "custom-quake", name = "Quake", executablePath = quake },
+                },
             },
         })));
 
-        Assert.Equal(["Overwatch"], _host.GameList.Select(game => game.Id));
+        Assert.Equal(["Overwatch", "custom-doom", "custom-quake"], _host.GameList.Select(game => game.Id));
+        Assert.Equal("Doom", _host.GameList.First(game => game.Id == "custom-doom").Name);
+        Assert.Equal(doom, _host.GameList.First(game => game.Id == "custom-doom").ExecutablePath);
     }
 
     // A reload replaces the list rather than emptying and refilling it, so a reader that already has

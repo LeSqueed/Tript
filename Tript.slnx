@@ -7,6 +7,7 @@
     <Project Path="src/Tript.Recorder/Tript.Recorder.csproj" />
     <Project Path="src/Tript.RecorderHarness/Tript.RecorderHarness.csproj" />
     <Project Path="src/Tript.Media/Tript.Media.csproj" />
+    <Project Path="src/Tript.GameDiscovery/Tript.GameDiscovery.csproj" />
     <Project Path="src/Tript.ModelValidator/Tript.ModelValidator.csproj" />
     <Project Path="src/Tript.App/Tript.App.csproj" />
     <Project Path="src/Tript.Shell/Tript.Shell.csproj" />
@@ -17,5 +18,6 @@
     <Project Path="tests/Tript.Settings.Tests/Tript.Settings.Tests.csproj" />
     <Project Path="tests/Tript.Detection.Tests/Tript.Detection.Tests.csproj" />
     <Project Path="tests/Tript.App.Tests/Tript.App.Tests.csproj" />
+    <Project Path="tests/Tript.GameDiscovery.Tests/Tript.GameDiscovery.Tests.csproj" />
   </Folder>
 </Solution>

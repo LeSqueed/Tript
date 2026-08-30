@@ -70,6 +70,44 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void TryUpdate_RejectionLeavesMemoryAndDiskUnchanged()
+    {
+        _store.Load().Recording.Fps = 60;
+        _store.Save();
+        var before = File.ReadAllText(_provider.FilePath);
+
+        var saved = _store.TryUpdate(candidate =>
+        {
+            candidate.Recording.Fps = 144;
+            return "rejected";
+        }, out var settings, out var error);
+
+        Assert.False(saved);
+        Assert.Equal("rejected", error);
+        Assert.Equal(60, settings.Recording.Fps);
+        Assert.Equal(60, _store.Load().Recording.Fps);
+        Assert.Equal(before, File.ReadAllText(_provider.FilePath));
+    }
+
+    [Fact]
+    public void TryUpdate_CommitsTheCloneOnlyAfterWriting()
+    {
+        var original = _store.Load();
+
+        var saved = _store.TryUpdate(candidate =>
+        {
+            candidate.Recording.Fps = 144;
+            return null;
+        }, out var settings, out var error);
+
+        Assert.True(saved);
+        Assert.Null(error);
+        Assert.NotSame(original, settings);
+        Assert.Equal(144, _store.Load().Recording.Fps);
+        Assert.Equal(144, new SettingsStore(_provider).Load().Recording.Fps);
+    }
+
+    [Fact]
     public void SaveThenLoad_RoundTripsGeneralSettings()
     {
         var settings = _store.Load();

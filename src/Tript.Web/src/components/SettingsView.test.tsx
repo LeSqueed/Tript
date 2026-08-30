@@ -295,6 +295,73 @@ describe('SettingsView', () => {
     expect(screen.queryByLabelText(/^Capture mode/)).toBeNull();
   });
 
+  it('correlates the custom-game executable picker command and response', () => {
+    const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
+
+    const frame = JSON.parse(ws.sent.at(-1) ?? '{}') as {
+      method?: string;
+      parameters?: { requestId?: string };
+    };
+    expect(frame).toEqual({
+      method: 'SelectGameExecutable',
+      parameters: { requestId: expect.any(String) },
+    });
+
+    act(() => {
+      ws.serverMessage(JSON.stringify({
+        method: 'selectedGameExecutable',
+        content: { requestId: 'stale-request', filePath: 'C:\\Wrong\\wrong.exe' },
+      }));
+    });
+    expect((screen.getByLabelText('Executable path') as HTMLInputElement).value).toBe('');
+
+    act(() => {
+      ws.serverMessage(JSON.stringify({
+        method: 'selectedGameExecutable',
+        content: { requestId: frame.parameters?.requestId, filePath: 'C:\\Games\\Picked\\game.exe' },
+      }));
+    });
+    expect((screen.getByLabelText('Executable path') as HTMLInputElement).value).toBe(
+      'C:\\Games\\Picked\\game.exe',
+    );
+  });
+
+  it('keeps a custom-game draft and validation response until its update is accepted', () => {
+    const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
+    fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Pending game' } });
+    fireEvent.change(screen.getByLabelText('Executable path'), {
+      target: { value: 'C:\\Games\\Pending\\game.exe' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const frame = JSON.parse(ws.sent.at(-1) ?? '{}') as {
+      method?: string;
+      parameters?: { requestId?: string };
+    };
+    expect(frame).toMatchObject({
+      method: 'UpdateSettings',
+      parameters: { requestId: expect.any(String) },
+    });
+    expect(screen.getByTestId('custom-game-draft')).toBeTruthy();
+
+    act(() => ws.serverMessage(JSON.stringify({
+      method: 'settingsUpdateResult',
+      content: {
+        requestId: frame.parameters?.requestId,
+        success: false,
+        error: 'Executable already belongs to another game.',
+      },
+    })));
+
+    expect((screen.getByLabelText('Game name') as HTMLInputElement).value).toBe('Pending game');
+    expect(screen.getByRole('alert').textContent).toBe('Executable already belongs to another game.');
+  });
+
   it('keeps the capture method on the Capture page', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));

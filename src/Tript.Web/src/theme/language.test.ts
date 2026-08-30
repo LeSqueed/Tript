@@ -20,9 +20,7 @@ const TRAINING_REGION_SURFACES = new Set([
 ]);
 /** The wire vocabulary. `Session` is a protocol value there, not a word anyone reads. */
 const IPC = join(SRC_ROOT, 'ipc');
-
 const RETIRED: { word: RegExp; instead: string }[] = [
-  { word: /\bsessions?\b/i, instead: 'recording(s)' },
   { word: /\brolling buffer\b/i, instead: 'instant replay' },
   { word: /\bmark in\b|\bmark out\b/i, instead: 'set start / set end' },
   { word: /\bstart capture\b/i, instead: 'record' },

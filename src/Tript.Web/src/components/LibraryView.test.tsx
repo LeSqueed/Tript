@@ -201,7 +201,7 @@ describe('LibraryView filters and sorting', () => {
     expect(cardTitles()).toEqual(['Nice shot']);
     expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Recordings' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
     expect(cardTitles()).toEqual(['Ranked win']);
 
     fireEvent.click(screen.getByRole('radio', { name: 'All' }));
@@ -309,12 +309,12 @@ describe('LibraryView pagination', () => {
     expect(screen.getAllByTestId('content-card')).toHaveLength(15);
     expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 2');
     // The top shelf is fixed at three recordings; the latest item grid pages the remaining items.
-    expect(screen.getByTestId('library-range').textContent).toBe('25 recordings · 25 items');
+    expect(screen.getByTestId('library-range').textContent).toBe('25 sessions · 25 items');
     expect(screen.getByRole('button', { name: 'Previous page' })).toHaveProperty('disabled', true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
     expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 2');
-    expect(screen.getByTestId('library-range').textContent).toBe('25 recordings · 25 items');
+    expect(screen.getByTestId('library-range').textContent).toBe('25 sessions · 25 items');
 
     expect(screen.getAllByTestId('content-card')).toHaveLength(10);
     expect(screen.getByRole('button', { name: 'Next page' })).toHaveProperty('disabled', true);
@@ -337,7 +337,7 @@ describe('LibraryView pagination', () => {
     fireEvent.change(screen.getByLabelText('Game'), { target: { value: 'Counter-Strike 2' } });
     expect(screen.getAllByTestId('content-card')).toHaveLength(3);
     expect(screen.queryByTestId('library-page')).toBeNull();
-    expect(screen.getByTestId('library-range').textContent).toContain('3 recordings · 3 items');
+    expect(screen.getByTestId('library-range').textContent).toContain('3 sessions · 3 items');
   });
 
   it('resets to page 1 on a sort change, since the front of the list changed', () => {
@@ -756,7 +756,7 @@ describe('LibraryView recent sessions and groups', () => {
   it('makes the newest sessions a recent shelf without a separate highlights action', () => {
     renderLibrary([older, newest, cutOfNewest]);
     const recent = screen.getByTestId('library-recent');
-    expect(within(recent).getByRole('heading', { name: 'Recent recordings' })).toBeTruthy();
+    expect(within(recent).getByRole('heading', { name: 'Recent sessions' })).toBeTruthy();
     expect(within(recent).queryByRole('button', { name: /Highlights/ })).toBeNull();
     expect(within(recent).queryByText('Recording 2 - 01')).toBeNull();
     expect(within(recent).getByText('Clips: 1')).toBeTruthy();

@@ -58,7 +58,7 @@ import { useWatchedGames } from './recorder/useWatchedGames';
 function typeFilters(trashCount: number): { value: ContentTypeFilter; label: string }[] {
   return [
     { value: 'all', label: 'All' },
-    { value: 'sessions', label: 'Recordings' },
+    { value: 'sessions', label: 'Sessions' },
     { value: 'clips', label: 'Clips' },
     { value: 'trash', label: trashCount > 0 ? `Trash (${trashCount})` : 'Trash' },
   ];
@@ -425,9 +425,9 @@ export function LibraryView({
               {view.matchCount > 0 && (
                 <span className="library-range muted small" data-testid="library-range">
                   {/* A grouped page holds a variable number of items — pagination is over groups so
-                      that a recording is never split from its clips — so it counts recordings. */}
+                      that a session is never split from its clips — so it counts sessions. */}
                   {groupView
-                    ? `${groupView.groupCount} recording${groupView.groupCount === 1 ? '' : 's'} · ${groupView.matchCount} item${groupView.matchCount === 1 ? '' : 's'}`
+                    ? `${groupView.groupCount} session${groupView.groupCount === 1 ? '' : 's'} · ${groupView.matchCount} item${groupView.matchCount === 1 ? '' : 's'}`
                     : `Showing ${view.firstIndex}–${view.lastIndex} of ${view.matchCount}`}
                   {view.filtered && view.totalCount !== view.matchCount
                     ? ` · ${view.totalCount} total`
@@ -498,7 +498,7 @@ export function LibraryView({
              <section className="library-recent" data-testid="library-recent" aria-labelledby="library-recent-title">
               <div className="library-section-heading">
                 <div>
-                  <h2 id="library-recent-title">Recent recordings</h2>
+                  <h2 id="library-recent-title">Recent sessions</h2>
                 </div>
                  <span className="library-section-kicker">{recentGroups.length} latest</span>
                </div>
@@ -523,12 +523,12 @@ export function LibraryView({
                 <ul className="library-grid" data-testid="library-latest-grid">
                  {latestItems.map((item) => (
                    <li key={selectionKey(item)}>
-                      <ContentCard
-                        item={item}
-                        clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                        highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                        previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
-                       onOpen={(item) => onOpen?.(item, groupView.resultItems)}
+                       <ContentCard
+                         item={item}
+                         clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                         highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                         previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
                        selectable={selectionMode}
@@ -545,12 +545,12 @@ export function LibraryView({
         <ul className="library-grid" data-testid="library-grid">
           {view.items.map((item) => (
             <li key={selectionKey(item)}>
-               <ContentCard
-                 item={item}
-                 clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                 highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                 previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
-                onOpen={(item) => onOpen?.(item, view.resultItems)}
+                <ContentCard
+                  item={item}
+                  clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                  highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                  previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                 onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}
                 selectable={selectionMode}

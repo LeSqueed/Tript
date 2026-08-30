@@ -118,6 +118,188 @@ public sealed class TrashTests : IDisposable
         Assert.Empty(_host.ListContent());
     }
 
+    [Theory]
+    [InlineData("{\"fileName\":\"sessions/session-1.mp4\",\"contentType\":\"recording\"}")]
+    [InlineData("{\"fileName\":\"sessions/session-1.mp4\",\"contentType\":\"recording\",\"deleteLinkedHighlights\":false}")]
+    public void DeleteContent_OmittedOrFalseCascade_PreservesLinkedAutomaticHighlights(string parametersJson)
+    {
+        WriteSession("session-1.mp4", null, null);
+        WriteAutomaticHighlight("eligible.mp4", "sessions/session-1.mp4");
+
+        var controller = new AppController(_host);
+        controller.Handle("DeleteContent", JsonSerializer.Deserialize<JsonElement>(parametersJson),
+            new ClientHandle((_, _) => { }));
+
+        AssertHighlightSurvives("eligible.mp4");
+        var entry = Assert.Single(_host.TrashEntries());
+        Assert.Equal("session-1.mp4", entry.FileName);
+    }
+
+    [Fact]
+    public void DeleteContent_CascadeToTrash_MovesOnlyUnfavouritedExactPathAutomaticHighlights()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+        WriteAutomaticHighlight("eligible.mp4", @"sessions\session-1.mp4");
+        WriteThumbnail("eligible.mp4");
+        WriteAutomaticHighlight("favourite.mp4", "sessions/session-1.mp4", favorite: true);
+        WriteManualHighlight("manual.mp4", "sessions/session-1.mp4");
+        WriteAutomaticHighlight("other-source.mp4", "sessions/other-session.mp4");
+        WriteAutomaticHighlight("basename-only.mp4", "session-1.mp4");
+        WriteAutomaticHighlight("prefix-only.mp4", "sessions/session-1.mp4/child.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters
+        {
+            FileName = "sessions/session-1.mp4",
+            DeleteLinkedHighlights = true,
+        });
+
+        Assert.False(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
+        Assert.False(File.Exists(MetadataPath("session-1.mp4")));
+        Assert.False(File.Exists(HighlightPath("eligible.mp4")));
+        Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
+        Assert.False(File.Exists(ThumbnailPath("eligible.mp4")));
+
+        AssertHighlightSurvives("favourite.mp4");
+        AssertHighlightSurvives("manual.mp4");
+        AssertHighlightSurvives("other-source.mp4");
+        AssertHighlightSurvives("basename-only.mp4");
+        AssertHighlightSurvives("prefix-only.mp4");
+
+        var entries = _host.TrashEntries();
+        Assert.True(new HashSet<string>(["session-1.mp4", "eligible.mp4"], StringComparer.Ordinal)
+            .SetEquals(entries.Select(entry => entry.FileName)));
+        Assert.Equal(2, entries.Count);
+
+        var sourceEntry = entries.Single(entry => entry.FileName == "session-1.mp4");
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(sourceEntry.Id), "files", "sessions", "session-1.mp4")));
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(sourceEntry.Id), "files", "metadata",
+            "session-1.mp4.metadata.json")));
+
+        var highlightEntry = entries.Single(entry => entry.FileName == "eligible.mp4");
+        Assert.Equal("highlight", highlightEntry.ContentType);
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(highlightEntry.Id), "files", "highlights", "eligible.mp4")));
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(highlightEntry.Id), "files", "metadata",
+            "eligible.mp4.title.json")));
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(highlightEntry.Id), "files", "metadata", "thumbnails",
+            "eligible.mp4.jpg")));
+    }
+
+    [Fact]
+    public void DeleteContent_CascadePathComparison_FollowsPlatformCaseSensitivity()
+    {
+        WriteSession("session-1.mp4", null, null);
+        WriteAutomaticHighlight("case-link.mp4", "SESSIONS/SESSION-1.MP4");
+
+        _host.DeleteContent(new DeleteContentParameters
+        {
+            FileName = "sessions/session-1.mp4",
+            DeleteLinkedHighlights = true,
+        });
+
+        Assert.Equal(!OperatingSystem.IsWindows(), File.Exists(HighlightPath("case-link.mp4")));
+    }
+
+    [Fact]
+    public void DeleteContent_CascadeRejectsTraversalSourceLink()
+    {
+        WriteSession("session-1.mp4", null, null);
+        WriteAutomaticHighlight("traversal-link.mp4", "sessions/other/../session-1.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters
+        {
+            FileName = "sessions/session-1.mp4",
+            DeleteLinkedHighlights = true,
+        });
+
+        AssertHighlightSurvives("traversal-link.mp4");
+    }
+
+    [Fact]
+    public void DeleteContent_PermanentCascade_UnlinksEligibleHighlightWithoutCreatingTrash()
+    {
+        WriteSession("session-1.mp4", null, null);
+        WriteThumbnail("session-1.mp4");
+        WriteAutomaticHighlight("eligible.mp4", "sessions/session-1.mp4");
+        WriteThumbnail("eligible.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters
+        {
+            FileName = "sessions/session-1.mp4",
+            Permanent = true,
+            DeleteLinkedHighlights = true,
+        });
+
+        Assert.False(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
+        Assert.False(File.Exists(MetadataPath("session-1.mp4")));
+        Assert.False(File.Exists(ThumbnailPath("session-1.mp4")));
+        Assert.False(File.Exists(HighlightPath("eligible.mp4")));
+        Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
+        Assert.False(File.Exists(ThumbnailPath("eligible.mp4")));
+        Assert.Empty(_host.TrashEntries());
+        Assert.False(Directory.Exists(Path.Combine(_contentRoot, ".trash")));
+    }
+
+    [Fact]
+    public void DeleteContent_MissingSessionAndMetadata_StillCascadesFromRequestedPath()
+    {
+        WriteAutomaticHighlight("eligible.mp4", "sessions/missing-session.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters
+        {
+            FileName = "sessions/missing-session.mp4",
+            DeleteLinkedHighlights = true,
+        });
+
+        Assert.False(File.Exists(HighlightPath("eligible.mp4")));
+        Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
+        var entry = Assert.Single(_host.TrashEntries());
+        Assert.Equal("eligible.mp4", entry.FileName);
+    }
+
+    [Fact]
+    public void DeleteContent_MissingPlaceholderWithoutCascade_IsANoOp()
+    {
+        WriteAutomaticHighlight("eligible.mp4", "sessions/missing-session.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/missing-session.mp4" });
+
+        AssertHighlightSurvives("eligible.mp4");
+        Assert.Empty(_host.TrashEntries());
+        Assert.False(Directory.Exists(Path.Combine(_contentRoot, ".trash")));
+    }
+
+    [Fact]
+    public void DeleteMultipleContent_DeduplicatesExplicitChildAndRepeatedSessionTargets()
+    {
+        WriteSession("session-1.mp4", null, null);
+        WriteAutomaticHighlight("eligible.mp4", "sessions/session-1.mp4");
+
+        _host.DeleteMultipleContent(new DeleteMultipleContentParameters
+        {
+            Items =
+            [
+                new DeleteContentParameters { FileName = "highlights/eligible.mp4", ContentType = "highlight" },
+                new DeleteContentParameters
+                {
+                    FileName = "sessions/session-1.mp4",
+                    DeleteLinkedHighlights = true,
+                },
+                new DeleteContentParameters
+                {
+                    FileName = "sessions/session-1.mp4",
+                    DeleteLinkedHighlights = true,
+                },
+            ],
+        });
+
+        var entries = _host.TrashEntries();
+        Assert.True(new HashSet<string>(["session-1.mp4", "eligible.mp4"], StringComparer.Ordinal)
+            .SetEquals(entries.Select(entry => entry.FileName)));
+        Assert.Equal(2, entries.Count);
+        Assert.False(File.Exists(HighlightPath("eligible.mp4")));
+        Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
+    }
+
     // ---- restore ----
 
     [Fact]
@@ -441,6 +623,42 @@ public sealed class TrashTests : IDisposable
         File.WriteAllBytes(path, [0xFF, 0xD8, 0xFF]);
         return path;
     }
+
+    private void WriteAutomaticHighlight(string fileName, string sourceSessionPath, bool favorite = false)
+    {
+        WriteHighlightFile(fileName);
+        var store = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(store.SaveAutomatic(fileName, sourceSessionPath, 10, 20));
+        if (favorite)
+            Assert.True(store.SaveFavorite(fileName, true));
+    }
+
+    private void WriteManualHighlight(string fileName, string sourceSessionPath)
+    {
+        WriteHighlightFile(fileName);
+        var store = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(store.SaveSourceSession(fileName, sourceSessionPath));
+    }
+
+    private void WriteHighlightFile(string fileName)
+    {
+        Directory.CreateDirectory(Path.Combine(_contentRoot, "highlights"));
+        File.WriteAllText(HighlightPath(fileName), "highlight");
+    }
+
+    private void AssertHighlightSurvives(string fileName)
+    {
+        Assert.True(File.Exists(HighlightPath(fileName)), $"{fileName} media must survive");
+        Assert.True(File.Exists(ClipRecordPath(fileName)), $"{fileName} record must survive");
+    }
+
+    private string HighlightPath(string fileName) => Path.Combine(_contentRoot, "highlights", fileName);
+
+    private string ClipRecordPath(string fileName) =>
+        Path.Combine(_contentRoot, "metadata", $"{fileName}.title.json");
+
+    private string ThumbnailPath(string fileName) =>
+        Path.Combine(_contentRoot, "metadata", "thumbnails", $"{fileName}.jpg");
 
     private string MetadataPath(string videoFileName) =>
         Path.Combine(_contentRoot, "metadata", $"{videoFileName}.metadata.json");

@@ -60,6 +60,9 @@ public sealed class GameSetting
     // whose window must never leak the desktop wants the opposite.
     public GameCaptureMethodOverride? CaptureMethodOverride { get; set; }
 
+    // A per-game override of the global automatic-clip before/after window.
+    public GameAutomaticClipOverride? AutomaticClipOverride { get; set; }
+
     // Per-game telemetry integration toggles. Game telemetry is externally dictated — ports,
     // config formats — and each integration is gated by a per-game Enabled toggle.
     public GameIntegrationSettings Integrations { get; set; } = new();
@@ -90,6 +93,15 @@ public sealed class GameQualityOverride
     public string? Encoder { get; set; }
 
     public int? Quality { get; set; }
+}
+
+// Per-game automatic-clip override. Each field is nullable so a game can override only the side it
+// cares about; a null field inherits the global value.
+public sealed class GameAutomaticClipOverride
+{
+    public int? BeforeSeconds { get; set; }
+
+    public int? AfterSeconds { get; set; }
 }
 
 // Per-game telemetry integration toggles. The settings model only records which are enabled.

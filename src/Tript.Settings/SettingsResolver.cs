@@ -57,6 +57,26 @@ public sealed class SettingsResolver
     // mode is the effective value.
     private static RecordingMode ResolveMode(RecordingMode global, RecordingMode? gameOverride)
         => gameOverride ?? global;
+
+    public static (TimeSpan Before, TimeSpan After) ResolveAutomaticClipWindow(Settings settings, string? gameId)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        GameSetting? game = null;
+        if (!string.IsNullOrEmpty(gameId))
+            game = settings.Game.GameList.FirstOrDefault(g => g.Id == gameId);
+
+        var beforeSeconds = game?.AutomaticClipOverride?.BeforeSeconds
+            ?? settings.Recording.AutomaticClipBeforeSeconds;
+        var afterSeconds = game?.AutomaticClipOverride?.AfterSeconds
+            ?? settings.Recording.AutomaticClipAfterSeconds;
+
+        beforeSeconds = Math.Max(0, beforeSeconds);
+        afterSeconds = Math.Max(0, afterSeconds);
+        afterSeconds = Math.Max(beforeSeconds, afterSeconds);
+
+        return (TimeSpan.FromSeconds(beforeSeconds), TimeSpan.FromSeconds(afterSeconds));
+    }
 }
 
 // The flat, resolved configuration the recorder consumes. Mutable for the alpha (a state machine

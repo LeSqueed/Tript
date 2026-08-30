@@ -44,7 +44,42 @@ internal sealed class ClipTitleStore
     // StoredRecordState: overwriting an unreadable record here costs the user's clip title.
     internal StoredRecord<ClipTitleRecord> Read(string clipFileName)
     {
-        var path = PathFor(clipFileName);
+        return ReadPath(PathFor(clipFileName));
+    }
+
+    // A materialized view of the usable records directly under the current metadata root. Callers
+    // can build lookups without enumerating the tree once and opening every record again.
+    internal IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> EnumerateRecords()
+    {
+        const string suffix = ".title.json";
+        string[] paths;
+        try
+        {
+            paths = Directory.GetFiles(_metadataRoot, $"*{suffix}", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        var records = new List<(string ClipFileName, ClipTitleRecord Record)>();
+        foreach (var path in paths)
+        {
+            var recordFileName = Path.GetFileName(path);
+            var clipFileName = recordFileName[..^suffix.Length];
+            if (clipFileName.Length == 0)
+                continue;
+
+            var record = ReadPath(path).Record;
+            if (record is not null)
+                records.Add((clipFileName, record));
+        }
+
+        return records;
+    }
+
+    private static StoredRecord<ClipTitleRecord> ReadPath(string path)
+    {
         if (!File.Exists(path))
             return StoredRecord<ClipTitleRecord>.Absent;
 

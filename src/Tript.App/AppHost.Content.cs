@@ -87,18 +87,23 @@ internal sealed partial class AppHost
 
     internal List<ContentItem> ListContent()
     {
+        var pathComparer = ContentPathComparer;
+        var clipRecords = _clipTitles.EnumerateRecords()
+            .ToDictionary(entry => entry.ClipFileName, entry => entry.Record, pathComparer);
         var items = new List<ContentItem>();
         var root = new DirectoryInfo(EffectiveRoot);
         if (!root.Exists)
             return items;
 
-        var gamesByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
-        var gameIdsByRecording = new Dictionary<string, string>(StringComparer.Ordinal);
-        var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
-        var gamesByRecordingPath = new Dictionary<string, string>(StringComparer.Ordinal);
-        var gameIdsByRecordingPath = new Dictionary<string, string>(StringComparer.Ordinal);
-        var tracksByRecordingPath = new Dictionary<string, List<AudioTrackInfo>>(StringComparer.Ordinal);
+        var gamesByRecording = new Dictionary<string, string>(pathComparer);
+        var gameIdsByRecording = new Dictionary<string, string>(pathComparer);
+        var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(pathComparer);
+        var gamesByRecordingPath = new Dictionary<string, string>(pathComparer);
+        var gameIdsByRecordingPath = new Dictionary<string, string>(pathComparer);
+        var tracksByRecordingPath = new Dictionary<string, List<AudioTrackInfo>>(pathComparer);
         var clips = new List<ContentItem>();
+        var linkedAutomaticSources = new HashSet<string>(pathComparer);
+        var recordingPaths = new HashSet<string>(pathComparer);
         var probeBudget = DurationProbeBudget;
         string? processingSessionPath;
         bool processingPaused = false;
@@ -142,28 +147,11 @@ internal sealed partial class AppHost
 
             if (contentType == "recording")
             {
+                recordingPaths.Add(relative);
                 var metadata = _metadata.Load(file.Name);
                 if (metadata is not null)
                 {
-                    item.Bookmarks = metadata.Bookmarks
-                        .Select(bookmark => new BookmarkItem
-                        {
-                            Id = bookmark.Id.ToString(),
-                            Type = bookmark.Type.ToString().ToLowerInvariant(),
-                            Subtype = bookmark.Subtype,
-                            Time = bookmark.Time.TotalSeconds,
-                        })
-                        .ToList();
-                    item.HasAutomaticClipCandidates = metadata.Bookmarks.Any(IsAutomaticClipCandidate);
-                    item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
-                    item.Favorite = metadata.Favorite;
-                    item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
-                    item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
-                    item.GameId = string.IsNullOrWhiteSpace(metadata.GameId)
-                        ? ResolveLegacyGameId(item.Game)
-                        : metadata.GameId;
-                    item.DurationSeconds = metadata.DurationSeconds;
-                    item.AudioTracks = ToAudioTrackInfo(metadata);
+                    ApplyRecordingMetadata(item, metadata);
 
                     var baseName = Path.GetFileNameWithoutExtension(file.Name);
                     if (item.Game is not null)
@@ -189,17 +177,18 @@ internal sealed partial class AppHost
             }
             else
             {
-                var record = _clipTitles.LoadRecord(file.Name);
-                item.SourceSessionPath = record?.SourceSessionPath;
+                clipRecords.TryGetValue(file.Name, out var record);
+                item.SourceSessionPath = NormalizeSourcePath(record?.SourceSessionPath);
                 item.IsHdr = record?.IsHdr;
                 if (record?.IsAutomatic == true)
                 {
                     contentType = "highlight";
                     item.ContentType = contentType;
                     item.Automated = true;
-                    item.SourceSessionPath = record.SourceSessionPath;
                     item.ClipStartTime = record.ClipStartTime;
                     item.ClipEndTime = record.ClipEndTime;
+                    if (item.SourceSessionPath is not null)
+                        linkedAutomaticSources.Add(item.SourceSessionPath);
                 }
                 if (!string.IsNullOrWhiteSpace(record?.Title))
                     item.Title = record.Title;
@@ -244,6 +233,48 @@ internal sealed partial class AppHost
             items.Add(item);
         }
 
+        foreach (var sourcePath in linkedAutomaticSources)
+        {
+            if (recordingPaths.Contains(sourcePath))
+                continue;
+
+            var fileName = FileNameFromWirePath(sourcePath);
+            var item = new ContentItem
+            {
+                ContentType = "recording",
+                FileName = fileName,
+                FilePath = sourcePath,
+                Title = Path.GetFileNameWithoutExtension(fileName),
+                FileSizeBytes = 0,
+                Bookmarks = [],
+                Favorite = false,
+                VideoMissing = true,
+            };
+            var metadata = _metadata.Load(fileName);
+            if (metadata is not null)
+            {
+                ApplyRecordingMetadata(item, metadata);
+
+                var baseName = Path.GetFileNameWithoutExtension(fileName);
+                if (item.Game is not null)
+                {
+                    gamesByRecording[baseName] = item.Game;
+                    gamesByRecordingPath[sourcePath] = item.Game;
+                }
+                if (item.GameId is not null)
+                {
+                    gameIdsByRecording[baseName] = item.GameId;
+                    gameIdsByRecordingPath[sourcePath] = item.GameId;
+                }
+                if (item.AudioTracks is not null)
+                {
+                    tracksByRecording[baseName] = item.AudioTracks;
+                    tracksByRecordingPath[sourcePath] = item.AudioTracks;
+                }
+            }
+            items.Add(item);
+        }
+
         foreach (var clip in clips)
         {
             // A record that already carries its own attribution keeps it; everything else inherits
@@ -253,7 +284,8 @@ internal sealed partial class AppHost
                 clip.Game = InheritedGame(clip, gamesByRecordingPath, gamesByRecording);
                 clip.GameId = InheritedFrom(clip, gameIdsByRecordingPath, gameIdsByRecording);
             }
-            BackfillClipGame(clip);
+            clipRecords.TryGetValue(clip.FileName, out var record);
+            BackfillClipGame(clip, record);
             clip.AudioTracks = InheritedFrom(clip, tracksByRecordingPath, tracksByRecording);
         }
 
@@ -297,8 +329,13 @@ internal sealed partial class AppHost
         Dictionary<string, TValue> byRecordingPath, Dictionary<string, TValue> bySession)
         where TValue : class
     {
-        if (clip.SourceSessionPath is not null && byRecordingPath.TryGetValue(clip.SourceSessionPath, out var linked))
-            return linked;
+        if (clip.SourceSessionPath is not null)
+        {
+            if (byRecordingPath.TryGetValue(clip.SourceSessionPath, out var linked))
+                return linked;
+            if (clip.Automated)
+                return null;
+        }
 
         var clipFileName = clip.FileName;
         var clipBaseName = Path.GetFileNameWithoutExtension(clipFileName);
@@ -338,7 +375,7 @@ internal sealed partial class AppHost
     // Pins the game attribution onto a clip whose record predates the field: once the tag is known
     // from any source, persist it so the next listing reads it straight from the record. Safe to run
     // on every pass — a record that already carries the tag is left alone.
-    private void BackfillClipGame(ContentItem clip)
+    private void BackfillClipGame(ContentItem clip, ClipTitleRecord? record)
     {
         var game = clip.Game;
         var gameId = clip.GameId;
@@ -374,9 +411,59 @@ internal sealed partial class AppHost
         if (fileName is null)
             return;
 
-        var record = _clipTitles.LoadRecord(fileName);
         if (record is not null && string.IsNullOrWhiteSpace(record.Game) && string.IsNullOrWhiteSpace(record.GameId))
             _clipTitles.SaveGame(fileName, game, gameId);
+    }
+
+    private void ApplyRecordingMetadata(ContentItem item, RecordingMetadata metadata)
+    {
+        item.Bookmarks = metadata.Bookmarks
+            .Select(bookmark => new BookmarkItem
+            {
+                Id = bookmark.Id.ToString(),
+                Type = bookmark.Type.ToString().ToLowerInvariant(),
+                Subtype = bookmark.Subtype,
+                Time = bookmark.Time.TotalSeconds,
+            })
+            .ToList();
+        item.HasAutomaticClipCandidates = metadata.Bookmarks.Any(IsAutomaticClipCandidate);
+        item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
+        item.Favorite = metadata.Favorite;
+        item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
+        item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
+        item.GameId = string.IsNullOrWhiteSpace(metadata.GameId)
+            ? ResolveLegacyGameId(item.Game)
+            : metadata.GameId;
+        item.DurationSeconds = metadata.DurationSeconds;
+        item.AudioTracks = ToAudioTrackInfo(metadata);
+    }
+
+    private string? NormalizeSourcePath(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return null;
+
+        var wirePath = sourcePath.Trim().Replace('\\', '/');
+        var absolutePath = ContentServer.ResolveWithinRoot(EffectiveRoot, wirePath);
+        if (absolutePath is null)
+            return null;
+
+        return Path.GetRelativePath(EffectiveRoot, absolutePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+    }
+
+    private static StringComparer ContentPathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
+    private static StringComparison ContentPathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    private static string FileNameFromWirePath(string path)
+    {
+        var separator = path.LastIndexOf('/');
+        return separator >= 0 ? path[(separator + 1)..] : path;
     }
 
     private static List<AudioTrackInfo>? ToAudioTrackInfo(RecordingMetadata metadata)

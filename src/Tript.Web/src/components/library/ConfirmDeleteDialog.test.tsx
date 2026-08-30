@@ -18,7 +18,7 @@ const base: DeleteConfirmation = {
 
 function renderDialog(
   confirmation: Partial<DeleteConfirmation> = {},
-  handlers: { onCancel?: () => void; onConfirm?: (permanent: boolean) => void } = {},
+  handlers: { onCancel?: () => void; onConfirm?: (permanent: boolean, checked: boolean) => void } = {},
 ) {
   return render(
     <ConfirmDeleteDialog
@@ -77,7 +77,7 @@ describe('ConfirmDeleteDialog skip-trash', () => {
     renderDialog({}, { onConfirm });
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
-    expect(onConfirm).toHaveBeenCalledWith(false);
+    expect(onConfirm).toHaveBeenCalledWith(false, false);
   });
 
   it('rewrites the notice and the button when skip-trash is ticked, and confirms permanently', () => {
@@ -90,7 +90,7 @@ describe('ConfirmDeleteDialog skip-trash', () => {
       '1 item will be deleted from disk immediately. This cannot be undone.',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
-    expect(onConfirm).toHaveBeenCalledWith(true);
+    expect(onConfirm).toHaveBeenCalledWith(true, false);
   });
 
   it('offers no checkbox for something already in the trash, and always confirms permanently', () => {
@@ -100,7 +100,33 @@ describe('ConfirmDeleteDialog skip-trash', () => {
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('cannot be undone');
     fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
-    expect(onConfirm).toHaveBeenCalledWith(true);
+    expect(onConfirm).toHaveBeenCalledWith(true, false);
+  });
+});
+
+describe('ConfirmDeleteDialog optional checkbox', () => {
+  const checkbox = { label: 'Delete linked highlights (favourited highlights are kept)' };
+
+  it('defaults off and returns a user-selected value independently of skip-trash', () => {
+    const onConfirm = vi.fn();
+    renderDialog({ checkbox }, { onConfirm });
+    const linked = screen.getByRole('checkbox', { name: checkbox.label });
+    expect((linked as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(linked);
+    fireEvent.click(screen.getByRole('checkbox', { name: /skip trash/i }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(onConfirm).toHaveBeenCalledWith(true, true);
+  });
+
+  it('uses the specified default for each newly mounted dialog', () => {
+    const onConfirm = vi.fn();
+    renderDialog({ checkbox: { ...checkbox, defaultChecked: true } }, { onConfirm });
+
+    expect((screen.getByRole('checkbox', { name: checkbox.label }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+    expect(onConfirm).toHaveBeenCalledWith(false, true);
   });
 });
 

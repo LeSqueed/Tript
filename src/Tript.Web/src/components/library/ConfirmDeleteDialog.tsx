@@ -27,6 +27,11 @@ export interface DeleteConfirmation {
    * offered and the confirm always sends `permanent`.
    */
   permanentOnly?: boolean;
+  /** An independent, ordinary checkbox offered for this deletion, when applicable. */
+  checkbox?: {
+    label: string;
+    defaultChecked?: boolean;
+  };
   retentionHours: number;
 }
 
@@ -37,11 +42,12 @@ export function ConfirmDeleteDialog({
 }: {
   confirmation: DeleteConfirmation;
   onCancel: () => void;
-  /** Called with what the checkbox says — `true` skips the trash. */
-  onConfirm: (permanent: boolean) => void;
+  /** Called with the permanent choice and the optional ordinary checkbox choice. */
+  onConfirm: (permanent: boolean, checked: boolean) => void;
 }) {
-  const { title, names, confirmLabel, permanentOnly = false, retentionHours } = confirmation;
+  const { title, names, confirmLabel, permanentOnly = false, checkbox, retentionHours } = confirmation;
   const [skipTrash, setSkipTrash] = useState(false);
+  const [checked, setChecked] = useState(checkbox?.defaultChecked === true);
   const permanent = permanentOnly || skipTrash;
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -146,6 +152,13 @@ export function ConfirmDeleteDialog({
           </label>
         )}
 
+        {checkbox && (
+          <label className="confirm-dialog-skip">
+            <Checkbox checked={checked} onChange={setChecked} />
+            <span>{checkbox.label}</span>
+          </label>
+        )}
+
         <div className="confirm-dialog-actions">
           <Button variant="ghost"  ref={cancelRef} onClick={onCancel}>
             Cancel
@@ -153,7 +166,7 @@ export function ConfirmDeleteDialog({
           <Button variant="danger"
             
             data-testid="confirm-delete-confirm"
-            onClick={() => onConfirm(permanent)}
+            onClick={() => onConfirm(permanent, checked)}
           >
             {/* Ticking the checkbox rewrites the button too: the label the user presses must
                 describe what ticking it changed. A permanent-only caller already named its own

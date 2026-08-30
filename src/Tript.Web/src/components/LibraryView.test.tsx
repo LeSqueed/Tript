@@ -145,6 +145,47 @@ describe('LibraryView grid', () => {
     expect(screen.queryByRole('presentation')).toBeNull();
   });
 
+  it('supplies only exact-path automatic highlights in timeline order for missing video', () => {
+    const missing = item({
+      fileName: 'missing.mp4',
+      title: 'Missing session',
+      videoMissing: true,
+      favorite: true,
+    });
+    const highlight = (name: string, clipStartTime: number, overrides: Partial<ContentItem> = {}) => item({
+      contentType: 'clip',
+      fileName: `${name}.mp4`,
+      filePath: `clips/${name}.mp4`,
+      automated: true,
+      sourceSessionPath: missing.filePath,
+      clipStartTime,
+      ...overrides,
+    });
+    renderLibrary([
+      missing,
+      highlight('first', 10),
+      highlight('second', 20),
+      highlight('manual', 5, { automated: false }),
+      highlight('other-source', 1, { sourceSessionPath: 'sessions/other.mp4' }),
+    ]);
+
+    const card = screen.getByRole('button', { name: 'Open Missing session' });
+    const images = within(card).getAllByRole('presentation') as HTMLImageElement[];
+    expect(images.map((image) => image.getAttribute('src'))).toEqual([
+      'http://localhost:8893/api/thumbnail/clips/first.mp4',
+      'http://localhost:8893/api/thumbnail/clips/second.mp4',
+    ]);
+    expect(within(card).getByText('Video missing')).toBeTruthy();
+  });
+
+  it('shows the missing-video fallback without requesting the recording thumbnail', () => {
+    renderLibrary([item({ fileName: 'gone.mp4', title: 'Gone recording', videoMissing: true })]);
+    const card = screen.getByRole('button', { name: 'Open Gone recording' });
+
+    expect(within(card).getByText('Source video unavailable')).toBeTruthy();
+    expect(within(card).queryByRole('presentation')).toBeNull();
+  });
+
   it('opens the item through the shell seam when a card is activated', () => {
     const onOpen = vi.fn();
     renderLibrary([session, clip], onOpen);
@@ -357,7 +398,12 @@ describe('LibraryView delete and selection', () => {
     };
   }
 
-  function renderWith(items: ContentItem[], retentionHours = 24, trash?: Partial<TrashController>) {
+  function renderWith(
+    items: ContentItem[],
+    retentionHours = 24,
+    trash?: Partial<TrashController>,
+    deleteLinkedHighlightsByDefault = false,
+  ) {
     const { client, sent } = recordingClient();
     const controller: TrashController = {
       entries: [],
@@ -374,6 +420,7 @@ describe('LibraryView delete and selection', () => {
         items={items}
         nowSeconds={NOW}
         retentionHours={retentionHours}
+        deleteLinkedHighlightsByDefault={deleteLinkedHighlightsByDefault}
         trash={controller}
       />,
     );
@@ -439,6 +486,81 @@ describe('LibraryView delete and selection', () => {
     ]);
   });
 
+  it('combines permanent and linked-highlight choices for a recording', () => {
+    const { sent } = renderWith([session]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: 'Delete linked highlights (favourited highlights are kept)',
+    }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /skip trash/i }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent).toEqual([{
+      method: 'DeleteContent',
+      parameters: {
+        contentType: 'recording',
+        fileName: 'sessions/cs2.mp4',
+        deleteLinkedHighlights: true,
+        permanent: true,
+      },
+    }]);
+  });
+
+  it('defaults an absent or false linked-highlight setting unchecked and omits the flag', () => {
+    const absent = renderWith([session]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+    expect((screen.getByRole('checkbox', { name: /delete linked highlights/i }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+    expect(absent.sent[0]).toEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'recording', fileName: 'sessions/cs2.mp4' },
+    });
+
+    absent.view.unmount();
+    const explicitFalse = renderWith([session], 24, undefined, false);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+    expect((screen.getByRole('checkbox', { name: /delete linked highlights/i }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+    expect(explicitFalse.sent[0]).toEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'recording', fileName: 'sessions/cs2.mp4' },
+    });
+  });
+
+  it('allows an unchecked missing-video placeholder deletion without a cascade flag', () => {
+    const placeholder = {
+      ...session,
+      fileName: 'missing.mp4',
+      filePath: 'sessions/missing.mp4',
+      title: 'Missing session',
+      videoMissing: true,
+    };
+    const { sent } = renderWith([placeholder], 24, undefined, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Missing session' }));
+
+    const linked = screen.getByRole('checkbox', { name: /delete linked highlights/i });
+    expect((linked as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(linked);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent).toEqual([{
+      method: 'DeleteContent',
+      parameters: { contentType: 'recording', fileName: 'sessions/missing.mp4' },
+    }]);
+  });
+
+  it('does not offer or send the linked-highlight choice for clip-only deletion', () => {
+    const { sent } = renderWith([clip], 24, undefined, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Nice shot' }));
+    expect(screen.queryByRole('checkbox', { name: /delete linked highlights/i })).toBeNull();
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent[0]).toEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'clip', fileName: 'clips/clip-1.mp4' },
+    });
+  });
+
   it('quotes the retention the shell was pushed, not a hardcoded 24 hours', () => {
     renderWith([session], 72);
     fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
@@ -495,6 +617,51 @@ describe('LibraryView delete and selection', () => {
     ]);
     // The cards go when the `content` push arrives; the selection must not still claim them.
     expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
+  });
+
+  it('applies one bulk linked-highlight choice only to recording targets', () => {
+    const { sent } = renderWith([session, clip], 24, undefined, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Ranked win' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Nice shot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 2' }));
+    expect((screen.getByRole('checkbox', {
+      name: 'Delete linked highlights (favourited highlights are kept)',
+    }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent[0]).toEqual({
+      method: 'DeleteMultipleContent',
+      parameters: {
+        items: [
+          {
+            contentType: 'recording',
+            fileName: 'sessions/cs2.mp4',
+            deleteLinkedHighlights: true,
+          },
+          { contentType: 'clip', fileName: 'clips/clip-1.mp4' },
+        ],
+      },
+    });
+  });
+
+  it('removes the cascade flag from every bulk target when the true default is unchecked', () => {
+    const { sent } = renderWith([session, clip], 24, undefined, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 2' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /delete linked highlights/i }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(sent[0]).toEqual({
+      method: 'DeleteMultipleContent',
+      parameters: {
+        items: [
+          { contentType: 'recording', fileName: 'sessions/cs2.mp4' },
+          { contentType: 'clip', fileName: 'clips/clip-1.mp4' },
+        ],
+      },
+    });
   });
 
   it('cannot bulk-delete nothing', () => {

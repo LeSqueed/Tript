@@ -742,7 +742,8 @@ internal sealed partial class AppHost : IDisposable
                     .Where(bookmark => !liveBookmarkIds.Contains(bookmark.Id))
                     .ToList();
                 if (unsavedBookmarks.Count > 0)
-                    QueueAutomaticClips(sourcePath, _pendingMetadata.VideoPath, unsavedBookmarks);
+                    QueueAutomaticClips(sourcePath, _pendingMetadata.VideoPath, unsavedBookmarks,
+                        _pendingMetadata.GameId);
             }
         }
 
@@ -1516,6 +1517,7 @@ internal sealed partial class AppHost : IDisposable
 
     private void RememberAutomaticClipBookmark(Bookmark bookmark)
     {
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(_settingsStore.Load(), _currentGameId);
         bookmark.IsAutomaticClipCandidate = true;
         LiveHighlightRegion? regionToSchedule = null;
         CancellationToken token = default;
@@ -1526,16 +1528,16 @@ internal sealed partial class AppHost : IDisposable
             if (!_liveHighlightsEnabled || _liveHighlightCancellation is null)
                 return;
 
-            var start = bookmark.Time > AutomaticClipPlanner.PreRoll
-                ? bookmark.Time - AutomaticClipPlanner.PreRoll
+            var start = bookmark.Time > before
+                ? bookmark.Time - before
                 : TimeSpan.Zero;
             var existing = _liveHighlightRegions.FirstOrDefault(region =>
-                !region.SaveRequested && bookmark.Time <= region.End);
+                !region.SaveRequested && bookmark.Time - before <= region.End);
             if (existing is not null)
             {
-                existing.End = existing.End > bookmark.Time + AutomaticClipPlanner.PostRoll
+                existing.End = existing.End > bookmark.Time + after
                     ? existing.End
-                    : bookmark.Time + AutomaticClipPlanner.PostRoll;
+                    : bookmark.Time + after;
                 existing.BookmarkIds.Add(bookmark.Id);
                 return;
             }
@@ -1543,7 +1545,7 @@ internal sealed partial class AppHost : IDisposable
             regionToSchedule = new LiveHighlightRegion
             {
                 Start = start,
-                End = bookmark.Time + AutomaticClipPlanner.PostRoll,
+                End = bookmark.Time + after,
             };
             regionToSchedule.BookmarkIds.Add(bookmark.Id);
             _liveHighlightRegions.Add(regionToSchedule);
@@ -1562,12 +1564,13 @@ internal sealed partial class AppHost : IDisposable
         {
             while (true)
             {
+                var (before, _) = SettingsResolver.ResolveAutomaticClipWindow(_settingsStore.Load(), _currentGameId);
                 TimeSpan delay;
                 lock (_automaticClipGate)
                 {
                     if (region.SaveRequested || !_liveHighlightsEnabled)
                         return;
-                    delay = _recordingStartUtc + region.End + LiveHighlightBoundaryGrace - DateTime.UtcNow;
+                    delay = _recordingStartUtc + region.End + before + LiveHighlightBoundaryGrace - DateTime.UtcNow;
                 }
 
                 if (delay > TimeSpan.Zero)
@@ -1577,7 +1580,7 @@ internal sealed partial class AppHost : IDisposable
                 {
                     if (region.SaveRequested || !_liveHighlightsEnabled)
                         return;
-                    if (_recordingStartUtc + region.End + LiveHighlightBoundaryGrace > DateTime.UtcNow)
+                    if (_recordingStartUtc + region.End + before + LiveHighlightBoundaryGrace > DateTime.UtcNow)
                         continue;
                     region.SaveRequested = true;
                 }
@@ -1894,6 +1897,9 @@ internal sealed partial class AppHost : IDisposable
                 if (!ValidateGameList(candidate.Game.GameList, out var validationError,
                     requireExistingExecutables: PatchUpdatesGameList(patch.Value)))
                     return validationError;
+                if (PatchUpdatesAutomaticClipWindows(patch.Value)
+                    && !ValidateAutomaticClipWindows(candidate, out var windowError))
+                    return windowError;
 
                 string effectiveRoot;
                 try
@@ -2017,6 +2023,14 @@ internal sealed partial class AppHost : IDisposable
         && patch.TryGetProperty("game", out var game)
         && game.ValueKind == JsonValueKind.Object
         && game.TryGetProperty("gameList", out _);
+
+    private static bool PatchUpdatesAutomaticClipWindows(JsonElement patch) =>
+        patch.ValueKind == JsonValueKind.Object
+        && ((patch.TryGetProperty("recording", out var recording)
+            && recording.ValueKind == JsonValueKind.Object
+            && (recording.TryGetProperty("automaticClipBeforeSeconds", out _)
+                || recording.TryGetProperty("automaticClipAfterSeconds", out _)))
+            || PatchUpdatesGameList(patch));
 
     private static void ApplyObjectPatch(object page, JsonElement patch)
     {
@@ -2205,6 +2219,34 @@ internal sealed partial class AppHost : IDisposable
         return true;
     }
 
+    // Reject invalid effective windows instead of silently relying on resolver clamping.
+    // SettingsModel avoids the Tript.Settings namespace collision in this file.
+    internal static bool ValidateAutomaticClipWindows(SettingsModel settings, out string? failure)
+    {
+        failure = null;
+
+        var globalBefore = settings.Recording.AutomaticClipBeforeSeconds;
+        var globalAfter = settings.Recording.AutomaticClipAfterSeconds;
+        if (globalAfter < globalBefore)
+        {
+            failure = "seconds after a bookmark cannot be lower than seconds before.";
+            return false;
+        }
+
+        foreach (var game in settings.Game.GameList)
+        {
+            var effectiveBefore = game.AutomaticClipOverride?.BeforeSeconds ?? globalBefore;
+            var effectiveAfter = game.AutomaticClipOverride?.AfterSeconds ?? globalAfter;
+            if (effectiveAfter < effectiveBefore)
+            {
+                failure = $"'{game.Name}': seconds after a bookmark cannot be lower than seconds before.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // A plain read. The getter used to reload whenever the catalogue was empty, which made a user who
     // deleted every game entry re-read the settings file on every access — from every thread, while
     // clearing and refilling the one list the other threads were enumerating. The catalogue is loaded
@@ -2371,7 +2413,7 @@ internal sealed partial class AppHost : IDisposable
         if (parameters is null || string.IsNullOrEmpty(parameters.FileName))
             return;
 
-        DeleteOne(parameters, parameters.Permanent);
+        DeleteItems([parameters], permanent: false);
         PushContent();
         PushTrash();
     }
@@ -2381,28 +2423,47 @@ internal sealed partial class AppHost : IDisposable
         if (parameters?.Items is null)
             return;
 
-        foreach (var item in parameters.Items)
-        {
-            if (string.IsNullOrEmpty(item.FileName))
-                continue;
-            DeleteOne(item, parameters.Permanent || item.Permanent);
-        }
+        DeleteItems(parameters.Items, parameters.Permanent);
 
         PushContent();
         PushTrash();
     }
 
-    // One item, without the pushes: a batch delete pushes once at the end rather than once per item.
-    private void DeleteOne(DeleteContentParameters item, bool permanent)
+    private void DeleteItems(IReadOnlyList<DeleteContentParameters> items, bool permanent)
+    {
+        var processed = new HashSet<string>(ContentPathComparer);
+        var clipRecords = items.Any(item => item.DeleteLinkedHighlights)
+            ? _clipTitles.EnumerateRecords()
+            : [];
+
+        foreach (var item in items)
+        {
+            if (!string.IsNullOrEmpty(item.FileName))
+                DeleteOne(item, permanent || item.Permanent, clipRecords, processed);
+        }
+    }
+
+    // One item, without the pushes: single, batch, and cascaded deletes share this path.
+    private void DeleteOne(DeleteContentParameters item, bool permanent,
+        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords,
+        HashSet<string> processed, ClipTitleRecord? enumeratedClipRecord = null)
     {
         // Resolve against the root even when the file is missing: a delete for a video whose file was
         // removed out-of-band must still drop the metadata record. ResolveContentFile refuses paths with
         // no file on disk, so use the traversal-safe resolver directly.
         var target = _content.ResolveWithinRoot(item.FileName);
-        if (target is null)
+        if (target is null || !processed.Add(target))
             return;
 
         var fileName = Path.GetFileName(target);
+        var relative = RelativeToRoot(target);
+        var contentType = ResolveContentType(item.ContentType, relative);
+        if (item.DeleteLinkedHighlights && contentType == "recording"
+            && TopLevelDirectory(relative) is not ("clips" or "highlights"))
+        {
+            DeleteLinkedAutomaticHighlights(target, relative, permanent, clipRecords, processed);
+        }
+
         if (permanent)
         {
             UnlinkContent(target, fileName);
@@ -2411,10 +2472,9 @@ internal sealed partial class AppHost : IDisposable
 
         // The records are read before they move, so the entry can be listed with the title, game and
         // length the library was showing.
-        var relative = RelativeToRoot(target);
         var seed = new TrashEntryRecord
         {
-            ContentType = ResolveContentType(item.ContentType, relative),
+            ContentType = contentType,
             FileName = fileName,
             OriginalPath = relative,
             DeletedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -2428,7 +2488,7 @@ internal sealed partial class AppHost : IDisposable
             seed.DurationSeconds = metadata.DurationSeconds;
         }
 
-        var clipRecord = _clipTitles.LoadRecord(fileName);
+        var clipRecord = enumeratedClipRecord ?? _clipTitles.LoadRecord(fileName);
         if (clipRecord is not null)
         {
             seed.Title ??= string.IsNullOrWhiteSpace(clipRecord.Title) ? null : clipRecord.Title;
@@ -2455,6 +2515,27 @@ internal sealed partial class AppHost : IDisposable
         {
             Console.Error.WriteLine($"Tript.App: could not move '{target}' to the trash: {failure}");
             PushError($"'{fileName}' could not be moved to the trash ({failure}), so it was left where it is.");
+        }
+    }
+
+    private void DeleteLinkedAutomaticHighlights(string sourceTarget, string sourcePath, bool permanent,
+        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords,
+        HashSet<string> processed)
+    {
+        var highlightsDirectory = HighlightsDirectoryPathForSource(sourceTarget);
+        foreach (var (clipFileName, record) in clipRecords)
+        {
+            if (!record.IsAutomatic || record.Favorite || string.IsNullOrWhiteSpace(record.SourceSessionPath))
+                continue;
+            if (!string.Equals(NormalizeSourcePath(record.SourceSessionPath), sourcePath,
+                ContentPathComparison))
+                continue;
+
+            DeleteOne(new DeleteContentParameters
+            {
+                ContentType = "highlight",
+                FileName = RelativeToRoot(Path.Combine(highlightsDirectory, clipFileName)),
+            }, permanent, clipRecords, processed, record);
         }
     }
 
@@ -2993,7 +3074,7 @@ internal sealed partial class AppHost : IDisposable
 
         var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
             .Replace(Path.DirectorySeparatorChar, '/');
-        if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates))
+        if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates, metadata.GameId))
             PushError("Automatic highlights are already being created for another recording.");
     }
 
@@ -3023,9 +3104,10 @@ internal sealed partial class AppHost : IDisposable
     }
 
     private bool QueueAutomaticClips(string sourcePath, string sourceSessionPath,
-        IReadOnlyList<Bookmark> bookmarks)
+        IReadOnlyList<Bookmark> bookmarks, string? gameId = null)
     {
-        var regions = AutomaticClipPlanner.Plan(bookmarks.Select(bookmark => bookmark.Time));
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(_settingsStore.Load(), gameId);
+        var regions = AutomaticClipPlanner.Plan(bookmarks.Select(bookmark => bookmark.Time), before, after);
         if (regions.Count == 0)
             return false;
 
@@ -3442,6 +3524,13 @@ internal sealed partial class AppHost : IDisposable
 
     private string HighlightsDirectoryForSource(string sourcePath)
     {
+        var directory = HighlightsDirectoryPathForSource(sourcePath);
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private string HighlightsDirectoryPathForSource(string sourcePath)
+    {
         var relative = Path.GetRelativePath(EffectiveRoot, sourcePath)
             .Replace(Path.DirectorySeparatorChar, '/');
         var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -3453,7 +3542,6 @@ internal sealed partial class AppHost : IDisposable
                 .Append("highlights")
                 .ToArray())
             : Path.Combine(EffectiveRoot, "highlights");
-        Directory.CreateDirectory(directory);
         return directory;
     }
 

@@ -78,6 +78,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
+  const [deleteLinkedHighlightsByDefault, setDeleteLinkedHighlightsByDefault] = useState(false);
   const [recording, setRecording] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ item: ContentItem; advancePlayer: boolean } | null>(null);
   const [builtInGameIds, setBuiltInGameIds] = useState<readonly string[]>(FALLBACK_BUILT_IN_GAME_IDS);
@@ -100,8 +101,16 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
 
   useEffect(() => {
     const remove = client.on('settings', (content) => {
-      const settings = (content as { settings?: { general?: { convertHdrClipsToSdr?: boolean } } }).settings;
+      const settings = (content as {
+        settings?: {
+          general?: { convertHdrClipsToSdr?: boolean };
+          recording?: { deleteLinkedHighlightsByDefault?: boolean };
+        };
+      }).settings;
       setConvertHdrClipsToSdr(settings?.general?.convertHdrClipsToSdr === true);
+      setDeleteLinkedHighlightsByDefault(
+        settings?.recording?.deleteLinkedHighlightsByDefault === true,
+      );
     });
     client.send('ListSettings');
     return remove;
@@ -158,16 +167,26 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const savedScrollTop = useRef(0);
   const overlayWasOpen = useRef(false);
 
+  const openSessionReview = useCallback((recording: ContentItem) => {
+    const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
+    setSessionReview({ recording, clips });
+    setRoute('session');
+  }, [items]);
+
   const openInPlayer = useCallback(
     (item: ContentItem, resultItems: ContentItem[]) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
+      if (item.videoMissing === true) {
+        openSessionReview(item);
+        return;
+      }
       setPlayerItem(item);
       setPlayerTitle(itemLabel(item));
       setPlayerNavigation(resultItems);
       setPlayerReturnRoute('library');
       setRoute('player');
     },
-    [],
+    [openSessionReview],
   );
 
   const closePlayer = useCallback(() => {
@@ -176,12 +195,6 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPlayerNavigation([]);
     setRoute((current) => (current === 'player' ? playerReturnRoute : current));
   }, [playerReturnRoute]);
-
-  const openSessionReview = useCallback((recording: ContentItem) => {
-    const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
-    setSessionReview({ recording, clips });
-    setRoute('session');
-  }, [items]);
 
   const openSessionClip = useCallback((item: ContentItem, navigation: ContentItem[]) => {
     setPlayerItem(item);
@@ -219,11 +232,19 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     }
   }, [playerNavigation, playerReturnRoute]);
 
-  const deleteItem = useCallback((item: ContentItem, permanent: boolean, advancePlayer: boolean) => {
+  const deleteItem = useCallback((
+    item: ContentItem,
+    permanent: boolean,
+    deleteLinkedHighlights: boolean,
+    advancePlayer: boolean,
+  ) => {
     client.send('DeleteContent', {
       contentType: item.contentType,
       fileName: item.filePath,
       ...(permanent ? { permanent: true } : {}),
+      ...(item.contentType === 'recording' && deleteLinkedHighlights
+        ? { deleteLinkedHighlights: true }
+        : {}),
     });
     if (advancePlayer) {
       advanceAfterPlayerDelete(item);
@@ -232,7 +253,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
 
   const requestPlayerDelete = useCallback((item: ContentItem) => {
     if (playerReturnRoute === 'session') {
-      deleteItem(item, false, true);
+      deleteItem(item, false, false, true);
       return;
     }
     setPendingDelete({ item, advancePlayer: true });
@@ -242,9 +263,14 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPendingDelete({ item, advancePlayer: false });
   }, []);
 
-  const confirmDelete = useCallback((permanent: boolean) => {
+  const confirmDelete = useCallback((permanent: boolean, deleteLinkedHighlights: boolean) => {
     if (pendingDelete) {
-      deleteItem(pendingDelete.item, permanent, pendingDelete.advancePlayer);
+      deleteItem(
+        pendingDelete.item,
+        permanent,
+        deleteLinkedHighlights,
+        pendingDelete.advancePlayer,
+      );
     }
     setPendingDelete(null);
   }, [deleteItem, pendingDelete]);
@@ -253,6 +279,14 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     title: `Delete ${itemLabel(pendingDelete.item)}?`,
     names: [itemLabel(pendingDelete.item)],
     confirmLabel: 'Move to trash',
+    ...(pendingDelete.item.contentType === 'recording'
+      ? {
+          checkbox: {
+            label: 'Delete linked highlights (favourited highlights are kept)',
+            defaultChecked: deleteLinkedHighlightsByDefault,
+          },
+        }
+      : {}),
     retentionHours: trash.retentionHours,
   } : null;
 
@@ -400,6 +434,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
                 contentLoaded={loaded}
                 onOpen={openInPlayer}
                 retentionHours={trash.retentionHours}
+                deleteLinkedHighlightsByDefault={deleteLinkedHighlightsByDefault}
                 trash={trash}
               />
             </div>

@@ -29,6 +29,8 @@ const SETTINGS: GameSettings = {
 function renderPage(
   settings: GameSettings = SETTINGS,
   selectedGameExecutable: SelectedGameExecutableMessage | null = null,
+  globalClipBeforeSeconds = 5,
+  globalClipAfterSeconds = 8,
 ) {
   const update = vi.fn((_page: string, _patch: Partial<Record<string, unknown>>) => 'settings-request-1');
   const onBrowseExecutable = vi.fn();
@@ -45,10 +47,27 @@ function renderPage(
       selectedGameExecutable={selected}
       settingsUpdateResult={settingsUpdateResult}
       onBrowseExecutable={onBrowseExecutable}
+      globalClipBeforeSeconds={globalClipBeforeSeconds}
+      globalClipAfterSeconds={globalClipAfterSeconds}
     />
   );
   const result = render(view());
   return { ...result, update, onBrowseExecutable, view };
+}
+
+/** A single packaged game, so the Before/After fields of its one row are unambiguous. */
+function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverride']) {
+  return {
+    gameCaptureTimeout: 10,
+    gameList: [
+      {
+        id: PACKAGED_ID,
+        name: 'Overwatch',
+        integrations: { enabled: false } as const,
+        ...(override !== undefined ? { automaticClipOverride: override } : {}),
+      },
+    ],
+  };
 }
 
 function gameListFrom(update: ReturnType<typeof vi.fn>) {
@@ -196,5 +215,113 @@ describe('packaged games', () => {
     renderPage({ ...SETTINGS, gameList: [{ ...SETTINGS.gameList[0], id: 'overwatch' }] });
     expect(screen.getByRole('button', { name: 'Reset overrides' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+});
+
+describe('automatic clip overrides', () => {
+  it('renders the before and after fields as numeric globals-by-placeholder', () => {
+    renderPage(oneGame());
+    const before = screen.getByLabelText('Before (s)') as HTMLInputElement;
+    const after = screen.getByLabelText('After (s)') as HTMLInputElement;
+    expect(before.getAttribute('type')).toBe('number');
+    expect(before.getAttribute('min')).toBe('1');
+    expect(before.getAttribute('placeholder')).toBe('global');
+    expect(before.value).toBe('');
+    expect(after.value).toBe('');
+  });
+
+  it('typing a before-only override leaves the after side inheriting', () => {
+    const { update } = renderPage(oneGame(), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('Before (s)'), { target: { value: '3' } });
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(gameListFrom(update)[0]).toEqual({
+      id: PACKAGED_ID,
+      name: 'Overwatch',
+      integrations: { enabled: false },
+      automaticClipOverride: { beforeSeconds: 3, afterSeconds: null },
+    });
+  });
+
+  it('typing an after-only override leaves the before side inheriting', () => {
+    const { update } = renderPage(oneGame(), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('After (s)'), { target: { value: '12' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: null,
+      afterSeconds: 12,
+    });
+  });
+
+  it('overriding one side keeps the other side’s stored override', () => {
+    const { update } = renderPage(oneGame({ beforeSeconds: 2 }), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('After (s)'), { target: { value: '9' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: 2,
+      afterSeconds: 9,
+    });
+  });
+
+  it('clearing both sides back to inherit drops the override entirely', () => {
+    const { update } = renderPage(oneGame({ beforeSeconds: 3 }), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('Before (s)'), { target: { value: '' } });
+
+    expect(gameListFrom(update)[0]).toEqual({
+      id: PACKAGED_ID,
+      name: 'Overwatch',
+      integrations: { enabled: false },
+    });
+  });
+
+  it('raising before above the effective after raises after in the same patch', () => {
+    const { update } = renderPage(oneGame({ beforeSeconds: 3 }), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('Before (s)'), { target: { value: '10' } });
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: 10,
+      afterSeconds: 10,
+    });
+  });
+
+  it('raises inherited after when before outruns the global window', () => {
+    const { update } = renderPage(oneGame(), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('Before (s)'), { target: { value: '10' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: 10,
+      afterSeconds: 10,
+    });
+  });
+
+  it('clamps a typed after below the effective before up to it', () => {
+    const { update } = renderPage(oneGame({ beforeSeconds: 4 }), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('After (s)'), { target: { value: '2' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: 4,
+      afterSeconds: 4,
+    });
+  });
+
+  it('clamps after against the inherited global before when nothing is overridden', () => {
+    const { update } = renderPage(oneGame(), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('After (s)'), { target: { value: '3' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: null,
+      afterSeconds: 5,
+    });
+  });
+
+  it('clearing after below the effective before clamps it up rather than sending an invalid pair', () => {
+    const { update } = renderPage(oneGame({ beforeSeconds: 10, afterSeconds: 12 }), null, 5, 8);
+    fireEvent.change(screen.getByLabelText('After (s)'), { target: { value: '' } });
+
+    expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
+      beforeSeconds: 10,
+      afterSeconds: 10,
+    });
   });
 });

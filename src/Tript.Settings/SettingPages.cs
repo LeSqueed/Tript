@@ -67,6 +67,18 @@ public sealed class RecordingSettings
     // mode the replay buffer still runs when this is false, ready for future manual hotkeys.
     public bool AutomaticClipsEnabled { get; set; }
 
+    // How many seconds of context before the bookmark to keep in an automatic highlight. Only
+    // meaningful when AutomaticClipsEnabled is on. Integer so the serialized value stays numeric.
+    public int AutomaticClipBeforeSeconds { get; set; } = 5;
+
+    // How many seconds of footage after the bookmark to keep in an automatic highlight. Only
+    // meaningful when AutomaticClipsEnabled is on. Integer so the serialized value stays numeric.
+    public int AutomaticClipAfterSeconds { get; set; } = 8;
+
+    // The initial choice shown when confirming deletion of a session with linked highlights.
+    // Deletion code decides what to remove; this setting only persists the user's default choice.
+    public bool DeleteLinkedHighlightsByDefault { get; set; }
+
     // How long a deleted recording stays in the trash before it is purged for good. Zero or less
     // disables the automatic purge, so entries stay until they are emptied by hand.
     //

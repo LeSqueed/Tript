@@ -296,6 +296,52 @@
   object-fit: cover;
 }
 
+.content-card-shell--missing .content-card {
+  border-color: rgba(240, 180, 41, 0.38);
+}
+
+.content-card-missing-preview,
+.content-card-preview-grid,
+.content-card-missing-fallback {
+  position: absolute;
+  inset: 0;
+}
+
+.content-card-missing-fallback {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-muted-strong);
+  font-size: 12px;
+  text-align: center;
+}
+
+.content-card-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--preview-count), minmax(0, 1fr));
+  gap: 2px;
+}
+
+.content-card-preview-image {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.content-card-preview-image.loaded {
+  opacity: 1;
+}
+
+.content-card-missing-chip {
+  color: var(--color-warning);
+  border-color: rgba(240, 180, 41, 0.45);
+  background: rgba(6, 9, 13, 0.58);
+}
+
 /* The placeholder tile — what a 204 (no thumbnail available) looks like. Deliberately a quiet glyph
  * on the card's own surface rather than a broken-image icon: there is nothing wrong, the frame just
  * has not been extracted. */

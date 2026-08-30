@@ -166,6 +166,22 @@ export function isClipContent(item: ContentItem): boolean {
   return item.contentType === 'clip' || item.contentType === 'highlight';
 }
 
+/** Automatic highlights linked to one recording, in their order on its timeline. */
+export function linkedAutomaticHighlights(
+  recording: ContentItem,
+  candidates: readonly ContentItem[],
+): ContentItem[] {
+  return candidates
+    .filter(
+      (item) => item.automated === true && item.sourceSessionPath === recording.filePath,
+    )
+    .sort(
+      (left, right) =>
+        (left.clipStartTime ?? Number.POSITIVE_INFINITY) -
+        (right.clipStartTime ?? Number.POSITIVE_INFINITY),
+    );
+}
+
 /** The file name without its extension, which is what the clip→recording link is written in. */
 function baseName(fileName: string): string {
   const dot = fileName.lastIndexOf('.');

@@ -191,6 +191,28 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(0, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
     }
 
+    [Fact]
+    public void DeleteLinkedHighlightsByDefault_FreshAndOlderSettings_DefaultToFalse()
+    {
+        Assert.False(_store.Load().Recording.DeleteLinkedHighlightsByDefault);
+
+        File.WriteAllText(_provider.FilePath, """{"version":1,"recording":{"mode":"Session"}}""");
+
+        Assert.False(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
+    }
+
+    [Fact]
+    public void DeleteLinkedHighlightsByDefault_TrueAndFalse_RoundTrip()
+    {
+        _store.Load().Recording.DeleteLinkedHighlightsByDefault = true;
+        _store.Save();
+        Assert.True(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
+
+        _store.Load().Recording.DeleteLinkedHighlightsByDefault = false;
+        _store.Save();
+        Assert.False(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
+    }
+
     // The recording page's output-directory setting must survive a full save/load round trip so a
     // user-chosen recording location persists across launches.
     [Fact]

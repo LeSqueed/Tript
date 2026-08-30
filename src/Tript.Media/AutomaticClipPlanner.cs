@@ -7,10 +7,8 @@ namespace Tript.Media;
 // from recording and ffmpeg makes the chain rule deterministic and testable without media binaries.
 public static class AutomaticClipPlanner
 {
-    public static readonly TimeSpan PreRoll = TimeSpan.FromSeconds(10);
-    public static readonly TimeSpan PostRoll = TimeSpan.FromSeconds(10);
-
-    public static IReadOnlyList<ClipRegion> Plan(IEnumerable<TimeSpan> bookmarkTimes)
+    public static IReadOnlyList<ClipRegion> Plan(
+        IEnumerable<TimeSpan> bookmarkTimes, TimeSpan preRoll, TimeSpan postRoll)
     {
         ArgumentNullException.ThrowIfNull(bookmarkTimes);
 
@@ -23,25 +21,25 @@ public static class AutomaticClipPlanner
             return [];
 
         var merged = new List<ClipRegion>(candidates.Count);
-        var current = RegionFor(candidates[0]);
+        var current = RegionFor(candidates[0], preRoll, postRoll);
         foreach (var candidate in candidates.Skip(1))
         {
             // Merge whenever the candidate's pre-roll reaches the current region.
-            if (RegionFor(candidate).Start <= current.End)
+            if (RegionFor(candidate, preRoll, postRoll).Start <= current.End)
             {
-                current = current with { End = candidate + PostRoll };
+                current = current with { End = candidate + postRoll };
                 continue;
             }
 
             merged.Add(current);
-            current = RegionFor(candidate);
+            current = RegionFor(candidate, preRoll, postRoll);
         }
 
         merged.Add(current);
         return merged;
     }
 
-    private static ClipRegion RegionFor(TimeSpan trigger) => new(
-        trigger > PreRoll ? trigger - PreRoll : TimeSpan.Zero,
-        trigger + PostRoll);
+    private static ClipRegion RegionFor(TimeSpan trigger, TimeSpan preRoll, TimeSpan postRoll) => new(
+        trigger > preRoll ? trigger - preRoll : TimeSpan.Zero,
+        trigger + postRoll);
 }

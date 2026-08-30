@@ -65,6 +65,10 @@ const FALLBACK_ENCODER = 'obs_x264';
  */
 const BACKEND_DECIDES_ENCODER = 'x264';
 
+/** The default highlight window the backend applies when a settings push carries no value. */
+const DEFAULT_CLIP_BEFORE_SECONDS = 5;
+const DEFAULT_CLIP_AFTER_SECONDS = 8;
+
 function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
   const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
   return windows
@@ -273,6 +277,12 @@ function parseKbps(draft: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** A whole positive number of seconds, or null when the draft is not one. */
+function parseSeconds(draft: string): number | null {
+  const parsed = Number(draft);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+}
+
 export function RecordingPage({
   settings,
   update,
@@ -302,12 +312,26 @@ export function RecordingPage({
   const directoryExample = nativeDirectoryExample();
   const [bitrate, setBitrate] = useState<string>(String(settings.bitrateKbps ?? ''));
   const [maxBitrate, setMaxBitrate] = useState<string>(String(settings.maxBitrateKbps ?? ''));
+  const [beforeSeconds, setBeforeSeconds] = useState<string>(
+    String(settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS),
+  );
+  const [afterSeconds, setAfterSeconds] = useState<string>(String(
+    settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS,
+  ));
 
   // Re-sync drafts from the model only on an external push, never on the echo of our own edit.
   useEffect(() => {
     setBitrate(String(settings.bitrateKbps ?? ''));
     setMaxBitrate(String(settings.maxBitrateKbps ?? ''));
-  }, [externalPushCount, settings.bitrateKbps, settings.maxBitrateKbps]);
+    setBeforeSeconds(String(settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS));
+    setAfterSeconds(String(settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS));
+  }, [
+    externalPushCount,
+    settings.bitrateKbps,
+    settings.maxBitrateKbps,
+    settings.automaticClipBeforeSeconds,
+    settings.automaticClipAfterSeconds,
+  ]);
 
   function commitResolution(value: string) {
     const parsed = parseResolution(value);
@@ -334,6 +358,44 @@ export function RecordingPage({
     }
   }
 
+  function storedBeforeSeconds(): number {
+    return settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
+  }
+
+  function storedAfterSeconds(): number {
+    return settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
+  }
+
+  function commitBefore() {
+    const before = parseSeconds(beforeSeconds);
+    if (before === null) {
+      setBeforeSeconds(String(storedBeforeSeconds()));
+      return;
+    }
+    const currentAfter = parseSeconds(afterSeconds) ?? storedAfterSeconds();
+    setBeforeSeconds(String(before));
+    if (before > currentAfter) {
+      // Raising before above after would break the pair; raise after along with it in one atomic patch.
+      setAfterSeconds(String(before));
+      update(page, { automaticClipBeforeSeconds: before, automaticClipAfterSeconds: before });
+    } else {
+      update(page, { automaticClipBeforeSeconds: before });
+    }
+  }
+
+  function commitAfter() {
+    const after = parseSeconds(afterSeconds);
+    if (after === null) {
+      setAfterSeconds(String(storedAfterSeconds()));
+      return;
+    }
+    const before = parseSeconds(beforeSeconds) ?? storedBeforeSeconds();
+    // The pair must stay coherent: after can never be below the before value it commits alongside.
+    const nextAfter = Math.max(after, before);
+    setAfterSeconds(String(nextAfter));
+    update(page, { automaticClipAfterSeconds: nextAfter });
+  }
+
   const encoder = settings.encoder;
   const rateControl = effectiveRateControl(settings.rateControl, encoder);
   // A stored mode this encoder cannot use is not an error to correct on the user's behalf — the page
@@ -341,6 +403,8 @@ export function RecordingPage({
   // an out-of-list encoder. Changing it without being asked would persist a choice nobody made.
   const coercedFrom = settings.rateControl && settings.rateControl !== rateControl ? settings.rateControl : undefined;
   const usesQuantiser = QUANTISER_MODES.includes(rateControl);
+  // The browser-level floor for the after field tracks the current before value (draft or stored).
+  const afterMin = Math.max(1, parseSeconds(beforeSeconds) ?? storedBeforeSeconds());
 
   return (
     <div className="settings-page" data-page="recording">
@@ -479,11 +543,55 @@ export function RecordingPage({
 
       <Field
         label="Automatic highlights"
-        hint="When enabled, Tript creates clips for positive detected events as soon as each recording stops. You can always create them manually from a session review."
+        hint="When enabled, Tript creates clips for positive detected events as soon as each recording stops, sized by the before/after windows below. You can always create them manually from a session review."
       >
         <Checkbox
           checked={settings.automaticClipsEnabled === true}
           onChange={(enabled) => update(page, { automaticClipsEnabled: enabled })}
+        />
+      </Field>
+
+      <Field label="Seconds before each highlight" hint="How far before a detected highlight's start the clip begins.">
+        <input
+          type="number"
+          className="input"
+          min={1}
+          value={beforeSeconds}
+          onChange={(event) => setBeforeSeconds(event.target.value)}
+          onBlur={commitBefore}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commitBefore();
+            }
+          }}
+          aria-label="Seconds before each highlight"
+        />
+      </Field>
+
+      <Field label="Seconds after each highlight" hint="How far after a detected highlight's end the clip continues. Cannot be less than the seconds before.">
+        <input
+          type="number"
+          className="input"
+          min={afterMin}
+          value={afterSeconds}
+          onChange={(event) => setAfterSeconds(event.target.value)}
+          onBlur={commitAfter}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commitAfter();
+            }
+          }}
+          aria-label="Seconds after each highlight"
+        />
+      </Field>
+
+      <Field
+        label="Delete linked highlights by default"
+        hint="Preselects the option to delete linked highlights when deleting a session. Favourited highlights are always kept."
+      >
+        <Checkbox
+          checked={settings.deleteLinkedHighlightsByDefault === true}
+          onChange={(enabled) => update(page, { deleteLinkedHighlightsByDefault: enabled })}
         />
       </Field>
 

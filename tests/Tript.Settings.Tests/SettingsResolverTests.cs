@@ -204,4 +204,153 @@ public class SettingsResolverTests
         // And a game nothing knows about still gets the global.
         Assert.Equal(DisplayCaptureMethod.Game, SettingsResolver.Resolve(settings, "Unknown").CaptureMethod);
     }
+
+    // The automatic-clip window defaults to the global pair stored on the recording settings: 5
+    // seconds before each save, 8 after. A fresh settings object is the canonical default.
+    [Fact]
+    public void ClipWindow_GlobalValues_AreTheDefaults()
+    {
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(new Settings(), gameId: null);
+
+        Assert.Equal(TimeSpan.FromSeconds(5), before);
+        Assert.Equal(TimeSpan.FromSeconds(8), after);
+    }
+
+    // A game id nothing knows about, and a null id, resolve to the same global defaults rather
+    // than erroring or inventing a window.
+    [Fact]
+    public void ClipWindow_UnknownOrNullGame_InheritsTheGlobalValues()
+    {
+        var settings = new Settings();
+
+        var (unknownBefore, unknownAfter) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "unknown-game");
+        var (nullBefore, nullAfter) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: null);
+
+        Assert.Equal(TimeSpan.FromSeconds(5), unknownBefore);
+        Assert.Equal(TimeSpan.FromSeconds(8), unknownAfter);
+        Assert.Equal(TimeSpan.FromSeconds(5), nullBefore);
+        Assert.Equal(TimeSpan.FromSeconds(8), nullAfter);
+    }
+
+    // A per-game override with both sides set wins over the globals on both sides.
+    [Fact]
+    public void ClipWindow_BothSidesOverridden_UsesTheOverrideForEachSide()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3, AfterSeconds = 12 };
+        });
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "ow");
+
+        Assert.Equal(TimeSpan.FromSeconds(3), before);
+        Assert.Equal(TimeSpan.FromSeconds(12), after);
+    }
+
+    // A before-only override replaces the before side while the after side is inherited from the
+    // global setting.
+    [Fact]
+    public void ClipWindow_BeforeOnlyOverride_UsesOverrideAndInheritsGlobalAfter()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3 };
+        });
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "ow");
+
+        Assert.Equal(TimeSpan.FromSeconds(3), before);
+        Assert.Equal(TimeSpan.FromSeconds(8), after);
+    }
+
+    // An after-only override replaces the after side while the before side is inherited from the
+    // global setting.
+    [Fact]
+    public void ClipWindow_AfterOnlyOverride_UsesOverrideAndInheritsGlobalBefore()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.AutomaticClipOverride = new GameAutomaticClipOverride { AfterSeconds = 12 };
+        });
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "ow");
+
+        Assert.Equal(TimeSpan.FromSeconds(5), before);
+        Assert.Equal(TimeSpan.FromSeconds(12), after);
+    }
+
+    // If the effective pair has after before before, the after side is clamped up to the before
+    // side so the returned window never points into the past. Before stays untouched.
+    [Fact]
+    public void ClipWindow_GlobalAfterBeforeBefore_ClampsAfterUpToBefore()
+    {
+        var settings = new Settings();
+        settings.Recording.AutomaticClipBeforeSeconds = 10;
+        settings.Recording.AutomaticClipAfterSeconds = 4;
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: null);
+
+        Assert.Equal(TimeSpan.FromSeconds(10), before);
+        Assert.Equal(TimeSpan.FromSeconds(10), after);
+    }
+
+    // The same clamp applies to an overridden pair: an after below the game's own before is raised
+    // to the before side rather than surviving.
+    [Fact]
+    public void ClipWindow_OverriddenAfterBelowBefore_ClampsAfterUpToBefore()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 6, AfterSeconds = 2 };
+        });
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "ow");
+
+        Assert.Equal(TimeSpan.FromSeconds(6), before);
+        Assert.Equal(TimeSpan.FromSeconds(6), after);
+    }
+
+    [Fact]
+    public void ClipWindow_NegativeBefore_ClampsBeforeToZero()
+    {
+        var settings = new Settings();
+        settings.Recording.AutomaticClipBeforeSeconds = -3;
+        settings.Recording.AutomaticClipAfterSeconds = 4;
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: null);
+
+        Assert.Equal(TimeSpan.Zero, before);
+        Assert.Equal(TimeSpan.FromSeconds(4), after);
+    }
+
+    [Fact]
+    public void ClipWindow_NegativeAfter_ClampsAfterToZero()
+    {
+        var settings = new Settings();
+        settings.Recording.AutomaticClipBeforeSeconds = 0;
+        settings.Recording.AutomaticClipAfterSeconds = -3;
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: null);
+
+        Assert.Equal(TimeSpan.Zero, before);
+        Assert.Equal(TimeSpan.Zero, after);
+    }
+
+    [Fact]
+    public void ClipWindow_NegativeAfterBelowPositiveBefore_ClampsThenRaisesAfterToBefore()
+    {
+        var settings = WithGame("ow", game =>
+        {
+            game.AutomaticClipOverride = new GameAutomaticClipOverride
+            {
+                BeforeSeconds = 6,
+                AfterSeconds = -2,
+            };
+        });
+
+        var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(settings, gameId: "ow");
+
+        Assert.Equal(TimeSpan.FromSeconds(6), before);
+        Assert.Equal(TimeSpan.FromSeconds(6), after);
+    }
 }

@@ -71,6 +71,9 @@ internal sealed class ContentItem
     // directory is being enumerated.
     public long FileSizeBytes { get; set; }
 
+    // Present only for a synthetic recording whose source video is no longer on disk.
+    public bool? VideoMissing { get; set; }
+
     // The bookmarks the recording carries on the wire, null when the item has none (clips never
     // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).
     public List<BookmarkItem>? Bookmarks { get; set; }
@@ -205,6 +208,9 @@ internal sealed class DeleteContentParameters
 
     // Omitted or false moves the item to the trash; true unlinks it there and then.
     public bool Permanent { get; set; }
+
+    // Applies the same operation to eligible automatic highlights linked to a recording.
+    public bool DeleteLinkedHighlights { get; set; }
 }
 
 internal sealed class DeleteMultipleContentParameters

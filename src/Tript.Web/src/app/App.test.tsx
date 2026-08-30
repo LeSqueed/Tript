@@ -277,6 +277,36 @@ describe('App shell', () => {
     expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
   });
 
+  it('opens a missing-video recording directly in its exact automatic highlights', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: {
+          content: [
+            HIGHLIGHT_2,
+            { ...HIGHLIGHT_1, automated: false, fileName: 'manual.mp4', filePath: 'clips/manual.mp4' },
+            { ...HIGHLIGHT_1, sourceSessionPath: SESSION_2.filePath, fileName: 'other.mp4', filePath: 'clips/other.mp4' },
+            HIGHLIGHT_1,
+            { ...SESSION_1, videoMissing: true },
+          ],
+        },
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+
+    expect(screen.getByRole('heading', { name: 'Session 1' })).toBeTruthy();
+    expect(screen.getByText('2 highlights')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Open (First|Second) highlight/ }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Open First highlight',
+      'Open Second highlight',
+    ]);
+    expect(screen.queryByRole('button', { name: 'Open manual.mp4' })).toBeNull();
+    expect(document.querySelector('.player-view')).toBeNull();
+  });
+
   it('refreshes the open player item when content metadata changes', () => {
     renderApp();
     connect();
@@ -324,6 +354,49 @@ describe('App shell', () => {
     expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
       method: 'DeleteContent',
       parameters: { contentType: 'recording', fileName: SESSION_1.filePath },
+    });
+  });
+
+  it('uses the current settings default for player recording deletion', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'settings',
+        content: { settings: { recording: { deleteLinkedHighlightsByDefault: true } } },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    const linked = screen.getByRole('checkbox', {
+      name: 'Delete linked highlights (favourited highlights are kept)',
+    });
+    expect((linked as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(linked);
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      method: 'DeleteContent',
+      parameters: { contentType: 'recording', fileName: SESSION_1.filePath },
+    });
+  });
+
+  it('sends the confirmed linked-highlight choice from a player recording deletion', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /delete linked highlights/i }));
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      method: 'DeleteContent',
+      parameters: {
+        contentType: 'recording',
+        fileName: SESSION_1.filePath,
+        deleteLinkedHighlights: true,
+      },
     });
   });
 

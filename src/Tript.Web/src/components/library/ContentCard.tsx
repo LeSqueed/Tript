@@ -9,7 +9,7 @@
 // wrapper, not its children: a button inside a button is invalid markup and browsers disagree about
 // which one a click activates.
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import { thumbnailUrl } from '../../ipc/endpoints';
 import {
@@ -37,6 +37,7 @@ export function ContentCard({
   priority = false,
   clipsCount = 0,
   highlightsCount = 0,
+  previewHighlights = [],
 }: {
   item: ContentItem;
   /** The library's open seam: called with the item the user activated. */
@@ -60,6 +61,8 @@ export function ContentCard({
   clipsCount?: number;
   /** Number of generated highlights, shown as an affordance on the thumbnail. */
   highlightsCount?: number;
+  /** Linked automatic highlights, already in timeline order, for a missing-video preview. */
+  previewHighlights?: ContentItem[];
   /**
    * An extra affordance, rendered inside the shell beside the card rather than within it — a button
    * inside a button is invalid markup, and the delete and favourite controls are siblings for the
@@ -78,15 +81,18 @@ export function ContentCard({
   const game = itemGame(item) ?? UNKNOWN_GAME_LABEL;
   const duration = formatDurationChip(item);
   const size = formatSizeChip(item);
+  const missingVideo = item.videoMissing === true;
   // An item with no path has nothing to ask the content server for — straight to the placeholder,
   // rather than a request that is guaranteed to fail.
-  const showThumbnail = item.filePath.length > 0 && !thumbnailFailed;
+  const showThumbnail = !missingVideo && item.filePath.length > 0 && !thumbnailFailed;
+  const preview = previewHighlights.slice(0, 3);
 
   return (
     <div
       className={[
         'content-card-shell',
         variant === 'wide' ? 'content-card-shell--wide' : '',
+        missingVideo ? 'content-card-shell--missing' : '',
         selected ? 'selected' : '',
       ]
         .filter(Boolean)
@@ -100,7 +106,12 @@ export function ContentCard({
         aria-label={`Open ${label}`}
       >
         <span className="content-card-thumb">
-          {showThumbnail ? (
+          {missingVideo ? (
+            <MissingVideoPreview
+              key={preview.map((highlight) => highlight.filePath).join('|')}
+              highlights={preview}
+            />
+          ) : showThumbnail ? (
             <img
               className="content-card-image"
               src={thumbnailUrl(item.filePath)}
@@ -124,6 +135,7 @@ export function ContentCard({
             </span>
             <span className="content-card-chips">
               <span className="pill content-card-type">{typeLabel(item)}</span>
+              {missingVideo && <span className="pill content-card-missing-chip">Video missing</span>}
               <span className="pill pill-muted">{game}</span>
               <span className="pill pill-muted">{formatDateChip(item)}</span>
               {clipsCount > 0 && <span className="pill pill-muted">Clips: {clipsCount}</span>}
@@ -174,7 +186,7 @@ export function ContentCard({
         </button>
       )}
 
-      {onToggleFavorite && (
+      {onToggleFavorite && !missingVideo && (
         <button
           type="button"
           className={item.favorite ? 'content-card-favorite active' : 'content-card-favorite'}
@@ -186,5 +198,38 @@ export function ContentCard({
         </button>
       )}
     </div>
+  );
+}
+
+function MissingVideoPreview({ highlights }: { highlights: ContentItem[] }) {
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
+
+  return (
+    <span className="content-card-missing-preview" data-testid="content-card-missing-preview">
+      <span className="content-card-missing-fallback" data-testid="content-card-missing-fallback">
+        <Icon name="clip" size={22} />
+        <span>Source video unavailable</span>
+      </span>
+      {highlights.length > 0 && (
+        <span
+          className="content-card-preview-grid"
+          style={{ '--preview-count': highlights.length } as CSSProperties}
+        >
+          {highlights.map((highlight) => (
+            <img
+              key={highlight.filePath}
+              className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
+              src={thumbnailUrl(highlight.filePath)}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              width={480}
+              height={270}
+              onLoad={() => setLoaded((current) => new Set(current).add(highlight.filePath))}
+            />
+          ))}
+        </span>
+      )}
+    </span>
   );
 }

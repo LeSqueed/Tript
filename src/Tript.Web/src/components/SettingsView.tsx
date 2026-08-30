@@ -114,6 +114,8 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
             selectedGameExecutable={selectedGameExecutable}
             settingsUpdateResult={controller.settingsUpdateResult}
             onBrowseExecutable={(requestId) => client.send('SelectGameExecutable', { requestId })}
+            globalClipBeforeSeconds={controller.settings.recording.automaticClipBeforeSeconds}
+            globalClipAfterSeconds={controller.settings.recording.automaticClipAfterSeconds}
           />
           )}
           {page === 'general' && (

@@ -37,6 +37,7 @@ import {
   clampPage,
   groupByRecording,
   itemLabel,
+  linkedAutomaticHighlights,
   NO_GAME,
   pageCountFor,
   UNKNOWN_GAME_LABEL,
@@ -99,6 +100,8 @@ export interface LibraryViewProps {
    * it; the default only stands until the first push arrives.
    */
   retentionHours?: number;
+  /** Current default used when a recording deletion dialog is opened. */
+  deleteLinkedHighlightsByDefault?: boolean;
 }
 export function LibraryView({
   client,
@@ -108,6 +111,7 @@ export function LibraryView({
   onOpen,
   nowSeconds,
   retentionHours = DEFAULT_RETENTION_HOURS,
+  deleteLinkedHighlightsByDefault = false,
   trash,
 }: LibraryViewProps) {
   const [query, setQuery] = useState<LibraryQuery>(DEFAULT_LIBRARY_QUERY);
@@ -216,10 +220,16 @@ export function LibraryView({
   const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const confirmDelete = useCallback(
-    (permanent: boolean) => {
+    (permanent: boolean, deleteLinkedHighlights: boolean) => {
       const targets = pendingDelete ?? [];
       const parameters = targets.map(
-        (item): DeleteContentParameters => ({ contentType: item.contentType, fileName: item.filePath }),
+        (item): DeleteContentParameters => ({
+          contentType: item.contentType,
+          fileName: item.filePath,
+          ...(item.contentType === 'recording' && deleteLinkedHighlights
+            ? { deleteLinkedHighlights: true }
+            : {}),
+        }),
       );
       // `permanent` is omitted rather than sent false — the contract reads omitted/false as "trash",
       // and the quieter frame is the one that cannot be misread.
@@ -246,9 +256,17 @@ export function LibraryView({
       title: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items?`,
       names,
       confirmLabel: names.length === 1 ? 'Move to trash' : `Move ${names.length} to trash`,
+      ...(pendingDelete.some((item) => item.contentType === 'recording')
+        ? {
+            checkbox: {
+              label: 'Delete linked highlights (favourited highlights are kept)',
+              defaultChecked: deleteLinkedHighlightsByDefault,
+            },
+          }
+        : {}),
       retentionHours,
     };
-  }, [pendingDelete, retentionHours]);
+  }, [deleteLinkedHighlightsByDefault, pendingDelete, retentionHours]);
 
   const groupActions: GroupActions = useMemo(
     () => ({
@@ -476,8 +494,9 @@ export function LibraryView({
                <ul className="library-grid" data-testid="library-latest-grid">
                  {latestItems.map((item) => (
                    <li key={selectionKey(item)}>
-                     <ContentCard
-                       item={item}
+                      <ContentCard
+                        item={item}
+                        previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
@@ -495,8 +514,9 @@ export function LibraryView({
         <ul className="library-grid" data-testid="library-grid">
           {view.items.map((item) => (
             <li key={selectionKey(item)}>
-              <ContentCard
-                item={item}
+               <ContentCard
+                 item={item}
+                 previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
                 onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}

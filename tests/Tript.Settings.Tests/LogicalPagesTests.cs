@@ -84,6 +84,75 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
+    public void AutomaticClipSeconds_FreshSettings_DefaultToFiveBeforeAndEightAfter()
+    {
+        var settings = new SettingsStore(_provider).Load();
+        Assert.Equal(5, settings.Recording.AutomaticClipBeforeSeconds);
+        Assert.Equal(8, settings.Recording.AutomaticClipAfterSeconds);
+    }
+
+    [Fact]
+    public void AutomaticClipSeconds_NonDefaultGlobalValues_RoundTrip()
+    {
+        var settings = _store.Load();
+        settings.Recording.AutomaticClipBeforeSeconds = 3;
+        settings.Recording.AutomaticClipAfterSeconds = 12;
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+        Assert.Equal(3, reloaded.Recording.AutomaticClipBeforeSeconds);
+        Assert.Equal(12, reloaded.Recording.AutomaticClipAfterSeconds);
+    }
+
+    [Fact]
+    public void AutomaticClipOverride_WithBothFields_RoundTrips()
+    {
+        var settings = _store.Load();
+        settings.Game.GameList.Add(new GameSetting
+        {
+            Id = "ow-clips-both",
+            Name = "Overwatch Clips Both",
+            AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3, AfterSeconds = 12 },
+        });
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow-clips-both");
+        Assert.Equal(3, game.AutomaticClipOverride!.BeforeSeconds);
+        Assert.Equal(12, game.AutomaticClipOverride!.AfterSeconds);
+    }
+
+    [Fact]
+    public void AutomaticClipOverride_WithOnlyOneField_OtherStaysNullOnReload()
+    {
+        var settings = _store.Load();
+        settings.Game.GameList.Add(new GameSetting
+        {
+            Id = "ow-clips-before",
+            Name = "Overwatch Clips Before Only",
+            AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3 },
+        });
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow-clips-before");
+        Assert.Equal(3, game.AutomaticClipOverride!.BeforeSeconds);
+        Assert.Null(game.AutomaticClipOverride.AfterSeconds);
+    }
+
+    [Fact]
+    public void AutomaticClipOverride_AbsentGame_ReloadsAsNull()
+    {
+        var settings = _store.Load();
+        settings.Game.GameList.Add(new GameSetting { Id = "ow-no-clips", Name = "Overwatch No Clips" });
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow-no-clips");
+        Assert.Null(game.AutomaticClipOverride);
+    }
+
+    [Fact]
     public void SaveOnePage_DoesNotDisturbTheOthers()
     {
         var settings = _store.Load();

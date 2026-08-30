@@ -96,6 +96,8 @@ export interface ContentItem {
   automaticClipsPaused?: boolean;
   automaticClipsCompleted?: number;
   automaticClipsTotal?: number;
+  /** True when this recording is synthetic because its source video no longer exists. */
+  videoMissing?: boolean;
   /** True for PQ/HLG video; absent means HDR status is not established. */
   isHdr?: boolean;
 }
@@ -463,6 +465,8 @@ export interface DeleteContentParameters {
   fileName: string;
   /** Omitted/false moves the item to the trash; true unlinks it immediately. */
   permanent?: boolean;
+  /** Apply the same operation to eligible automatic highlights linked to this recording. */
+  deleteLinkedHighlights?: boolean;
 }
 
 export interface DeleteMultipleContentParameters {

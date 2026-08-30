@@ -53,6 +53,18 @@ export interface RecordingSettings {
   outputDirectory?: string | null;
   /** Create detected highlights automatically when a recording stops. Off by default. */
   automaticClipsEnabled?: boolean;
+  /**
+   * How many seconds before a detected highlight's start the clip begins. Optional as with
+   * `rateControl`: a push from a backend without the field must still render.
+   */
+  automaticClipBeforeSeconds?: number;
+  /**
+   * How many seconds after a detected highlight's end the clip continues. Optional for the same
+   * reason as `automaticClipBeforeSeconds`.
+   */
+  automaticClipAfterSeconds?: number;
+  /** Initial linked-highlight choice in session deletion confirmations. Undefined reads as false. */
+  deleteLinkedHighlightsByDefault?: boolean;
   [key: string]: unknown;
 }
 
@@ -171,6 +183,15 @@ export interface GameQualityOverride {
   [key: string]: unknown;
 }
 
+/**
+ * Per-game automatic-clip padding. Null or undefined for a side inherits the global
+ * `automaticClipBeforeSeconds`/`automaticClipAfterSeconds` value for that side.
+ */
+export interface GameAutomaticClipOverride {
+  beforeSeconds?: number | null;
+  afterSeconds?: number | null;
+}
+
 export interface GameIntegrationSettings {
   enabled: boolean;
   [key: string]: unknown;
@@ -190,6 +211,11 @@ export interface GameSetting {
   recordingModeOverride?: GameRecordingModeOverride | null;
   captureMethodOverride?: GameCaptureMethodOverride | null;
   qualityOverride?: GameQualityOverride | null;
+  /**
+   * Per-game automatic-clip padding. Absent means this game uses the global recording-page values;
+   * within the override, a null/undefined side likewise inherits the global value for that side.
+   */
+  automaticClipOverride?: GameAutomaticClipOverride | null;
   integrations: GameIntegrationSettings;
   [key: string]: unknown;
 }

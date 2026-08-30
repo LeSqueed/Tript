@@ -10,10 +10,16 @@ TestResults/
 CLAUDE.md
 
 
+# Working notes and per-feature task packets — not part of the product.
+docs/
 # Screenshot captures — regenerate with `cd src/Tript.Web && npm run shots`.
 docs/shots/
 # The settings file that run gives its host, so captures are always of a fresh install.
 docs/shots-settings.json
+
+# Python scratch (training scripting).
+__pycache__/
+*.pyc
 
 # Frontend build artifacts (src/Tript.Web).
 dist/

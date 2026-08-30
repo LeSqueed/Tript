@@ -204,6 +204,274 @@ public sealed class ContentCatalogueTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task ListContent_MissingAutomaticHighlightSource_EmitsFallbackRecording()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", @"sessions\missing-session.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recording = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "recording");
+
+        Assert.Equal("sessions/missing-session.mp4", recording.GetProperty("filePath").GetString());
+        Assert.Equal("missing-session.mp4", recording.GetProperty("fileName").GetString());
+        Assert.Equal("missing-session", recording.GetProperty("title").GetString());
+        Assert.Equal("recording", recording.GetProperty("contentType").GetString());
+        Assert.True(recording.GetProperty("videoMissing").GetBoolean());
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_MissingAutomaticHighlightSource_ProjectsRecordingMetadata()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/missing-session.mp4", 10, 20));
+
+        var bookmarkId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var startTime = new DateTime(2026, 8, 17, 12, 30, 0, DateTimeKind.Local);
+        var metadata = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(metadata.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/missing-session.mp4",
+            Title = "Ranked comeback",
+            Favorite = true,
+            Game = "Stored game",
+            GameId = "stored-game-id",
+            StartTime = startTime,
+            DurationSeconds = 137.5,
+            AudioTracks =
+            {
+                new AudioTrackLayout { Index = 2, Name = "Discord" },
+                new AudioTrackLayout { Index = 0, Name = "Game" },
+            },
+            Bookmarks =
+            {
+                new Bookmark
+                {
+                    Id = bookmarkId,
+                    Type = BookmarkType.Kill,
+                    Subtype = "headshot",
+                    Time = TimeSpan.FromSeconds(12.5),
+                },
+            },
+        }));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recording = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "recording");
+
+        Assert.Equal("Ranked comeback", recording.GetProperty("title").GetString());
+        Assert.True(recording.GetProperty("favorite").GetBoolean());
+        Assert.Equal("Stored game", recording.GetProperty("game").GetString());
+        Assert.Equal("stored-game-id", recording.GetProperty("gameId").GetString());
+        Assert.Equal(new DateTimeOffset(startTime).ToUnixTimeSeconds(), recording.GetProperty("startTime").GetInt64());
+        Assert.Equal(137.5, recording.GetProperty("durationSeconds").GetDouble());
+        Assert.True(recording.GetProperty("hasAutomaticClipCandidates").GetBoolean());
+
+        var tracks = recording.GetProperty("audioTracks").EnumerateArray().ToList();
+        Assert.Equal(2, tracks.Count);
+        Assert.Equal(0, tracks[0].GetProperty("index").GetInt32());
+        Assert.Equal("Game", tracks[0].GetProperty("name").GetString());
+        Assert.Equal(2, tracks[1].GetProperty("index").GetInt32());
+        Assert.Equal("Discord", tracks[1].GetProperty("name").GetString());
+
+        var bookmark = Assert.Single(recording.GetProperty("bookmarks").EnumerateArray());
+        Assert.Equal(bookmarkId.ToString(), bookmark.GetProperty("id").GetString());
+        Assert.Equal("kill", bookmark.GetProperty("type").GetString());
+        Assert.Equal("headshot", bookmark.GetProperty("subtype").GetString());
+        Assert.Equal(12.5, bookmark.GetProperty("time").GetDouble());
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_MultipleHighlightsForMissingSource_EmitOneRecording()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-2.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/missing-session.mp4", 10, 20));
+        Assert.True(clipTitles.SaveAutomatic("highlight-2.mp4", @"sessions\missing-session.mp4", 30, 40));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recordings = content.GetProperty("content").EnumerateArray()
+            .Where(item => item.GetProperty("contentType").GetString() == "recording").ToList();
+
+        var recording = Assert.Single(recordings);
+        Assert.Equal("sessions/missing-session.mp4", recording.GetProperty("filePath").GetString());
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_SourceOutsideRootOrContainingTraversal_DoesNotEmitPlaceholder()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "outside.mp4"), "highlight");
+        await File.WriteAllTextAsync(Path.Combine(highlights, "traversal.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("outside.mp4",
+            Path.Combine(Path.GetDirectoryName(_contentRoot)!, "outside.mp4"), 10, 20));
+        Assert.True(clipTitles.SaveAutomatic("traversal.mp4", "sessions/../outside.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var hostScope = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.DoesNotContain(items, item => item.GetProperty("contentType").GetString() == "recording");
+        Assert.All(items, item => Assert.False(item.TryGetProperty("sourceSessionPath", out _)));
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_SourcePathComparison_FollowsPlatformCaseSensitivity()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(sessions);
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "SESSIONS/SESSION-1.MP4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var hostScope = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recordings = content.GetProperty("content").EnumerateArray()
+            .Where(item => item.GetProperty("contentType").GetString() == "recording").ToList();
+
+        Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, recordings.Count);
+        if (OperatingSystem.IsWindows())
+            Assert.DoesNotContain(recordings, item => item.TryGetProperty("videoMissing", out _));
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_SurvivingAutomaticHighlightSource_SuppressesPlaceholderAndVideoMissing()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(sessions);
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/session-1.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recordings = content.GetProperty("content").EnumerateArray()
+            .Where(item => item.GetProperty("contentType").GetString() == "recording").ToList();
+
+        var recording = Assert.Single(recordings);
+        Assert.Equal("sessions/session-1.mp4", recording.GetProperty("filePath").GetString());
+        Assert.False(recording.TryGetProperty("videoMissing", out var _videoMissing));
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_IneligibleClipRecords_DoNotCreatePlaceholders()
+    {
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(clips, "manual.mp4"), "clip");
+        await File.WriteAllTextAsync(Path.Combine(clips, "unlinked-automatic.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveSourceSession("manual.mp4", "sessions/manual-source.mp4"));
+        Assert.True(clipTitles.SaveAutomatic("unlinked-automatic.mp4", "   ", 10, 20));
+        Assert.True(clipTitles.SaveAutomatic("missing-highlight.mp4", "sessions/orphan-source.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.DoesNotContain(items, item => item.GetProperty("contentType").GetString() == "recording");
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_RemovingLastLinkedHighlight_RemovesPlaceholder()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        var highlightPath = Path.Combine(highlights, "highlight-1.mp4");
+        await File.WriteAllTextAsync(highlightPath, "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/missing-session.mp4", 10, 20));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, before) = await host.ReceiveAsyncParsed();
+        Assert.Contains(before.GetProperty("content").EnumerateArray(),
+            item => item.TryGetProperty("videoMissing", out var missing) && missing.GetBoolean());
+
+        File.Delete(highlightPath);
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, after) = await host.ReceiveAsyncParsed();
+        Assert.Empty(after.GetProperty("content").EnumerateArray());
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
     public async Task ListContent_SessionWithMetadataShowsBookmarks_SessionWithoutShowsEmpty()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");

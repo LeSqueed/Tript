@@ -24,6 +24,10 @@ const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
   { value: 'SessionWithReplayBuffer', label: 'Session + Replay Buffer' },
 ];
 
+/** The default highlight window the backend applies when a settings push carries no value. */
+const DEFAULT_CLIP_BEFORE_SECONDS = 5;
+const DEFAULT_CLIP_AFTER_SECONDS = 8;
+
 interface CustomGameDraft {
   index: number | null;
   name: string;
@@ -39,6 +43,8 @@ export function GamePage({
   selectedGameExecutable,
   settingsUpdateResult,
   onBrowseExecutable,
+  globalClipBeforeSeconds,
+  globalClipAfterSeconds,
 }: {
   settings: import('../settingsModel').GameSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
@@ -48,7 +54,16 @@ export function GamePage({
   selectedGameExecutable: SelectedGameExecutableMessage | null;
   settingsUpdateResult: SettingsUpdateResultMessage | null;
   onBrowseExecutable: (requestId: string) => void;
+  /**
+   * The recording page's automatic-clip window. Absent means an older backend push carried no
+   * value and the backend default is the inherit baseline.
+   */
+  globalClipBeforeSeconds?: number;
+  globalClipAfterSeconds?: number;
 }) {
+  // The inherit baseline for each side: the global recording-page value, or the backend default.
+  const clipBeforeSeconds = globalClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
+  const clipAfterSeconds = globalClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
   const [timeoutSeconds, setTimeoutSeconds] = useState<string>(String(settings.gameCaptureTimeout));
   const [draft, setDraft] = useState<CustomGameDraft | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -111,6 +126,33 @@ export function GamePage({
 
   function replaceGame(index: number, game: GameSetting) {
     update(page, { gameList: gameList.map((candidate, i) => i === index ? game : candidate) });
+  }
+
+  /**
+   * Commit a per-game automatic-clip override side (null means inherit the global side). The
+   * effective pair is `override ?? global` for each side, and it must stay coherent: the effective
+   * after can never fall below the effective before, or the backend rejects the patch (task 10).
+   * When a new before outruns the effective after, after is raised to it in the same patch; a typed
+   * after below the effective before is clamped up. When both sides inherit, the override object is
+   * dropped entirely.
+   */
+  function patchAutomaticClipOverride(
+    index: number,
+    game: GameSetting,
+    before: number | null,
+    after: number | null,
+  ) {
+    const effectiveBefore = before ?? clipBeforeSeconds;
+    const effectiveAfter = after ?? clipAfterSeconds;
+    const nextAfter = effectiveAfter < effectiveBefore ? effectiveBefore : after;
+    if (before === null && nextAfter === null) {
+      const { automaticClipOverride: _dropped, ...rest } = game;
+      replaceGame(index, rest as GameSetting);
+    } else {
+      patchGame(index, {
+        automaticClipOverride: { beforeSeconds: before, afterSeconds: nextAfter },
+      });
+    }
   }
 
   function saveDraft() {
@@ -353,6 +395,38 @@ export function GamePage({
                 <Checkbox
                   checked={game.integrations?.enabled ?? false}
                   onChange={(enabled) => patchGame(index, { integrations: { enabled } })}
+                />
+              </label>
+
+              <label className="settings-inline-field">
+                <span className="muted small">Before (s)</span>
+                <TextField
+                  type="number"
+                  min={1}
+                  value={game.automaticClipOverride?.beforeSeconds ?? ''}
+                  placeholder="global"
+                  onChange={(value) => patchAutomaticClipOverride(
+                    index,
+                    game,
+                    value === '' ? null : Number(value),
+                    game.automaticClipOverride?.afterSeconds ?? null,
+                  )}
+                />
+              </label>
+
+              <label className="settings-inline-field">
+                <span className="muted small">After (s)</span>
+                <TextField
+                  type="number"
+                  min={1}
+                  value={game.automaticClipOverride?.afterSeconds ?? ''}
+                  placeholder="global"
+                  onChange={(value) => patchAutomaticClipOverride(
+                    index,
+                    game,
+                    game.automaticClipOverride?.beforeSeconds ?? null,
+                    value === '' ? null : Number(value),
+                  )}
                 />
               </label>
             </div>

@@ -221,11 +221,21 @@ public sealed class RecorderLifecycleTests : IDisposable
         _host.TrackDetectedGameStarted(doom);
 
         _host.DetectedGameStopped(overwatch);
+        WaitUntil(() => _host.CurrentGameId == "doom");
 
         Assert.True(_host.IsRecording);
         Assert.Equal("doom", _host.CurrentGameId);
         _host.DetectedGameStopped(doom);
+        WaitUntil(() => !_host.IsRecording);
         Assert.False(_host.IsRecording);
+    }
+
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (!condition() && DateTime.UtcNow < deadline)
+            Thread.Sleep(20);
+        Assert.True(condition(), "The condition was not reached before the timeout.");
     }
 
     [Fact]

@@ -1256,12 +1256,28 @@ internal sealed partial class AppHost : IDisposable
         var (owner, gameId) = TrackDetectedGameStarted(process);
         PushState(IsRecording, CurrentGameId);
         EnsureManagedModel(gameId);
+        // The auto-start can block indefinitely while the game-capture hook is awaited, and the
+        // detector reports every lifecycle over one serialized callback thread. Starting the
+        // recording on that thread would stall it, so the GameStopped that clears this process when
+        // it exits could never be processed and the detected badge would stay up after the game
+        // closed. The start runs on the thread pool; the recorder gate still serializes it against
+        // every other start/stop.
+        ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(gameId, owner));
+    }
+
+    private void StartDetectedGameRecording(string gameId, string owner)
+    {
+        if (_disposed || _shuttingDown)
+            return;
+
         lock (_recorderGate)
         {
+            if (!_detectedGames.Contains(owner))
+                return;
+
             StartRecordingLocked(gameId, owner);
-            // The start clears the process owner when it does not become a recording (the game-capture
-            // hook never attached, the mode is refused, or the attempt otherwise failed). A process
-            // that is still running never fires GameStopped, so without this the detected badge would
+            // The start clears the process owner when it does not become a recording. A process that
+            // is still running never fires GameStopped, so without this the detected badge would
             // linger for the life of the process even though nothing recorded.
             if (Volatile.Read(ref _recordingProcessOwner) is null)
             {
@@ -1311,12 +1327,7 @@ internal sealed partial class AppHost : IDisposable
             if (_detectedGames.LatestGameId() is { } nextGameId
                 && _detectedGames.LatestOwner(nextGameId) is { } nextOwner)
             {
-                StartRecordingLocked(nextGameId, nextOwner);
-                if (Volatile.Read(ref _recordingProcessOwner) is null)
-                {
-                    _detectedGames.Remove(nextOwner);
-                    PushState(IsRecording, CurrentGameId);
-                }
+                ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(nextGameId, nextOwner));
             }
         }
     }

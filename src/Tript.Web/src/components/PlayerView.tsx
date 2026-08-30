@@ -685,6 +685,7 @@ export function PlayerView({
         creatingHighlights={creatingHighlights}
         highlightsPaused={highlightsPaused}
         highlightCount={highlightCount}
+        canCreateHighlights={item.hasAutomaticClipCandidates === true}
         onBack={onBack}
         onAutomaticClips={handleAutomaticClips}
         onRename={handleRename}

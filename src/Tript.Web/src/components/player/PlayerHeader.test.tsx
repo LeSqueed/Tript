@@ -12,12 +12,13 @@ const item = (contentType: ContentItem['contentType'], isHdr?: boolean): Content
   isHdr,
 });
 
-function header(content: ContentItem, recording = false) {
+function header(content: ContentItem, recording = false, canCreateHighlights = true) {
   return <PlayerHeader
     item={content}
     creatingHighlights={false}
     highlightsPaused={false}
     highlightCount={0}
+    canCreateHighlights={canCreateHighlights}
     onAutomaticClips={() => {}}
     convertHdrClipsToSdr
     recording={recording}
@@ -25,6 +26,17 @@ function header(content: ContentItem, recording = false) {
 }
 
 afterEach(cleanup);
+
+describe('PlayerHeader automatic highlights', () => {
+  it('disables Create highlights when the recording has no cuttable events', () => {
+    const view = render(header(item('recording'), false, false));
+    expect((screen.getByRole('button', { name: 'Create highlights' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Create highlights' }).getAttribute('title')).toContain('no detected events');
+
+    view.rerender(header(item('recording'), false, true));
+    expect((screen.getByRole('button', { name: 'Create highlights' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
 
 describe('PlayerHeader SDR action', () => {
   it('shows the action for HDR clips and disables it while recording', () => {
@@ -59,6 +71,7 @@ describe('PlayerHeader title actions', () => {
         creatingHighlights={false}
         highlightsPaused={false}
         highlightCount={0}
+        canCreateHighlights={false}
         onAutomaticClips={() => {}}
         onRename={onRename}
       />,
@@ -80,6 +93,7 @@ describe('PlayerHeader title actions', () => {
         creatingHighlights={false}
         highlightsPaused={false}
         highlightCount={0}
+        canCreateHighlights={false}
         onAutomaticClips={() => {}}
         onRename={onRename}
       />,
@@ -103,6 +117,7 @@ describe('PlayerHeader title actions', () => {
         creatingHighlights={false}
         highlightsPaused={false}
         highlightCount={0}
+        canCreateHighlights={false}
         onAutomaticClips={() => {}}
         onOpenFileLocation={onOpenFileLocation}
       />,

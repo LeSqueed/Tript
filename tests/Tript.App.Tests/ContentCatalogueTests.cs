@@ -886,6 +886,82 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Null(store.Load("broken.mp4"));
     }
 
+    // The library exposes whether a recording has cuttable detected events so the player can keep
+    // the "Create highlights" action disabled until there is something to cut. The flag mirrors the
+    // exact predicate CreateAutomaticClips uses: an explicit candidate flag (an event definition
+    // that opted in) or a legacy type that predates per-definition flagging.
+    [SkippableFact]
+    public async Task ListContent_FlagsAutomaticClipCandidates_OnTheRecording()
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        await File.WriteAllTextAsync(Path.Combine(sessions, "candidates.mp4"), "recording");
+        await File.WriteAllTextAsync(Path.Combine(sessions, "none.mp4"), "recording");
+
+        var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/candidates.mp4",
+            Bookmarks =
+            {
+                new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(5) },
+                // Legacy: Kill is included in highlights by type.
+                new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) },
+            },
+        });
+        store.Save(new RecordingMetadata
+        {
+            VideoPath = "sessions/none.mp4",
+            Bookmarks =
+            {
+                // Explicitly opted out: an event definition that stays out of automatic clips.
+                new Bookmark { Type = BookmarkType.Death, Time = TimeSpan.FromSeconds(20) },
+                new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(30) },
+                new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(40), IsAutomaticClipCandidate = false },
+            },
+        });
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var scope = host;
+        await scope.ConnectWebSocketAsync();
+        await DrainPushes(scope, 3);
+
+        await scope.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await scope.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray()
+            .Select(item => (FileName: item.GetProperty("fileName").GetString(), HasCandidates: item.TryGetProperty("hasAutomaticClipCandidates", out var flag) && flag.GetBoolean()))
+            .ToDictionary(pair => pair.FileName!, pair => pair.HasCandidates);
+
+        Assert.True(items["candidates.mp4"], "a legacy Kill bookmark must count as a highlight candidate");
+        Assert.False(items["none.mp4"], "an explicitly opted-out bookmark must not count");
+
+        await scope.ShutdownAsync();
+    }
+
+    // A clip has no highlight-candidate flag at all: the "Create highlights" dimension does not
+    // apply to clips, so the wire must not suggest the action exists for them.
+    [SkippableFact]
+    public async Task ListContent_ClipsCarryNoAutomaticClipCandidateFlag()
+    {
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(clips, "session-1-clip-x.mp4"), "clip");
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var scope = host;
+        await scope.ConnectWebSocketAsync();
+        await DrainPushes(scope, 3);
+
+        await scope.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await scope.ReceiveAsyncParsed();
+        var clip = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "clip");
+        Assert.False(clip.TryGetProperty("hasAutomaticClipCandidates", out _),
+            "clips must not carry the highlight-candidate flag");
+
+        await scope.ShutdownAsync();
+    }
+
     // The bug this suite grew for. A record that exists but cannot be parsed used to be reported as
     // null, which the duration-persisting path read as "there is no record" — so it wrote a fresh
     // record holding a video path and a duration over a file that held the recording's game, title

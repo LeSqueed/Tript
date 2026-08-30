@@ -9,6 +9,12 @@ interface PlayerHeaderProps {
   creatingHighlights: boolean;
   highlightsPaused: boolean;
   highlightCount: number;
+  /**
+   * Whether the recording has at least one detected event automatic highlights could cut. When
+   * false, the "Create highlights" action is disabled: asking the backend to cut nothing would
+   * only produce an error the button could have avoided.
+   */
+  canCreateHighlights: boolean;
   onBack?: () => void;
   onAutomaticClips: () => void;
   onRename?: (item: ContentItem, title: string) => void;
@@ -26,6 +32,7 @@ export function PlayerHeader({
   creatingHighlights,
   highlightsPaused,
   highlightCount,
+  canCreateHighlights,
   onBack,
   onAutomaticClips,
   onRename,
@@ -128,7 +135,11 @@ export function PlayerHeader({
         <span className="player-header-error" role="alert">{conversionError}</span>
       )}
       {item.contentType === 'recording' && (
-        <Button variant="ghost" size="small" onClick={onAutomaticClips} disabled={recording}>
+        <Button variant="ghost" size="small" onClick={onAutomaticClips}
+          disabled={recording || (!creatingHighlights && !canCreateHighlights)}
+          title={!creatingHighlights && !canCreateHighlights
+            ? 'This recording has no detected events to cut highlights from'
+            : undefined}>
           {creatingHighlights ? (highlightsPaused ? 'Resume highlights' : 'Pause highlights') : 'Create highlights'}
         </Button>
       )}

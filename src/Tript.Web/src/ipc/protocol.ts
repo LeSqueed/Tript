@@ -86,6 +86,8 @@ export interface ContentItem {
   fileSizeBytes?: number;
   /** Bookmark events inside a recording. Absent (never empty) on clips. */
   bookmarks?: BookmarkItem[];
+  /** True when the recording has at least one event the automatic-highlights pipeline would cut. */
+  hasAutomaticClipCandidates?: boolean;
   automated?: boolean;
   sourceSessionPath?: string;
   clipStartTime?: number;

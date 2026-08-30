@@ -75,6 +75,11 @@ internal sealed class ContentItem
     // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).
     public List<BookmarkItem>? Bookmarks { get; set; }
 
+    // True when the recording has at least one detected event the automatic-highlights pipeline
+    // would cut, so the frontend can keep the "Create highlights" action disabled when there is
+    // nothing to create. Absent (null) on clips, where the action never applies.
+    public bool? HasAutomaticClipCandidates { get; set; }
+
     // Set only on generated highlights. Manual clips remain independent library content.
     public bool Automated { get; set; }
 

@@ -294,6 +294,35 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 
     [Fact]
+    public void TrainingList_ForAGameWithoutEventDefinitions_DoesNotThrow()
+    {
+        var exe = ExecutablePath("custom.exe");
+        File.WriteAllText(exe, "not a real PE; only the path matters");
+        try
+        {
+            Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+            {
+                game = new
+                {
+                    gameList = new[]
+                    {
+                        new { id = "custom-game", name = "Custom game", executablePath = exe },
+                    },
+                },
+            })));
+
+            // Opening the player surfaces ListTraining for the item's game. A custom game that has
+            // no event definitions (no model, never trained) must not error the whole action: it
+            // simply has no events yet.
+            _host.PushTraining("custom-game");
+        }
+        finally
+        {
+            File.Delete(exe);
+        }
+    }
+
+    [Fact]
     public void NormalizePickedExecutable_AcceptsOnlyExistingExecutables()
     {
         if (!OperatingSystem.IsWindows())

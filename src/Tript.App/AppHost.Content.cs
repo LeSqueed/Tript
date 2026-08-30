@@ -154,6 +154,7 @@ internal sealed partial class AppHost
                             Time = bookmark.Time.TotalSeconds,
                         })
                         .ToList();
+                    item.HasAutomaticClipCandidates = metadata.Bookmarks.Any(IsAutomaticClipCandidate);
                     item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
                     item.Favorite = metadata.Favorite;
                     item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);

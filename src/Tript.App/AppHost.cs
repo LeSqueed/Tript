@@ -2983,9 +2983,7 @@ internal sealed partial class AppHost : IDisposable
         }
 
         var candidates = metadata.Bookmarks
-            .Where(bookmark => bookmark.IsAutomaticClipCandidate == true
-                || (bookmark.IsAutomaticClipCandidate is null
-                    && bookmark.Type.IsIncludedInHighlights()))
+            .Where(IsAutomaticClipCandidate)
             .ToList();
         if (candidates.Count == 0)
         {
@@ -2998,6 +2996,14 @@ internal sealed partial class AppHost : IDisposable
         if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates))
             PushError("Automatic highlights are already being created for another recording.");
     }
+
+    // What counts as an automatic-highlight candidate: an event definition that opted into clips,
+    // or a legacy bookmark type that predates the per-definition flag. Shared by the clip command
+    // and the library listing so "has highlights to create" never disagrees with "creates them".
+    private static bool IsAutomaticClipCandidate(Bookmark bookmark) =>
+        bookmark.IsAutomaticClipCandidate == true
+        || (bookmark.IsAutomaticClipCandidate is null
+            && bookmark.Type.IsIncludedInHighlights());
 
     internal void ToggleAutomaticClipPause()
     {

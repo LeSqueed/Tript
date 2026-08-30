@@ -67,14 +67,14 @@ internal sealed partial class AppHost
 
         var runtimeRoot = ModelService.GetGamePath(gameId);
         var runtimeEvents = Path.Combine(runtimeRoot, "events.json");
-        if (!File.Exists(runtimeEvents))
-            throw new FileNotFoundException($"No event definitions exist for game '{gameId}'.", runtimeEvents);
-
-        workspace.EnsureDirectories();
-        File.Copy(runtimeEvents, workspace.EventsPath, overwrite: true);
-        var runtimeModel = Path.Combine(runtimeRoot, "model.onnx");
-        if (File.Exists(runtimeModel))
-            File.Copy(runtimeModel, workspace.ModelPath, overwrite: true);
+        if (File.Exists(runtimeEvents))
+        {
+            workspace.EnsureDirectories();
+            File.Copy(runtimeEvents, workspace.EventsPath, overwrite: true);
+            var runtimeModel = Path.Combine(runtimeRoot, "model.onnx");
+            if (File.Exists(runtimeModel))
+                File.Copy(runtimeModel, workspace.ModelPath, overwrite: true);
+        }
         return workspace;
     }
 

@@ -16,7 +16,7 @@ import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
-import { itemLabel } from '../components/library/libraryModel';
+import { cascadableLinkedHighlights, itemLabel } from '../components/library/libraryModel';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem, GameInfo, RecordingState } from '../ipc/protocol';
@@ -275,20 +275,29 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     setPendingDelete(null);
   }, [deleteItem, pendingDelete]);
 
-  const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? {
-    title: `Delete ${itemLabel(pendingDelete.item)}?`,
-    names: [itemLabel(pendingDelete.item)],
-    confirmLabel: 'Move to trash',
-    ...(pendingDelete.item.contentType === 'recording'
-      ? {
-          checkbox: {
-            label: 'Delete linked highlights (favourited highlights are kept)',
-            defaultChecked: deleteLinkedHighlightsByDefault,
-          },
-        }
-      : {}),
-    retentionHours: trash.retentionHours,
-  } : null;
+  const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? (() => {
+    const item = pendingDelete.item;
+    const isRecording = item.contentType === 'recording';
+    const cascadable = isRecording ? cascadableLinkedHighlights(item, items).length : 0;
+    return {
+      title: `Delete ${itemLabel(item)}?`,
+      names: [itemLabel(item)],
+      confirmLabel: 'Move to trash',
+      // A missing-video placeholder names itself but has no session file to move; only its cascaded
+      // highlights (if any) actually go to the trash, so the sentence must not count the session.
+      affectedCount: isRecording && item.videoMissing === true ? 0 : 1,
+      ...(isRecording ? { cascadeCount: cascadable } : {}),
+      ...(isRecording
+        ? {
+            checkbox: {
+              label: 'Delete linked highlights (favourited highlights are kept)',
+              defaultChecked: deleteLinkedHighlightsByDefault,
+            },
+          }
+        : {}),
+      retentionHours: trash.retentionHours,
+    };
+  })() : null;
 
   useLayoutEffect(() => {
     if (playerItem !== null) {

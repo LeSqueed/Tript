@@ -549,6 +549,36 @@ describe('LibraryView delete and selection', () => {
     }]);
   });
 
+  it('excludes favourited highlights from the trash count, matching the cascade', () => {
+    // The session links two automatic highlights, one favourited and one not. The backend cascade
+    // keeps the favourited one, so the notice must count the session plus only the non-favourited
+    // highlight — never the favourited one it cannot remove.
+    const favourite = {
+      contentType: 'clip' as const,
+      fileName: 'highlight-fav.mp4',
+      filePath: 'clips/highlight-fav.mp4',
+      title: 'Favourite highlight',
+      automated: true,
+      favorite: true,
+      sourceSessionPath: 'sessions/cs2.mp4',
+    };
+    const highlight = {
+      contentType: 'clip' as const,
+      fileName: 'highlight-1.mp4',
+      filePath: 'clips/highlight-1.mp4',
+      title: 'Normal highlight',
+      automated: true,
+      favorite: false,
+      sourceSessionPath: 'sessions/cs2.mp4',
+    };
+    renderWith([session, favourite, highlight], 24, undefined, false);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Ranked win' }));
+
+    const linked = screen.getByRole('checkbox', { name: /delete linked highlights/i });
+    fireEvent.click(linked);
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('2 items');
+  });
+
   it('does not offer or send the linked-highlight choice for clip-only deletion', () => {
     const { sent } = renderWith([clip], 24, undefined, true);
     fireEvent.click(screen.getByRole('button', { name: 'Delete Nice shot' }));

@@ -130,6 +130,32 @@ describe('ConfirmDeleteDialog optional checkbox', () => {
   });
 });
 
+describe('ConfirmDeleteDialog affected count', () => {
+  const checkbox = { label: 'Delete linked highlights (favourited highlights are kept)' };
+
+  it('counts only physically-deleted targets', () => {
+    // The placeholder session names itself but its file is gone; the notice must not count it.
+    renderDialog({ affectedCount: 0, checkbox });
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toBe(
+      '0 items will be moved to the trash, where they can be restored for the next 1 day.',
+    );
+  });
+
+  it('adds the cascaded highlights once the checkbox is ticked', () => {
+    const onConfirm = vi.fn();
+    renderDialog({ affectedCount: 1, cascadeCount: 3, checkbox }, { onConfirm });
+
+    const linked = screen.getByRole('checkbox', { name: checkbox.label });
+    fireEvent.click(linked);
+
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toBe(
+      '4 items will be moved to the trash, where they can be restored for the next 1 day.',
+    );
+    fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
+    expect(onConfirm).toHaveBeenCalledWith(false, true);
+  });
+});
+
 describe('ConfirmDeleteDialog keyboard', () => {
   it('focuses Cancel on open, not the destructive button', () => {
     renderDialog();

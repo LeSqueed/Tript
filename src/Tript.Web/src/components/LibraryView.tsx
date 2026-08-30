@@ -31,6 +31,7 @@ import { EmptyState } from './ui/Ui';
 import {
   ANY_GAME,
   availableGames,
+  cascadableLinkedHighlights,
   DEFAULT_LIBRARY_QUERY,
   deriveGroupedLibrary,
   deriveLibrary,
@@ -252,12 +253,26 @@ export function LibraryView({
       return null;
     }
     const names = pendingDelete.map(itemLabel);
+    // Count what the button really moves, not what the dialog named. A missing-video placeholder
+    // session names itself but deletes nothing on its own; checked cascades add the non-favourited
+    // highlights the listing would otherwise hide.
+    const physicalTargets = pendingDelete.reduce(
+      (count, item) => count + (item.contentType === 'recording' && item.videoMissing === true ? 0 : 1),
+      0,
+    );
+    const cascadable = pendingDelete.reduce(
+      (count, item) =>
+        count + (item.contentType === 'recording' ? cascadableLinkedHighlights(item, items).length : 0),
+      0,
+    );
     return {
       title: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items?`,
       names,
       confirmLabel: names.length === 1 ? 'Move to trash' : `Move ${names.length} to trash`,
+      affectedCount: physicalTargets,
       ...(pendingDelete.some((item) => item.contentType === 'recording')
         ? {
+            cascadeCount: cascadable,
             checkbox: {
               label: 'Delete linked highlights (favourited highlights are kept)',
               defaultChecked: deleteLinkedHighlightsByDefault,
@@ -266,7 +281,7 @@ export function LibraryView({
         : {}),
       retentionHours,
     };
-  }, [deleteLinkedHighlightsByDefault, pendingDelete, retentionHours]);
+  }, [deleteLinkedHighlightsByDefault, items, pendingDelete, retentionHours]);
 
   const groupActions: GroupActions = useMemo(
     () => ({

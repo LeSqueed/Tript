@@ -182,6 +182,20 @@ export function linkedAutomaticHighlights(
     );
 }
 
+/**
+ * The automatic highlights a session deletion would cascade to: automated, linked to the exact
+ * recording, and not favourited. This mirrors the backend's eligibility rule (AppHost.DeleteOne) so
+ * the confirmation can count what the trash sentence promises.
+ */
+export function cascadableLinkedHighlights(
+  recording: ContentItem,
+  candidates: readonly ContentItem[],
+): ContentItem[] {
+  return linkedAutomaticHighlights(recording, candidates).filter(
+    (item) => item.favorite !== true,
+  );
+}
+
 /** The file name without its extension, which is what the clip→recording link is written in. */
 function baseName(fileName: string): string {
   const dot = fileName.lastIndexOf('.');

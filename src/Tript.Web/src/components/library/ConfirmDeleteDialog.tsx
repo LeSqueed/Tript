@@ -33,6 +33,18 @@ export interface DeleteConfirmation {
     defaultChecked?: boolean;
   };
   retentionHours: number;
+  /**
+   * How many items actually move, when that number is not `names.length`. A missing-video session's
+   * placeholder names itself but deletes nothing on its own, so it is not counted. The trash sentence
+   * reads this, so the count it quotes never disagrees with what the button does.
+   */
+  affectedCount?: number;
+  /**
+   * How many linked non-favourited automatic highlights a checked cascade checkbox adds. Only read
+   * when this dialog has a checkbox; the caller counts them (mirroring the backend's eligibility) so
+   * the sentence the user reads about "how many items" matches what ticking the box will do.
+   */
+  cascadeCount?: number;
 }
 
 export function ConfirmDeleteDialog({
@@ -49,6 +61,10 @@ export function ConfirmDeleteDialog({
   const [skipTrash, setSkipTrash] = useState(false);
   const [checked, setChecked] = useState(checkbox?.defaultChecked === true);
   const permanent = permanentOnly || skipTrash;
+  // `names.length` is what the caller listed, but the list may not be the deletion: a cascaded link
+  // can delete highlights the dialog never named. The notice counts what the delete really takes.
+  const affectedCount =
+    (confirmation.affectedCount ?? names.length) + (checkbox && checked ? (confirmation.cascadeCount ?? 0) : 0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -125,7 +141,7 @@ export function ConfirmDeleteDialog({
         </h2>
 
         <p className="confirm-dialog-notice" id={noticeId} data-testid="confirm-delete-notice">
-          {deletionNotice(names.length, permanent, retentionHours)}
+          {deletionNotice(affectedCount, permanent, retentionHours)}
         </p>
 
         {names.length <= NAME_LIMIT ? (

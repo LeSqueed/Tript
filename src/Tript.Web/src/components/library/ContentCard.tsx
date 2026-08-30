@@ -135,7 +135,7 @@ export function ContentCard({
             </span>
             <span className="content-card-chips">
               <span className="pill content-card-type">{typeLabel(item)}</span>
-              {missingVideo && <span className="pill content-card-missing-chip">Video missing</span>}
+              {missingVideo && <span className="pill content-card-missing-chip">Highlights only</span>}
               <span className="pill pill-muted">{game}</span>
               <span className="pill pill-muted">{formatDateChip(item)}</span>
               {clipsCount > 0 && <span className="pill pill-muted">Clips: {clipsCount}</span>}

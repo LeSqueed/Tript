@@ -103,6 +103,7 @@ internal sealed partial class AppHost
         var tracksByRecordingPath = new Dictionary<string, List<AudioTrackInfo>>(pathComparer);
         var clips = new List<ContentItem>();
         var linkedAutomaticSources = new HashSet<string>(pathComparer);
+        var earliestLinkedHighlightStart = new Dictionary<string, double>(pathComparer);
         var recordingPaths = new HashSet<string>(pathComparer);
         var probeBudget = DurationProbeBudget;
         string? processingSessionPath;
@@ -233,6 +234,16 @@ internal sealed partial class AppHost
             items.Add(item);
         }
 
+        foreach (var clip in clips)
+        {
+            if (!clip.Automated || clip.SourceSessionPath is null)
+                continue;
+            if (clip.StartTime is { } start && start > 0
+                && (!earliestLinkedHighlightStart.TryGetValue(clip.SourceSessionPath, out var earliest)
+                    || start < earliest))
+                earliestLinkedHighlightStart[clip.SourceSessionPath] = start;
+        }
+
         foreach (var sourcePath in linkedAutomaticSources)
         {
             if (recordingPaths.Contains(sourcePath))
@@ -272,6 +283,29 @@ internal sealed partial class AppHost
                     tracksByRecordingPath[sourcePath] = item.AudioTracks;
                 }
             }
+            else if (earliestLinkedHighlightStart.TryGetValue(sourcePath, out var sessionStart))
+            {
+                // The session's metadata went with its video. The placeholder still represents a real
+                // capture, so it takes a date rather than None: the earliest of its surviving
+                // highlights, which is the closest truth left on disk.
+                item.StartTime = sessionStart;
+            }
+
+            // A deleted session's metadata is gone, but the per-game recording layout keeps its game in
+            // the path itself ("<game>/sessions/..."). Resolve the same way clips do so a session whose
+            // highlights survived is still attributed, not parked under "Unknown game".
+            if (item.Game is null && item.GameId is null
+                && GameSegmentFromPath(sourcePath) is { } sessionSegment)
+            {
+                var known = GameList.FirstOrDefault(candidate => string.Equals(candidate.Id,
+                    sessionSegment, StringComparison.OrdinalIgnoreCase));
+                if (known is not null)
+                {
+                    item.GameId = known.Id;
+                    item.Game = known.Name;
+                }
+            }
+
             items.Add(item);
         }
 

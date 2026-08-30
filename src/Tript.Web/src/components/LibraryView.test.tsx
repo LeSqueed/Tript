@@ -175,7 +175,7 @@ describe('LibraryView grid', () => {
       'http://localhost:8893/api/thumbnail/clips/first.mp4',
       'http://localhost:8893/api/thumbnail/clips/second.mp4',
     ]);
-    expect(within(card).getByText('Video missing')).toBeTruthy();
+    expect(within(card).getByText('Highlights only')).toBeTruthy();
   });
 
   it('shows the missing-video fallback without requesting the recording thumbnail', () => {

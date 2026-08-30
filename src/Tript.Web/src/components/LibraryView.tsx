@@ -302,6 +302,20 @@ export function LibraryView({
   }, [games, query.game]);
 
   const allGroups = groupView && !groupView.filtered ? groupByRecording(groupView.resultItems) : [];
+  // The flat grids (the Latest shelf and the ungrouped view) show a recording next to its clips like
+  // groupings do, so their cards need the same clips/highlights counts the recording groups carry.
+  // Built from the whole list so the badge is stable whether it sits in a group or a flat grid.
+  const recordingCounts = useMemo(() => {
+    const counts = new Map<string, { clips: number; highlights: number }>();
+    for (const group of groupByRecording(items)) {
+      if (!group.recording) continue;
+      counts.set(group.recording.filePath, {
+        clips: group.clips.length,
+        highlights: group.clips.filter((clip) => clip.automated).length,
+      });
+    }
+    return counts;
+  }, [items]);
   const recentGroups = groupView && !groupView.filtered
     ? allGroups.filter((group) => group.recording !== null).slice(0, 3)
     : [];
@@ -491,11 +505,13 @@ export function LibraryView({
                  <h2>Latest</h2>
                  <span className="library-section-kicker">{latestItems.length} items</span>
                </div>
-               <ul className="library-grid" data-testid="library-latest-grid">
+                <ul className="library-grid" data-testid="library-latest-grid">
                  {latestItems.map((item) => (
                    <li key={selectionKey(item)}>
                       <ContentCard
                         item={item}
+                        clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                        highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
                         previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
                        onDelete={requestDelete}
@@ -516,6 +532,8 @@ export function LibraryView({
             <li key={selectionKey(item)}>
                <ContentCard
                  item={item}
+                 clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                 highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
                  previewHighlights={item.videoMissing ? linkedAutomaticHighlights(item, items) : undefined}
                 onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}

@@ -231,6 +231,45 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    // A session deleted from the UI takes its metadata with it, leaving the placeholder with only its
+    // highlights to speak for it. In the per-game recording layout the game still lives in the path
+    // ("<gameId>/sessions/..."), so the placeholder must name it the way clips do; and its date is the
+    // earliest of the surviving highlights, the closest truth left on disk.
+    [SkippableFact]
+    public async Task ListContent_MissingAutomaticHighlightSource_InheritsGameAndDateFromItsHighlights()
+    {
+        var highlights = Path.Combine(_contentRoot, "Overwatch", "highlights");
+        Directory.CreateDirectory(highlights);
+        var firstPath = Path.Combine(highlights, "highlight-1.mp4");
+        var secondPath = Path.Combine(highlights, "highlight-2.mp4");
+        await File.WriteAllTextAsync(firstPath, "highlight");
+        await File.WriteAllTextAsync(secondPath, "highlight");
+        var firstStart = new DateTime(2026, 8, 17, 15, 30, 0, DateTimeKind.Local);
+        File.SetLastWriteTime(firstPath, firstStart);
+        File.SetLastWriteTime(secondPath, firstStart.AddMinutes(2));
+
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "Overwatch/sessions/missing-session.mp4", 10, 20));
+        Assert.True(clipTitles.SaveAutomatic("highlight-2.mp4", "Overwatch/sessions/missing-session.mp4", 30, 40));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var recording = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "recording");
+
+        Assert.Equal("Overwatch/sessions/missing-session.mp4", recording.GetProperty("filePath").GetString());
+        Assert.Equal("Overwatch", recording.GetProperty("game").GetString());
+        Assert.Equal("Overwatch", recording.GetProperty("gameId").GetString());
+        Assert.Equal(new DateTimeOffset(firstStart).ToUnixTimeSeconds(), recording.GetProperty("startTime").GetInt64());
+
+        await host.ShutdownAsync();
+    }
+
     [SkippableFact]
     public async Task ListContent_MissingAutomaticHighlightSource_ProjectsRecordingMetadata()
     {

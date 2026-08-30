@@ -342,6 +342,50 @@
   background: rgba(6, 9, 13, 0.58);
 }
 
+.content-card-recording-chip {
+  color: var(--color-error);
+  border-color: rgba(232, 88, 88, 0.5);
+  background: rgba(6, 9, 13, 0.58);
+}
+
+.content-card-shell--recording .content-card {
+  border-color: rgba(232, 88, 88, 0.42);
+}
+
+.content-card-recording-preview,
+.content-card-recording-fallback {
+  position: absolute;
+  inset: 0;
+}
+
+.content-card-recording-preview {
+  background: var(--color-panel-raised);
+}
+
+.content-card-recording-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+  background: linear-gradient(rgba(6, 9, 13, 0.35), rgba(6, 9, 13, 0.35));
+}
+
+.content-card-recording-fallback .rec-dot {
+  width: 14px;
+  height: 14px;
+}
+
+/* The highlight preview grid sits above the recording fallback, so a live capture shows the moment
+ * the review will open to behind the recording marker. */
+.content-card-recording-preview .content-card-preview-grid {
+  z-index: 1;
+}
+
 /* The placeholder tile — what a 204 (no thumbnail available) looks like. Deliberately a quiet glyph
  * on the card's own surface rather than a broken-image icon: there is nothing wrong, the frame just
  * has not been extracted. */

@@ -82,10 +82,15 @@ export function ContentCard({
   const duration = formatDurationChip(item);
   const size = formatSizeChip(item);
   const missingVideo = item.videoMissing === true;
+  const liveRecording = item.recording === true;
   // An item with no path has nothing to ask the content server for — straight to the placeholder,
-  // rather than a request that is guaranteed to fail.
-  const showThumbnail = !missingVideo && item.filePath.length > 0 && !thumbnailFailed;
+  // rather than a request that is guaranteed to fail. A live recording's file is still growing, so
+  // its frame would be a mid-write half-shot; the card advertises the capture instead.
+  const showThumbnail = !missingVideo && !liveRecording && item.filePath.length > 0 && !thumbnailFailed;
   const preview = previewHighlights.slice(0, 3);
+  // A live capture is not playable yet. It opens only to its own highlights — and only when it
+  // actually has some, so the card itself does the "cannot interact" part of the contract.
+  const canOpen = !liveRecording || highlightsCount > 0;
 
   return (
     <div
@@ -93,6 +98,7 @@ export function ContentCard({
         'content-card-shell',
         variant === 'wide' ? 'content-card-shell--wide' : '',
         missingVideo ? 'content-card-shell--missing' : '',
+        liveRecording ? 'content-card-shell--recording' : '',
         selected ? 'selected' : '',
       ]
         .filter(Boolean)
@@ -102,11 +108,18 @@ export function ContentCard({
         type="button"
         className={variant === 'wide' ? 'content-card content-card--wide' : 'content-card'}
         data-testid="content-card"
-        onClick={() => onOpen?.(item)}
-        aria-label={`Open ${label}`}
+        onClick={() => {
+          if (canOpen) onOpen?.(item);
+        }}
+        aria-label={canOpen ? `Open ${label}` : `Recording in progress: ${label}`}
       >
         <span className="content-card-thumb">
-          {missingVideo ? (
+          {liveRecording ? (
+            <LiveRecordingPreview
+              key={preview.map((highlight) => highlight.filePath).join('|')}
+              highlights={preview}
+            />
+          ) : missingVideo ? (
             <MissingVideoPreview
               key={preview.map((highlight) => highlight.filePath).join('|')}
               highlights={preview}
@@ -135,6 +148,7 @@ export function ContentCard({
             </span>
             <span className="content-card-chips">
               <span className="pill content-card-type">{typeLabel(item)}</span>
+              {liveRecording && <span className="pill content-card-recording-chip">Recording</span>}
               {missingVideo && <span className="pill content-card-missing-chip">Highlights only</span>}
               <span className="pill pill-muted">{game}</span>
               <span className="pill pill-muted">{formatDateChip(item)}</span>
@@ -166,7 +180,7 @@ export function ContentCard({
 
       {action && <div className="content-card-action">{action}</div>}
 
-      {selectable && (
+      {selectable && !liveRecording && (
         <Checkbox
           className="content-card-select"
           checked={selected}
@@ -175,7 +189,8 @@ export function ContentCard({
         />
       )}
 
-      {onDelete && (
+      {/* A session being written cannot be deleted out from under the recorder. */}
+      {onDelete && !liveRecording && (
         <button
           type="button"
           className="content-card-delete"
@@ -186,7 +201,7 @@ export function ContentCard({
         </button>
       )}
 
-      {onToggleFavorite && !missingVideo && (
+      {onToggleFavorite && !missingVideo && !liveRecording && (
         <button
           type="button"
           className={item.favorite ? 'content-card-favorite active' : 'content-card-favorite'}
@@ -209,6 +224,39 @@ function MissingVideoPreview({ highlights }: { highlights: ContentItem[] }) {
       <span className="content-card-missing-fallback" data-testid="content-card-missing-fallback">
         <Icon name="clip" size={22} />
         <span>Source video unavailable</span>
+      </span>
+      {highlights.length > 0 && (
+        <span
+          className="content-card-preview-grid"
+          style={{ '--preview-count': highlights.length } as CSSProperties}
+        >
+          {highlights.map((highlight) => (
+            <img
+              key={highlight.filePath}
+              className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
+              src={thumbnailUrl(highlight.filePath)}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              width={480}
+              height={270}
+              onLoad={() => setLoaded((current) => new Set(current).add(highlight.filePath))}
+            />
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function LiveRecordingPreview({ highlights }: { highlights: ContentItem[] }) {
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
+
+  return (
+    <span className="content-card-recording-preview" data-testid="content-card-recording-preview">
+      <span className="content-card-recording-fallback" data-testid="content-card-recording-fallback">
+        <span className="rec-dot recording" />
+        <span>Recording in progress</span>
       </span>
       {highlights.length > 0 && (
         <span

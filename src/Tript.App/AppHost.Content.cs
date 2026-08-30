@@ -95,6 +95,13 @@ internal sealed partial class AppHost
         if (!root.Exists)
             return items;
 
+        // The session the active recording is appending to right now, as a wire path. Its metadata
+        // record is only written when the recording stops, so the item it describes would otherwise
+        // render as an attribution-less "unknown game" session the whole time it is being captured.
+        var activeRecordingPath = IsRecording && _activeOutputPath is { Length: > 0 }
+            ? Path.GetRelativePath(EffectiveRoot, _activeOutputPath).Replace(Path.DirectorySeparatorChar, '/')
+            : null;
+
         var gamesByRecording = new Dictionary<string, string>(pathComparer);
         var gameIdsByRecording = new Dictionary<string, string>(pathComparer);
         var tracksByRecording = new Dictionary<string, List<AudioTrackInfo>>(pathComparer);
@@ -174,6 +181,23 @@ internal sealed partial class AppHost
                 else
                 {
                     item.Bookmarks = [];
+                }
+
+                if (activeRecordingPath is not null
+                    && string.Equals(relative, activeRecordingPath, ContentPathComparison))
+                {
+                    item.Recording = true;
+                    if (_pendingMetadata is not null)
+                    {
+                        // A live recording's metadata record is written only on stop, so its in-memory
+                        // record — which knows the game being captured — is what the card should show.
+                        item.Game = string.IsNullOrWhiteSpace(_pendingMetadata.Game)
+                            ? null
+                            : _pendingMetadata.Game;
+                        item.GameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
+                            ? ResolveLegacyGameId(item.Game)
+                            : _pendingMetadata.GameId;
+                    }
                 }
             }
             else

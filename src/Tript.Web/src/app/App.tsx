@@ -176,7 +176,9 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const openInPlayer = useCallback(
     (item: ContentItem, resultItems: ContentItem[]) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
-      if (item.videoMissing === true) {
+      // A pending-video or live-capture session has no playable video, so the player is not the
+      // destination: it is the review of the session's highlights (which only exist if it has any).
+      if (item.videoMissing === true || item.recording === true) {
         openSessionReview(item);
         return;
       }

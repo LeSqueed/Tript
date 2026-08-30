@@ -98,6 +98,8 @@ export interface ContentItem {
   automaticClipsTotal?: number;
   /** True when this recording is synthetic because its source video no longer exists. */
   videoMissing?: boolean;
+  /** True only for the session the active recording is writing right now. */
+  recording?: boolean;
   /** True for PQ/HLG video; absent means HDR status is not established. */
   isHdr?: boolean;
 }

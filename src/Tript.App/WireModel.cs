@@ -74,6 +74,10 @@ internal sealed class ContentItem
     // Present only for a synthetic recording whose source video is no longer on disk.
     public bool? VideoMissing { get; set; }
 
+    // Present only for the session the active recording is writing right now. The library renders it
+    // as a live capture: recording in progress, non-interactive until it has highlights.
+    public bool? Recording { get; set; }
+
     // The bookmarks the recording carries on the wire, null when the item has none (clips never
     // have bookmarks). The wire shape mirrors the frontend's BookmarkItem (protocol.ts).
     public List<BookmarkItem>? Bookmarks { get; set; }

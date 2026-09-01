@@ -335,6 +335,14 @@ export interface TrainingModelInfo {
   classNames?: Record<string, string> | null;
 }
 
+export interface TrainingEventCoverage {
+  classId: number;
+  name: string;
+  sampleCount: number;
+  trainingSamples: number;
+  validationSamples: number;
+}
+
 export interface TrainingMessage {
   gameId: string | null;
   revision?: string;
@@ -343,6 +351,8 @@ export interface TrainingMessage {
   dataset?: {
     trainingImages: number;
     validationImages: number;
+    eventCoverage: TrainingEventCoverage[];
+    warnings: string[];
   };
   model?: TrainingModelInfo | null;
   trainingActive?: boolean;

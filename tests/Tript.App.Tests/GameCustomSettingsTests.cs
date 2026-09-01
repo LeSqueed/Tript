@@ -295,7 +295,7 @@ public sealed class GameCustomSettingsTests : IDisposable
 
 #if TRIPT_TRAINING
     [Fact]
-    public void TrainingList_ForAGameWithoutEventDefinitions_DoesNotThrow()
+    public async Task TrainingList_ForAGameWithoutEventDefinitions_DoesNotThrow()
     {
         var exe = ExecutablePath("custom.exe");
         File.WriteAllText(exe, "not a real PE; only the path matters");
@@ -315,7 +315,7 @@ public sealed class GameCustomSettingsTests : IDisposable
             // Opening the player surfaces ListTraining for the item's game. A custom game that has
             // no event definitions (no model, never trained) must not error the whole action: it
             // simply has no events yet.
-            _host.PushTraining("custom-game");
+            await _host.PushTraining("custom-game");
         }
         finally
         {

@@ -11,6 +11,38 @@ namespace Tript.App.Training;
 
 internal sealed record TrainingRunResult(string DatasetModelPath, int ImageSize, string Device);
 
+internal sealed class TrainingEventCoverage
+{
+    public int ClassId { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public int SampleCount { get; init; }
+    public int TrainingSamples { get; init; }
+    public int ValidationSamples { get; init; }
+}
+
+internal sealed class TrainingDatasetExportSummary
+{
+    public int SampleCount { get; init; }
+    public int CropCount { get; init; }
+    public int TrainingSamples { get; init; }
+    public int ValidationSamples { get; init; }
+    public int TrainingCrops { get; init; }
+    public int ValidationCrops { get; init; }
+    public List<TrainingEventCoverage> EventCoverage { get; init; } = [];
+    public List<string> Warnings { get; init; } = [];
+
+    internal string ProgressMessage()
+    {
+        var coverage = string.Join(", ", EventCoverage.Select(item =>
+            $"{item.Name}: {item.TrainingSamples} train/{item.ValidationSamples} validation"));
+        var message = $"Dataset exported: {TrainingSamples} train and {ValidationSamples} validation " +
+            $"frames ({TrainingCrops}/{ValidationCrops} crops). Event coverage: {coverage}.";
+        if (Warnings.Count > 0)
+            message += " Warnings: " + string.Join(" ", Warnings);
+        return message;
+    }
+}
+
 internal sealed class TrainingRunner
 {
     private readonly object _gate = new();
@@ -44,6 +76,9 @@ internal sealed class TrainingRunner
         await RunProcessAsync(python, exportScript, workspace.RootPath,
             ["--size", imageSize.ToString(System.Globalization.CultureInfo.InvariantCulture)],
             progress, cancellationToken).ConfigureAwait(false);
+        var exportSummary = LoadExportSummary(workspace)
+            ?? throw new InvalidDataException("Dataset export completed without export.json.");
+        progress(exportSummary.ProgressMessage());
 
         var trainArguments = new List<string>
         {
@@ -79,6 +114,18 @@ internal sealed class TrainingRunner
         var selectedDevice = device == "auto" ? "auto (see training progress)" : device;
         progress($"VALIDATED input={metadata.InputWidth}x{metadata.InputHeight} classes={metadata.ClassCount}");
         return new TrainingRunResult(modelPath, imageSize, selectedDevice);
+    }
+
+    internal static TrainingDatasetExportSummary? LoadExportSummary(TrainingWorkspace workspace)
+    {
+        var path = Path.Combine(workspace.DatasetPath, "export.json");
+        if (!File.Exists(path))
+            return null;
+        return JsonSerializer.Deserialize<TrainingDatasetExportSummary>(
+            File.ReadAllText(path), new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            });
     }
 
     private static void ValidateKnownSamples(TrainingWorkspace workspace, string modelPath,

@@ -186,6 +186,9 @@ export function TrainingView({ client }: TrainingViewProps) {
   const samplePageCount = Math.max(1, Math.ceil(filteredSamples.length / SAMPLE_PAGE_SIZE));
   const pageSamples = filteredSamples.slice((samplePage - 1) * SAMPLE_PAGE_SIZE, samplePage * SAMPLE_PAGE_SIZE);
   const pageSampleIds = pageSamples.map((sample) => sample.id).join('|');
+  const eventCoverage = new Map(
+    training.dataset?.eventCoverage.map((coverage) => [coverage.classId, coverage]) ?? [],
+  );
 
   const requestPreview = (sample: TrainingSample) => {
     if (!gameId) return;
@@ -342,22 +345,33 @@ export function TrainingView({ client }: TrainingViewProps) {
                 <strong>{training.model?.classCount ?? 'Not trained'}</strong>
                 <span>Editable samples</span>
                 <strong>{training.samples.length}</strong>
+                <span>Train images</span>
+                <strong>{training.dataset?.trainingImages ?? 'Not exported'}</strong>
+                <span>Validation images</span>
+                <strong>{training.dataset?.validationImages ?? 'Not exported'}</strong>
               </div>
+              {training.dataset?.warnings.map((warning) => (
+                <p className="training-event-error" role="alert" key={warning}>{warning}</p>
+              ))}
               <ul className="training-event-list">
-                {training.events.map((event) => (
-                  <li key={event.classId}>
+                {training.events.map((event) => {
+                  const coverage = eventCoverage.get(event.classId);
+                  return <li key={event.classId}>
                     <span className="training-class-id">{event.classId}</span>
                     <span>{event.name}</span>
                     <span className="training-event-actions">
-                      <small>{event.type}</small>
+                      <small>
+                        {event.type}
+                        {coverage && ` · ${coverage.trainingSamples} train / ${coverage.validationSamples} validation frames`}
+                      </small>
                       <Button variant="ghost" size="small" onClick={() => setEventEditor({ event, isNew: false })}>Edit</Button>
                       <Button variant="ghost" size="small" onClick={() => setRegionEditor(event)}>Region</Button>
                       <Button variant="ghost" size="small" onClick={() => {
                         if (window.confirm(`Delete the ${event.name} event?`)) deleteEvent(event.id);
                       }}>Delete</Button>
                     </span>
-                  </li>
-                ))}
+                  </li>;
+                })}
               </ul>
             </section>
 

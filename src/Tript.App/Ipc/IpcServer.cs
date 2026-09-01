@@ -147,13 +147,13 @@ internal sealed class IpcServer : IDisposable
 
     // ---- dispatch ----
 
-    internal void Dispatch(ClientConnection client, string method, JsonElement? parameters)
+    internal async Task DispatchAsync(ClientConnection client, string method, JsonElement? parameters)
     {
         Console.Error.WriteLine($"Tript.App.Ipc: dispatching {Loggable(method)}");
         try
         {
             var handle = new ClientHandle((message, content) => client.Send(Serialize(message, content)));
-            _controller.Handle(method, parameters, handle);
+            await _controller.HandleAsync(method, parameters, handle);
         }
         catch (Exception exception)
         {
@@ -370,7 +370,7 @@ internal sealed class IpcServer : IDisposable
                     while (!result.EndOfMessage);
 
                     var text = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
-                    ParseAndDispatch(text);
+                    await ParseAndDispatchAsync(text);
                 }
             }
             catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException)
@@ -424,7 +424,7 @@ internal sealed class IpcServer : IDisposable
             }
         }
 
-        private void ParseAndDispatch(string text)
+        private async Task ParseAndDispatchAsync(string text)
         {
             try
             {
@@ -443,7 +443,7 @@ internal sealed class IpcServer : IDisposable
                 if (root.TryGetProperty("parameters", out var parametersElement))
                     parameters = parametersElement;
 
-                _owner.Dispatch(this, method, parameters);
+                await _owner.DispatchAsync(this, method, parameters);
             }
             catch (JsonException)
             {

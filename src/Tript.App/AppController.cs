@@ -18,6 +18,7 @@ internal sealed class AppController
     private readonly AppHost _host;
 
     private readonly Dictionary<string, Action<JsonElement?, ClientHandle>> _commands;
+    private readonly Dictionary<string, Func<JsonElement?, ClientHandle, Task>> _asyncCommands;
 
     public AppController(AppHost host)
     {
@@ -100,36 +101,50 @@ internal sealed class AppController
             ["StorageWarningConfirm"] = (_, _) => { /* No storage warnings raised. */ },
             ["RecoveryConfirm"] = (parameters, _) => _host.RecoveryConfirm(parameters.Deserialize<RecoveryConfirmParameters>()),
 #if TRIPT_TRAINING
-            ["ListTraining"] = (parameters, _) => _host.PushTraining(
-                parameters.Deserialize<TrainingGameParameters>()?.GameId),
-            ["ImportTrainingAssets"] = (parameters, _) => _host.ImportTrainingAssets(
-                parameters.Deserialize<ImportTrainingParameters>()),
-             ["CaptureTrainingSample"] = (parameters, _) => _host.CaptureTrainingSample(
-                 parameters.Deserialize<CaptureTrainingSampleParameters>()),
-             ["UpdateTrainingEvents"] = (parameters, _) => _host.UpdateTrainingEvents(
-                 parameters.Deserialize<UpdateTrainingEventsParameters>()),
-            ["GetTrainingSample"] = (parameters, _) => _host.GetTrainingSample(
-                parameters.Deserialize<TrainingSampleParameters>()),
-             ["UpdateTrainingSample"] = (parameters, _) => _host.UpdateTrainingSample(
-                 parameters.Deserialize<UpdateTrainingSampleParameters>()),
-             ["SuggestTrainingLabels"] = (parameters, _) => _host.SuggestTrainingLabels(
-                 parameters.Deserialize<SuggestTrainingLabelsParameters>()),
-             ["DeleteTrainingSample"] = (parameters, _) => _host.DeleteTrainingSample(
-                parameters.Deserialize<TrainingSampleParameters>()),
-            ["StartTraining"] = (parameters, _) => _host.StartTraining(
-                parameters.Deserialize<StartTrainingParameters>()),
             ["CancelTraining"] = (_, _) => _host.CancelTraining(),
-            ["InstallTrainingModel"] = (parameters, _) => _host.InstallTrainingModelCommand(
-                parameters.Deserialize<TrainingGameParameters>()),
+#endif
+        };
+
+        // Commands that may block a worker on the training workspace gate (or on a file read) dispatch
+        // asynchronously, so the receive loop's continuation yields instead of parking a pool thread for
+        // the gate's whole hold — the same treatment the thumbnail path now gets. Every other command is
+        // small and answers synchronously.
+        _asyncCommands = new Dictionary<string, Func<JsonElement?, ClientHandle, Task>>(StringComparer.Ordinal)
+        {
+#if TRIPT_TRAINING
+            ["ListTraining"] = async (parameters, _) =>
+                await _host.PushTraining(parameters.Deserialize<TrainingGameParameters>()?.GameId),
+            ["ImportTrainingAssets"] = async (parameters, _) =>
+                await _host.ImportTrainingAssets(parameters.Deserialize<ImportTrainingParameters>()),
+            ["CaptureTrainingSample"] = async (parameters, _) =>
+                await _host.CaptureTrainingSample(parameters.Deserialize<CaptureTrainingSampleParameters>()),
+            ["UpdateTrainingEvents"] = async (parameters, _) =>
+                await _host.UpdateTrainingEvents(parameters.Deserialize<UpdateTrainingEventsParameters>()),
+            ["GetTrainingSample"] = async (parameters, _) =>
+                await _host.GetTrainingSample(parameters.Deserialize<TrainingSampleParameters>()),
+            ["UpdateTrainingSample"] = async (parameters, _) =>
+                await _host.UpdateTrainingSample(parameters.Deserialize<UpdateTrainingSampleParameters>()),
+            ["SuggestTrainingLabels"] = async (parameters, _) =>
+                await _host.SuggestTrainingLabels(parameters.Deserialize<SuggestTrainingLabelsParameters>()),
+            ["DeleteTrainingSample"] = async (parameters, _) =>
+                await _host.DeleteTrainingSample(parameters.Deserialize<TrainingSampleParameters>()),
+            ["StartTraining"] = async (parameters, _) =>
+                await _host.StartTraining(parameters.Deserialize<StartTrainingParameters>()),
+            ["InstallTrainingModel"] = async (parameters, _) =>
+                await _host.InstallTrainingModelCommand(parameters.Deserialize<TrainingGameParameters>()),
 #endif
         };
     }
 
-    internal void Handle(string method, JsonElement? parameters, ClientHandle client)
+    internal async Task HandleAsync(string method, JsonElement? parameters, ClientHandle client)
     {
         if (_commands.TryGetValue(method, out var handler))
         {
             handler(parameters, client);
+        }
+        else if (_asyncCommands.TryGetValue(method, out var asyncHandler))
+        {
+            await asyncHandler(parameters, client);
         }
         // Unknown methods are dropped silently, matching the frontend's tolerance of unknown
         // backend messages.

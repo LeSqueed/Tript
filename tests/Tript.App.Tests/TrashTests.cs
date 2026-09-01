@@ -121,13 +121,13 @@ public sealed class TrashTests : IDisposable
     [Theory]
     [InlineData("{\"fileName\":\"sessions/session-1.mp4\",\"contentType\":\"recording\"}")]
     [InlineData("{\"fileName\":\"sessions/session-1.mp4\",\"contentType\":\"recording\",\"deleteLinkedHighlights\":false}")]
-    public void DeleteContent_OmittedOrFalseCascade_PreservesLinkedAutomaticHighlights(string parametersJson)
+    public async Task DeleteContent_OmittedOrFalseCascade_PreservesLinkedAutomaticHighlights(string parametersJson)
     {
         WriteSession("session-1.mp4", null, null);
         WriteAutomaticHighlight("eligible.mp4", "sessions/session-1.mp4");
 
         var controller = new AppController(_host);
-        controller.Handle("DeleteContent", JsonSerializer.Deserialize<JsonElement>(parametersJson),
+        await controller.HandleAsync("DeleteContent", JsonSerializer.Deserialize<JsonElement>(parametersJson),
             new ClientHandle((_, _) => { }));
 
         AssertHighlightSurvives("eligible.mp4");
@@ -572,7 +572,7 @@ public sealed class TrashTests : IDisposable
     [InlineData("{\"entryIds\":\"not-a-list\"}")]
     [InlineData("\"not-an-object\"")]
     [InlineData("123")]
-    public void PurgeTrash_OverTheDispatch_WithAMalformedFrame_LeavesTheBinAlone(string parametersJson)
+    public async Task PurgeTrash_OverTheDispatch_WithAMalformedFrame_LeavesTheBinAlone(string parametersJson)
     {
         WriteSession("session-1.mp4", "Overwatch", "The clutch");
         _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
@@ -580,21 +580,21 @@ public sealed class TrashTests : IDisposable
 
         var controller = new AppController(_host);
         var parameters = JsonSerializer.Deserialize<JsonElement>(parametersJson);
-        controller.Handle("PurgeTrash", parameters, new ClientHandle((_, _) => { }));
+        await controller.HandleAsync("PurgeTrash", parameters, new ClientHandle((_, _) => { }));
 
         Assert.Single(_host.TrashEntries());
     }
 
     // And the parameterless frame still means the whole bin.
     [Fact]
-    public void PurgeTrash_OverTheDispatch_WithNoParameters_EmptiesTheBin()
+    public async Task PurgeTrash_OverTheDispatch_WithNoParameters_EmptiesTheBin()
     {
         WriteSession("session-1.mp4", "Overwatch", "The clutch");
         _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
         Assert.Single(_host.TrashEntries());
 
         var controller = new AppController(_host);
-        controller.Handle("PurgeTrash", null, new ClientHandle((_, _) => { }));
+        await controller.HandleAsync("PurgeTrash", null, new ClientHandle((_, _) => { }));
 
         Assert.Empty(_host.TrashEntries());
     }

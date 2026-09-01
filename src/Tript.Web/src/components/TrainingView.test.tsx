@@ -126,4 +126,28 @@ describe('TrainingView sample gallery', () => {
     expect((screen.getByRole('button', { name: 'Start training' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('shows exported image totals, per-event coverage, and coverage warnings', () => {
+    const { client, emit } = createClient();
+    const training: TrainingMessage = {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [{ ...sample(1), labels: [{ classId: 0, centerX: 0.5, centerY: 0.5, width: 0.1, height: 0.1 }] }],
+      dataset: {
+        trainingImages: 3,
+        validationImages: 0,
+        eventCoverage: [{ classId: 0, name: 'Event', sampleCount: 1, trainingSamples: 1, validationSamples: 0 }],
+        warnings: ["'Event' has one labeled frame; it is train-only and cannot be validated."],
+      },
+    };
+    render(<TrainingView client={client} />);
+
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training }));
+
+    expect(screen.getByText('Train images').nextElementSibling?.textContent).toBe('3');
+    expect(screen.getByText('Validation images').nextElementSibling?.textContent).toBe('0');
+    expect(screen.getByText(/1 train \/ 0 validation frames/)).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('train-only');
+  });
 });

@@ -52,9 +52,12 @@ def main() -> int:
 
         assignments = split_samples(samples, args.validation)
         exported = 0
+        split_crops = {"train": 0, "val": 0}
         for split, split_samples_list in assignments.items():
             for sample in split_samples_list:
-                exported += export_sample(sample, split, dataset, events, args.size, exported)
+                crop_count = export_sample(sample, split, dataset, events, args.size, exported)
+                exported += crop_count
+                split_crops[split] += crop_count
 
         if exported == 0:
             raise ValueError("no valid training crops were exported")
@@ -74,9 +77,20 @@ def main() -> int:
         (dataset / "dataset.yaml").write_text(
             json.dumps(dataset_config, indent=2) + "\n", encoding="utf-8"
         )
+        event_coverage, warnings = summarize_coverage(assignments, events)
         (dataset / "export.json").write_text(
             json.dumps(
-                {"size": args.size, "sampleCount": len(samples), "cropCount": exported},
+                {
+                    "size": args.size,
+                    "sampleCount": len(samples),
+                    "cropCount": exported,
+                    "trainingSamples": len(assignments["train"]),
+                    "validationSamples": len(assignments["val"]),
+                    "trainingCrops": split_crops["train"],
+                    "validationCrops": split_crops["val"],
+                    "eventCoverage": event_coverage,
+                    "warnings": warnings,
+                },
                 indent=2,
             )
             + "\n",
@@ -96,7 +110,18 @@ def main() -> int:
         if backup.exists():
             shutil.rmtree(backup)
 
-        print(f"EXPORTED samples={len(samples)} crops={exported} size={args.size}", flush=True)
+        coverage = ", ".join(
+            f"{item['name']}={item['trainingSamples']}/{item['validationSamples']}"
+            for item in event_coverage
+        )
+        print(f"COVERAGE train/val frames: {coverage}", flush=True)
+        for warning in warnings:
+            print(f"WARNING {warning}", flush=True)
+        print(
+            f"EXPORTED samples={len(samples)} train={len(assignments['train'])} "
+            f"val={len(assignments['val'])} crops={exported} size={args.size}",
+            flush=True,
+        )
         return 0
     except Exception:
         if dataset.exists():
@@ -162,12 +187,128 @@ def validate_labels(
 
 
 def split_samples(samples: list[dict], validation_fraction: float) -> dict[str, list[dict]]:
-    shuffled = list(samples)
-    random.Random(42).shuffle(shuffled)
-    validation_count = round(len(shuffled) * validation_fraction) if len(shuffled) > 1 else 0
-    validation_count = max(1 if len(shuffled) > 1 else 0, validation_count)
-    validation_count = min(len(shuffled) - 1, validation_count)
-    return {"train": shuffled[validation_count:], "val": shuffled[:validation_count]}
+    shuffled_indices = list(range(len(samples)))
+    random.Random(42).shuffle(shuffled_indices)
+    target = round(len(samples) * validation_fraction) if len(samples) > 1 else 0
+    target = max(1 if len(samples) > 1 else 0, target)
+    target = min(len(samples) - 1, target)
+
+    sample_classes = [set(label["classId"] for label in sample["labels"]) for sample in samples]
+    class_samples: dict[int, list[int]] = {}
+    for sample_index, class_ids in enumerate(sample_classes):
+        for class_id in class_ids:
+            class_samples.setdefault(class_id, []).append(sample_index)
+
+    singleton_classes = {class_id for class_id, indices in class_samples.items() if len(indices) == 1}
+    fixed_train = {
+        sample_index
+        for sample_index, class_ids in enumerate(sample_classes)
+        if class_ids & singleton_classes
+    }
+    covered_classes = {class_id for class_id, indices in class_samples.items() if len(indices) > 1}
+    validation: set[int] = set()
+    validation_counts = {class_id: 0 for class_id in covered_classes}
+    rank = {sample_index: index for index, sample_index in enumerate(shuffled_indices)}
+
+    def safe_for_validation(sample_index: int) -> bool:
+        return sample_index not in fixed_train and all(
+            validation_counts[class_id] + 1 < len(class_samples[class_id])
+            for class_id in sample_classes[sample_index] & covered_classes
+        )
+
+    def cover(uncovered: set[int]) -> bool:
+        if not uncovered:
+            return True
+
+        choices: dict[int, list[int]] = {}
+        for class_id in uncovered:
+            candidates = []
+            signatures: set[frozenset[int]] = set()
+            for sample_index in class_samples[class_id]:
+                signature = frozenset(sample_classes[sample_index])
+                if sample_index in validation or signature in signatures or not safe_for_validation(sample_index):
+                    continue
+                signatures.add(signature)
+                candidates.append(sample_index)
+            choices[class_id] = candidates
+
+        class_id = min(uncovered, key=lambda item: (len(choices[item]), item))
+        candidates = sorted(
+            choices[class_id],
+            key=lambda sample_index: (
+                -len(sample_classes[sample_index] & uncovered),
+                rank[sample_index],
+            ),
+        )
+        for sample_index in candidates:
+            validation.add(sample_index)
+            affected = sample_classes[sample_index] & covered_classes
+            for affected_class in affected:
+                validation_counts[affected_class] += 1
+            if cover({item for item in uncovered if validation_counts[item] == 0}):
+                return True
+            for affected_class in affected:
+                validation_counts[affected_class] -= 1
+            validation.remove(sample_index)
+        return False
+
+    if not cover(set(covered_classes)):
+        missing = sorted(class_id for class_id in covered_classes if validation_counts[class_id] == 0)
+        raise ValueError(
+            "cannot keep every event with multiple samples in both train and validation while "
+            f"keeping frames intact; add samples for class IDs: {missing}"
+        )
+
+    for sample_index in shuffled_indices:
+        if len(validation) >= target:
+            break
+        if sample_index not in validation and safe_for_validation(sample_index):
+            validation.add(sample_index)
+            for class_id in sample_classes[sample_index] & covered_classes:
+                validation_counts[class_id] += 1
+
+    return {
+        "train": [samples[index] for index in shuffled_indices if index not in validation],
+        "val": [samples[index] for index in shuffled_indices if index in validation],
+    }
+
+
+def summarize_coverage(assignments: dict[str, list[dict]], events: list[dict]) -> tuple[list[dict], list[str]]:
+    counts = {
+        split: {
+            event["classId"]: sum(
+                any(label["classId"] == event["classId"] for label in sample["labels"])
+                for sample in samples
+            )
+            for event in events
+        }
+        for split, samples in assignments.items()
+    }
+    coverage = []
+    warnings = []
+    for event in events:
+        class_id = event["classId"]
+        training_samples = counts["train"][class_id]
+        validation_samples = counts["val"][class_id]
+        sample_count = training_samples + validation_samples
+        coverage.append(
+            {
+                "classId": class_id,
+                "name": event["name"],
+                "sampleCount": sample_count,
+                "trainingSamples": training_samples,
+                "validationSamples": validation_samples,
+            }
+        )
+        if sample_count == 0:
+            warnings.append(f"'{event['name']}' has no labeled frames.")
+        elif sample_count == 1:
+            warnings.append(
+                f"'{event['name']}' has one labeled frame; it is train-only and cannot be validated."
+            )
+    if not assignments["val"]:
+        warnings.append("The dataset has no validation frames.")
+    return coverage, warnings
 
 
 def export_sample(sample: dict, split: str, dataset: Path, events: list[dict], size: int, sequence: int) -> int:

@@ -20,12 +20,12 @@ internal sealed partial class AppHost
     private CancellationTokenSource? _trainingCancellation;
     private string? _trainingGameId;
 
-    private void WithTrainingWorkspaceLock(Action action)
+    private async Task WithTrainingWorkspaceLockAsync(Func<Task> action)
     {
-        _trainingWorkspaceGate.Wait();
+        await _trainingWorkspaceGate.WaitAsync();
         try
         {
-            action();
+            await action();
         }
         finally
         {
@@ -78,10 +78,12 @@ internal sealed partial class AppHost
         return workspace;
     }
 
-    internal void PushTraining(string? requestedGameId)
-    {
-        WithTrainingWorkspaceLock(() => PushTrainingCore(requestedGameId));
-    }
+    internal async Task PushTraining(string? requestedGameId)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            PushTrainingCore(requestedGameId);
+            return Task.CompletedTask;
+        });
 
     private void PushTrainingCore(string? requestedGameId)
     {
@@ -98,10 +100,21 @@ internal sealed partial class AppHost
         var workspace = EnsureTrainingWorkspace(gameId);
         var definitions = workspace.LoadDefinitions();
         var samples = new TrainingSampleStore(workspace).List();
+        TrainingDatasetExportSummary? exportSummary = null;
+        try
+        {
+            exportSummary = TrainingRunner.LoadExportSummary(workspace);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Training: could not read dataset coverage for {GameId}", gameId);
+        }
         var dataset = new
         {
             trainingImages = CountTrainingImages(workspace.DatasetPath, "train"),
             validationImages = CountTrainingImages(workspace.DatasetPath, "val"),
+            eventCoverage = exportSummary?.EventCoverage ?? [],
+            warnings = exportSummary?.Warnings ?? [],
         };
         OnnxModelMetadata? metadata = null;
         var modelPath = File.Exists(workspace.ModelPath)
@@ -140,10 +153,12 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
-    internal void ImportTrainingAssets(ImportTrainingParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => ImportTrainingAssetsCore(parameters));
-    }
+    internal async Task ImportTrainingAssets(ImportTrainingParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            ImportTrainingAssetsCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void ImportTrainingAssetsCore(ImportTrainingParameters? parameters)
     {
@@ -207,12 +222,10 @@ internal sealed partial class AppHost
         }
     }
 
-    internal void CaptureTrainingSample(CaptureTrainingSampleParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => CaptureTrainingSampleCore(parameters));
-    }
+    internal async Task CaptureTrainingSample(CaptureTrainingSampleParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() => CaptureTrainingSampleCore(parameters));
 
-    private void CaptureTrainingSampleCore(CaptureTrainingSampleParameters? parameters)
+    private async Task CaptureTrainingSampleCore(CaptureTrainingSampleParameters? parameters)
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
@@ -236,7 +249,7 @@ internal sealed partial class AppHost
             var sample = new TrainingSampleStore(workspace).Save(sourcePath, parameters.TimestampSeconds,
                 media.Width, media.Height, labels, File.ReadAllBytes(temporaryPath), definitions);
             PushTrainingProgress(parameters.GameId, "sampleSaved", sample.Id);
-            PushTrainingSample(parameters.GameId, workspace, sample);
+            await PushTrainingSampleAsync(parameters.GameId, workspace, sample);
             PushTrainingCore(parameters.GameId);
         }
         finally
@@ -246,12 +259,10 @@ internal sealed partial class AppHost
         }
     }
 
-    internal void GetTrainingSample(TrainingSampleParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => GetTrainingSampleCore(parameters));
-    }
+    internal async Task GetTrainingSample(TrainingSampleParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() => GetTrainingSampleCore(parameters));
 
-    private void GetTrainingSampleCore(TrainingSampleParameters? parameters)
+    private async Task GetTrainingSampleCore(TrainingSampleParameters? parameters)
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
@@ -274,15 +285,17 @@ internal sealed partial class AppHost
             throw new FileNotFoundException("The training sample image is missing.", imagePath);
         }
 
-        PushTrainingSample(parameters.GameId, workspace, sample, parameters.PreviewOnly
+        await PushTrainingSampleAsync(parameters.GameId, workspace, sample, parameters.PreviewOnly
             ? "trainingSamplePreview"
             : "trainingSample", parameters.RequestId);
     }
 
-    internal void UpdateTrainingEvents(UpdateTrainingEventsParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => UpdateTrainingEventsCore(parameters));
-    }
+    internal async Task UpdateTrainingEvents(UpdateTrainingEventsParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            UpdateTrainingEventsCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void UpdateTrainingEventsCore(UpdateTrainingEventsParameters? parameters)
     {
@@ -333,10 +346,12 @@ internal sealed partial class AppHost
         PushTrainingCore(parameters.GameId);
     }
 
-    internal void UpdateTrainingSample(UpdateTrainingSampleParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => UpdateTrainingSampleCore(parameters));
-    }
+    internal async Task UpdateTrainingSample(UpdateTrainingSampleParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            UpdateTrainingSampleCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void UpdateTrainingSampleCore(UpdateTrainingSampleParameters? parameters)
     {
@@ -350,10 +365,12 @@ internal sealed partial class AppHost
         PushTrainingCore(parameters.GameId);
     }
 
-    internal void SuggestTrainingLabels(SuggestTrainingLabelsParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => SuggestTrainingLabelsCore(parameters));
-    }
+    internal async Task SuggestTrainingLabels(SuggestTrainingLabelsParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            SuggestTrainingLabelsCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void SuggestTrainingLabelsCore(SuggestTrainingLabelsParameters? parameters)
     {
@@ -381,10 +398,12 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
-    internal void DeleteTrainingSample(TrainingSampleParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => DeleteTrainingSampleCore(parameters));
-    }
+    internal async Task DeleteTrainingSample(TrainingSampleParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            DeleteTrainingSampleCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void DeleteTrainingSampleCore(TrainingSampleParameters? parameters)
     {
@@ -396,10 +415,12 @@ internal sealed partial class AppHost
         PushTrainingCore(parameters.GameId);
     }
 
-    internal void StartTraining(StartTrainingParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => StartTrainingCore(parameters));
-    }
+    internal async Task StartTraining(StartTrainingParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            StartTrainingCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void StartTrainingCore(StartTrainingParameters? parameters)
     {
@@ -438,10 +459,12 @@ internal sealed partial class AppHost
         }
     }
 
-    internal void InstallTrainingModelCommand(TrainingGameParameters? parameters)
-    {
-        WithTrainingWorkspaceLock(() => InstallTrainingModelCommandCore(parameters));
-    }
+    internal async Task InstallTrainingModelCommand(TrainingGameParameters? parameters)
+        => await WithTrainingWorkspaceLockAsync(() =>
+        {
+            InstallTrainingModelCommandCore(parameters);
+            return Task.CompletedTask;
+        });
 
     private void InstallTrainingModelCommandCore(TrainingGameParameters? parameters)
     {
@@ -524,7 +547,7 @@ internal sealed partial class AppHost
     internal static string ResolveTrainingModelPath(string installedModelPath, string workspaceModelPath) =>
         File.Exists(installedModelPath) ? installedModelPath : workspaceModelPath;
 
-    private void PushTrainingSample(string gameId, TrainingWorkspace workspace, TrainingSampleRecord sample,
+    private async Task PushTrainingSampleAsync(string gameId, TrainingWorkspace workspace, TrainingSampleRecord sample,
         string messageName = "trainingSample", string? requestId = null)
     {
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
@@ -536,7 +559,7 @@ internal sealed partial class AppHost
             sample,
             gameId,
             requestId,
-            imageData = "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(imagePath)),
+            imageData = "data:image/png;base64," + Convert.ToBase64String(await File.ReadAllBytesAsync(imagePath)),
         }, Wire.Options));
     }
 

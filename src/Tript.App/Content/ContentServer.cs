@@ -96,7 +96,7 @@ internal sealed class ContentServer : IDisposable
             try
             {
                 var context = _listener.GetContext();
-                ThreadPool.QueueUserWorkItem(_ => Handle(context));
+                ThreadPool.QueueUserWorkItem(state => _ = Handle(context));
             }
             catch (HttpListenerException)
             {
@@ -111,7 +111,7 @@ internal sealed class ContentServer : IDisposable
         }
     }
 
-    private void Handle(HttpListenerContext context)
+    private async Task Handle(HttpListenerContext context)
     {
         try
         {
@@ -154,7 +154,7 @@ internal sealed class ContentServer : IDisposable
             match = ThumbnailRoute.Match(path);
             if (match.Success)
             {
-                ServeThumbnail(context, Decode(match.Groups[1].Value));
+                await ServeThumbnail(context, Decode(match.Groups[1].Value));
                 return;
             }
 
@@ -402,7 +402,7 @@ internal sealed class ContentServer : IDisposable
     // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract
     // is deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
     // placeholder card".
-    private void ServeThumbnail(HttpListenerContext context, string requestPath)
+    private async Task ServeThumbnail(HttpListenerContext context, string requestPath)
     {
         var resolved = ResolveWithinRoot(requestPath);
         if (resolved is null)
@@ -417,7 +417,9 @@ internal sealed class ContentServer : IDisposable
         {
             if (File.Exists(resolved))
             {
-                var cached = _thumbnails?.Ensure(resolved);
+                var cached = _thumbnails is null
+                    ? null
+                    : await _thumbnails.EnsureAsync(resolved);
                 if (cached is not null)
                     image = File.ReadAllBytes(cached);
             }

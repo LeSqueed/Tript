@@ -39,15 +39,15 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 
     [SkippableFact]
-    public void Ensure_RunsTheExtractorOnce_AndServesTheCachedFileAfterwards()
+    public async Task Ensure_RunsTheExtractorOnce_AndServesTheCachedFileAfterwards()
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor();
         var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
-        var first = store.Ensure(video);
-        var second = store.Ensure(video);
-        var third = store.Ensure(video);
+        var first = await store.EnsureAsync(video);
+        var second = await store.EnsureAsync(video);
+        var third = await store.EnsureAsync(video);
 
         Assert.NotNull(first);
         Assert.Equal(first, second);
@@ -62,13 +62,13 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 
     [SkippableFact]
-    public void Ensure_ReturnsNull_WhenTheExtractorCannotProduceAnImage()
+    public async Task Ensure_ReturnsNull_WhenTheExtractorCannotProduceAnImage()
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor { Succeed = false };
         var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
-        Assert.Null(store.Ensure(video));
+        Assert.Null(await store.EnsureAsync(video));
         // No empty file is left behind for a later request to serve as a thumbnail.
         Assert.Empty(Directory.Exists(ThumbnailRoot)
             ? Directory.GetFiles(ThumbnailRoot)
@@ -78,7 +78,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     // A machine with no ffmpeg is a supported state: the extractor factory returns null, every
     // request answers "no thumbnail", and the factory is not retried per request.
     [SkippableFact]
-    public void Ensure_ReturnsNull_AndAsksOnce_WhenThereIsNoExtractor()
+    public async Task Ensure_ReturnsNull_AndAsksOnce_WhenThereIsNoExtractor()
     {
         var video = WriteVideo("session-1.mp4");
         var factoryCalls = 0;
@@ -88,37 +88,37 @@ public sealed class ThumbnailCacheTests : IDisposable
             return null;
         });
 
-        Assert.Null(store.Ensure(video));
-        Assert.Null(store.Ensure(video));
+        Assert.Null(await store.EnsureAsync(video));
+        Assert.Null(await store.EnsureAsync(video));
         Assert.Equal(1, factoryCalls);
     }
 
     // A video replaced in place under the same name (a re-record, a restored backup) must not keep
     // serving the previous file's frame.
     [SkippableFact]
-    public void Ensure_RegeneratesWhenTheVideoIsNewerThanTheCachedImage()
+    public async Task Ensure_RegeneratesWhenTheVideoIsNewerThanTheCachedImage()
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor();
         var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
-        var cached = store.Ensure(video);
+        var cached = await store.EnsureAsync(video);
         Assert.NotNull(cached);
         Assert.Equal(1, extractor.Calls);
 
         File.SetLastWriteTimeUtc(video, File.GetLastWriteTimeUtc(cached) + TimeSpan.FromSeconds(5));
 
-        Assert.Equal(cached, store.Ensure(video));
+        Assert.Equal(cached, await store.EnsureAsync(video));
         Assert.Equal(2, extractor.Calls);
     }
 
     [SkippableFact]
-    public void Delete_RemovesTheCachedImage()
+    public async Task Delete_RemovesTheCachedImage()
     {
         var video = WriteVideo("session-1.mp4");
         var store = new ThumbnailStore(ThumbnailRoot, () => new CountingExtractor());
 
-        var cached = store.Ensure(video);
+        var cached = await store.EnsureAsync(video);
         Assert.NotNull(cached);
         Assert.True(File.Exists(cached));
 
@@ -132,7 +132,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     // An unwritable cache directory must not throw at the caller (the content server's worker
     // thread): it is one more reason there is no thumbnail.
     [SkippableFact]
-    public void Ensure_ReturnsNull_WhenTheCacheDirectoryCannotBeCreated()
+    public async Task Ensure_ReturnsNull_WhenTheCacheDirectoryCannotBeCreated()
     {
         var video = WriteVideo("session-1.mp4");
         // A regular file where the cache directory would go: Directory.CreateDirectory then fails
@@ -142,7 +142,7 @@ public sealed class ThumbnailCacheTests : IDisposable
 
         var store = new ThumbnailStore(Path.Combine(inTheWay, "thumbnails"), () => new CountingExtractor());
 
-        Assert.Null(store.Ensure(video));
+        Assert.Null(await store.EnsureAsync(video));
     }
 
     private string ThumbnailRoot => Path.Combine(_root, "metadata", "thumbnails");

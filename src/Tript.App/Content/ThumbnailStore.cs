@@ -44,9 +44,9 @@ internal sealed class ThumbnailStore
     private readonly Lazy<IThumbnailExtractor?> _extractor;
     private readonly SemaphoreSlim _concurrency = new(MaxConcurrentExtractions, MaxConcurrentExtractions);
 
-    // One lock object per video file name, so two concurrent requests for the same card do not both
+    // One gate per video file name, so two concurrent requests for the same card do not both
     // run ffmpeg (and do not both write the same file). Requests for different cards never contend.
-    private readonly Dictionary<string, object> _perFileLocks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemaphoreSlim> _perFileGates = new(StringComparer.Ordinal);
 
     // Guards _thumbnailRoot alone. Always taken innermost (a per-file gate may be held while it is
     // acquired; never the other way round).
@@ -88,7 +88,7 @@ internal sealed class ThumbnailStore
     // The cached thumbnail for a video, generating it if there is not a usable one yet. Returns
     // null when no image can be produced — a missing or corrupt source, no ffmpeg on the machine,
     // an extraction that failed or overran, an unwritable cache directory.
-    internal string? Ensure(string videoPath)
+    internal async Task<string?> EnsureAsync(string videoPath)
     {
         var fileName = Path.GetFileName(videoPath);
         if (fileName.Length == 0)
@@ -98,9 +98,11 @@ internal sealed class ThumbnailStore
         if (IsFresh(cached, videoPath))
             return cached;
 
-        lock (LockFor(fileName))
+        var gate = GateFor(fileName);
+        await gate.WaitAsync();
+        try
         {
-            // Re-checked under the lock: while this request waited, the request it was queued behind
+            // Re-checked under the gate: while this request waited, the request it was queued behind
             // may have generated exactly this file.
             if (IsFresh(cached, videoPath))
                 return cached;
@@ -109,7 +111,7 @@ internal sealed class ThumbnailStore
             if (extractor is null)
                 return null;
 
-            if (!_concurrency.Wait(QueueWait))
+            if (!await _concurrency.WaitAsync(QueueWait))
                 return null;
 
             try
@@ -128,6 +130,10 @@ internal sealed class ThumbnailStore
             {
                 _concurrency.Release();
             }
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -202,14 +208,14 @@ internal sealed class ThumbnailStore
 
     private static string VersionPath(string cached) => $"{cached}.version";
 
-    private object LockFor(string fileName)
+    private SemaphoreSlim GateFor(string fileName)
     {
-        lock (_perFileLocks)
+        lock (_perFileGates)
         {
-            if (!_perFileLocks.TryGetValue(fileName, out var gate))
+            if (!_perFileGates.TryGetValue(fileName, out var gate))
             {
-                gate = new object();
-                _perFileLocks[fileName] = gate;
+                gate = new SemaphoreSlim(1, 1);
+                _perFileGates[fileName] = gate;
             }
 
             return gate;

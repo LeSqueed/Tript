@@ -321,6 +321,13 @@ internal static unsafe partial class ObsNative
     internal static partial void gs_duplicator_destroy(nint duplicator);
 
     [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    internal static partial bool gs_duplicator_update_frame(nint duplicator);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint gs_duplicator_get_texture(nint duplicator);
+
+    [LibraryImport(ObsLibrary.Name)]
     internal static partial int gs_duplicator_get_color_space(nint duplicator);
 
     [LibraryImport(ObsLibrary.Name)]

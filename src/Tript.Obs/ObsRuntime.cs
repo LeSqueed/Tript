@@ -383,6 +383,20 @@ public sealed class ObsRuntime : IDisposable
 
             try
             {
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    if (!ObsNative.gs_duplicator_update_frame(duplicator))
+                        return null;
+
+                    if (ObsNative.gs_duplicator_get_texture(duplicator) != nint.Zero)
+                        break;
+
+                    Thread.Sleep(5);
+                }
+
+                if (ObsNative.gs_duplicator_get_texture(duplicator) == nint.Zero)
+                    return null;
+
                 return ((ObsSourceColorSpace)ObsNative.gs_duplicator_get_color_space(duplicator),
                     ObsNative.gs_duplicator_get_sdr_white_level(duplicator));
             }

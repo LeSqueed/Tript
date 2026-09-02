@@ -490,6 +490,7 @@ internal sealed partial class AppHost : IDisposable
 
         _ipc.Dispose();
         _content.Dispose();
+        _thumbnails.Dispose();
         _ui.Dispose();
     }
 
@@ -2506,6 +2507,10 @@ internal sealed partial class AppHost : IDisposable
 
         AddIfPresent(files, _metadata.PathFor(fileName));
         AddIfPresent(files, _clipTitles.PathFor(fileName));
+        // Close the extraction check-to-publish race before the cache is snapshotted for the trash
+        // transaction. A worker already decoding this source must not recreate the thumbnail after
+        // the source and its existing cache entry have moved.
+        _thumbnails.Invalidate(fileName);
         AddIfPresent(files, _thumbnails.PathFor(fileName));
 
         if (files.Count == 0)
@@ -2515,6 +2520,13 @@ internal sealed partial class AppHost : IDisposable
         {
             Console.Error.WriteLine($"Tript.App: could not move '{target}' to the trash: {failure}");
             PushError($"'{fileName}' could not be moved to the trash ({failure}), so it was left where it is.");
+        }
+        else
+        {
+            // A request can arrive after the pre-move invalidation and enqueue against the source
+            // before TrashStore moves it. Invalidate once more after the move and remove anything
+            // that worker managed to publish after the file snapshot was taken.
+            _thumbnails.Delete(fileName);
         }
     }
 

@@ -261,6 +261,8 @@ describe('App shell', () => {
   it('opens the player as a route at desktop width, keeping the library mounted', () => {
     renderApp();
     connect();
+    const library = document.querySelector('.library-view') as HTMLElement;
+    expect(library.querySelectorAll('img').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
 
     // The player is on the page...
@@ -268,9 +270,9 @@ describe('App shell', () => {
     // ...as a route, not as the overlay layer.
     expect(screen.queryByTestId('player-overlay')).toBeNull();
     // ...and the library is still mounted underneath, merely hidden, so its state survives.
-    const library = document.querySelector('.library-view');
     expect(library).not.toBeNull();
     expect(library?.closest('[hidden]')).not.toBeNull();
+    expect(library.querySelectorAll('img')).toHaveLength(0);
     // The player remains inside the shell: primary navigation stays visible and Library is active.
     const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(within(nav).getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe('page');
@@ -295,7 +297,10 @@ describe('App shell', () => {
       }));
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    const library = document.querySelector('.library-view') as HTMLElement;
+    const missingCard = screen.getByRole('button', { name: 'Open Session 1' });
+    expect(within(missingCard).getAllByRole('presentation')).toHaveLength(2);
+    fireEvent.click(missingCard);
 
     expect(screen.getByRole('heading', { name: 'Session 1' })).toBeTruthy();
     expect(screen.getByText('2 highlights')).toBeTruthy();
@@ -305,6 +310,12 @@ describe('App shell', () => {
     ]);
     expect(screen.queryByRole('button', { name: 'Open manual.mp4' })).toBeNull();
     expect(document.querySelector('.player-view')).toBeNull();
+    expect(library.closest('[hidden]')).not.toBeNull();
+    expect(library.querySelectorAll('img')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to library' }));
+    expect(library.closest('[hidden]')).toBeNull();
+    expect(within(screen.getByRole('button', { name: 'Open Session 1' })).getAllByRole('presentation')).toHaveLength(2);
   });
 
   it('refreshes the open player item when content metadata changes', () => {
@@ -426,11 +437,14 @@ describe('App shell', () => {
   it('returns from the player route to the library', () => {
     renderApp();
     connect();
+    const library = document.querySelector('.library-view') as HTMLElement;
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(library.querySelectorAll('img')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Library' }));
 
     expect(document.querySelector('.player-view')).toBeNull();
     expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
+    expect(library.querySelectorAll('img').length).toBeGreaterThan(0);
   });
 
   it('keeps the player inside the shell at compact width', () => {

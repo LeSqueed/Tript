@@ -441,6 +441,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               <LibraryView
                 client={client}
                 items={items}
+                thumbnailLoadingActive={route === 'library'}
                 connectionState={connectionState}
                 contentLoaded={loaded}
                 onOpen={openInPlayer}

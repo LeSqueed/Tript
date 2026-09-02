@@ -114,15 +114,21 @@ describe('LibraryView grid', () => {
     expect(within(card).getByText('No date')).toBeTruthy();
   });
 
-  it('lazy-loads grid thumbnails, and loads the hero eagerly', () => {
-    renderLibrary([session, clip]);
+  it('loads exactly the first recent thumbnail eagerly and deprioritizes the rest', () => {
+    const secondRecent = item({
+      fileName: 'second-recent.mp4',
+      title: 'Second recent session',
+      startTime: NOW - 4 * HOUR,
+    });
+    renderLibrary([session, secondRecent, clip]);
     const images = screen.getAllByRole('presentation') as HTMLImageElement[];
     expect(images[0].getAttribute('src')).toBe('http://localhost:8893/api/thumbnail/sessions/cs2.mp4');
-    // The hero is the picture the user came to look at; it must not wait for an intersection.
-    expect(images[0].getAttribute('loading')).toBe('eager');
+    expect(images.filter((image) => image.getAttribute('loading') === 'eager')).toHaveLength(1);
+    expect(images[0].getAttribute('fetchpriority')).toBe('high');
     // Everything else: a library is unbounded, and a thousand cards must not become a thousand
     // requests on mount.
     expect(images.slice(1).every((image) => image.getAttribute('loading') === 'lazy')).toBe(true);
+    expect(images.slice(1).every((image) => image.getAttribute('fetchpriority') === 'low')).toBe(true);
   });
 
   it('falls back to the placeholder tile when the thumbnail request fails or 204s', () => {

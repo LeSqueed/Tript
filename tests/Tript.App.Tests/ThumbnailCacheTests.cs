@@ -43,7 +43,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor();
-        var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
         var first = await store.EnsureAsync(video);
         var second = await store.EnsureAsync(video);
@@ -66,9 +66,12 @@ public sealed class ThumbnailCacheTests : IDisposable
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor { Succeed = false };
-        var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
         Assert.Null(await store.EnsureAsync(video));
+        Assert.Null(store.GetOrQueue(video));
+        await Task.Delay(100);
+        Assert.Equal(1, extractor.Calls);
         // No empty file is left behind for a later request to serve as a thumbnail.
         Assert.Empty(Directory.Exists(ThumbnailRoot)
             ? Directory.GetFiles(ThumbnailRoot)
@@ -82,7 +85,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     {
         var video = WriteVideo("session-1.mp4");
         var factoryCalls = 0;
-        var store = new ThumbnailStore(ThumbnailRoot, () =>
+        using var store = new ThumbnailStore(ThumbnailRoot, () =>
         {
             factoryCalls++;
             return null;
@@ -100,7 +103,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     {
         var video = WriteVideo("session-1.mp4");
         var extractor = new CountingExtractor();
-        var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
         var cached = await store.EnsureAsync(video);
         Assert.NotNull(cached);
@@ -116,7 +119,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     public async Task Delete_RemovesTheCachedImage()
     {
         var video = WriteVideo("session-1.mp4");
-        var store = new ThumbnailStore(ThumbnailRoot, () => new CountingExtractor());
+        using var store = new ThumbnailStore(ThumbnailRoot, () => new CountingExtractor());
 
         var cached = await store.EnsureAsync(video);
         Assert.NotNull(cached);
@@ -140,9 +143,52 @@ public sealed class ThumbnailCacheTests : IDisposable
         var inTheWay = Path.Combine(_root, "blocked");
         File.WriteAllText(inTheWay, "in the way");
 
-        var store = new ThumbnailStore(Path.Combine(inTheWay, "thumbnails"), () => new CountingExtractor());
+        using var store = new ThumbnailStore(Path.Combine(inTheWay, "thumbnails"), () => new CountingExtractor());
 
         Assert.Null(await store.EnsureAsync(video));
+    }
+
+    [Fact]
+    public async Task Cache_misses_return_immediately_and_coalesce_while_extraction_is_blocked()
+    {
+        var video = WriteVideo("slow.mp4");
+        var extractor = new BlockingExtractor();
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+
+        Assert.Null(store.GetOrQueue(video));
+        Assert.True(extractor.Entered.Wait(TimeSpan.FromSeconds(2)), "the background worker did not start");
+
+        var stopwatch = Stopwatch.StartNew();
+        for (var index = 0; index < 20; index++)
+            Assert.Null(store.GetOrQueue(video));
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"cache misses waited on extraction for {stopwatch.Elapsed}");
+        Assert.Equal(1, extractor.Calls);
+
+        var completion = store.EnsureAsync(video);
+        Assert.False(completion.IsCompleted);
+        extractor.Release.Set();
+        Assert.NotNull(await completion.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, extractor.Calls);
+    }
+
+    [Fact]
+    public async Task Invalidate_prevents_an_in_flight_extraction_from_publishing()
+    {
+        var video = WriteVideo("moving-to-trash.mp4");
+        var extractor = new BlockingExtractor();
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+
+        var completion = store.EnsureAsync(video);
+        Assert.True(extractor.Entered.Wait(TimeSpan.FromSeconds(2)), "the background worker did not start");
+
+        store.Invalidate(Path.GetFileName(video));
+        extractor.Release.Set();
+
+        Assert.Null(await completion.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.False(File.Exists(store.PathFor(Path.GetFileName(video))));
     }
 
     private string ThumbnailRoot => Path.Combine(_root, "metadata", "thumbnails");
@@ -169,6 +215,23 @@ public sealed class ThumbnailCacheTests : IDisposable
 
             // A real extractor writes a JPEG; the bytes are irrelevant to the cache, the length is
             // not (a zero-length file counts as no thumbnail).
+            File.WriteAllBytes(destinationPath, [0xFF, 0xD8, 0xFF, 0xD9]);
+            return true;
+        }
+    }
+
+    private sealed class BlockingExtractor : IThumbnailExtractor
+    {
+        internal ManualResetEventSlim Entered { get; } = new(false);
+        internal ManualResetEventSlim Release { get; } = new(false);
+        internal int Calls => Volatile.Read(ref _calls);
+        private int _calls;
+
+        public bool TryExtract(string sourcePath, string destinationPath)
+        {
+            Interlocked.Increment(ref _calls);
+            Entered.Set();
+            Release.Wait(TimeSpan.FromSeconds(10));
             File.WriteAllBytes(destinationPath, [0xFF, 0xD8, 0xFF, 0xD9]);
             return true;
         }
@@ -210,7 +273,10 @@ public sealed class ThumbnailRouteTests : IDisposable
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
         await using var _ = host;
 
-        using var first = await GetAsync(host, "sessions/source.mp4");
+        using (var queued = await GetAsync(host, "sessions/source.mp4"))
+            Assert.Equal(HttpStatusCode.NoContent, queued.StatusCode);
+
+        using var first = await GetUntilReadyAsync(host, "sessions/source.mp4");
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal("image/jpeg", first.Content.Headers.ContentType?.MediaType);
         Assert.Contains("max-age", string.Join(' ', first.Headers.GetValues("Cache-Control")));
@@ -311,7 +377,7 @@ public sealed class ThumbnailRouteTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        using (var response = await GetAsync(host, "sessions/source.mp4"))
+        using (var response = await GetUntilReadyAsync(host, "sessions/source.mp4"))
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var cached = Path.Combine(_contentRoot, "metadata", "thumbnails", "source.mp4.jpg");
@@ -331,6 +397,21 @@ public sealed class ThumbnailRouteTests : IDisposable
     // With the launch's session token; the content server serves no thumbnail without it.
     private static Task<HttpResponseMessage> GetAsync(AppHostDriver host, string path)
         => SendAsync(new HttpRequestMessage(HttpMethod.Get, host.WithToken($"{Base}/api/thumbnail/{path}")));
+
+    private static async Task<HttpResponseMessage> GetUntilReadyAsync(AppHostDriver host, string path)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < TimeSpan.FromSeconds(15))
+        {
+            var response = await GetAsync(host, path);
+            if (response.StatusCode == HttpStatusCode.OK)
+                return response;
+            response.Dispose();
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"Thumbnail '{path}' was not generated within 15 seconds.");
+    }
 
     private static async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
     {

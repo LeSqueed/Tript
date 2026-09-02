@@ -82,6 +82,8 @@ export interface LibraryViewProps {
   client: IpcClient;
   /** Everything the backend has, in its own order (newest-first), reactive via the shell's source. */
   items: ContentItem[];
+  /** Whether cards may create thumbnail requests while this mounted library is visible. */
+  thumbnailLoadingActive?: boolean;
   connectionState?: ConnectionState;
   contentLoaded?: boolean;
   /** The shell's player seam: called with the item the user opened. */
@@ -107,6 +109,7 @@ export interface LibraryViewProps {
 export function LibraryView({
   client,
   items,
+  thumbnailLoadingActive = true,
   connectionState,
   contentLoaded = true,
   onOpen,
@@ -503,14 +506,16 @@ export function LibraryView({
                  <span className="library-section-kicker">{recentGroups.length} latest</span>
                </div>
                <div className="library-recent-grid">
-                 {recentGroups.map((group) => (
-                  <RecordingGroup
-                    key={group.recording?.filePath ?? 'orphaned-clips'}
-                    group={group}
-                    variant="recent"
-                    actions={groupActions}
-                  />
-                ))}
+                 {recentGroups.map((group, index) => (
+                   <RecordingGroup
+                     key={group.recording?.filePath ?? 'orphaned-clips'}
+                     group={group}
+                     variant="recent"
+                     actions={groupActions}
+                     thumbnailLoadingActive={thumbnailLoadingActive}
+                     priority={index === 0}
+                   />
+                 ))}
               </div>
              </section>
            )}
@@ -526,9 +531,10 @@ export function LibraryView({
                        <ContentCard
                          item={item}
                          clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                         highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                         previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
-                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
+                          highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                          previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                          thumbnailLoadingActive={thumbnailLoadingActive}
+                         onOpen={(item) => onOpen?.(item, groupView.resultItems)}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
                        selectable={selectionMode}
@@ -548,9 +554,10 @@ export function LibraryView({
                 <ContentCard
                   item={item}
                   clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                  highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                  previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
-                 onOpen={(item) => onOpen?.(item, view.resultItems)}
+                   highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                   previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                   thumbnailLoadingActive={thumbnailLoadingActive}
+                  onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}
                 selectable={selectionMode}

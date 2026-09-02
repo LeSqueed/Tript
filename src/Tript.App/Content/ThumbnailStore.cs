@@ -1,190 +1,259 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Collections.Concurrent;
 using Tript.Media;
 
 namespace Tript.App.Content;
 
-// The on-disk thumbnail cache the library's grid is drawn from. One JPEG per video, generated on
-// first request and served from disk afterwards.
-//
-// Why a cache at all: the library is a paginated grid of thumbnail cards, so a single render asks
-// for every visible card's thumbnail at once. Generating on each request would spawn one ffmpeg per
-// card per render — two dozen decoders for a scroll — which is why the file on disk, not the frame,
-// is the unit of work here.
-//
-// Where it lives: <recordingRoot>/metadata/thumbnails/<videoFileName>.jpg. The metadata tree is
-// already where per-video derived records live (RecordingMetadataStore, ClipTitleStore), keyed the
-// same way — by the video's own file name, so a record is addressable without parsing anything — and
-// it already moves with the recording root through the same UpdateRoot call. Two consequences that
-// decided it over a thumbnails/ sibling:
-//
-//   * the recordings and clips directories stay plain MP4s, which is a documented invariant of the
-//     storage layout, and ListContent enumerates *.mp4 under the root recursively, so nothing new
-//     appears in the library;
-//   * the cascade delete is already there. Deleting content removes its metadata records; the
-//     thumbnail is one more keyed record removed in the same place (AppHost.DeleteContent), so a
-//     deleted video cannot leave an orphaned image behind.
-//
-// The subdirectory keeps a pile of binaries out of the hand-readable record directory and makes
-// "drop the whole cache" a single directory delete.
-internal sealed class ThumbnailStore
+// The on-disk thumbnail cache the library grid is drawn from. Cache hits are served directly, while
+// misses are placed on a bounded background queue. An HTTP request never waits for ffmpeg: keeping a
+// thumbnail response open can occupy every browser connection to the same origin and prevent the
+// player's range request from reaching the server at all.
+internal sealed class ThumbnailStore : IDisposable
 {
     private const string CacheVersion = "2";
-    // A first render of a full page of cards arrives as a burst of concurrent requests, each a
-    // cache miss. Unbounded, that is one ffmpeg per card at once, which on a recording machine
-    // competes with the encoder for the same cores.
-    private const int MaxConcurrentExtractions = 3;
-
-    // How long a request waits for its turn before giving up. Longer than the extraction timeout
-    // times the queue depth would mean a browser request waiting on a queue instead of being told
-    // "no thumbnail yet"; the frontend can re-request on the next render, so giving up is cheap.
-    private static readonly TimeSpan QueueWait = TimeSpan.FromSeconds(20);
+    private const int MaxPendingExtractions = 32;
+    private static readonly TimeSpan WorkerShutdownWait = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan FailedExtractionCooldown = TimeSpan.FromMinutes(5);
 
     private readonly Lazy<IThumbnailExtractor?> _extractor;
-    private readonly SemaphoreSlim _concurrency = new(MaxConcurrentExtractions, MaxConcurrentExtractions);
-
-    // One gate per video file name, so two concurrent requests for the same card do not both
-    // run ffmpeg (and do not both write the same file). Requests for different cards never contend.
-    private readonly Dictionary<string, SemaphoreSlim> _perFileGates = new(StringComparer.Ordinal);
-
-    // Guards _thumbnailRoot alone. Always taken innermost (a per-file gate may be held while it is
-    // acquired; never the other way round).
-    private readonly object _rootGate = new();
+    private readonly BlockingCollection<GenerationJob> _jobs =
+        new(new ConcurrentQueue<GenerationJob>(), MaxPendingExtractions);
+    private readonly Dictionary<string, GenerationJob> _pending;
+    private readonly Dictionary<string, FailedGeneration> _failed;
+    private readonly Dictionary<string, long> _fileVersions;
+    private readonly object _stateGate = new();
+    private readonly Thread _worker;
 
     private string _thumbnailRoot;
+    private long _rootVersion;
+    private bool _disposed;
 
-    // The extractor is resolved lazily and at most once: building it locates ffmpeg on PATH, which
-    // runs `ffmpeg -version` to verify the binary, and doing that per request would be two extra
-    // processes per card. A machine with no ffmpeg resolves to null once and every request then
-    // answers "no thumbnail" without touching the file system.
     internal ThumbnailStore(string thumbnailRoot, Func<IThumbnailExtractor?> extractorFactory)
     {
         _thumbnailRoot = thumbnailRoot;
-        _extractor = new Lazy<IThumbnailExtractor?>(extractorFactory, LazyThreadSafetyMode.ExecutionAndPublication);
+        _extractor = new Lazy<IThumbnailExtractor?>(extractorFactory,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        _pending = new Dictionary<string, GenerationJob>(comparer);
+        _failed = new Dictionary<string, FailedGeneration>(comparer);
+        _fileVersions = new Dictionary<string, long>(comparer);
+        _worker = new Thread(ProcessJobs)
+        {
+            IsBackground = true,
+            Name = "Tript.App.Thumbnail.Generation",
+            Priority = ThreadPriority.BelowNormal,
+        };
+        _worker.Start();
     }
 
-    // Switches the cache to a new tree (a settings change that moves the recording output directory
-    // moves the metadata tree, and the cache inside it, with it).
     internal void UpdateRoot(string thumbnailRoot)
     {
-        lock (_rootGate)
+        lock (_stateGate)
         {
             _thumbnailRoot = thumbnailRoot;
+            _rootVersion++;
+            _failed.Clear();
         }
     }
 
-    internal string PathFor(string videoFileName) => Path.Combine(Root, $"{videoFileName}.jpg");
-
-    private string Root
+    internal string PathFor(string videoFileName)
     {
-        get
-        {
-            lock (_rootGate)
-                return _thumbnailRoot;
-        }
+        lock (_stateGate)
+            return Path.Combine(_thumbnailRoot, $"{videoFileName}.jpg");
     }
 
-    // The cached thumbnail for a video, generating it if there is not a usable one yet. Returns
-    // null when no image can be produced — a missing or corrupt source, no ffmpeg on the machine,
-    // an extraction that failed or overran, an unwritable cache directory.
-    internal async Task<string?> EnsureAsync(string videoPath)
+    // Returns a usable cache entry immediately. A miss is coalesced into the bounded background
+    // queue and returns null, whether it was accepted, already pending, or shed because the queue is
+    // full. All three outcomes deliberately release the browser connection at once.
+    internal string? GetOrQueue(string videoPath)
+        => GetOrQueue(videoPath, out _);
+
+    private string? GetOrQueue(string videoPath, out Task<string?> completion)
     {
+        completion = Task.FromResult<string?>(null);
         var fileName = Path.GetFileName(videoPath);
         if (fileName.Length == 0)
             return null;
 
-        var cached = PathFor(fileName);
-        if (IsFresh(cached, videoPath))
-            return cached;
-
-        var gate = GateFor(fileName);
-        await gate.WaitAsync();
-        try
+        GenerationJob job;
+        lock (_stateGate)
         {
-            // Re-checked under the gate: while this request waited, the request it was queued behind
-            // may have generated exactly this file.
+            if (_disposed)
+                return null;
+
+            var cached = Path.Combine(_thumbnailRoot, $"{fileName}.jpg");
             if (IsFresh(cached, videoPath))
+            {
+                completion = Task.FromResult<string?>(cached);
                 return cached;
+            }
 
-            var extractor = _extractor.Value;
-            if (extractor is null)
+            var key = PendingKey(_rootVersion, videoPath);
+            if (_pending.TryGetValue(key, out var pending))
+            {
+                completion = pending.Completion.Task;
+                return null;
+            }
+
+            if (!TryReadSourceStamp(videoPath, out var source))
                 return null;
 
-            if (!await _concurrency.WaitAsync(QueueWait))
-                return null;
+            if (_failed.TryGetValue(key, out var failed))
+            {
+                if (failed.Source == source && failed.RetryAfterUtc > DateTime.UtcNow)
+                    return null;
+                _failed.Remove(key);
+            }
 
+            var fileVersion = _fileVersions.GetValueOrDefault(fileName);
+            job = new GenerationJob(key, videoPath, fileName, cached, source, _rootVersion, fileVersion);
+            _pending.Add(key, job);
+            completion = job.Completion.Task;
+            if (!_jobs.TryAdd(job))
+            {
+                _pending.Remove(key);
+                job.Completion.TrySetResult(null);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    // Test/support seam for callers that need the generated result rather than HTTP's immediate-miss
+    // contract. Production thumbnail requests use GetOrQueue and never await this completion.
+    internal Task<string?> EnsureAsync(string videoPath)
+    {
+        var cached = GetOrQueue(videoPath, out var completion);
+        if (cached is not null)
+            return Task.FromResult<string?>(cached);
+        return completion;
+    }
+
+    private void ProcessJobs()
+    {
+        foreach (var job in _jobs.GetConsumingEnumerable())
+        {
+            string? result = null;
+            var attempted = false;
             try
             {
-                return Generate(extractor, videoPath, cached);
+                if (CanRun(job))
+                {
+                    var extractor = _extractor.Value;
+                    if (extractor is not null)
+                    {
+                        attempted = true;
+                        result = Generate(extractor, job);
+                    }
+                }
             }
             catch (Exception exception)
             {
-                // This runs on an HttpListener worker. An exception escaping here would become a 500
-                // for a card, or worse an unhandled exception on the listener's thread pool, so
-                // every failure is reported as "no thumbnail" instead.
-                Console.Error.WriteLine($"Tript.App: could not build a thumbnail for '{videoPath}': {exception.Message}");
-                return null;
+                Console.Error.WriteLine(
+                    $"Tript.App: could not build a thumbnail for '{job.VideoPath}': {exception.Message}");
             }
             finally
             {
-                _concurrency.Release();
+                lock (_stateGate)
+                {
+                    if (result is not null)
+                    {
+                        _failed.Remove(job.Key);
+                    }
+                    else if (attempted && IsCurrent(job) && SourceMatches(job))
+                    {
+                        // A corrupt file or unsupported codec must not launch ffmpeg once per card
+                        // retry. A changed source bypasses the cooldown because its stamp differs.
+                        _failed[job.Key] = new FailedGeneration(
+                            job.Source, DateTime.UtcNow + FailedExtractionCooldown);
+                    }
+                    if (_pending.TryGetValue(job.Key, out var pending) && ReferenceEquals(pending, job))
+                        _pending.Remove(job.Key);
+                }
+                job.Completion.TrySetResult(result);
             }
-        }
-        finally
-        {
-            gate.Release();
         }
     }
 
-    private string? Generate(IThumbnailExtractor extractor, string videoPath, string cached)
+    private bool CanRun(GenerationJob job)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(cached)!);
+        lock (_stateGate)
+            return IsCurrent(job) && SourceMatches(job);
+    }
 
-        // Written to a temporary name and moved into place: a request that arrives while ffmpeg is
-        // still writing must not be served a half-written JPEG, and File.Move within one directory
-        // is atomic enough for that (the reader either sees the old file or the new one).
-        var temporary = $"{cached}.{Environment.ProcessId:x}-{Environment.CurrentManagedThreadId:x}.part";
+    private string? Generate(IThumbnailExtractor extractor, GenerationJob job)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(job.CachedPath)!);
+        var temporary = $"{job.CachedPath}.{Guid.NewGuid():N}.part";
         try
         {
-            if (!extractor.TryExtract(videoPath, temporary))
+            if (!extractor.TryExtract(job.VideoPath, temporary))
                 return null;
 
-            File.Move(temporary, cached, overwrite: true);
-            File.WriteAllText(VersionPath(cached), CacheVersion);
-            return cached;
+            // Delete/root changes and source replacement can happen while ffmpeg is running. The
+            // short state lock closes the check-to-publish race; extraction itself never holds it.
+            lock (_stateGate)
+            {
+                if (!IsCurrent(job) || !SourceMatches(job))
+                    return null;
+
+                File.Move(temporary, job.CachedPath, overwrite: true);
+                File.WriteAllText(VersionPath(job.CachedPath), CacheVersion);
+                return job.CachedPath;
+            }
         }
         finally
         {
             if (File.Exists(temporary))
             {
-                try { File.Delete(temporary); } catch (IOException) { /* swept on the next attempt */ }
+                try { File.Delete(temporary); } catch (IOException) { }
             }
         }
     }
 
-    // Removes a video's cached thumbnail, when there is one. Part of the cascade-delete contract: a
-    // deleted video takes its metadata records with it, and the thumbnail is one of them, so the
-    // cache never keeps an image for a video that is gone (and a new recording that happened to
-    // reuse the name could never inherit the old image).
+    private bool IsCurrent(GenerationJob job) =>
+        !_disposed
+        && job.RootVersion == _rootVersion
+        && job.FileVersion == _fileVersions.GetValueOrDefault(job.FileName);
+
+    private static bool SourceMatches(GenerationJob job) =>
+        TryReadSourceStamp(job.VideoPath, out var current) && current == job.Source;
+
     internal bool Delete(string videoFileName)
     {
-        try
+        lock (_stateGate)
         {
-            File.Delete(PathFor(videoFileName));
-            File.Delete(VersionPath(PathFor(videoFileName)));
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Tript.App: could not delete a cached thumbnail: {exception.Message}");
-            return false;
+            InvalidateLocked(videoFileName);
+            try
+            {
+                var path = Path.Combine(_thumbnailRoot, $"{videoFileName}.jpg");
+                File.Delete(path);
+                File.Delete(VersionPath(path));
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Tript.App: could not delete a cached thumbnail: {exception.Message}");
+                return false;
+            }
         }
     }
 
-    // Whether the cached image can be served as-is. Non-empty, and no older than the video: a video
-    // replaced in place under the same name (a re-record, a restored backup) must not keep serving
-    // the previous file's frame.
+    // Prevents an extraction already in progress from publishing after the caller moves the source
+    // and its current cache entry elsewhere. A later request may enqueue a fresh generation if the
+    // source remains in place (for example, when a trash transaction fails).
+    internal void Invalidate(string videoFileName)
+    {
+        lock (_stateGate)
+            InvalidateLocked(videoFileName);
+    }
+
+    private void InvalidateLocked(string videoFileName) =>
+        _fileVersions[videoFileName] = _fileVersions.GetValueOrDefault(videoFileName) + 1;
+
     private static bool IsFresh(string cached, string videoPath)
     {
         try
@@ -206,19 +275,60 @@ internal sealed class ThumbnailStore
         }
     }
 
-    private static string VersionPath(string cached) => $"{cached}.version";
-
-    private SemaphoreSlim GateFor(string fileName)
+    private static bool TryReadSourceStamp(string path, out SourceStamp stamp)
     {
-        lock (_perFileGates)
+        try
         {
-            if (!_perFileGates.TryGetValue(fileName, out var gate))
+            var file = new FileInfo(path);
+            if (!file.Exists)
             {
-                gate = new SemaphoreSlim(1, 1);
-                _perFileGates[fileName] = gate;
+                stamp = default;
+                return false;
             }
 
-            return gate;
+            stamp = new SourceStamp(file.Length, file.LastWriteTimeUtc);
+            return true;
         }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            stamp = default;
+            return false;
+        }
+    }
+
+    private static string PendingKey(long rootVersion, string videoPath) => $"{rootVersion}:{videoPath}";
+
+    private static string VersionPath(string cached) => $"{cached}.version";
+
+    public void Dispose()
+    {
+        lock (_stateGate)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _jobs.CompleteAdding();
+        }
+
+        // The extractor has its own hard process timeout. Do not make app shutdown wait on it: this
+        // is a background cache and the worker is marked background specifically for that guarantee.
+        if (_worker.Join(WorkerShutdownWait))
+            _jobs.Dispose();
+    }
+
+    private readonly record struct SourceStamp(long Length, DateTime LastWriteTimeUtc);
+    private readonly record struct FailedGeneration(SourceStamp Source, DateTime RetryAfterUtc);
+
+    private sealed record GenerationJob(
+        string Key,
+        string VideoPath,
+        string FileName,
+        string CachedPath,
+        SourceStamp Source,
+        long RootVersion,
+        long FileVersion)
+    {
+        internal TaskCompletionSource<string?> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

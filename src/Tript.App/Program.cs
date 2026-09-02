@@ -56,10 +56,6 @@ internal static class Program
         // diagnostics the headless launcher does.
         AppLog.Configure();
 
-        ThreadPool.GetMinThreads(out var minWorkers, out var minIo);
-        ThreadPool.SetMinThreads(
-            Math.Max(minWorkers, Math.Min(64, Environment.ProcessorCount * 4)), minIo);
-
         // Here for the same reason, and it has to be early: the shell hosts libobs in its own
         // process, and a DPI-unaware process cannot duplicate a desktop at all.
         DeclareDpiAwareness();

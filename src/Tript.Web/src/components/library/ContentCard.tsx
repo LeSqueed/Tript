@@ -9,7 +9,7 @@
 // wrapper, not its children: a button inside a button is invalid markup and browsers disagree about
 // which one a click activates.
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import { thumbnailUrl } from '../../ipc/endpoints';
 import {
@@ -24,6 +24,10 @@ import {
 import { Icon } from '../ui/Icon';
 import { Checkbox } from '../../components/ui/controls';
 
+const THUMBNAIL_RETRY_BASE_MS = 250;
+const THUMBNAIL_RETRY_MAX_MS = 5_000;
+const THUMBNAIL_RETRY_STAGGER_MS = 100;
+
 export function ContentCard({
   item,
   onOpen,
@@ -35,6 +39,7 @@ export function ContentCard({
   variant = 'grid',
   action,
   priority = false,
+  thumbnailLoadingActive = true,
   clipsCount = 0,
   highlightsCount = 0,
   previewHighlights = [],
@@ -57,6 +62,8 @@ export function ContentCard({
   variant?: 'grid' | 'wide';
   /** Recent sessions are above the fold and should not wait for intersection before painting. */
   priority?: boolean;
+  /** False while the mounted library is hidden behind playback or session review. */
+  thumbnailLoadingActive?: boolean;
   /** Number of clips cut from this recording, shown as a metadata chip when present. */
   clipsCount?: number;
   /** Number of generated highlights, shown as an affordance on the thumbnail. */
@@ -70,13 +77,6 @@ export function ContentCard({
    */
   action?: ReactNode;
 }) {
-  // Per-card, per-path: a `content` push can replace the item under this card (a rename keeps the
-  // path, a delete + re-record does not), and a previous path's failure must not condemn the new one.
-  const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  useEffect(() => {
-    setThumbnailFailed(false);
-  }, [item.filePath]);
-
   const label = itemLabel(item);
   const game = itemGame(item) ?? UNKNOWN_GAME_LABEL;
   const duration = formatDurationChip(item);
@@ -86,7 +86,7 @@ export function ContentCard({
   // An item with no path has nothing to ask the content server for — straight to the placeholder,
   // rather than a request that is guaranteed to fail. A live recording's file is still growing, so
   // its frame would be a mid-write half-shot; the card advertises the capture instead.
-  const showThumbnail = !missingVideo && !liveRecording && item.filePath.length > 0 && !thumbnailFailed;
+  const showThumbnail = thumbnailLoadingActive && !missingVideo && !liveRecording && item.filePath.length > 0;
   const preview = previewHighlights.slice(0, 3);
   // A live capture is not playable yet. It opens only to its own highlights — and only when it
   // actually has some, so the card itself does the "cannot interact" part of the contract.
@@ -118,24 +118,26 @@ export function ContentCard({
             <LiveRecordingPreview
               key={preview.map((highlight) => highlight.filePath).join('|')}
               highlights={preview}
+              thumbnailLoadingActive={thumbnailLoadingActive}
             />
           ) : missingVideo ? (
             <MissingVideoPreview
               key={preview.map((highlight) => highlight.filePath).join('|')}
               highlights={preview}
+              thumbnailLoadingActive={thumbnailLoadingActive}
             />
           ) : showThumbnail ? (
-            <img
+            <RetryingThumbnail
+              key={item.filePath}
+              filePath={item.filePath}
               className="content-card-image"
-              src={thumbnailUrl(item.filePath)}
-              // Decorative: the title sits right beside it, so describing the frame again would only
-              // make a screen reader say the same name twice.
-              alt=""
-               loading={priority || variant === 'wide' ? 'eager' : 'lazy'}
-              decoding="async"
-              width={480}
-              height={270}
-              onError={() => setThumbnailFailed(true)}
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : 'low'}
+              fallback={
+                <span className="content-card-placeholder" data-testid="content-card-placeholder">
+                  <Icon name="play" size={22} />
+                </span>
+              }
             />
           ) : (
             <span className="content-card-placeholder" data-testid="content-card-placeholder">
@@ -216,7 +218,13 @@ export function ContentCard({
   );
 }
 
-function MissingVideoPreview({ highlights }: { highlights: ContentItem[] }) {
+function MissingVideoPreview({
+  highlights,
+  thumbnailLoadingActive,
+}: {
+  highlights: ContentItem[];
+  thumbnailLoadingActive: boolean;
+}) {
   const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
 
   return (
@@ -225,21 +233,18 @@ function MissingVideoPreview({ highlights }: { highlights: ContentItem[] }) {
         <Icon name="clip" size={22} />
         <span>Source video unavailable</span>
       </span>
-      {highlights.length > 0 && (
+      {thumbnailLoadingActive && highlights.length > 0 && (
         <span
           className="content-card-preview-grid"
           style={{ '--preview-count': highlights.length } as CSSProperties}
         >
           {highlights.map((highlight) => (
-            <img
+            <RetryingThumbnail
               key={highlight.filePath}
+              filePath={highlight.filePath}
               className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
-              src={thumbnailUrl(highlight.filePath)}
-              alt=""
               loading="lazy"
-              decoding="async"
-              width={480}
-              height={270}
+              fetchPriority="low"
               onLoad={() => setLoaded((current) => new Set(current).add(highlight.filePath))}
             />
           ))}
@@ -249,7 +254,13 @@ function MissingVideoPreview({ highlights }: { highlights: ContentItem[] }) {
   );
 }
 
-function LiveRecordingPreview({ highlights }: { highlights: ContentItem[] }) {
+function LiveRecordingPreview({
+  highlights,
+  thumbnailLoadingActive,
+}: {
+  highlights: ContentItem[];
+  thumbnailLoadingActive: boolean;
+}) {
   const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
 
   return (
@@ -258,21 +269,18 @@ function LiveRecordingPreview({ highlights }: { highlights: ContentItem[] }) {
         <span className="rec-dot recording" />
         <span>Recording in progress</span>
       </span>
-      {highlights.length > 0 && (
+      {thumbnailLoadingActive && highlights.length > 0 && (
         <span
           className="content-card-preview-grid"
           style={{ '--preview-count': highlights.length } as CSSProperties}
         >
           {highlights.map((highlight) => (
-            <img
+            <RetryingThumbnail
               key={highlight.filePath}
+              filePath={highlight.filePath}
               className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
-              src={thumbnailUrl(highlight.filePath)}
-              alt=""
               loading="lazy"
-              decoding="async"
-              width={480}
-              height={270}
+              fetchPriority="low"
               onLoad={() => setLoaded((current) => new Set(current).add(highlight.filePath))}
             />
           ))}
@@ -280,4 +288,72 @@ function LiveRecordingPreview({ highlights }: { highlights: ContentItem[] }) {
       )}
     </span>
   );
+}
+
+function RetryingThumbnail({
+  filePath,
+  className,
+  loading,
+  fetchPriority,
+  fallback = null,
+  onLoad,
+}: {
+  filePath: string;
+  className: string;
+  loading: 'eager' | 'lazy';
+  fetchPriority: 'high' | 'low';
+  fallback?: ReactNode;
+  onLoad?: () => void;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  const [waiting, setWaiting] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setAttempt(0);
+    setWaiting(false);
+    return () => {
+      if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    };
+  }, [filePath]);
+
+  if (waiting) return fallback;
+
+  const source = new URL(thumbnailUrl(filePath));
+  if (attempt > 0) source.searchParams.set('thumbnailRetry', String(attempt));
+
+  return (
+    <img
+      className={className}
+      src={source.toString()}
+      // Decorative: the title sits beside every thumbnail, so repeating it adds no information.
+      alt=""
+      loading={loading}
+      fetchPriority={fetchPriority}
+      decoding="async"
+      width={480}
+      height={270}
+      onLoad={onLoad}
+      onError={() => {
+        if (retryTimer.current !== null) return;
+
+        setWaiting(true);
+        const delay = Math.min(THUMBNAIL_RETRY_BASE_MS * 2 ** attempt, THUMBNAIL_RETRY_MAX_MS)
+          + thumbnailRetryOffset(filePath);
+        retryTimer.current = setTimeout(() => {
+          retryTimer.current = null;
+          setAttempt((current) => current + 1);
+          setWaiting(false);
+        }, delay);
+      }}
+    />
+  );
+}
+
+function thumbnailRetryOffset(filePath: string): number {
+  let hash = 0;
+  for (let index = 0; index < filePath.length; index += 1) {
+    hash = (hash * 31 + filePath.charCodeAt(index)) >>> 0;
+  }
+  return hash % THUMBNAIL_RETRY_STAGGER_MS;
 }

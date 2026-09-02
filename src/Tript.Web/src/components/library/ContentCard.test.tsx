@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ContentItem } from '../../ipc/protocol';
+import { captureSessionToken } from '../../ipc/sessionToken';
 import { ContentCard } from './ContentCard';
+
+const normal: ContentItem = {
+  contentType: 'clip',
+  fileName: 'normal.mp4',
+  filePath: 'clips/normal.mp4',
+  title: 'Normal clip',
+};
 
 const missing: ContentItem = {
   contentType: 'recording',
@@ -34,9 +42,108 @@ function highlight(index: number): ContentItem {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  captureSessionToken('');
+});
+
+describe('ContentCard thumbnail retries', () => {
+  it('keeps retrying a normal thumbnail with capped, cache-busting delays while mounted', () => {
+    vi.useFakeTimers();
+    captureSessionToken('?k=card-token');
+    render(<ContentCard item={normal} />);
+
+    let image = screen.getByRole('presentation') as HTMLImageElement;
+    expect(new URL(image.src).searchParams.get('k')).toBe('card-token');
+    expect(new URL(image.src).searchParams.has('thumbnailRetry')).toBe(false);
+
+    const delays: number[] = [];
+    for (let retry = 1; retry <= 25; retry += 1) {
+      fireEvent.error(image);
+      expect(screen.getByTestId('content-card-placeholder')).toBeTruthy();
+      const retryStartedAt = Date.now();
+      act(() => vi.runOnlyPendingTimers());
+      delays.push(Date.now() - retryStartedAt);
+      image = screen.getByRole('presentation') as HTMLImageElement;
+      const retryUrl = new URL(image.src);
+      expect(retryUrl.searchParams.get('k')).toBe('card-token');
+      expect(retryUrl.searchParams.get('thumbnailRetry')).toBe(String(retry));
+    }
+
+    const stagger = delays[0] - 250;
+    expect(delays).toHaveLength(25);
+    expect(delays).toEqual(
+      Array.from({ length: 25 }, (_, attempt) => Math.min(250 * 2 ** attempt, 5_000) + stagger),
+    );
+    expect(stagger).toBeGreaterThanOrEqual(0);
+    expect(stagger).toBeLessThan(100);
+    expect(new URL(image.src).searchParams.get('thumbnailRetry')).toBe('25');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels and resets retries when thumbnails are disabled, re-enabled, or the path changes', () => {
+    vi.useFakeTimers();
+    const view = render(<ContentCard item={normal} />);
+    fireEvent.error(screen.getByRole('presentation'));
+    expect(vi.getTimerCount()).toBe(1);
+
+    view.rerender(<ContentCard item={normal} thumbnailLoadingActive={false} />);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.queryByRole('presentation')).toBeNull();
+
+    view.rerender(<ContentCard item={normal} />);
+    let image = screen.getByRole('presentation') as HTMLImageElement;
+    expect(new URL(image.src).searchParams.has('thumbnailRetry')).toBe(false);
+    fireEvent.error(image);
+    act(() => vi.runOnlyPendingTimers());
+
+    const replacement = { ...normal, filePath: 'clips/replacement.mp4' };
+    view.rerender(<ContentCard item={replacement} />);
+    image = screen.getByRole('presentation') as HTMLImageElement;
+    expect(image.src).toContain('/api/thumbnail/clips/replacement.mp4');
+    expect(new URL(image.src).searchParams.has('thumbnailRetry')).toBe(false);
+  });
+
+  it('retries both missing-video and live-recording preview images', () => {
+    vi.useFakeTimers();
+    render(
+      <>
+        <ContentCard item={missing} previewHighlights={[highlight(1)]} />
+        <ContentCard item={live} highlightsCount={1} previewHighlights={[highlight(2)]} />
+      </>,
+    );
+
+    screen.getAllByRole('presentation').forEach((image) => fireEvent.error(image));
+    expect(screen.queryByRole('presentation')).toBeNull();
+    act(() => vi.runAllTimers());
+
+    const retried = screen.getAllByRole('presentation') as HTMLImageElement[];
+    expect(retried).toHaveLength(2);
+    expect(retried.map((image) => new URL(image.src).searchParams.get('thumbnailRetry'))).toEqual(['1', '1']);
+  });
+});
 
 describe('ContentCard missing-video placeholder', () => {
+  it('does not create missing or live preview images while thumbnail loading is inactive', () => {
+    render(
+      <>
+        <ContentCard item={missing} previewHighlights={[highlight(1)]} thumbnailLoadingActive={false} />
+        <ContentCard
+          item={live}
+          highlightsCount={1}
+          previewHighlights={[highlight(2)]}
+          thumbnailLoadingActive={false}
+        />
+      </>,
+    );
+
+    expect(screen.getByTestId('content-card-missing-fallback')).toBeTruthy();
+    expect(screen.getByTestId('content-card-recording-fallback')).toBeTruthy();
+    expect(screen.queryByRole('presentation')).toBeNull();
+  });
+
   it('uses at most three supplied highlight thumbnails and keeps its fallback after image failures', () => {
     render(<ContentCard item={missing} previewHighlights={[1, 2, 3, 4].map(highlight)} />);
 

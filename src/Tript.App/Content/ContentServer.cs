@@ -96,7 +96,7 @@ internal sealed class ContentServer : IDisposable
             try
             {
                 var context = _listener.GetContext();
-                ThreadPool.QueueUserWorkItem(state => _ = Handle(context));
+                ThreadPool.QueueUserWorkItem(_ => _ = HandleAsync(context));
             }
             catch (HttpListenerException)
             {
@@ -111,7 +111,7 @@ internal sealed class ContentServer : IDisposable
         }
     }
 
-    private async Task Handle(HttpListenerContext context)
+    private async Task HandleAsync(HttpListenerContext context)
     {
         try
         {
@@ -147,19 +147,23 @@ internal sealed class ContentServer : IDisposable
             var match = ContentRoute.Match(path);
             if (match.Success)
             {
-                ServeContent(context, Decode(match.Groups[1].Value));
+                await ServeContentAsync(context, Decode(match.Groups[1].Value), _cts.Token);
                 return;
             }
 
             match = ThumbnailRoute.Match(path);
             if (match.Success)
             {
-                await ServeThumbnail(context, Decode(match.Groups[1].Value));
+                ServeThumbnail(context, Decode(match.Groups[1].Value));
                 return;
             }
 
             context.Response.StatusCode = 404;
             context.Response.Close();
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        {
+            try { context.Response.Abort(); } catch { }
         }
         catch (Exception exception)
         {
@@ -270,7 +274,8 @@ internal sealed class ContentServer : IDisposable
 
     // ---- content ----
 
-    private void ServeContent(HttpListenerContext context, string requestPath)
+    private async Task ServeContentAsync(HttpListenerContext context, string requestPath,
+        CancellationToken cancellationToken)
     {
         var resolved = ResolveWithinRoot(requestPath);
         if (resolved is null)
@@ -295,8 +300,9 @@ internal sealed class ContentServer : IDisposable
         // file open for write, and File.OpenRead (FileShare.Read) cannot open alongside it on
         // Windows — a sharing violation, so a 500 for a session that is mid-record. Linux has no
         // sharing model, so the open there was always fine and the mode still matches.
-        using var stream = new FileStream(resolved, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
+        await using var stream = new FileStream(resolved, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
         var length = stream.Length;
 
         context.Response.ContentType = "video/mp4";
@@ -308,7 +314,7 @@ internal sealed class ContentServer : IDisposable
         {
             context.Response.StatusCode = 200;
             context.Response.ContentLength64 = length;
-            WriteExactly(context, stream, length);
+            await WriteExactlyAsync(context, stream, length, cancellationToken);
             return;
         }
 
@@ -326,26 +332,28 @@ internal sealed class ContentServer : IDisposable
         context.Response.Headers.Add("Content-Range", $"bytes {start}-{end}/{length}");
 
         stream.Seek(start, SeekOrigin.Begin);
-        WriteExactly(context, stream, count);
+        await WriteExactlyAsync(context, stream, count, cancellationToken);
     }
 
     // Copies exactly `count` bytes and closes the response. A file that was truncated underneath us
     // cannot supply them; the connection is aborted rather than closed, because closing short of the
     // declared Content-Length leaves the client waiting for bytes that will never arrive.
-    private static void WriteExactly(HttpListenerContext context, Stream stream, long count)
+    private static async Task WriteExactlyAsync(HttpListenerContext context, Stream stream, long count,
+        CancellationToken cancellationToken)
     {
         var buffer = new byte[64 * 1024];
         var remaining = count;
         while (remaining > 0)
         {
-            var read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+            var read = await stream.ReadAsync(
+                buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken);
             if (read == 0)
             {
                 context.Response.Abort();
                 return;
             }
 
-            context.Response.OutputStream.Write(buffer, 0, read);
+            await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             remaining -= read;
         }
 
@@ -402,7 +410,7 @@ internal sealed class ContentServer : IDisposable
     // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract
     // is deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
     // placeholder card".
-    private async Task ServeThumbnail(HttpListenerContext context, string requestPath)
+    private void ServeThumbnail(HttpListenerContext context, string requestPath)
     {
         var resolved = ResolveWithinRoot(requestPath);
         if (resolved is null)
@@ -417,17 +425,15 @@ internal sealed class ContentServer : IDisposable
         {
             if (File.Exists(resolved))
             {
-                var cached = _thumbnails is null
-                    ? null
-                    : await _thumbnails.EnsureAsync(resolved);
+                var cached = _thumbnails?.GetOrQueue(resolved);
                 if (cached is not null)
                     image = File.ReadAllBytes(cached);
             }
         }
         catch (Exception exception)
         {
-            // Ensure already contains its own failures; this catches the read of the cached file
-            // (deleted between the Ensure and the read, permissions changed underneath) so that no
+            // The store contains its own queue failures; this catches the read of the cached file
+            // (deleted between lookup and the read, permissions changed underneath) so that no
             // thumbnail request can ever produce a 500 or an unhandled exception on a worker thread.
             Console.Error.WriteLine($"Tript.App: could not serve a thumbnail for '{resolved}': {exception.Message}");
             image = null;

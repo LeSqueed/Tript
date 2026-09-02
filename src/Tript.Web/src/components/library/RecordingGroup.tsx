@@ -26,6 +26,7 @@ function cardFor(
   actions: GroupActions,
   variant: 'grid' | 'wide' = 'grid',
   priority = false,
+  thumbnailLoadingActive = true,
   clipsCount = 0,
   highlightsCount = 0,
   previewHighlights: ContentItem[] = [],
@@ -35,6 +36,7 @@ function cardFor(
       item={item}
       variant={variant}
       priority={priority}
+      thumbnailLoadingActive={thumbnailLoadingActive}
       clipsCount={clipsCount}
       highlightsCount={highlightsCount}
       previewHighlights={previewHighlights}
@@ -52,10 +54,14 @@ export function RecordingGroup({
   group,
   variant,
   actions,
+  thumbnailLoadingActive = true,
+  priority = false,
 }: {
   group: Group;
   variant: 'hero' | 'recent' | 'row';
   actions: GroupActions;
+  thumbnailLoadingActive?: boolean;
+  priority?: boolean;
 }) {
   const recording = group.recording;
   const automaticClips = recording ? linkedAutomaticHighlights(recording, group.clips) : [];
@@ -71,7 +77,8 @@ export function RecordingGroup({
           recording,
           actions,
           variant === 'recent' ? 'grid' : 'wide',
-          variant === 'recent',
+          priority,
+          thumbnailLoadingActive,
           group.clips.length,
           automaticClips.length,
           automaticClips,
@@ -91,7 +98,7 @@ export function RecordingGroup({
     <section className="recording-group" data-testid="recording-group">
       <div className="recording-group-body">
         <div className="recording-group-head">
-          {cardFor(recording, actions, 'grid', false, group.clips.length, automaticClips.length, automaticClips)}
+          {cardFor(recording, actions, 'grid', false, thumbnailLoadingActive, group.clips.length, automaticClips.length, automaticClips)}
         </div>
       </div>
     </section>

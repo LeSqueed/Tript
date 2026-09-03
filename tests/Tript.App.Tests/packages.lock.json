@@ -173,7 +173,10 @@
         }
       },
       "tript.gamediscovery": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[1.0.0, )"
+        }
       },
       "tript.media": {
         "type": "Project",
@@ -205,21 +208,12 @@
           "Photino.NET": "[4.0.16, )",
           "Tript.App": "[1.0.0, )"
         }
-      }
-    },
-    "net10.0/win-x64": {
-      "Microsoft.ML.OnnxRuntime": {
-        "type": "Transitive",
-        "resolved": "1.28.0",
-        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
-        "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
-        }
       },
-      "Photino.Native": {
-        "type": "Transitive",
-        "resolved": "4.0.22",
-        "contentHash": "VIHipEOe4CZ7HElZE8zTwcvANOsCZ2yak/4nQ4LXzjdlwIjdbY8htmHfNR6rRPgWlCfTfT349GCa6V6Id2/Xyg=="
+      "tript.testsupport": {
+        "type": "Project",
+        "dependencies": {
+          "xunit": "[2.9.2, )"
+        }
       }
     },
     "net10.0-windows10.0.19041": {
@@ -394,7 +388,10 @@
         }
       },
       "tript.gamediscovery": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[1.0.0, )"
+        }
       },
       "tript.media": {
         "type": "Project",
@@ -426,21 +423,12 @@
           "Photino.NET": "[4.0.16, )",
           "Tript.App": "[1.0.0, )"
         }
-      }
-    },
-    "net10.0-windows10.0.19041/win-x64": {
-      "Microsoft.ML.OnnxRuntime": {
-        "type": "Transitive",
-        "resolved": "1.28.0",
-        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
-        "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
-        }
       },
-      "Photino.Native": {
-        "type": "Transitive",
-        "resolved": "4.0.22",
-        "contentHash": "VIHipEOe4CZ7HElZE8zTwcvANOsCZ2yak/4nQ4LXzjdlwIjdbY8htmHfNR6rRPgWlCfTfT349GCa6V6Id2/Xyg=="
+      "tript.testsupport": {
+        "type": "Project",
+        "dependencies": {
+          "xunit": "[2.9.2, )"
+        }
       }
     }
   }

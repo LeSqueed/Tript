@@ -96,10 +96,8 @@ public sealed class BufferSettings
 
     public bool Enabled { get; set; }
 
-    // Configurable, default 30 seconds.
     public TimeSpan Duration { get; set; } = TimeSpan.FromSeconds(30);
 
-    // Configurable, independent of duration.
     public long MaxSizeBytes { get; set; } = 4L * 1024 * 1024 * 1024;
 }
 

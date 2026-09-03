@@ -10,7 +10,7 @@ namespace Tript.Shell;
 
 // The desktop shell: the same host as the headless launcher (Tript.App's Program.BuildApp seam —
 // src/Tript.App/Program.cs) behind a native window instead of a browser tab. The app's React UI is
-// served over HTTP by the host's UiHost (http://localhost:8892/) and rendered in a Photino webview,
+// served over HTTP by the host's UiHost (LocalPorts.Ui) and rendered in a Photino webview,
 // which keeps the UI and the protocol exactly the headless build already uses.
 //
 // Lifetime, split across two threads because both sides demand the main thread:

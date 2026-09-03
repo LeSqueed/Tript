@@ -3,6 +3,8 @@
 
 using Tript.Recorder;
 using Xunit;
+using Tript.TestSupport;
+using Tript.Core;
 
 namespace Tript.Recorder.Tests;
 
@@ -311,12 +313,9 @@ public sealed class FullscreenGameDetectorTests
         Assert.True(await Task.Run(() => exited.Wait(TimeSpan.FromSeconds(5))));
     }
 
-    [Fact]
+    [WindowsFact]
     public void WindowsCandidateCasingIsStable()
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
         var path = GamePath("Alpha.exe");
         FullscreenGameCandidate? probed = new(41, "Alpha", path, StartTime(1));
         using var detector = Detector([], () => probed);
@@ -357,23 +356,16 @@ public sealed class FullscreenGameDetectorTests
         Assert.Equal(1, calls);
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData("C:\\Windows\\System32\\explorer.exe")]
     [InlineData("C:\\Windows\\SysWOW64\\something.exe")]
     [InlineData("C:\\Program Files\\WindowsApps\\Example\\game.exe")]
     public void SystemLocationsAreIgnored(string path)
-    {
-        if (OperatingSystem.IsWindows())
-            Assert.True(FullscreenGameDetector.IsSystemExecutable(path));
-    }
+        => Assert.True(FullscreenGameDetector.IsSystemExecutable(path));
 
-    [Fact]
+    [WindowsFact]
     public void SystemPathPrefixDoesNotMatchASimilarlyNamedUserFolder()
-    {
-        if (OperatingSystem.IsWindows())
-            Assert.False(FullscreenGameDetector.IsUnderDirectory(
-                "C:\\WindowsGames\\game.exe", "C:\\Windows"));
-    }
+        => Assert.False(FilePaths.IsUnder("C:\\WindowsGames\\game.exe", "C:\\Windows"));
 
     private static FullscreenGameDetector Detector(
         IEnumerable<GameDetectionTarget> targets,

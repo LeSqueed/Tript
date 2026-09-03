@@ -181,7 +181,9 @@ internal sealed class TrainingRunner
         if (!string.IsNullOrWhiteSpace(configured))
             return new PythonCommand(configured, []);
 
-        var virtualEnvironment = Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe");
+        var virtualEnvironment = OperatingSystem.IsWindows()
+            ? Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe")
+            : Path.Combine(AppContext.BaseDirectory, ".venv", "bin", "python");
         if (File.Exists(virtualEnvironment))
             return new PythonCommand(virtualEnvironment, []);
 

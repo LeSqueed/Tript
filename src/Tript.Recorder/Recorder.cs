@@ -28,6 +28,7 @@ public sealed class Recorder : IDisposable
 {
     private readonly IRecorderSession _session;
     private readonly object _gate = new();
+    private readonly ManualResetEventSlim _idle = new(initialState: true);
 
     private IRecorderOutput? _output;
     private IRecorderOutput? _pendingDispose;
@@ -146,6 +147,7 @@ public sealed class Recorder : IDisposable
                     _lastStopReason = null;
                     _lastStopCode = null;
                     _lastError = null;
+                    _idle.Reset();
                     _state = RecorderState.Recording;
                     started = true;
                 }
@@ -214,59 +216,48 @@ public sealed class Recorder : IDisposable
 
     // Stops the recording in flight, if any. A no-op from Idle. The stop signal is what completes
     // the transition back to Idle; until then the recorder is in Stopping.
-    public bool Stop()
+    public bool Stop() => Stop(null);
+
+    // Blocks until the recorder is Idle, or the timeout elapses. Idle is entered by the output's
+    // stop signal, on whichever thread raises it.
+    public bool WaitForIdle(TimeSpan timeout) => _idle.Wait(timeout);
+
+    private bool Stop(RecorderStopReason? reason)
     {
+        IRecorderOutput output;
         lock (_gate)
         {
             ThrowIfDisposed();
 
-            if (_state == RecorderState.Idle)
+            if (_state == RecorderState.Idle || _output is null)
                 return false;
 
-            var output = _output;
-            if (output is null)
-                return false;
-
-            // The state moves BEFORE the call, never after. An output that raises its stop signal
-            // synchronously inside Stop — the fake session, and libobs when the output ends inline —
-            // re-enters this lock through RecordStop and completes the transition to Idle. Assigning
-            // Stopping afterwards clobbered that back, leaving a recorder stuck in Stopping with a
-            // null output: every later stop then dereferenced it, and the app's settle loop waited
-            // out its full deadline on every single stop.
+            // The state (and reason) move BEFORE the call, never after: an output that raises its
+            // stop signal synchronously inside Stop completes the transition to Idle through
+            // RecordStop, and assigning Stopping afterwards clobbered that back.
+            output = _output;
             _state = RecorderState.Stopping;
-            if (output is IReplayBufferOutput replay)
-                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
-            output.Stop();
-            return true;
+            if (reason is not null)
+                _lastStopReason = reason;
         }
-    }
 
-    // Stops the recording as a GameStopped end rather than a user request: the caller sets the stop
-    // reason before the output's stop signal resolves it. No longer wired to the auto-start path,
-    // but retained as the explicit GameStopped stop.
-    internal bool StopForGameEnd()
-    {
-        lock (_gate)
+        // A replay save can take seconds; waiting outside the gate keeps Snapshot and Dispose
+        // responsive meanwhile. Dispose may have raced ahead and released the output.
+        try
         {
-            ThrowIfDisposed();
-
-            if (_state == RecorderState.Idle)
-                return false;
-
-            var output = _output;
-            if (output is null)
-                return false;
-
-            // Both the state and the reason go before the call, for the reason documented on Stop:
-            // a synchronous stop signal resolves the reason as it passes through RecordStop.
-            _state = RecorderState.Stopping;
-            _lastStopReason = RecorderStopReason.GameStopped;
             if (output is IReplayBufferOutput replay)
                 replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
             output.Stop();
-            return true;
         }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        return true;
     }
+
+    // Stops the recording as a GameStopped end rather than a user request.
+    internal bool StopForGameEnd() => Stop(RecorderStopReason.GameStopped);
 
     public void Dispose()
     {
@@ -313,6 +304,7 @@ public sealed class Recorder : IDisposable
         {
             _disposed = true;
             _disposing = false;
+            _idle.Set();
 
             clearSource = _sourcePlaced;
             _sourcePlaced = false;
@@ -372,6 +364,7 @@ public sealed class Recorder : IDisposable
             _output = null;
             _pendingDispose = output;
             _state = RecorderState.Idle;
+            _idle.Set();
 
             // The stop code is never swallowed. The only clean end is the one this recorder asked
             // for; a code on a recording that expected to keep going is a failure to surface.

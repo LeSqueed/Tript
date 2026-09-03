@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Serilog;
+using Tript.Core;
 
 namespace Tript.Recorder;
 
@@ -190,7 +191,7 @@ public sealed class FullscreenGameDetector : IDisposable
         if (path is null || IsSystemExecutable(path))
             return null;
 
-        var executable = ProcessNameGameDetector.NormalizeProcessName(Path.GetFileName(path));
+        var executable = ExecutableNames.Normalize(path);
 
         return executable.Length == 0
             ? null
@@ -206,7 +207,7 @@ public sealed class FullscreenGameDetector : IDisposable
     {
         ArgumentNullException.ThrowIfNull(knownTargets);
         var paths = new HashSet<string>(PathComparer);
-        var executables = new HashSet<string>(PathComparer);
+        var executables = new HashSet<string>(ExecutableNames.Comparer);
 
         foreach (var target in knownTargets)
         {
@@ -230,6 +231,9 @@ public sealed class FullscreenGameDetector : IDisposable
 
     private static FullscreenGameCandidate? ProbeCandidate()
     {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
         var window = GetForegroundWindow();
         if (window == IntPtr.Zero || !IsWindowVisible(window) || !IsWindowFullscreen(window))
             return null;
@@ -247,7 +251,7 @@ public sealed class FullscreenGameDetector : IDisposable
 
             return new FullscreenGameCandidate(
                 (int)nativeProcessId,
-                ProcessNameGameDetector.NormalizeProcessName(Path.GetFileName(path)),
+                ExecutableNames.Normalize(path),
                 path,
                 process.StartTime.ToUniversalTime());
         }
@@ -301,7 +305,7 @@ public sealed class FullscreenGameDetector : IDisposable
             || left is not null && right is not null
                 && left.ProcessId == right.ProcessId
                 && left.ProcessStartTime == right.ProcessStartTime
-                && PathComparer.Equals(left.Executable, right.Executable)
+                && ExecutableNames.Comparer.Equals(left.Executable, right.Executable)
                 && PathComparer.Equals(left.ExecutablePath, right.ExecutablePath);
 
     internal static bool IsSystemExecutable(string path)
@@ -328,22 +332,7 @@ public sealed class FullscreenGameDetector : IDisposable
                 "Microsoft", "WindowsApps"),
         };
 
-        return roots.Any(root => IsUnderDirectory(fullPath, root));
-    }
-
-    internal static bool IsUnderDirectory(string path, string root)
-    {
-        if (string.IsNullOrWhiteSpace(root))
-            return false;
-
-        var normalizedRoot = Path.GetFullPath(root)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        var normalizedPath = Path.GetFullPath(path);
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        return normalizedPath.StartsWith(normalizedRoot, comparison);
+        return roots.Any(root => FilePaths.IsUnder(fullPath, root));
     }
 
     private static bool IsWindowFullscreen(IntPtr window)
@@ -367,9 +356,7 @@ public sealed class FullscreenGameDetector : IDisposable
 
     private static bool NearlyEqual(int left, int right) => Math.Abs(left - right) <= 1;
 
-    private static StringComparer PathComparer => OperatingSystem.IsWindows()
-        ? StringComparer.OrdinalIgnoreCase
-        : StringComparer.Ordinal;
+    private static StringComparer PathComparer => FilePaths.Comparer;
 
     private sealed record KnownTargetSet(HashSet<string> Paths, HashSet<string> Executables);
 

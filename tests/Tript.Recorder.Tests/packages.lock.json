@@ -148,6 +148,12 @@
         "dependencies": {
           "Tript.Core": "[1.0.0, )"
         }
+      },
+      "tript.testsupport": {
+        "type": "Project",
+        "dependencies": {
+          "xunit": "[2.9.2, )"
+        }
       }
     },
     "net10.0-windows10.0.19041": {
@@ -296,6 +302,12 @@
         "type": "Project",
         "dependencies": {
           "Tript.Core": "[1.0.0, )"
+        }
+      },
+      "tript.testsupport": {
+        "type": "Project",
+        "dependencies": {
+          "xunit": "[2.9.2, )"
         }
       }
     }

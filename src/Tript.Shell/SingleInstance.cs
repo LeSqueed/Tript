@@ -4,6 +4,7 @@
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
+using Tript.Core;
 
 namespace Tript.Shell;
 
@@ -24,9 +25,7 @@ internal sealed class SingleInstance : IDisposable
             if (string.IsNullOrWhiteSpace(processPath))
                 return "default";
 
-            var normalized = Path.GetFullPath(processPath);
-            if (OperatingSystem.IsWindows())
-                normalized = normalized.ToUpperInvariant();
+            var normalized = FilePaths.CaseFold(Path.GetFullPath(processPath));
 
             return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)))[..16];
         }

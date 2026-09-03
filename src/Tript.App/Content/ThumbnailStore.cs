@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using Tript.Media;
+using Tript.Core;
 
 namespace Tript.App.Content;
 
@@ -23,6 +24,7 @@ internal sealed class ThumbnailStore : IDisposable
     private readonly Dictionary<string, GenerationJob> _pending;
     private readonly Dictionary<string, FailedGeneration> _failed;
     private readonly Dictionary<string, long> _fileVersions;
+    private readonly HashSet<string> _verifiedVersions;
     private readonly object _stateGate = new();
     private readonly Thread _worker;
 
@@ -35,10 +37,11 @@ internal sealed class ThumbnailStore : IDisposable
         _thumbnailRoot = thumbnailRoot;
         _extractor = new Lazy<IThumbnailExtractor?>(extractorFactory,
             LazyThreadSafetyMode.ExecutionAndPublication);
-        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var comparer = FilePaths.Comparer;
         _pending = new Dictionary<string, GenerationJob>(comparer);
         _failed = new Dictionary<string, FailedGeneration>(comparer);
         _fileVersions = new Dictionary<string, long>(comparer);
+        _verifiedVersions = new HashSet<string>(comparer);
         _worker = new Thread(ProcessJobs)
         {
             IsBackground = true,
@@ -55,6 +58,7 @@ internal sealed class ThumbnailStore : IDisposable
             _thumbnailRoot = thumbnailRoot;
             _rootVersion++;
             _failed.Clear();
+            _verifiedVersions.Clear();
         }
     }
 
@@ -84,7 +88,7 @@ internal sealed class ThumbnailStore : IDisposable
                 return null;
 
             var cached = Path.Combine(_thumbnailRoot, $"{fileName}.jpg");
-            if (IsFresh(cached, videoPath))
+            if (IsFresh(fileName, cached, videoPath))
             {
                 completion = Task.FromResult<string?>(cached);
                 return cached;
@@ -202,6 +206,7 @@ internal sealed class ThumbnailStore : IDisposable
 
                 File.Move(temporary, job.CachedPath, overwrite: true);
                 File.WriteAllText(VersionPath(job.CachedPath), CacheVersion);
+                _verifiedVersions.Add(job.FileName);
                 return job.CachedPath;
             }
         }
@@ -251,10 +256,14 @@ internal sealed class ThumbnailStore : IDisposable
             InvalidateLocked(videoFileName);
     }
 
-    private void InvalidateLocked(string videoFileName) =>
+    private void InvalidateLocked(string videoFileName)
+    {
         _fileVersions[videoFileName] = _fileVersions.GetValueOrDefault(videoFileName) + 1;
+        _verifiedVersions.Remove(videoFileName);
+    }
 
-    private static bool IsFresh(string cached, string videoPath)
+    // Called under _stateGate.
+    private bool IsFresh(string fileName, string cached, string videoPath)
     {
         try
         {
@@ -262,8 +271,7 @@ internal sealed class ThumbnailStore : IDisposable
             if (!image.Exists || image.Length == 0)
                 return false;
 
-            if (!File.Exists(VersionPath(cached))
-                || !string.Equals(File.ReadAllText(VersionPath(cached)), CacheVersion, StringComparison.Ordinal))
+            if (!HasCurrentVersion(fileName, cached))
                 return false;
 
             var video = new FileInfo(videoPath);
@@ -273,6 +281,23 @@ internal sealed class ThumbnailStore : IDisposable
         {
             return false;
         }
+    }
+
+    // The version marker is read from disk once per file per root. A grid render asks for every
+    // visible card at once, and the marker only changes when this store rewrites it, which is
+    // where the in-memory answer is refreshed.
+    private bool HasCurrentVersion(string fileName, string cached)
+    {
+        if (_verifiedVersions.Contains(fileName))
+            return true;
+
+        var versionPath = VersionPath(cached);
+        if (!File.Exists(versionPath)
+            || !string.Equals(File.ReadAllText(versionPath), CacheVersion, StringComparison.Ordinal))
+            return false;
+
+        _verifiedVersions.Add(fileName);
+        return true;
     }
 
     private static bool TryReadSourceStamp(string path, out SourceStamp stamp)

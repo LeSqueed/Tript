@@ -46,7 +46,6 @@ internal sealed class AppController
             ["CreateAutomaticClips"] = (parameters, _) => _host.CreateAutomaticClips(
                 parameters.Deserialize<CreateAutomaticClipsParameters>()),
             ["PauseAutomaticClips"] = (_, _) => _host.ToggleAutomaticClipPause(),
-            ["ListContent"] = (_, _) => _host.PushContent(),
             ["ListGames"] = (_, _) => _host.PushGameList(),
             ["CancelClip"] = (_, _) => { /* The engine is not cancellable in the alpha. */ },
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
@@ -111,6 +110,9 @@ internal sealed class AppController
         // small and answers synchronously.
         _asyncCommands = new Dictionary<string, Func<JsonElement?, ClientHandle, Task>>(StringComparer.Ordinal)
         {
+            // The listing walks the whole library and probes durations, so it must not park the
+            // receive loop behind it.
+            ["ListContent"] = (_, _) => Task.Run(_host.PushContent),
 #if TRIPT_TRAINING
             ["ListTraining"] = async (parameters, _) =>
                 await _host.PushTraining(parameters.Deserialize<TrainingGameParameters>()?.GameId),

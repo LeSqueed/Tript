@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Net;
+using Tript.Core;
 
 namespace Tript.App;
 
@@ -103,7 +104,7 @@ internal sealed class UiHost : IDisposable
             }
 
             var candidate = Path.GetFullPath(Path.Combine(_webRoot, relative));
-            if (!candidate.StartsWith(_webRoot, ComparisonFor()))
+            if (!candidate.StartsWith(_webRoot, FilePaths.Comparison))
             {
                 context.Response.StatusCode = 404;
                 context.Response.Close();
@@ -188,10 +189,6 @@ internal sealed class UiHost : IDisposable
             _ => "application/octet-stream",
         };
     }
-
-    private static StringComparison ComparisonFor() => OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
 
     public void Dispose()
     {

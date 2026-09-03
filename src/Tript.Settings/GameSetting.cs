@@ -4,6 +4,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tript.Core;
 
 namespace Tript.Settings;
 
@@ -33,26 +34,23 @@ public sealed class GameSetting
     // launcher inventory or their basename.
     public string? ExecutablePath { get; set; }
 
-    // Never written to the settings file: this is the path's file name, Executable, or Name — not a
-    // stored value. Callers that need to compare it against a running process name normalize it
-    // first (ProcessNameGameDetector.NormalizeProcessName) — the `.exe` is optional on both sides.
+    // Never written to the settings file. Callers comparing it against a running process name go
+    // through ExecutableNames.Normalize, so the `.exe` is optional on both sides.
     [JsonIgnore]
     public string EffectiveExecutable
     {
         get
         {
             if (!string.IsNullOrWhiteSpace(ExecutablePath))
-                return Path.GetFileName(ExecutablePath.Trim());
+                return FilePaths.FileName(ExecutablePath.Trim());
             return string.IsNullOrWhiteSpace(Executable) ? Name : Executable.Trim();
         }
     }
 
     public string? IconId { get; set; }
 
-    // A per-game override of the global recording-mode setting.
     public GameRecordingModeOverride? RecordingModeOverride { get; set; }
 
-    // A per-game override of the global quality settings (resolution, fps, encoder, quality).
     public GameQualityOverride? QualityOverride { get; set; }
 
     // Per-game capture method: null means "inherit the global capture setting". A title that will
@@ -60,7 +58,6 @@ public sealed class GameSetting
     // whose window must never leak the desktop wants the opposite.
     public GameCaptureMethodOverride? CaptureMethodOverride { get; set; }
 
-    // A per-game override of the global automatic-clip before/after window.
     public GameAutomaticClipOverride? AutomaticClipOverride { get; set; }
 
     // Per-game telemetry integration toggles. Game telemetry is externally dictated — ports,
@@ -68,13 +65,11 @@ public sealed class GameSetting
     public GameIntegrationSettings Integrations { get; set; } = new();
 }
 
-// Per-game capture method: null means "inherit the global setting".
 public sealed class GameCaptureMethodOverride
 {
     public DisplayCaptureMethod Method { get; set; }
 }
 
-// Per-game recording mode: null means "inherit the global setting".
 public sealed class GameRecordingModeOverride
 {
     public RecordingMode Mode { get; set; }
@@ -104,7 +99,6 @@ public sealed class GameAutomaticClipOverride
     public int? AfterSeconds { get; set; }
 }
 
-// Per-game telemetry integration toggles. The settings model only records which are enabled.
 public sealed class GameIntegrationSettings
 {
     public bool Enabled { get; set; }

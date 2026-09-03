@@ -78,6 +78,67 @@ public sealed class ThumbnailExtractionTests
         Assert.True(new FileInfo(destination).Length > 0);
     }
 
+    // The spawn budget. A probed source gets one ffmpeg run at a seek point chosen from its
+    // duration and, only when that yields no usable frame, one more at frame 0; nothing beyond
+    // that. A grid of cards used to cost up to five decoder launches per thumbnail.
+    [Fact]
+    public void TryExtract_RunsFfmpegOnce_WhenTheChosenSeekProducesAFrame()
+    {
+        var source = MediaTestFixture.CreateSdrSource("thumbnail-one-run.mp4", durationSeconds: 5, audioTracks: 0);
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-one-run.jpg");
+        var log = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-one-run.log");
+        var extractor = new FfmpegThumbnailExtractor(
+            MediaTestFixture.CreateCountingStubFfmpeg("ffmpeg-one-run", log, writesFrameAt: destination),
+            MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+
+        // 30% of a five-second source.
+        var run = Assert.Single(File.ReadAllLines(log));
+        Assert.Contains("-ss 1.5 -i", run);
+    }
+
+    [Fact]
+    public void TryExtract_FallsBackToFrameZeroOnce_WhenTheChosenSeekProducesNoFrame()
+    {
+        var source = MediaTestFixture.CreateSdrSource("thumbnail-two-runs.mp4", durationSeconds: 5, audioTracks: 0);
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-two-runs.jpg");
+        var log = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-two-runs.log");
+        var extractor = new FfmpegThumbnailExtractor(
+            MediaTestFixture.CreateCountingStubFfmpeg("ffmpeg-two-runs", log),
+            MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.False(extractor.TryExtract(source, destination));
+
+        var runs = File.ReadAllLines(log);
+        Assert.Equal(2, runs.Length);
+        Assert.Contains("-ss 1.5 -i", runs[0]);
+        Assert.DoesNotContain("-ss", runs[1]);
+        Assert.False(File.Exists(destination));
+    }
+
+    // A recording still being written has no readable duration yet (an MP4 gets its index only
+    // when finalised). The probe failing must not cost the fallback: the fixed early seek runs,
+    // then frame 0.
+    [Fact]
+    public void TryExtract_StillTriesTheFixedSeekAndFrameZero_WhenTheProbeFails()
+    {
+        var source = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-growing.mp4");
+        File.WriteAllText(source, "a recording that has not been finalised yet");
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-growing.jpg");
+        var log = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-growing.log");
+        var extractor = new FfmpegThumbnailExtractor(
+            MediaTestFixture.CreateCountingStubFfmpeg("ffmpeg-growing", log),
+            MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.False(extractor.TryExtract(source, destination));
+
+        var runs = File.ReadAllLines(log);
+        Assert.Equal(2, runs.Length);
+        Assert.Contains("-ss 1 -i", runs[0]);
+        Assert.DoesNotContain("-ss", runs[1]);
+    }
+
     [Fact]
     public void TryExtract_ReturnsFalse_AndLeavesNoFile_ForASourceThatIsNotAVideo()
     {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The playback hook — the sync model. `currentTime` is the single source of truth for the playhead:
-// the <video> element, both timelines and the transport all read and write it.
+// the <video> element, both timelines and the transport all read and write it. While playing it is
+// sampled from the element every animation frame, so the playhead glides rather than steps.
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
@@ -68,6 +69,28 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
       }
     }
   }, [itemKey]);
+
+  // A smooth playhead. The element's own `timeupdate` fires only a few times per second, so a playhead
+  // drawn from those samples alone advances in visible steps. While the media is playing, its position
+  // is sampled once per animation frame instead, into the same `currentTime` every timeline reads —
+  // the sync model is unchanged, only the sample rate is. `timeupdate` stays wired: it is what moves
+  // the playhead while paused (a seek, a frame step) and the fallback where animation frames are not
+  // delivered. The loop stops with playback, so a paused player costs nothing per frame.
+  useEffect(() => {
+    if (!playing || typeof requestAnimationFrame !== 'function') {
+      return;
+    }
+    let frame = 0;
+    const sample = (): void => {
+      const video = videoRef.current;
+      if (video) {
+        setCurrentTime(video.currentTime);
+      }
+      frame = requestAnimationFrame(sample);
+    };
+    frame = requestAnimationFrame(sample);
+    return () => cancelAnimationFrame(frame);
+  }, [playing]);
 
   function seek(time: number): void {
     const target = Math.max(0, Math.min(time, duration));

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Tript.GameDiscovery;
 using Tript.Recorder;
+using Tript.Core;
 
 namespace Tript.App;
 
@@ -48,21 +49,20 @@ internal sealed class GameCatalog
     private static void Validate(IReadOnlyList<GameCatalogEntry> entries)
     {
         var gameIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var executables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var executables = new HashSet<string>(ExecutableNames.Comparer);
 
         foreach (var entry in entries)
         {
             if (string.IsNullOrWhiteSpace(entry.GameId) || string.IsNullOrWhiteSpace(entry.Executable))
                 throw new InvalidDataException("Every game catalogue entry requires a gameId and executable.");
-            if (entry.Executable.Contains(Path.DirectorySeparatorChar)
-                || entry.Executable.Contains(Path.AltDirectorySeparatorChar))
+            if (FilePaths.ContainsSeparator(entry.Executable))
             {
                 throw new InvalidDataException(
                     $"Game catalogue executable '{entry.Executable}' must be a filename, not a path.");
             }
             if (!gameIds.Add(entry.GameId))
                 throw new InvalidDataException($"Game catalogue contains duplicate gameId '{entry.GameId}'.");
-            if (!executables.Add(ProcessNameGameDetector.NormalizeProcessName(entry.Executable)))
+            if (!executables.Add(ExecutableNames.Normalize(entry.Executable)))
                 throw new InvalidDataException(
                     $"Game catalogue contains duplicate executable '{entry.Executable}'.");
 

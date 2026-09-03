@@ -7,6 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
+using Serilog;
+
 using Tript.App;
 
 namespace Tript.App.Ipc;
@@ -25,9 +27,14 @@ internal sealed class IpcServer : IDisposable
     private readonly List<ClientConnection> _clients = [];
     private readonly CancellationTokenSource _cts = new();
 
-    private Thread? _acceptThread;
+    // Captured once: the accept loop reads this, never _cts.Token, so Dispose can dispose the source
+    // without racing a read that would throw ObjectDisposedException.
+    private readonly CancellationToken _shutdown;
+
+    private Task? _acceptLoop;
     private volatile bool _running;
     private int _shutdownRequested;
+    private int _disposed;
 
     public IpcServer(AppController controller, SessionToken token, int port = LocalPorts.ControlSocket,
         int uiPort = LocalPorts.Ui)
@@ -36,6 +43,7 @@ internal sealed class IpcServer : IDisposable
         _token = token;
         _port = port;
         _allowedOrigins = [$"http://localhost:{uiPort}", $"http://127.0.0.1:{uiPort}"];
+        _shutdown = _cts.Token;
     }
 
     public event Action? ShutdownRequested;
@@ -58,23 +66,19 @@ internal sealed class IpcServer : IDisposable
             _listener.Prefixes.Add($"http://localhost:{_port}/");
             _listener.Start();
             _running = true;
-
-            _acceptThread = new Thread(AcceptLoop)
-            {
-                IsBackground = true,
-                Name = "Tript.App.Ipc.Accept",
-            };
-            _acceptThread.Start();
+            _acceptLoop = Task.Run(AcceptLoopAsync);
         }
     }
 
-    private void AcceptLoop()
+    // Awaits both the request and the WebSocket handshake, so a client that is slow to complete
+    // its upgrade holds no thread — the old dedicated accept thread sat blocked in the handshake.
+    private async Task AcceptLoopAsync()
     {
         while (_running)
         {
             try
             {
-                var context = _listener.GetContext();
+                var context = await _listener.GetContextAsync();
                 if (!context.Request.IsWebSocketRequest)
                 {
                     context.Response.StatusCode = 404;
@@ -109,13 +113,26 @@ internal sealed class IpcServer : IDisposable
                     continue;
                 }
 
-                var wsContext = context.AcceptWebSocketAsync(null).GetAwaiter().GetResult();
+                // Bounded by the shutdown token: a client that starts the upgrade and never finishes
+                // it would otherwise keep Dispose waiting on this loop.
+                var wsContext = await context.AcceptWebSocketAsync(null).WaitAsync(_shutdown);
                 var client = new ClientConnection(wsContext.WebSocket, this);
+                var accepted = false;
                 lock (_gate)
                 {
-                    _clients.Add(client);
+                    if (_running)
+                    {
+                        _clients.Add(client);
+                        accepted = true;
+                    }
                 }
-                client.Start();
+
+                // Dispose has already emptied _clients; a client admitted after that would never be
+                // torn down.
+                if (accepted)
+                    client.Start();
+                else
+                    client.Dispose();
             }
             catch (HttpListenerException)
             {
@@ -127,9 +144,18 @@ internal sealed class IpcServer : IDisposable
             {
                 // A client that dies mid-handshake; nothing to do.
             }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
             catch (ObjectDisposedException)
             {
                 break;
+            }
+            catch (Exception exception)
+            {
+                if (_running)
+                    Log.Warning(exception, "Ipc: admitting a client failed");
             }
         }
     }
@@ -229,6 +255,9 @@ internal sealed class IpcServer : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _running = false;
         _cts.Cancel();
 
@@ -260,6 +289,11 @@ internal sealed class IpcServer : IDisposable
             // endpoint is already gone); the process is exiting, so a close failure is not worth
             // propagating into Program.Main's exit code.
         }
+
+        // The loop swallows its own exceptions, so this can only time out; the token it holds is
+        // captured, so disposing the source after a timeout cannot make it throw.
+        _acceptLoop?.Wait(TimeSpan.FromSeconds(2));
+        _cts.Dispose();
     }
 
     // ---- client ----
@@ -279,8 +313,10 @@ internal sealed class IpcServer : IDisposable
         private readonly WebSocket _socket;
         private readonly IpcServer _owner;
         private readonly Channel<byte[]> _outbound;
-        private CancellationTokenSource _cts = new();
+        private readonly CancellationTokenSource _cts = new();
+        private readonly CancellationToken _closed;
         private int _dropped;
+        private int _disposed;
 
         // How many outgoing frames this connection has thrown away because it was not being read.
         internal int DroppedFrames => Volatile.Read(ref _dropped);
@@ -289,6 +325,7 @@ internal sealed class IpcServer : IDisposable
         {
             _socket = socket;
             _owner = owner;
+            _closed = _cts.Token;
 
             // DropOldest, not DropWrite: every push in this app is a FULL push, so the newest frame
             // supersedes every older one and dropping from the front leaves the client converging on
@@ -322,10 +359,10 @@ internal sealed class IpcServer : IDisposable
         {
             try
             {
-                await foreach (var frame in _outbound.Reader.ReadAllAsync(_cts.Token))
+                await foreach (var frame in _outbound.Reader.ReadAllAsync(_closed))
                 {
                     await _socket.SendAsync(new ArraySegment<byte>(frame), WebSocketMessageType.Text,
-                        endOfMessage: true, _cts.Token);
+                        endOfMessage: true, _closed);
                 }
             }
             catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException)
@@ -349,7 +386,7 @@ internal sealed class IpcServer : IDisposable
                     WebSocketReceiveResult result;
                     do
                     {
-                        result = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
+                        result = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer), _closed);
                         if (result.MessageType == WebSocketMessageType.Close)
                             return;
                         if (result.MessageType == WebSocketMessageType.Binary)
@@ -453,6 +490,9 @@ internal sealed class IpcServer : IDisposable
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+
             _cts.Cancel();
             try
             {
@@ -463,6 +503,10 @@ internal sealed class IpcServer : IDisposable
             }
 
             _socket.Dispose();
+
+            // The writer and receive loops hold the captured token and end on the cancelled socket;
+            // neither reads _cts again, so the source can go now.
+            _cts.Dispose();
         }
     }
 }

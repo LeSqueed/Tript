@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Security;
+
 namespace Tript.GameDiscovery;
 
-using System.Security;
 
 public sealed class SteamInventorySource(IDiscoveryFileSystem fileSystem, IDiscoveryRegistry registry) : IGameInventorySource
 {

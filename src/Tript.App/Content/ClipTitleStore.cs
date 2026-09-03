@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.App.Content;
 
@@ -124,9 +125,7 @@ internal sealed class ClipTitleStore
             var existing = Read(clipFileName);
             if (existing.MustNotBeOverwritten)
             {
-                Console.Error.WriteLine(
-                    $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
-                    $"({existing.Failure}); its title is not written, so the record is left as it is.");
+                Log.Warning("{FileName} has a clip record that could not be read ({Failure}); its title is not written, so the record is left as it is.", clipFileName, existing.Failure);
                 return false;
             }
 
@@ -158,9 +157,7 @@ internal sealed class ClipTitleStore
             var existing = Read(clipFileName);
             if (existing.MustNotBeOverwritten)
             {
-                Console.Error.WriteLine(
-                    $"Tript.App: '{clipFileName}' has a clip record that could not be read " +
-                    $"({existing.Failure}); the duration is not persisted, so the record is left as it is.");
+                Log.Warning("{FileName} has a clip record that could not be read ({Failure}); the duration is not persisted, so the record is left as it is.", clipFileName, existing.Failure);
                 return false;
             }
 
@@ -271,7 +268,7 @@ internal sealed class ClipTitleStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Tript.App: could not write clip record: {exception.Message}");
+            Log.Warning("could not write clip record: {Reason}", exception.Message);
             return false;
         }
     }
@@ -290,7 +287,7 @@ internal sealed class ClipTitleStore
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                Console.Error.WriteLine($"Tript.App: could not delete clip record: {exception.Message}");
+                Log.Warning("could not delete clip record: {Reason}", exception.Message);
                 return false;
             }
         }

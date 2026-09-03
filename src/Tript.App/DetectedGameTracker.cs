@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using Tript.Recorder;
+using Tript.Core;
 
 namespace Tript.App;
 
@@ -58,9 +59,8 @@ internal sealed class DetectedGameTracker
 
     internal static string OwnerOf(DetectedGameProcess process)
     {
-        var path = ProcessNameGameDetector.NormalizePath(process.ExecutablePath) ?? process.ExecutablePath;
-        if (OperatingSystem.IsWindows())
-            path = path.ToUpperInvariant();
+        var path = FilePaths.CaseFold(
+            ProcessNameGameDetector.NormalizePath(process.ExecutablePath) ?? process.ExecutablePath);
         return $"{process.ProcessId}:{process.ProcessStartTime?.UtcTicks ?? 0}:{path}";
     }
 

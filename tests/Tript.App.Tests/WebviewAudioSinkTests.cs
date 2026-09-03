@@ -3,6 +3,7 @@
 
 using Tript.Shell;
 using Xunit;
+using Tript.TestSupport;
 
 namespace Tript.App.Tests;
 
@@ -140,14 +141,12 @@ public sealed class WebviewAudioSinkTests
         Assert.Null(WebviewAudioSink.Inspect(
             "tript-no-such-gst-inspect", WebviewAudioSink.Element, TimeSpan.FromSeconds(1)));
 
-    [Fact]
+    // The guard exists to remove a hang, so it must not be able to introduce one: a child that
+    // does not answer in time is killed and the answer is "unknown" (startup continues).
+    // Linux only: /bin/sleep stands in for a wedged gst-inspect-1.0.
+    [LinuxFact]
     public void Inspect_ThatOutstaysItsTimeout_IsKilledAndUnknown()
     {
-        // The guard exists to remove a hang, so it must not be able to introduce one: a child that
-        // does not answer in time is killed and the answer is "unknown" (startup continues).
-        if (OperatingSystem.IsWindows())
-            return; // No /bin/sleep to stand in for a wedged gst-inspect-1.0; the check is Linux-only anyway.
-
         var started = DateTime.UtcNow;
         var answer = WebviewAudioSink.Inspect("sleep", "30", TimeSpan.FromMilliseconds(300));
         var elapsed = DateTime.UtcNow - started;

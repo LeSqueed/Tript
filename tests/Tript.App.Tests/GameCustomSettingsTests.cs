@@ -6,6 +6,7 @@ using Tript.App.Content;
 using Tript.Core;
 using Tript.Settings;
 using Xunit;
+using Tript.TestSupport;
 
 namespace Tript.App.Tests;
 
@@ -324,12 +325,9 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 #endif
 
-    [Fact]
+    [WindowsFact]
     public void NormalizePickedExecutable_AcceptsOnlyExistingExecutables()
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
         var exe = ExecutablePath("pick.exe");
         File.WriteAllText(exe, "pick me");
         try

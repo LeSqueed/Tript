@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-namespace Tript.GameDiscovery;
-
 using System.Security;
+
+namespace Tript.GameDiscovery;
 
 public sealed class EaInventorySource(IDiscoveryFileSystem fileSystem, IDiscoveryRegistry registry) : IGameInventorySource
 {
@@ -18,7 +18,7 @@ public sealed class EaInventorySource(IDiscoveryFileSystem fileSystem, IDiscover
             cancellationToken.ThrowIfCancellationRequested();
             IEnumerable<string> products;
             try { products = registry.GetSubKeyNames(RegistryHiveId.LocalMachine, view, parent).ToArray(); }
-            catch (Exception ex) when (IsExpectedRegistryException(ex))
+            catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
             {
                 result.Warn("ea.registry", ex.Message, parent);
                 continue;
@@ -35,7 +35,7 @@ public sealed class EaInventorySource(IDiscoveryFileSystem fileSystem, IDiscover
                     if (install is not null && PathSafety.TryCanonicalize(fileSystem, install, out var root))
                         result.AddGame(id, name, root);
                 }
-                catch (Exception ex) when (IsExpectedRegistryException(ex))
+                catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
                 {
                     result.Warn("ea.registry", ex.Message, key);
                 }
@@ -47,9 +47,6 @@ public sealed class EaInventorySource(IDiscoveryFileSystem fileSystem, IDiscover
     private string? First(RegistryViewId view, string key, params string[] names) =>
         names.Select(name => registry.GetString(RegistryHiveId.LocalMachine, view, key, name))
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-
-    private static bool IsExpectedRegistryException(Exception exception) =>
-        exception is IOException or UnauthorizedAccessException or SecurityException or PlatformNotSupportedException;
 }
 
 public sealed class UbisoftInventorySource(IDiscoveryFileSystem fileSystem, IDiscoveryRegistry registry) : IGameInventorySource
@@ -65,7 +62,7 @@ public sealed class UbisoftInventorySource(IDiscoveryFileSystem fileSystem, IDis
             cancellationToken.ThrowIfCancellationRequested();
             IEnumerable<string> products;
             try { products = registry.GetSubKeyNames(RegistryHiveId.LocalMachine, view, ParentKey).ToArray(); }
-            catch (Exception ex) when (IsExpectedRegistryException(ex))
+            catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
             {
                 result.Warn("ubisoft.registry", ex.Message, ParentKey);
                 continue;
@@ -81,7 +78,7 @@ public sealed class UbisoftInventorySource(IDiscoveryFileSystem fileSystem, IDis
                     if (install is not null && PathSafety.TryCanonicalize(fileSystem, install, out var root))
                         result.AddGame(product, name, root);
                 }
-                catch (Exception ex) when (IsExpectedRegistryException(ex))
+                catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
                 {
                     result.Warn("ubisoft.registry", ex.Message, key);
                 }
@@ -89,7 +86,10 @@ public sealed class UbisoftInventorySource(IDiscoveryFileSystem fileSystem, IDis
         }
         return ValueTask.FromResult(result.Build());
     }
+}
 
-    private static bool IsExpectedRegistryException(Exception exception) =>
+internal static class RegistryExceptions
+{
+    public static bool IsExpected(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or SecurityException or PlatformNotSupportedException;
 }

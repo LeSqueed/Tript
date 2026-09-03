@@ -22,6 +22,7 @@
          available here. -->
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Tript.TestSupport\Tript.TestSupport.csproj" />
     <ProjectReference Include="..\..\src\Tript.App\Tript.App.csproj" />
     <!-- The desktop shell is here for its startup preflight only (WebviewAudioSinkTests): pure
          decision logic over injected probes, no window and no Photino call. The shell has no test

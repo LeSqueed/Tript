@@ -3,17 +3,19 @@
 
 using System.Diagnostics;
 using Serilog;
+using Tript.Core;
 
 namespace Tript.Recorder;
 
 public sealed class ProcessNameGameDetector : IGameDetector
 {
     private readonly TimeSpan _pollInterval;
-    private readonly Func<IReadOnlyList<ProcessSnapshot>> _processProbe;
+    private readonly Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> _processProbe;
     private readonly object _gate = new();
     private readonly SerializedDetectorCallbackQueue _callbacks =
         new("Tript process detector callbacks");
     private readonly Dictionary<int, DetectedGameProcess> _running = [];
+    private Dictionary<int, ProbedIdentity> _probed = [];
     private TargetSet _targets;
     private long _targetVersion;
     private Timer? _timer;
@@ -23,13 +25,15 @@ public sealed class ProcessNameGameDetector : IGameDetector
     public ProcessNameGameDetector(
         IEnumerable<GameDetectionTarget> targets,
         TimeSpan? pollInterval = null)
-        : this(targets, ProbeProcesses, pollInterval)
     {
+        _targets = CreateTargetSet(targets);
+        _processProbe = ProbeProcesses;
+        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
     }
 
     internal ProcessNameGameDetector(
         IEnumerable<GameDetectionTarget> targets,
-        Func<IReadOnlyList<ProcessSnapshot>> processProbe,
+        Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> processProbe,
         TimeSpan? pollInterval = null)
     {
         ArgumentNullException.ThrowIfNull(processProbe);
@@ -118,7 +122,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
         }
 
         var seen = new Dictionary<int, DetectedGameProcess>();
-        foreach (var process in _processProbe())
+        foreach (var process in _processProbe(targets.CandidateExecutables))
         {
             if (process.ProcessId <= 0)
                 continue;
@@ -187,9 +191,14 @@ public sealed class ProcessNameGameDetector : IGameDetector
         return false;
     }
 
-    private static IReadOnlyList<ProcessSnapshot> ProbeProcesses()
+    private IReadOnlyList<ProcessSnapshot> ProbeProcesses(IReadOnlySet<string> candidates)
     {
+        Dictionary<int, ProbedIdentity> previous;
+        lock (_gate)
+            previous = _probed;
+
         var snapshots = new List<ProcessSnapshot>();
+        var probed = new Dictionary<int, ProbedIdentity>();
         foreach (var process in Process.GetProcesses())
         {
             using (process)
@@ -201,22 +210,41 @@ public sealed class ProcessNameGameDetector : IGameDetector
                     executable = process.ProcessName;
                     processId = process.Id;
                 }
-                catch (Exception exception) when (exception is ArgumentException
-                    or InvalidOperationException or System.ComponentModel.Win32Exception
-                    or NotSupportedException)
+                catch (Exception exception) when (IsInspectionFailure(exception))
                 {
                     continue;
                 }
 
+                if (!candidates.Contains(NormalizeProcessName(executable)))
+                    continue;
+
                 DateTimeOffset? startTime = null;
-                string? path = null;
                 try { startTime = process.StartTime.ToUniversalTime(); }
                 catch (Exception exception) when (IsInspectionFailure(exception)) { }
-                try { path = process.MainModule?.FileName; }
-                catch (Exception exception) when (IsInspectionFailure(exception)) { }
+
+                // The start time is cheap to read and pins the pid to one process, so it
+                // decides whether the cached MainModule path may be reused.
+                string? path;
+                if (previous.TryGetValue(processId, out var known)
+                    && SameProcessIdentity(known.StartTime, startTime))
+                {
+                    path = known.Path;
+                }
+                else
+                {
+                    path = null;
+                    try { path = process.MainModule?.FileName; }
+                    catch (Exception exception) when (IsInspectionFailure(exception)) { }
+                }
+
+                if (path is not null)
+                    probed[processId] = new ProbedIdentity(startTime, path);
                 snapshots.Add(new ProcessSnapshot(processId, executable, path, startTime));
             }
         }
+
+        lock (_gate)
+            _probed = probed;
         return snapshots;
     }
 
@@ -275,6 +303,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
         ArgumentNullException.ThrowIfNull(targets);
         var byPath = new Dictionary<string, NormalizedTarget>(PathComparer);
         var byExecutable = new Dictionary<string, NormalizedTarget>(ExecutableComparer);
+        var candidates = new HashSet<string>(ExecutableComparer);
 
         foreach (var target in targets)
         {
@@ -292,52 +321,36 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
             var normalized = new NormalizedTarget(target.GameId);
             if (path is not null)
+            {
                 byPath.TryAdd(path, normalized);
+                candidates.Add(NormalizeProcessName(Path.GetFileName(path)));
+            }
             else
+            {
                 byExecutable.TryAdd(executable, normalized);
+                candidates.Add(executable);
+            }
         }
 
-        return new TargetSet(byPath, byExecutable);
+        return new TargetSet(byPath, byExecutable, candidates);
     }
 
-    internal static string? NormalizePath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return null;
+    internal static string? NormalizePath(string? path) => FilePaths.TryGetFullPath(path);
 
-        try
-        {
-            return Path.GetFullPath(path.Trim());
-        }
-        catch (Exception exception) when (exception is ArgumentException or IOException
-            or NotSupportedException)
-        {
-            return null;
-        }
-    }
+    public static string NormalizeProcessName(string name) => ExecutableNames.Normalize(name);
 
-    public static string NormalizeProcessName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return string.Empty;
+    private static StringComparer PathComparer => FilePaths.Comparer;
 
-        var fileName = Path.GetFileName(name.Trim());
-        return fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            ? fileName[..^4]
-            : fileName;
-    }
-
-    private static StringComparer PathComparer => OperatingSystem.IsWindows()
-        ? StringComparer.OrdinalIgnoreCase
-        : StringComparer.Ordinal;
-
-    private static StringComparer ExecutableComparer => PathComparer;
+    private static StringComparer ExecutableComparer => ExecutableNames.Comparer;
 
     private sealed record NormalizedTarget(string GameId);
 
     private sealed record TargetSet(
         IReadOnlyDictionary<string, NormalizedTarget> ByPath,
-        IReadOnlyDictionary<string, NormalizedTarget> ByExecutable);
+        IReadOnlyDictionary<string, NormalizedTarget> ByExecutable,
+        IReadOnlySet<string> CandidateExecutables);
+
+    private readonly record struct ProbedIdentity(DateTimeOffset? StartTime, string Path);
 }
 
 internal sealed record ProcessSnapshot(

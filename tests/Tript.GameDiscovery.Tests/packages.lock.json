@@ -93,8 +93,14 @@
           "xunit.extensibility.core": "[2.9.2]"
         }
       },
-      "tript.gamediscovery": {
+      "tript.core": {
         "type": "Project"
+      },
+      "tript.gamediscovery": {
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[1.0.0, )"
+        }
       }
     }
   }

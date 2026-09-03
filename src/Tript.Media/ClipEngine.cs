@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Globalization;
+using Tript.Core;
 
 namespace Tript.Media;
 
@@ -49,10 +50,7 @@ public sealed class ClipEngine : IClipEngine
         if (string.IsNullOrWhiteSpace(request.OutputPath))
             throw new ClipSourceException("An output path is required.");
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (string.Equals(Path.GetFullPath(request.SourcePath), Path.GetFullPath(request.OutputPath), comparison))
+        if (string.Equals(Path.GetFullPath(request.SourcePath), Path.GetFullPath(request.OutputPath), FilePaths.Comparison))
             throw new ClipSourceException("The clip output must not overwrite its source file.");
 
         var sourceInfo = _probe.Probe(request.SourcePath);

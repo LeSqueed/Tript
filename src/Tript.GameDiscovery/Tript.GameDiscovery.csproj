@@ -5,4 +5,7 @@
     <RootNamespace>Tript.GameDiscovery</RootNamespace>
     <AssemblyName>Tript.GameDiscovery</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Tript.Core\Tript.Core.csproj" />
+  </ItemGroup>
 </Project>

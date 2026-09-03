@@ -107,6 +107,27 @@ internal static class MediaTestFixture
         return script;
     }
 
+    // An ffmpeg stand-in that appends its argument line to invocationLog on every run, so a test can
+    // count and inspect the runs, and optionally writes a non-empty "frame" so a run counts as a
+    // successful extraction.
+    internal static string CreateCountingStubFfmpeg(string name, string invocationLog, string? writesFrameAt = null)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(ScratchRoot, name + ".cmd");
+            var frame = writesFrameAt is null ? string.Empty : $"echo frame> \"{writesFrameAt}\"\r\n";
+            File.WriteAllText(cmd, $"@echo off\r\necho %*>> \"{invocationLog}\"\r\n" + frame + "exit /b 0\r\n");
+            return cmd;
+        }
+
+        var script = Path.Combine(ScratchRoot, name + ".sh");
+        var write = writesFrameAt is null ? string.Empty : $"printf frame > '{writesFrameAt}'\n";
+        File.WriteAllText(script, $"#!/bin/sh\necho \"$@\" >> '{invocationLog}'\n" + write + "exit 0\n");
+        File.SetUnixFileMode(script,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return script;
+    }
+
     // Quotes a single argument for the old string-based Arguments path. Kept for the fixture
     // builders that join args into one string; the probe helpers below use ArgumentList instead.
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";

@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.App.Content;
 
@@ -91,8 +92,7 @@ internal sealed class RecordingMetadataStore
             var videoFileName = metadata.VideoFileName();
             if (string.IsNullOrWhiteSpace(videoFileName))
             {
-                Console.Error.WriteLine(
-                    "Tript.App: refusing to write a metadata record with no videoPath — it would not belong to any video.");
+                Log.Warning("refusing to write a metadata record with no videoPath — it would not belong to any video.");
                 return false;
             }
 
@@ -105,7 +105,7 @@ internal sealed class RecordingMetadataStore
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                Console.Error.WriteLine($"Tript.App: could not write metadata record: {exception.Message}");
+                Log.Warning("could not write metadata record: {Reason}", exception.Message);
                 return false;
             }
         }
@@ -153,7 +153,7 @@ internal sealed class RecordingMetadataStore
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                Console.Error.WriteLine($"Tript.App: could not delete metadata record: {exception.Message}");
+                Log.Warning("could not delete metadata record: {Reason}", exception.Message);
                 return false;
             }
         }

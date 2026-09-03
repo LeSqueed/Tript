@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Buffers;
 using System.Net;
 using System.Text.RegularExpressions;
 
 using Tript.App;
+using Tript.Core;
 
 namespace Tript.App.Content;
 
@@ -36,6 +38,12 @@ internal sealed class ContentServer : IDisposable
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
 
+    // Captured once: request handlers outlive Dispose by a moment, and reading _cts.Token after
+    // the source is disposed throws.
+    private readonly CancellationToken _shutdown;
+
+    private const int StreamBufferSize = 64 * 1024;
+
     // The thumbnail cache the /api/thumbnail route serves from. Optional: a server built without one
     // answers every thumbnail request with 204, which is the same answer the frontend already
     // handles for a video no frame could be taken from.
@@ -49,6 +57,7 @@ internal sealed class ContentServer : IDisposable
 
     private Thread? _serverThread;
     private volatile bool _running;
+    private int _disposed;
 
     internal ContentServer(string contentRoot, SessionToken token, ThumbnailStore? thumbnails = null,
         int port = LocalPorts.Content)
@@ -57,6 +66,7 @@ internal sealed class ContentServer : IDisposable
         _token = token;
         _thumbnails = thumbnails;
         _port = port;
+        _shutdown = _cts.Token;
     }
 
     internal string ContentRoot => _contentRoot;
@@ -147,21 +157,21 @@ internal sealed class ContentServer : IDisposable
             var match = ContentRoute.Match(path);
             if (match.Success)
             {
-                await ServeContentAsync(context, Decode(match.Groups[1].Value), _cts.Token);
+                await ServeContentAsync(context, Decode(match.Groups[1].Value), _shutdown);
                 return;
             }
 
             match = ThumbnailRoute.Match(path);
             if (match.Success)
             {
-                ServeThumbnail(context, Decode(match.Groups[1].Value));
+                await ServeThumbnailAsync(context, Decode(match.Groups[1].Value), _shutdown);
                 return;
             }
 
             context.Response.StatusCode = 404;
             context.Response.Close();
         }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
         {
             try { context.Response.Abort(); } catch { }
         }
@@ -248,7 +258,7 @@ internal sealed class ContentServer : IDisposable
     // "/content-root".
     private static bool IsUnderRoot(string candidate, string root)
     {
-        var comparison = ComparisonFor();
+        var comparison = FilePaths.Comparison;
         if (string.Compare(candidate, root, comparison) == 0)
             return true;
 
@@ -265,12 +275,8 @@ internal sealed class ContentServer : IDisposable
         var relative = Path.GetRelativePath(root, candidate);
         var separator = relative.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
         var first = separator >= 0 ? relative[..separator] : relative;
-        return first.Equals(TrashStore.DirectoryName, ComparisonFor());
+        return first.Equals(TrashStore.DirectoryName, FilePaths.Comparison);
     }
-
-    private static StringComparison ComparisonFor() => OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
 
     // ---- content ----
 
@@ -301,7 +307,7 @@ internal sealed class ContentServer : IDisposable
         // Windows — a sharing violation, so a 500 for a session that is mid-record. Linux has no
         // sharing model, so the open there was always fine and the mode still matches.
         await using var stream = new FileStream(resolved, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete, 64 * 1024,
+            FileShare.ReadWrite | FileShare.Delete, StreamBufferSize,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var length = stream.Length;
 
@@ -341,23 +347,30 @@ internal sealed class ContentServer : IDisposable
     private static async Task WriteExactlyAsync(HttpListenerContext context, Stream stream, long count,
         CancellationToken cancellationToken)
     {
-        var buffer = new byte[64 * 1024];
-        var remaining = count;
-        while (remaining > 0)
+        var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+        try
         {
-            var read = await stream.ReadAsync(
-                buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken);
-            if (read == 0)
+            var remaining = count;
+            while (remaining > 0)
             {
-                context.Response.Abort();
-                return;
+                var read = await stream.ReadAsync(
+                    buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken);
+                if (read == 0)
+                {
+                    context.Response.Abort();
+                    return;
+                }
+
+                await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                remaining -= read;
             }
 
-            await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            remaining -= read;
+            context.Response.Close();
         }
-
-        context.Response.Close();
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     internal static bool TryParseRange(string header, long length, out long start, out long end)
@@ -410,7 +423,8 @@ internal sealed class ContentServer : IDisposable
     // A still frame from the video, as JPEG, cached on disk (ThumbnailStore). The status contract
     // is deliberately two-valued for the frontend: 200 with an image, or 204 meaning "draw the
     // placeholder card".
-    private void ServeThumbnail(HttpListenerContext context, string requestPath)
+    private async Task ServeThumbnailAsync(HttpListenerContext context, string requestPath,
+        CancellationToken cancellationToken)
     {
         var resolved = ResolveWithinRoot(requestPath);
         if (resolved is null)
@@ -427,14 +441,15 @@ internal sealed class ContentServer : IDisposable
             {
                 var cached = _thumbnails?.GetOrQueue(resolved);
                 if (cached is not null)
-                    image = File.ReadAllBytes(cached);
+                    image = await File.ReadAllBytesAsync(cached, cancellationToken);
             }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // The store contains its own queue failures; this catches the read of the cached file
             // (deleted between lookup and the read, permissions changed underneath) so that no
             // thumbnail request can ever produce a 500 or an unhandled exception on a worker thread.
+            // Cancellation is left to the caller, which aborts the response instead of answering it.
             Console.Error.WriteLine($"Tript.App: could not serve a thumbnail for '{resolved}': {exception.Message}");
             image = null;
         }
@@ -456,12 +471,15 @@ internal sealed class ContentServer : IDisposable
         context.Response.Headers.Add("Cache-Control", "private, max-age=3600");
         context.Response.Headers.Add("Last-Modified",
             File.GetLastWriteTimeUtc(resolved).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
-        context.Response.OutputStream.Write(image, 0, image.Length);
+        await context.Response.OutputStream.WriteAsync(image, cancellationToken);
         context.Response.Close();
     }
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _running = false;
         _cts.Cancel();
         try
@@ -481,5 +499,10 @@ internal sealed class ContentServer : IDisposable
             // See IpcServer.Dispose: a Close racing the listener's teardown can throw; the process
             // is exiting.
         }
+
+        // Handlers still in flight hold the captured token, so they cannot trip over the disposed
+        // source; the accept thread is the only thing left to wait for.
+        _serverThread?.Join(TimeSpan.FromSeconds(2));
+        _cts.Dispose();
     }
 }

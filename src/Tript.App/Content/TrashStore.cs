@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.App.Content;
 
@@ -104,9 +105,7 @@ internal sealed class TrashStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine(
-                $"Tript.App: the trash entry '{id}' was moved but its record could not be written " +
-                $"({exception.Message}); it is listed from the files themselves instead.");
+            Log.Warning("the trash entry {Id} was moved but its record could not be written ({Reason}); it is listed from the files themselves instead.", id, exception.Message);
         }
 
         return seed;
@@ -129,7 +128,7 @@ internal sealed class TrashStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Tript.App: the trash could not be listed: {exception.Message}");
+            Log.Warning("the trash could not be listed: {Reason}", exception.Message);
             return entries;
         }
 
@@ -197,8 +196,7 @@ internal sealed class TrashStore
                 var target = ContentServer.ResolveWithinRoot(effectiveRoot, ToWirePath(relative));
                 if (target is null)
                 {
-                    Console.Error.WriteLine(
-                        $"Tript.App: '{relative}' does not resolve inside the recording folder, so it stays in the trash.");
+                    Log.Warning("{Path} does not resolve inside the recording folder, so it stays in the trash.", relative);
                     kept++;
                     continue;
                 }
@@ -207,8 +205,7 @@ internal sealed class TrashStore
                 {
                     // Only the video was re-keyed; a stale record left behind under the same key is
                     // the one thing that can still collide, and its owner on disk wins.
-                    Console.Error.WriteLine(
-                        $"Tript.App: '{target}' already exists, so the trashed copy was left in the trash.");
+                    Log.Warning("{Target} already exists, so the trashed copy was left in the trash.", target);
                     kept++;
                     continue;
                 }
@@ -301,9 +298,7 @@ internal sealed class TrashStore
         {
             // Never rewritten — the files it describes are still under files/, and the listing is
             // rebuilt from those instead.
-            Console.Error.WriteLine(
-                $"Tript.App: the trash record for '{Path.GetFileName(entryDirectory)}' could not be read " +
-                $"({exception.Message}); the entry is listed from its files instead.");
+            Log.Warning("the trash record for {Entry} could not be read ({Reason}); the entry is listed from its files instead.", Path.GetFileName(entryDirectory), exception.Message);
             return null;
         }
     }
@@ -436,7 +431,7 @@ internal sealed class TrashStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Tript.App: could not empty the trash entry '{directory}': {exception.Message}");
+            Log.Warning("could not empty the trash entry {Directory}: {Reason}", directory, exception.Message);
         }
     }
 

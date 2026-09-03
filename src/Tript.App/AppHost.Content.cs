@@ -9,6 +9,7 @@ using Tript.App.Ipc;
 using Tript.Core;
 using Tript.Media;
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.App;
 
@@ -250,7 +251,7 @@ internal sealed partial class AppHost
                 }
                 catch (Exception exception)
                 {
-                    Console.Error.WriteLine($"Tript.App: could not read HDR metadata of '{relative}': {exception.Message}");
+                    Log.Warning("could not read HDR metadata of {Path}: {Reason}", relative, exception.Message);
                     MarkUnprobeable(file.FullName);
                 }
             }
@@ -510,13 +511,9 @@ internal sealed partial class AppHost
             .Replace(Path.DirectorySeparatorChar, '/');
     }
 
-    private static StringComparer ContentPathComparer => OperatingSystem.IsWindows()
-        ? StringComparer.OrdinalIgnoreCase
-        : StringComparer.Ordinal;
+    private static StringComparer ContentPathComparer => FilePaths.Comparer;
 
-    private static StringComparison ContentPathComparison => OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
+    private static StringComparison ContentPathComparison => FilePaths.Comparison;
 
     private static string FileNameFromWirePath(string path)
     {
@@ -548,7 +545,7 @@ internal sealed partial class AppHost
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App: could not read the duration of '{relativePath}': {exception.Message}");
+            Log.Warning("could not read the duration of {Path}: {Reason}", relativePath, exception.Message);
             MarkUnprobeable(file.FullName);
             return null;
         }

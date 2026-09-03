@@ -18,12 +18,15 @@ public interface IThumbnailExtractor
 // disk rather than trusted from the exit code.
 public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
 {
-    // How far into the file the frame is taken. Frame 0 of a game capture is usually useless: the
-    // capture source's first composited frames are commonly black (game capture hooks before the
-    // first present, and libobs renders the scene's clear colour until a frame arrives), and titles
-    // fade in over the first moments.
+    // How far into the file the frame is taken when the duration is unknown. Frame 0 of a game
+    // capture is usually useless: the capture source's first composited frames are commonly black
+    // (game capture hooks before the first present, and libobs renders the scene's clear colour
+    // until a frame arrives), and titles fade in over the first moments.
     private static readonly TimeSpan SeekOffset = TimeSpan.FromSeconds(1);
-    private static readonly int[] PercentageOffsets = [5, 15, 30, 50];
+
+    // With a known duration the frame is taken this far into the file, never earlier than
+    // SeekOffset: well past loading screens on a long recording, and still inside a short clip.
+    private const double SeekFraction = 0.3;
 
     // The frame's width; the height follows the source's aspect ratio. 480 is a card in the
     // library grid at 2x, and keeps a JPEG in the tens of kilobytes. A source narrower than this is
@@ -48,47 +51,32 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
+    // At most two ffmpeg runs: the seek point chosen from the probed duration, then frame 0 as the
+    // deterministic fallback. Frame 0 is accepted even when black, so an all-black recording still
+    // gets a thumbnail rather than a blank card.
     public bool TryExtract(string sourcePath, string destinationPath)
     {
-        var candidates = CandidateOffsets(sourcePath).ToList();
-        var fallback = candidates[^1];
+        if (!File.Exists(sourcePath))
+            return false;
 
-        foreach (var offset in candidates)
-        {
-            // Frame zero is the deterministic fallback. Even an all-black recording still gets a
-            // thumbnail rather than a blank card.
-            if (TryExtractAt(sourcePath, destinationPath, offset, offset != fallback))
-                return true;
-        }
-
-        return false;
+        return TryExtractAt(sourcePath, destinationPath, ChosenOffset(sourcePath), rejectBlack: true)
+            || TryExtractAt(sourcePath, destinationPath, TimeSpan.Zero, rejectBlack: false);
     }
 
-    private IEnumerable<TimeSpan> CandidateOffsets(string sourcePath)
+    private TimeSpan ChosenOffset(string sourcePath)
     {
-        var candidates = new List<TimeSpan> { SeekOffset };
         try
         {
             var duration = _probe.Value?.Probe(sourcePath).DurationSeconds;
             if (duration is > 0 and var seconds && double.IsFinite(seconds))
-            {
-                candidates.AddRange(PercentageOffsets.Select(
-                    percentage => TimeSpan.FromSeconds(seconds * percentage / 100.0)));
-            }
+                return TimeSpan.FromSeconds(Math.Max(SeekOffset.TotalSeconds, seconds * SeekFraction));
         }
         catch (Exception)
         {
-            // Fixed offsets below still cover files being written or files ffprobe cannot read yet.
+            // A file still being written, or one ffprobe cannot read yet, gets the fixed offset.
         }
 
-        candidates.Add(TimeSpan.Zero);
-        var seen = new HashSet<long>();
-        foreach (var candidate in candidates)
-        {
-            if (candidate < TimeSpan.Zero || !seen.Add(candidate.Ticks))
-                continue;
-            yield return candidate;
-        }
+        return SeekOffset;
     }
 
     private bool TryExtractAt(string sourcePath, string destinationPath, TimeSpan offset, bool rejectBlack)

@@ -3,6 +3,7 @@
 
 using Tript.Recorder;
 using Xunit;
+using Tript.TestSupport;
 
 namespace Tript.Recorder.Tests;
 
@@ -14,7 +15,7 @@ public sealed class ProcessNameGameDetectorTests
         var path = GamePath("alpha.exe");
         using var detector = Detector(
             [new("alpha-id", "alpha.exe")],
-            () => [new(41, "ALPHA.EXE", path)]);
+            _ => [new(41, "ALPHA.EXE", path)]);
         DetectedGameProcess? started = null;
         detector.GameStarted += process => started = process;
 
@@ -25,13 +26,31 @@ public sealed class ProcessNameGameDetectorTests
     }
 
     [Fact]
+    public void Poll_GivesTheProbeTheCandidateExecutableNames()
+    {
+        IReadOnlySet<string>? candidates = null;
+        using var detector = Detector(
+            [new("alpha-id", "alpha.exe"), new("beta-id", "not-used.exe", GamePath("beta.exe"))],
+            names =>
+            {
+                candidates = names;
+                return [];
+            });
+
+        detector.PollOnce();
+
+        Assert.NotNull(candidates);
+        Assert.Equal(["alpha", "beta"], candidates.Order());
+    }
+
+    [Fact]
     public void PathTarget_MatchesOnlyItsCanonicalPath()
     {
         var trustedPath = GamePath("trusted", "alpha.exe");
         var otherPath = GamePath("other", "alpha.exe");
         using var detector = Detector(
             [new("alpha-id", "alpha.exe", Path.Combine(Path.GetDirectoryName(trustedPath)!, ".", "alpha.exe"))],
-            () => [new(41, "alpha", otherPath)]);
+            _ => [new(41, "alpha", otherPath)]);
         var started = new List<DetectedGameProcess>();
         detector.GameStarted += started.Add;
 
@@ -48,7 +67,7 @@ public sealed class ProcessNameGameDetectorTests
         var configured = Path.Combine(Path.GetDirectoryName(path)!, ".", "alpha.exe");
         using var detector = Detector(
             [new("alpha-id", "not-used.exe", configured)],
-            () => [new(41, "alpha.exe", path)]);
+            _ => [new(41, "alpha.exe", path)]);
         var started = new List<DetectedGameProcess>();
         detector.GameStarted += started.Add;
 
@@ -63,7 +82,7 @@ public sealed class ProcessNameGameDetectorTests
     {
         using var detector = Detector(
             [new("alpha-id", "ALPHA.EXE")],
-            () => [new(41, "alpha", GamePath("alpha.exe"))]);
+            _ => [new(41, "alpha", GamePath("alpha.exe"))]);
         var started = new List<DetectedGameProcess>();
         detector.GameStarted += started.Add;
 
@@ -78,7 +97,7 @@ public sealed class ProcessNameGameDetectorTests
     {
         Assert.Throws<ArgumentException>(() => Detector(
             [new("alpha-id", "alpha.exe", "invalid\0path")],
-            () => []));
+            _ => []));
     }
 
     [Fact]
@@ -89,7 +108,7 @@ public sealed class ProcessNameGameDetectorTests
             new(41, "alpha", GamePath("one", "alpha.exe")),
             new(42, "alpha", GamePath("two", "alpha.exe")),
         ];
-        using var detector = Detector([new("alpha-id", "alpha.exe")], () => processes);
+        using var detector = Detector([new("alpha-id", "alpha.exe")], _ => processes);
         var started = new List<DetectedGameProcess>();
         var stopped = new List<DetectedGameProcess>();
         detector.GameStarted += started.Add;
@@ -108,7 +127,7 @@ public sealed class ProcessNameGameDetectorTests
     public void UpdateTargets_ReclassifiesARunningPidAsStopThenStart()
     {
         var process = new ProcessSnapshot(41, "alpha", GamePath("alpha.exe"));
-        using var detector = Detector([new("old-id", "alpha.exe")], () => [process]);
+        using var detector = Detector([new("old-id", "alpha.exe")], _ => [process]);
         var transitions = new List<string>();
         detector.GameStarted += found => transitions.Add("start:" + found.GameId);
         detector.GameStopped += gone => transitions.Add("stop:" + gone.GameId);
@@ -129,7 +148,7 @@ public sealed class ProcessNameGameDetectorTests
         using var release = new ManualResetEventSlim();
         var path = GamePath("alpha.exe");
         var calls = 0;
-        using var detector = Detector([new("old-id", "alpha.exe")], () =>
+        using var detector = Detector([new("old-id", "alpha.exe")], _ =>
         {
             if (Interlocked.Increment(ref calls) == 1)
             {
@@ -159,7 +178,7 @@ public sealed class ProcessNameGameDetectorTests
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var calls = 0;
-        using var detector = Detector([], () =>
+        using var detector = Detector([], _ =>
         {
             Interlocked.Increment(ref calls);
             entered.Set();
@@ -181,7 +200,7 @@ public sealed class ProcessNameGameDetectorTests
     {
         IReadOnlyList<ProcessSnapshot> processes =
             [new(41, "alpha", GamePath("alpha.exe"))];
-        using var detector = Detector([new("alpha-id", "alpha.exe")], () => processes);
+        using var detector = Detector([new("alpha-id", "alpha.exe")], _ => processes);
         var notifications = 0;
         detector.GameStarted += _ => throw new InvalidOperationException("test");
         detector.GameStarted += _ => notifications++;
@@ -200,7 +219,7 @@ public sealed class ProcessNameGameDetectorTests
     {
         using var detector = Detector(
             [new("alpha-id", "alpha.exe")],
-            () => [new(41, "alpha", null, StartTime(1))]);
+            _ => [new(41, "alpha", null, StartTime(1))]);
         var started = new List<DetectedGameProcess>();
         detector.GameStarted += started.Add;
 
@@ -217,7 +236,7 @@ public sealed class ProcessNameGameDetectorTests
         var path = GamePath("alpha.exe");
         var start = StartTime(1);
         IReadOnlyList<ProcessSnapshot> processes = [new(41, "alpha", path, start)];
-        using var detector = Detector([new("alpha-id", "alpha.exe", path)], () => processes);
+        using var detector = Detector([new("alpha-id", "alpha.exe", path)], _ => processes);
         var transitions = new List<string>();
         detector.GameStarted += _ => transitions.Add("start");
         detector.GameStopped += _ => transitions.Add("stop");
@@ -236,7 +255,7 @@ public sealed class ProcessNameGameDetectorTests
     {
         var path = GamePath("alpha.exe");
         IReadOnlyList<ProcessSnapshot> processes = [new(41, "alpha", path, StartTime(1))];
-        using var detector = Detector([new("alpha-id", "alpha.exe")], () => processes);
+        using var detector = Detector([new("alpha-id", "alpha.exe")], _ => processes);
         var transitions = new List<string>();
         detector.GameStarted += process => transitions.Add("start:" + process.ProcessStartTime);
         detector.GameStopped += process => transitions.Add("stop:" + process.ProcessStartTime);
@@ -252,15 +271,12 @@ public sealed class ProcessNameGameDetectorTests
             transitions);
     }
 
-    [Fact]
+    [WindowsFact]
     public void WindowsPathAndExecutableCasingDoesNotCreateTransitions()
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
         var path = GamePath("Alpha.exe");
         IReadOnlyList<ProcessSnapshot> processes = [new(41, "Alpha", path, StartTime(1))];
-        using var detector = Detector([new("alpha-id", "ALPHA.EXE")], () => processes);
+        using var detector = Detector([new("alpha-id", "ALPHA.EXE")], _ => processes);
         var transitions = 0;
         detector.GameStarted += _ => transitions++;
         detector.GameStopped += _ => transitions++;
@@ -281,7 +297,7 @@ public sealed class ProcessNameGameDetectorTests
         using var release = new ManualResetEventSlim();
         IReadOnlyList<ProcessSnapshot> processes =
             [new(41, "alpha", GamePath("alpha.exe"), StartTime(1))];
-        using var detector = Detector([new("alpha-id", "alpha.exe")], () => processes);
+        using var detector = Detector([new("alpha-id", "alpha.exe")], _ => processes);
         var transitions = new List<string>();
         detector.GameStarted += _ =>
         {
@@ -309,7 +325,7 @@ public sealed class ProcessNameGameDetectorTests
         using var release = new ManualResetEventSlim();
         using var detector = Detector(
             [new("alpha-id", "alpha.exe")],
-            () =>
+            _ =>
             [
                 new(41, "alpha", GamePath("one", "alpha.exe"), StartTime(1)),
                 new(42, "alpha", GamePath("two", "alpha.exe"), StartTime(2)),
@@ -341,7 +357,7 @@ public sealed class ProcessNameGameDetectorTests
         using var release = new ManualResetEventSlim();
         var detector = Detector(
             [new("alpha-id", "alpha.exe")],
-            () =>
+            _ =>
             [
                 new(41, "alpha", GamePath("one", "alpha.exe"), StartTime(1)),
                 new(42, "alpha", GamePath("two", "alpha.exe"), StartTime(2)),
@@ -370,7 +386,7 @@ public sealed class ProcessNameGameDetectorTests
         using var exited = new ManualResetEventSlim();
         var detector = Detector(
             [new("alpha-id", "alpha.exe")],
-            () => [new(41, "alpha", GamePath("alpha.exe"), StartTime(1))]);
+            _ => [new(41, "alpha", GamePath("alpha.exe"), StartTime(1))]);
         detector.GameStarted += _ =>
         {
             detector.Dispose();
@@ -384,7 +400,7 @@ public sealed class ProcessNameGameDetectorTests
 
     private static ProcessNameGameDetector Detector(
         IEnumerable<GameDetectionTarget> targets,
-        Func<IReadOnlyList<ProcessSnapshot>> probe)
+        Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> probe)
         => new(targets, probe, TimeSpan.FromHours(1));
 
     private static string GamePath(params string[] parts)

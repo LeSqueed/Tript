@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Collections.Immutable;
+using Tript.Core;
 
 namespace Tript.GameDiscovery;
 
@@ -45,7 +46,7 @@ public sealed record InstalledGame(
     {
         executablePath = string.Empty;
         return !string.IsNullOrWhiteSpace(filenameOrRelativePath)
-            && !Path.IsPathFullyQualified(filenameOrRelativePath)
+            && !FilePaths.IsFullyQualified(filenameOrRelativePath)
             && PathSafety.TryResolveLexicallyContained(fileSystem, InstallRoot, filenameOrRelativePath, out var candidate)
             && fileSystem.FileExists(candidate)
             && (executablePath = candidate).Length > 0;

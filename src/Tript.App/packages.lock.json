@@ -42,7 +42,10 @@
         }
       },
       "tript.gamediscovery": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[1.0.0, )"
+        }
       },
       "tript.media": {
         "type": "Project",
@@ -66,16 +69,6 @@
         "type": "Project",
         "dependencies": {
           "Tript.Core": "[1.0.0, )"
-        }
-      }
-    },
-    "net10.0/win-x64": {
-      "Microsoft.ML.OnnxRuntime": {
-        "type": "Transitive",
-        "resolved": "1.28.0",
-        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
-        "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
         }
       }
     }

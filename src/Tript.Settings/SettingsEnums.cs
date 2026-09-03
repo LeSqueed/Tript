@@ -59,7 +59,6 @@ public enum StartupVisibility
     Tray
 }
 
-// What clicking the native minimize button does.
 public enum MinimizeBehavior
 {
     Taskbar,
@@ -73,7 +72,6 @@ public enum CloseBehavior
     HideToTray
 }
 
-// Which capture path supplies the picture.
 public enum DisplayCaptureMethod
 {
     Auto,

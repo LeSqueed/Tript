@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Settings — logical pages: recording, buffer/replay, audio, capture, game. The buffer has its own
-// page; the audio page drives the multi-track model (track count, source→track routing, per-source
-// volume).
+// Settings — logical pages: recording, highlights, general, audio, capture, games. The highlights
+// page owns the replay buffer and the automatic-clip switch; the audio page drives the multi-track
+// model (track count, source→track routing, per-source volume).
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
-import { BufferPage } from '../settings/pages/BufferPage';
+import { HighlightsPage } from '../settings/pages/HighlightsPage';
 import { AudioPage } from '../settings/pages/AudioPage';
 import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
 import { GeneralPage } from '../settings/pages/GeneralPage';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
-  { id: 'general', label: 'General' },
   { id: 'recording', label: 'Recording' },
-  { id: 'buffer', label: 'Buffer' },
+  { id: 'buffer', label: 'Highlights' },
+  { id: 'general', label: 'General' },
   { id: 'audio', label: 'Audio' },
   { id: 'capture', label: 'Capture' },
-  { id: 'game', label: 'Game' },
+  { id: 'game', label: 'Games' },
 ];
 
 export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClient; builtInGameIds?: readonly string[] }) {
@@ -77,6 +77,7 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
           {page === 'recording' && (
           <RecordingPage
             settings={controller.settings.recording}
+            buffer={controller.settings.buffer}
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
@@ -86,8 +87,9 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
           />
           )}
           {page === 'buffer' && (
-          <BufferPage
+          <HighlightsPage
             settings={controller.settings.buffer}
+            recording={controller.settings.recording}
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
@@ -99,9 +101,11 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
           {page === 'capture' && (
           <CapturePage
             settings={controller.settings.capture}
+            game={controller.settings.game}
             update={controller.update}
             page={page}
             availableDisplays={controller.availableDisplays}
+            externalPushCount={controller.externalPushCount}
           />
           )}
           {page === 'game' && (
@@ -116,11 +120,14 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
             onBrowseExecutable={(requestId) => client.send('SelectGameExecutable', { requestId })}
             globalClipBeforeSeconds={controller.settings.recording.automaticClipBeforeSeconds}
             globalClipAfterSeconds={controller.settings.recording.automaticClipAfterSeconds}
+            globalRecordingMode={controller.settings.recording.mode}
+            automaticClipsEnabled={controller.settings.recording.automaticClipsEnabled === true}
           />
           )}
           {page === 'general' && (
           <GeneralPage
             settings={controller.settings.general}
+            recording={controller.settings.recording}
             update={controller.update}
             page={page}
           />

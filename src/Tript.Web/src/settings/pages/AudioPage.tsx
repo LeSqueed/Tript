@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The audio page drives the multi-track model:
+// The audio page: the plain default up front, the advanced tucked in the disclosure.
 //
+//   - The page opens by saying what the default is: microphone and desktop audio at system
+//     volume. The track routing below changes that.
 //   - Tracks are destinations, not devices. The user chooses how many audio tracks a recording
 //     has. A track is a place in the output file, not bound to a single device.
 //   - Sources are routed into tracks. Each track has one or more sources assigned to it, each
 //     with its own volume.
-//   - Inputs and outputs are both source types. Inputs are mics and other capture devices;
-//     outputs are speakers and playback devices — and game audio is an output source.
+//   - Inputs and outputs are both source types. Inputs are mics and other capture endpoints;
+//     outputs are speakers and playback endpoints, and game audio is an output source.
 //   - A track may carry several merged sources, and a source's volume is per-source, never
 //     per-track.
+//   - What happens to the recorded app's own audio output (Normal / Mute / Disable) is the one
+//     non-default knob, and it lives in the advanced disclosure at the bottom.
 //
 // The model: a track is `{ id, name, sources: AudioSource[] }`. A source references a device by
 // id (a device can be absent while its selection persists) and carries `kind`, `name` and
@@ -30,14 +34,19 @@ import type {
 import { Button, Field, SelectField, Slider, TextField } from '../../components/ui/controls';
 
 const OUTPUT_MODES: { value: AudioOutputMode; label: string }[] = [
-  { value: 'Normal', label: 'Normal — keep app audio as-is' },
-  { value: 'Mute', label: 'Mute — silence the app output while recording' },
-  { value: 'Disable', label: 'Disable — no app output at all while recording' },
+  { value: 'Normal', label: 'Normal (hear it as usual)' },
+  { value: 'Mute', label: 'Mute (silent while recording)' },
+  { value: 'Disable', label: 'Disable (off entirely while recording)' },
 ];
 
 const SOURCE_KIND_LABELS: Record<AudioSourceKind, string> = {
-  Input: 'Input',
-  Output: 'Output',
+  Input: 'Mic',
+  Output: 'Playback',
+};
+
+const SOURCE_KIND_TITLES: Record<AudioSourceKind, string> = {
+  Input: 'WASAPI capture endpoint (input)',
+  Output: 'WASAPI render endpoint (output)',
 };
 
 interface SourceOption {
@@ -186,13 +195,10 @@ export function AudioPage({
 
   return (
     <div className="settings-page" data-page="audio">
-      <Field label="Output mode" hint="How the app's own audio output is handled while recording.">
-        <SelectField
-          value={settings.outputMode}
-          onChange={(value) => update(page, { outputMode: value as AudioOutputMode })}
-          options={OUTPUT_MODES}
-        />
-      </Field>
+      <p className="settings-page-note">
+        With no custom tracks, Tript records the audio in OBS's programme mix. Add tracks below to
+        choose and adjust specific microphones or playback sources.
+      </p>
 
       <div className="audio-header">
         <h3 className="subheading">
@@ -202,7 +208,7 @@ export function AudioPage({
       </div>
 
       {tracks.length === 0 && (
-        <p className="muted small">No tracks yet — add one to start routing sources into it.</p>
+        <p className="muted small">No tracks yet. Add one to start routing sources into it.</p>
       )}
 
       {tracks.map((track, trackIndex) => {
@@ -235,7 +241,9 @@ export function AudioPage({
                       <span className="audio-source-name" title={device?.name ?? source.label ?? source.name}>
                         {device?.name ?? source.label ?? source.name}
                       </span>
-                      <span className="pill pill-muted">{SOURCE_KIND_LABELS[source.kind] ?? source.kind}</span>
+                      <span className="pill pill-muted" title={SOURCE_KIND_TITLES[source.kind]}>
+                        {SOURCE_KIND_LABELS[source.kind] ?? source.kind}
+                      </span>
                       {device && device.name !== (source.label ?? source.name) ? (
                         <span className="muted small">{device.id}</span>
                       ) : null}
@@ -296,9 +304,25 @@ export function AudioPage({
       })}
 
       <p className="settings-page-note">
-        A track is a destination in the output file, not a device — one track can carry several
-        merged sources, and each source's volume is adjusted independently.
+        A track is a place in the output file, not a device. One track can carry several merged
+        sources, and each source's volume is adjusted independently.
       </p>
+
+      <details className="settings-advanced">
+        <summary>Advanced</summary>
+        <div className="settings-advanced-body">
+          <Field
+            label="Audio output while recording"
+            hint="What happens to the recorded app's own audio output while Tript records."
+          >
+            <SelectField
+              value={settings.outputMode}
+              onChange={(value) => update(page, { outputMode: value as AudioOutputMode })}
+              options={OUTPUT_MODES}
+            />
+          </Field>
+        </div>
+      </details>
     </div>
   );
 }

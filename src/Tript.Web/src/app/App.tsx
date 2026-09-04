@@ -39,14 +39,20 @@ type PhotinoShellWindow = Window & {
   };
 };
 
-export function App({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
+export function App({
+  ipcOptions,
+  trainingFeatureEnabled = trainingEnabled,
+}: {
+  ipcOptions?: IpcClientOptions;
+  trainingFeatureEnabled?: boolean;
+}) {
   // Without the launch token every listener refuses this page: the socket, the videos, the
   // thumbnails. Rendering the shell anyway would be an empty library over a socket reconnecting
   // forever, which reads as a broken backend. Say what is wrong and open nothing.
   if (!hasSessionToken()) {
     return <MissingKeyNotice />;
   }
-  return <AppShell ipcOptions={ipcOptions} />;
+  return <AppShell ipcOptions={ipcOptions} trainingFeatureEnabled={trainingFeatureEnabled} />;
 }
 
 function MissingKeyNotice() {
@@ -64,7 +70,13 @@ function MissingKeyNotice() {
   );
 }
 
-function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
+function AppShell({
+  ipcOptions,
+  trainingFeatureEnabled,
+}: {
+  ipcOptions?: IpcClientOptions;
+  trainingFeatureEnabled: boolean;
+}) {
   const { client, connectionState } = useIpcClient(ipcOptions);
   // A key is present (App checked) but may no longer be accepted: the host mints a new one per
   // launch, so a tab left open across a restart 403s on everything and would otherwise just sit
@@ -77,6 +89,11 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
   const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
+  const [sessionPlayerOrigin, setSessionPlayerOrigin] = useState<{
+    recording: ContentItem;
+    navigation: ContentItem[];
+  } | null>(null);
+  const [sessionReturnRoute, setSessionReturnRoute] = useState<'library' | 'player'>('library');
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
   const [deleteLinkedHighlightsByDefault, setDeleteLinkedHighlightsByDefault] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -167,11 +184,13 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   const savedScrollTop = useRef(0);
   const overlayWasOpen = useRef(false);
 
-  const openSessionReview = useCallback((recording: ContentItem) => {
+  const openSessionReview = useCallback((recording: ContentItem, returnRoute: 'library' | 'player' = 'player') => {
     const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
     setSessionReview({ recording, clips });
+    setSessionReturnRoute(returnRoute);
+    setSessionPlayerOrigin(returnRoute === 'player' ? { recording, navigation: playerNavigation } : null);
     setRoute('session');
-  }, [items]);
+  }, [items, playerNavigation]);
 
   const openInPlayer = useCallback(
     (item: ContentItem, resultItems: ContentItem[]) => {
@@ -179,7 +198,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
       // A pending-video or live-capture session has no playable video, so the player is not the
       // destination: it is the review of the session's highlights (which only exist if it has any).
       if (item.videoMissing === true || item.recording === true) {
-        openSessionReview(item);
+        openSessionReview(item, 'library');
         return;
       }
       setPlayerItem(item);
@@ -336,6 +355,10 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
   }, [items, playerItem, closePlayer]);
 
   useEffect(() => {
+    if (sessionReview
+      && !items.some((item) => item.filePath === sessionReview.recording.filePath)) {
+      setRoute((current) => current === 'session' ? 'library' : current);
+    }
     setSessionReview((previous) => {
       if (!previous) {
         return previous;
@@ -354,12 +377,32 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     });
   }, [items]);
 
+  useEffect(() => {
+    if (!sessionPlayerOrigin) {
+      return;
+    }
+    const recording = items.find((item) => item.filePath === sessionPlayerOrigin.recording.filePath);
+    if (!recording) {
+      setSessionPlayerOrigin(null);
+      setSessionReview(null);
+      setPlayerItem(null);
+      setPlayerTitle('');
+      setPlayerNavigation([]);
+      setRoute((current) => current === 'player' || current === 'session' ? 'library' : current);
+      return;
+    }
+    if (recording !== sessionPlayerOrigin.recording) {
+      setSessionPlayerOrigin((previous) => previous ? { ...previous, recording } : null);
+    }
+  }, [items, sessionPlayerOrigin]);
+
   // Leaving for another destination closes whatever was open in the player route.
   const leaveFor = useCallback((next: Route) => {
     setRoute(next);
     setPlayerItem(null);
     if (next !== 'session') {
       setSessionReview(null);
+      setSessionPlayerOrigin(null);
     }
   }, []);
   const showLibrary = useCallback(() => {
@@ -381,6 +424,18 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
     }
     showLibrary();
   }, [playerReturnRoute, showLibrary]);
+  const backFromSession = useCallback(() => {
+    if (sessionReturnRoute === 'player' && sessionPlayerOrigin) {
+      setPlayerItem(sessionPlayerOrigin.recording);
+      setPlayerTitle(itemLabel(sessionPlayerOrigin.recording));
+      setPlayerNavigation(sessionPlayerOrigin.navigation);
+      setSessionReview(null);
+      setSessionPlayerOrigin(null);
+      setRoute('player');
+      return;
+    }
+    showLibrary();
+  }, [sessionPlayerOrigin, sessionReturnRoute, showLibrary]);
 
   return (
     <div className="app-shell">
@@ -409,7 +464,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
             <Icon name="settings" className="nav-glyph" />
             <span>Settings</span>
           </button>
-          {trainingEnabled && (
+          {trainingFeatureEnabled && (
             <button
               type="button"
               className={route === 'training' ? 'nav-item active' : 'nav-item'}
@@ -422,7 +477,11 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
           )}
         </nav>
         {route === 'player' && <span className="app-topbar-context">{playerTitle}</span>}
-        <RecorderBar client={client} connectionState={connectionState} />
+        <RecorderBar
+          client={client}
+          connectionState={connectionState}
+          trainingFeatureEnabled={trainingFeatureEnabled}
+        />
       </header>
       <main className="app-main">
         <ConnectionBanner reachability={reachability} />
@@ -454,7 +513,7 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
           {route === 'player' && playerItem && (
             <PlayerView
               client={client}
-              trainingEnabled={trainingEnabled}
+              trainingEnabled={trainingFeatureEnabled}
               source={source}
               item={playerItem}
               navigationItems={playerNavigation}
@@ -475,14 +534,15 @@ function AppShell({ ipcOptions }: { ipcOptions?: IpcClientOptions }) {
               recording={sessionReview.recording}
               clips={sessionReview.clips}
               client={client}
-              onBack={showLibrary}
+              onBack={backFromSession}
+              backLabel={sessionReturnRoute === 'player' ? 'Back to session' : 'Back to library'}
               onOpen={openSessionClip}
               onToggleFavorite={toggleFavorite}
               onDelete={requestSessionDelete}
             />
           )}
           {route === 'settings' && <SettingsView client={client} builtInGameIds={builtInGameIds} />}
-          {route === 'training' && trainingEnabled && <TrainingView client={client} />}
+          {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}
         </div>
       </main>
       {deleteConfirmation && (

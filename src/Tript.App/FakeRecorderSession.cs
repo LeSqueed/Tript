@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Text.Json;
 using Tript.Obs;
 using Tript.Recorder;
 using Tript.Settings;
@@ -14,6 +15,7 @@ namespace Tript.App;
 // exercise the host's stopping timeout without a muxer.
 internal sealed class FakeRecorderSession : IRecorderSession
 {
+    internal const string SettingsTraceEnvironmentVariable = "TRIPT_FAKE_RECORDER_SETTINGS_TRACE";
     private readonly FakeOutput _output = new();
 
     internal bool CompleteStopSynchronously { get; set; } = true;
@@ -22,6 +24,11 @@ internal sealed class FakeRecorderSession : IRecorderSession
     {
         _output.LastSettings = settings;
         _output.CompleteStopSynchronously = CompleteStopSynchronously;
+        if (Environment.GetEnvironmentVariable(SettingsTraceEnvironmentVariable) is { Length: > 0 } tracePath)
+        {
+            File.AppendAllText(tracePath,
+                JsonSerializer.Serialize(new { settings.Display }) + Environment.NewLine);
+        }
         return _output;
     }
 

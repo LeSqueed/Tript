@@ -4,8 +4,8 @@
 namespace Tript.Detection;
 
 // The single compatibility gate used by import, training, installation, and runtime startup. A
-// model's class order is part of its binary contract; events.json may add behaviour, but it cannot
-// change what an existing class means.
+// model's class order is part of its binary contract. events.json may append classes for a newer
+// model, but it cannot remove or change the identity of any class the loaded model emits.
 public static class ModelEventCompatibility
 {
     public static string? FindMismatch(IReadOnlyList<EventDefinition> definitions,
@@ -23,16 +23,14 @@ public static class ModelEventCompatibility
         var seenClassIds = new HashSet<int>();
         foreach (var definition in definitions)
         {
-            if (definition.ClassId < 0 || definition.ClassId >= classCount)
-            {
-                return $"classId {definition.ClassId} ('{definition.Name}') falls outside the model's " +
-                    $"{classCount} classes";
-            }
+            if (definition.ClassId < 0)
+                return $"classId {definition.ClassId} ('{definition.Name}') is negative";
 
             if (!seenClassIds.Add(definition.ClassId))
                 return $"classId {definition.ClassId} is duplicated in events.json";
 
-            if (classNames is null)
+            // Extra event definitions are safe: an older model simply cannot emit those classes.
+            if (definition.ClassId >= classCount || classNames is null)
                 continue;
 
             if (!classNames.TryGetValue(definition.ClassId, out var modelName))
@@ -48,7 +46,7 @@ public static class ModelEventCompatibility
             }
         }
 
-        if (definitions.Count != classCount)
+        if (definitions.Count < classCount)
         {
             return $"model declares {classCount} classes but events.json contains " +
                 $"{definitions.Count} definitions";

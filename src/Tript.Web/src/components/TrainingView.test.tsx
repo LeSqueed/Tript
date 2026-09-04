@@ -117,7 +117,7 @@ describe('TrainingView sample gallery', () => {
     act(() => emit('training', { training }));
     act(() => emit('trainingProgress', {
       gameId: 'game-1',
-      status: 'started',
+      status: 'progress',
       message: 'Training is running in a console window.',
     }));
 
@@ -196,12 +196,35 @@ describe('TrainingView sample gallery', () => {
       getData: (type: string) => transferred.get(type) ?? '',
     };
     const eventRow = screen.getByText('Event').closest('.training-tree-event')!;
-    const groupFolder = screen.getByText('HUD').closest('.training-event-folder')!;
+    const groupFolder = screen.getByLabelText('HUD events').closest('.training-event-folder')!;
     fireEvent.dragStart(eventRow, { dataTransfer });
     fireEvent.drop(groupFolder, { dataTransfer });
     expect(client.send).toHaveBeenCalledWith('UpdateTrainingEvents', expect.objectContaining({
       events: [expect.objectContaining({ regionGroupId: 1 })],
     }));
+  });
+
+  it('warns that changed regions need a new install when a model exists', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      model: { inputWidth: 640, inputHeight: 640 },
+      regionGroups: [{
+        id: 7, name: 'HUD', screenRegionX: 0.1, screenRegionY: 0.1,
+        screenRegionW: 0.3, screenRegionH: 0.3,
+      }],
+    } satisfies TrainingMessage }));
+
+    const group = screen.getByLabelText('HUD events').closest('.training-event-folder')!;
+    fireEvent.click(within(group as HTMLElement).getByRole('button', { name: 'Region' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear region' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save region' }));
+
+    expect(screen.getByRole('status').textContent).toContain('installed model still uses its previous regions');
   });
 
   it('deletes an event optimistically and clears the busy state once saved', () => {
@@ -224,13 +247,104 @@ describe('TrainingView sample gallery', () => {
     expect(client.send).toHaveBeenCalledWith('UpdateTrainingEvents', expect.objectContaining({
       events: [expect.objectContaining({ id: 2, name: 'Keep' })],
     }));
+    const requestId = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingEvents')?.[1]?.requestId;
 
-    act(() => emit('trainingProgress', { gameId: 'game-1', status: 'eventDeleteProgress', message: 'x 50%', percent: 50 }));
-    act(() => emit('trainingProgress', { gameId: 'game-1', status: 'eventsUpdated', message: 'Training events updated.' }));
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1', requestId, status: 'eventDeleteProgress', message: 'x 50%', percent: 50,
+    }));
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1', requestId, status: 'eventsUpdated', message: 'Training events updated.',
+    }));
     act(() => emit('training', { training: {
       gameId: 'game-1', events: [{ id: 2, classId: 0, name: 'Keep', type: 'Trigger' }], samples: [],
     } satisfies TrainingMessage }));
     expect(screen.queryByText(/Deleting Delete Me event/)).toBeNull();
+  });
+
+  it('keeps the newest event and group edits through out-of-order results and snapshots', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    const base: TrainingMessage = {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      regionGroups: [
+        { id: 1, name: 'HUD', screenRegionX: null, screenRegionY: null, screenRegionW: null, screenRegionH: null },
+        { id: 2, name: 'Feed', screenRegionX: null, screenRegionY: null, screenRegionW: null, screenRegionH: null },
+      ],
+    };
+    act(() => emit('training', { training: base }));
+
+    const transferred = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: (type: string, value: string) => transferred.set(type, value),
+      getData: (type: string) => transferred.get(type) ?? '',
+    };
+    const dragEventTo = (folder: string) => {
+      const eventRow = screen.getByText('Event').closest('.training-tree-event')!;
+      const folderSection = screen.getByLabelText(`${folder} events`).closest('.training-event-folder')!;
+      fireEvent.dragStart(eventRow, { dataTransfer });
+      fireEvent.drop(folderSection, { dataTransfer });
+    };
+    const eventFolder = () => screen.getByText('Event')
+      .closest('.training-event-folder')!
+      .querySelector('.training-folder-events')!
+      .getAttribute('aria-label')!;
+    dragEventTo('HUD');
+    dragEventTo('Feed');
+    const eventRequests = client.send.mock.calls.filter(([method]) => method === 'UpdateTrainingEvents');
+    const firstEventRequest = eventRequests.at(-2)?.[1];
+    const latestEventRequest = eventRequests.at(-1)?.[1];
+
+    act(() => emit('trainingEventsUpdateResult', { requestId: firstEventRequest.requestId, success: true }));
+    act(() => emit('training', {
+      requestId: firstEventRequest.requestId,
+      updateKind: 'events',
+      training: { ...base, events: firstEventRequest.events },
+    }));
+    expect(eventFolder()).toBe('Feed events');
+
+    act(() => emit('training', { training: base }));
+    expect(eventFolder()).toBe('Feed events');
+    act(() => emit('trainingEventsUpdateResult', { requestId: latestEventRequest.requestId, success: true }));
+    act(() => emit('training', {
+      requestId: latestEventRequest.requestId,
+      updateKind: 'events',
+      training: { ...base, events: latestEventRequest.events },
+    }));
+    act(() => emit('training', {
+      requestId: firstEventRequest.requestId,
+      updateKind: 'events',
+      training: { ...base, events: firstEventRequest.events },
+    }));
+    expect(eventFolder()).toBe('Feed events');
+
+    fireEvent.change(screen.getByLabelText('New region group name'), { target: { value: 'Minimap' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create group' }));
+    fireEvent.change(screen.getByLabelText('New region group name'), { target: { value: 'Score' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create group' }));
+    const groupRequests = client.send.mock.calls.filter(([method]) => method === 'UpdateTrainingRegionGroups');
+    const firstGroupRequest = groupRequests.at(-2)?.[1];
+    const latestGroupRequest = groupRequests.at(-1)?.[1];
+
+    act(() => emit('training', {
+      requestId: firstGroupRequest.requestId,
+      updateKind: 'regionGroups',
+      training: { ...base, regionGroups: firstGroupRequest.regionGroups },
+    }));
+    expect(screen.getByLabelText('Score events')).toBeTruthy();
+    act(() => emit('trainingRegionGroupsUpdateResult', {
+      requestId: latestGroupRequest.requestId, success: true,
+    }));
+    act(() => emit('training', {
+      requestId: latestGroupRequest.requestId,
+      updateKind: 'regionGroups',
+      training: { ...base, regionGroups: latestGroupRequest.regionGroups },
+    }));
+    expect(screen.getByLabelText('Score events')).toBeTruthy();
   });
 
   it('loads a labeled sample for the event whose region is being edited', async () => {
@@ -439,6 +553,35 @@ describe('TrainingView training run feedback', () => {
       // Three completed epochs at ~10s each, one of four left.
       expect(screen.getByText('30s elapsed')).toBeTruthy();
       expect(screen.getByText('~10s remaining')).toBeTruthy();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('leaves sparkline gaps for skipped epochs and uses the recent median pace', () => {
+    const { client, emit } = createClient();
+    const clock = vi.spyOn(Date, 'now');
+    const times = [1_000_000, 1_100_000, 1_110_000, 1_120_000];
+    clock.mockImplementation(() => times.shift() ?? 1_120_000);
+    try {
+      render(<TrainingView client={client} />);
+      act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+      act(() => emit('training', { training: {
+        gameId: 'game-1', events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+        samples: [], trainingActive: true, trainingPhase: 'training',
+      } satisfies TrainingMessage }));
+      for (const epoch of [1, 3, 4, 5]) {
+        act(() => emit('trainingProgress', {
+          gameId: 'game-1', status: 'progress', message: `Epoch ${epoch}/7`,
+          details: { epoch, epochs: 7, loss: 1 / epoch, map50: null },
+        }));
+      }
+
+      const points = screen.getByRole('img', { name: 'Training metrics per epoch' })
+        .querySelector('.training-sparkline-loss')?.getAttribute('points');
+      expect(points).toMatch(/^0\.00,.* 33\.33,/);
+      expect(screen.getByText('50s elapsed')).toBeTruthy();
+      expect(screen.getByText('~20s remaining')).toBeTruthy();
     } finally {
       clock.mockRestore();
     }

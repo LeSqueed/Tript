@@ -83,11 +83,11 @@ public sealed class GrowingFileStreamingTests
     {
         path = host.WithToken(path);
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", TestPorts.Content);
+        await client.ConnectAsync("localhost", host.ContentPort);
         await using var stream = client.GetStream();
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(
-            $"GET {path} HTTP/1.1\r\nHost: localhost:{TestPorts.Content}\r\n\r\n"));
+            $"GET {path} HTTP/1.1\r\nHost: localhost:{host.ContentPort}\r\n\r\n"));
 
         using var response = new MemoryStream();
         var buffer = new byte[64 * 1024];

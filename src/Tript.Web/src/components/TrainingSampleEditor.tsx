@@ -6,6 +6,7 @@ import type {
   TrainingLabelSuggestionsMessage,
   TrainingRegionGroup,
   TrainingSampleMessage,
+  TrainingUpdateResultMessage,
 } from '../ipc/protocol';
 import { Button } from './ui/controls';
 import { TrainingEventEditor } from './TrainingEventEditor';
@@ -27,8 +28,8 @@ interface TrainingSampleEditorProps {
   sample: TrainingSampleMessage;
   events: TrainingEventDefinition[];
   regionGroups?: TrainingRegionGroup[];
-  onEventsChange?: (events: TrainingEventDefinition[]) => void;
-  onRegionGroupsChange?: (groups: TrainingRegionGroup[]) => void;
+  onEventsChange?: (events: TrainingEventDefinition[], requestId: string) => void;
+  onRegionGroupsChange?: (groups: TrainingRegionGroup[], requestId: string) => void;
   onNavigate?: (direction: 'previous' | 'next') => void;
   canNavigatePrevious?: boolean;
   canNavigateNext?: boolean;
@@ -82,6 +83,8 @@ export function TrainingSampleEditor({
   const [labels, setLabels] = useState<TrainingLabel[]>(sample.sample.labels);
   const [savedLabels, setSavedLabels] = useState<TrainingLabel[]>(sample.sample.labels);
   const [showSaveNotice, setShowSaveNotice] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionConfidence, setSuggestionConfidence] = useState<Record<number, number>>({});
@@ -101,6 +104,8 @@ export function TrainingSampleEditor({
   const imageRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const suggestionRequestRef = useRef<string | null>(null);
+  const pendingSaveRef = useRef<{ requestId: string; labels: TrainingLabel[] } | null>(null);
+  const requestCounterRef = useRef(0);
   const labelsAreDirty = JSON.stringify(labels) !== JSON.stringify(savedLabels);
   const invalidLabelIndexes = new Set(labels.flatMap((label, index) =>
     isLabelInsideEffectiveRegion(label, eventDefinitions, groupDefinitions) ? [] : [index]));
@@ -122,6 +127,9 @@ export function TrainingSampleEditor({
     setLabels(sample.sample.labels);
     setSavedLabels(sample.sample.labels);
     setShowSaveNotice(false);
+    setSaveError(null);
+    setIsSaving(false);
+    pendingSaveRef.current = null;
     setSuggestionNotice(null);
     setIsSuggesting(false);
     setSuggestionConfidence({});
@@ -158,14 +166,31 @@ export function TrainingSampleEditor({
         return [...current, ...additions.map((suggestion) => suggestion.label)];
       });
     });
+    const removeSaveResult = client.on('trainingSampleUpdateResult', (content) => {
+      const message = content as TrainingUpdateResultMessage;
+      const pending = pendingSaveRef.current;
+      if (!pending || message.requestId !== pending.requestId) return;
+      pendingSaveRef.current = null;
+      setIsSaving(false);
+      if (message.success) {
+        setSavedLabels(pending.labels);
+        setSaveError(null);
+        setShowSaveNotice(true);
+      } else {
+        setSaveError(message.error ?? 'Could not save labels');
+      }
+    });
     const removeError = client.on('error', (content) => {
-      if (suggestionRequestRef.current === null) return;
-      suggestionRequestRef.current = null;
-      setIsSuggesting(false);
-      setSuggestionNotice((content as { message?: string }).message ?? 'Could not suggest labels');
+      const message = (content as { message?: string }).message;
+      if (suggestionRequestRef.current !== null) {
+        suggestionRequestRef.current = null;
+        setIsSuggesting(false);
+        setSuggestionNotice(message ?? 'Could not suggest labels');
+      }
     });
     return () => {
       removeSuggestions();
+      removeSaveResult();
       removeError();
     };
   }, [client, gameId, sample.sample.id]);
@@ -322,9 +347,16 @@ export function TrainingSampleEditor({
   };
 
   const saveLabels = () => {
-    client.send('UpdateTrainingSample', { gameId, sampleId: sample.sample.id, labels });
-    setSavedLabels(labels.map((label) => ({ ...label })));
-    setShowSaveNotice(true);
+    if (isSaving) return;
+    const submittedLabels = labels.map((label) => ({ ...label }));
+    const requestId = `sample-${sample.sample.id}-${++requestCounterRef.current}`;
+    pendingSaveRef.current = { requestId, labels: submittedLabels };
+    setIsSaving(true);
+    setSaveError(null);
+    setShowSaveNotice(false);
+    client.send('UpdateTrainingSample', {
+      gameId, sampleId: sample.sample.id, requestId, labels: submittedLabels,
+    });
   };
 
   const navigate = (direction: 'previous' | 'next') => {
@@ -355,8 +387,9 @@ export function TrainingSampleEditor({
       : [...eventDefinitions, nextEvent];
     setEventDefinitions(next);
     setClassId(String(nextEvent.classId));
-    if (onEventsChange) onEventsChange(next);
-    else client.send('UpdateTrainingEvents', { gameId, events: next });
+    const requestId = `events-editor-${++requestCounterRef.current}`;
+    if (onEventsChange) onEventsChange(next, requestId);
+    else client.send('UpdateTrainingEvents', { gameId, requestId, events: next });
     setEventDraft(null);
   };
 
@@ -365,8 +398,9 @@ export function TrainingSampleEditor({
       ? { ...event, regionGroupId: value ? Number(value) : null }
       : event);
     setEventDefinitions(next);
-    if (onEventsChange) onEventsChange(next);
-    else client.send('UpdateTrainingEvents', { gameId, events: next });
+    const requestId = `events-editor-${++requestCounterRef.current}`;
+    if (onEventsChange) onEventsChange(next, requestId);
+    else client.send('UpdateTrainingEvents', { gameId, requestId, events: next });
   };
 
   const openRegion = (event: TrainingEventDefinition) => {
@@ -382,13 +416,15 @@ export function TrainingSampleEditor({
     if (regionDraft?.targetType === 'group') {
       const next = groupDefinitions.map((group) => group.id === target.id ? target as TrainingRegionGroup : group);
       setGroupDefinitions(next);
-      if (onRegionGroupsChange) onRegionGroupsChange(next);
-      else client.send('UpdateTrainingRegionGroups', { gameId, regionGroups: next });
+      const requestId = `region-groups-editor-${++requestCounterRef.current}`;
+      if (onRegionGroupsChange) onRegionGroupsChange(next, requestId);
+      else client.send('UpdateTrainingRegionGroups', { gameId, requestId, regionGroups: next });
     } else {
       const next = eventDefinitions.map((event) => event.id === target.id ? target as TrainingEventDefinition : event);
       setEventDefinitions(next);
-      if (onEventsChange) onEventsChange(next);
-      else client.send('UpdateTrainingEvents', { gameId, events: next });
+      const requestId = `events-editor-${++requestCounterRef.current}`;
+      if (onEventsChange) onEventsChange(next, requestId);
+      else client.send('UpdateTrainingEvents', { gameId, requestId, events: next });
     }
     setRegionDraft(null);
   };
@@ -511,7 +547,8 @@ export function TrainingSampleEditor({
               Delete frame
             </Button>
             <Button variant="ghost" onClick={deleteSelected} disabled={selectedIndex === null}>Delete label</Button>
-            <Button onClick={saveLabels}>Save labels</Button>
+            {saveError && <span className="training-label-warning" role="alert">{saveError}</span>}
+            <Button onClick={saveLabels} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save labels'}</Button>
           </div>
         </footer>
       </section>

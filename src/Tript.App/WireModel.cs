@@ -181,6 +181,8 @@ internal sealed class CreateAutomaticClipsParameters
 internal sealed class StartRecordingParameters
 {
     public string? GameId { get; set; }
+    public bool? ApplyDisplay { get; set; }
+    public string? DisplayId { get; set; }
 }
 
 internal sealed class OpenFileLocationParameters
@@ -359,6 +361,17 @@ internal sealed class TrainingGameParameters
     public string GameId { get; set; } = string.Empty;
 }
 
+internal sealed class AvailableRecordingModelsMessage
+{
+    public List<AvailableRecordingModel> Models { get; set; } = [];
+}
+
+internal sealed class AvailableRecordingModel
+{
+    public string GameId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
 internal sealed class ImportTrainingParameters
 {
     public string GameId { get; set; } = string.Empty;
@@ -404,6 +417,8 @@ internal sealed class UpdateTrainingSampleParameters
 
     public string SampleId { get; set; } = string.Empty;
 
+    public string RequestId { get; set; } = string.Empty;
+
     public List<TrainingLabelParameters> Labels { get; set; } = [];
 }
 
@@ -411,12 +426,16 @@ internal sealed class UpdateTrainingEventsParameters
 {
     public string GameId { get; set; } = string.Empty;
 
+    public string RequestId { get; set; } = string.Empty;
+
     public List<EventDefinition> Events { get; set; } = [];
 }
 
 internal sealed class UpdateTrainingRegionGroupsParameters
 {
     public string GameId { get; set; } = string.Empty;
+
+    public string RequestId { get; set; } = string.Empty;
 
     public List<Training.TrainingRegionGroup> RegionGroups { get; set; } = [];
 }

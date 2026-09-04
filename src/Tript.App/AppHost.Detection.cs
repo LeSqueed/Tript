@@ -332,7 +332,7 @@ internal sealed partial class AppHost
             if (!_detectedGames.Contains(owner))
                 return;
 
-            StartRecordingLocked(gameId, owner);
+            _ = StartRecordingLocked(gameId, owner);
             // The start clears the process owner when it does not become a recording. A process that
             // is still running never fires GameStopped, so without this the detected badge would
             // linger for the life of the process even though nothing recorded.
@@ -482,24 +482,27 @@ internal sealed partial class AppHost
             _clipTitles.SaveGame(Path.GetFileName(clipFile), game, gameId);
     }
 
-    private void StartDetection(string gameId)
+    private bool StartDetection(string gameId)
     {
         _detectionHost?.Stop();
         _detectionHost?.Dispose();
         _detectionHost = null;
+        _activeDetectionGameId = null;
 
         var detector = new VisualEventDetectorAdapter(new VisualEventDetector());
         _detectionHost = new DetectionHost(detector, onAutomaticClipBookmark: RememberAutomaticClipBookmark);
         if (_detectionHost.Start(gameId))
         {
+            _activeDetectionGameId = gameId;
             PushGameList();
-            return;
+            return true;
         }
 
         _detectionHost.Dispose();
         _detectionHost = null;
         Log.Warning("AppHost: automatic detection did not start for {GameId}; recording continues without automatic bookmarks",
             gameId);
+        return false;
     }
 
     private void StopDetection()
@@ -507,6 +510,7 @@ internal sealed partial class AppHost
         _detectionHost?.Stop();
         _detectionHost?.Dispose();
         _detectionHost = null;
+        _activeDetectionGameId = null;
     }
 
     private void EnsureManagedModel(string gameId)
@@ -535,27 +539,33 @@ internal sealed partial class AppHost
             if (_shuttingDown)
                 throw new OperationCanceledException(cancellationToken);
 
-            var restart = IsRecording && string.Equals(_currentGameId, gameId,
-                StringComparison.OrdinalIgnoreCase);
-            if (restart)
-                StopDetection();
-
-            try
-            {
-                ModelService.InvalidateModel(gameId);
-                GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, GameModelPaths.ModelsRoot);
-                if (restart)
-                    StartDetection(gameId);
-            }
-            catch
-            {
-                if (restart)
-                    StartDetection(gameId);
-                throw;
-            }
+            ActivateDownloadedModelCore(gameId, _activeDetectionGameId, StopDetection,
+                () =>
+                {
+                    ModelService.InvalidateModel(gameId);
+                    GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, GameModelPaths.ModelsRoot);
+                }, StartDetection);
         }
 
         return Task.CompletedTask;
+    }
+
+    internal static void ActivateDownloadedModelCore(string gameId, string? activeDetectionGameId,
+        Action stopDetection, Action install, Func<string, bool> startDetection)
+    {
+        var restart = string.Equals(activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase);
+        if (restart)
+            stopDetection();
+
+        try
+        {
+            install();
+        }
+        finally
+        {
+            if (restart)
+                startDetection(gameId);
+        }
     }
 
     private void OnModelStatusChanged(IReadOnlyList<GameModelStatus> statuses) =>

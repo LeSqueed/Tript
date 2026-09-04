@@ -38,7 +38,6 @@ public enum NotificationKind
 // Every state push is a full push, so the frontend converges to a consistent view.
 internal sealed partial class AppHost : IDisposable
 {
-    private const string StartupGameId = "Overwatch";
 
     private readonly AppOptions _options;
     private readonly SettingsStore _settingsStore;
@@ -126,6 +125,10 @@ internal sealed partial class AppHost : IDisposable
     private readonly HashSet<Guid> _liveHighlightBookmarkIds = [];
     private DateTime _recordingStartUtc;
     private bool _liveHighlightsEnabled;
+    // The effective automatic-clip/live-highlight gate decided when this session started. Kept
+    // separate from _liveHighlightsEnabled: that flag is already cleared by the time the recording
+    // is finalized, so the post-stop clip cut must read the value the session began with.
+    private bool _liveHighlightsEnabledAtSessionStart;
     private CancellationTokenSource? _captureWaitCancellation;
     private int _recordingStopRequested;
     private readonly DetectedGameTracker _detectedGames = new();
@@ -255,6 +258,7 @@ internal sealed partial class AppHost : IDisposable
         : null;
 
     private string? _currentGameId;
+    private string? _activeDetectionGameId;
     private string? _recordingProcessOwner;
 
     // The single root everything content lives under: sessions, clips, the metadata tree and the
@@ -894,6 +898,7 @@ internal sealed partial class AppHost : IDisposable
             {
                 recording,
                 game,
+                activeModelGameId = _activeDetectionGameId,
                 // When the current recording started, in unix seconds like every other time on this
                 // wire. Without it a UI that connects mid-session can only count from the moment it
                 // connected, which for an 8-hour recording is a confidently wrong number — worse

@@ -81,6 +81,19 @@ internal sealed class TrainingRunner
     private readonly object _gate = new();
     private Process? _process;
 
+    internal static void ValidateEpochs(int epochs)
+    {
+        if (epochs <= 0)
+            throw new ArgumentOutOfRangeException(nameof(epochs), "Epochs must be positive.");
+    }
+
+    internal static void ValidateAugmentCopies(int augmentCopies)
+    {
+        if (augmentCopies < 0)
+            throw new ArgumentOutOfRangeException(nameof(augmentCopies),
+                "Augmented copies per crop must be non-negative.");
+    }
+
     // Phase one: build the dataset from the editable samples. This is the only phase that reads
     // samples/, events.json and regionGroups.json, so the caller keeps the workspace gate for it —
     // it is also the phase the UI shows the loading modal for.
@@ -90,8 +103,7 @@ internal sealed class TrainingRunner
     {
         if (imageSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(imageSize));
-        if (augmentCopies < 0)
-            throw new ArgumentOutOfRangeException(nameof(augmentCopies));
+        ValidateAugmentCopies(augmentCopies);
 
         var (python, exportScript, _) = ResolveTrainingEnvironment();
         if (!Directory.Exists(workspace.SamplesPath)
@@ -118,8 +130,7 @@ internal sealed class TrainingRunner
     {
         if (imageSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(imageSize));
-        if (epochs <= 0)
-            throw new ArgumentOutOfRangeException(nameof(epochs));
+        ValidateEpochs(epochs);
 
         var (python, _, trainScript) = ResolveTrainingEnvironment();
 

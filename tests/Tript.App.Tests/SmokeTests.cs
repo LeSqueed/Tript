@@ -105,11 +105,109 @@ public sealed class SmokeTests : IDisposable
         Assert.Equal("state", startMethod);
         Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
 
-        var expected = Path.Combine(outputRoot, "Overwatch", "sessions");
+        var expected = Path.Combine(outputRoot, "sessions");
         Assert.True(Directory.Exists(expected), $"The configured output directory was not created: {expected}");
         // Sessions are flat inside the game folder: the timestamp is in the file name, so there is no date subfolder.
         Assert.Empty(Directory.GetDirectories(expected));
 
+        await host.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task StartRecording_withStaleGameId_clearsGameAttributionForDesktopCapture()
+    {
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"StartRecording","parameters":{"gameId":"Overwatch"}}""");
+        var (method, content) = await host.ReceiveAsyncParsed();
+
+        Assert.Equal("state", method);
+        var state = content.GetProperty("state");
+        Assert.True(state.GetProperty("recording").GetBoolean());
+        Assert.False(state.TryGetProperty("game", out var _ignoredGame));
+        Assert.True(Directory.Exists(Path.Combine(_contentRoot, "sessions")));
+        Assert.False(Directory.Exists(Path.Combine(_contentRoot, "Overwatch", "sessions")));
+
+        await host.SendAsync("""{"method":"StopRecording"}""");
+        await host.ReceiveAsyncParsed();
+        await host.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task StartRecording_inGameModeWithoutDetectedProcess_reportsSpecificError()
+    {
+        var seeded = new Tript.Settings.Settings
+        {
+            Capture = { Method = Tript.Settings.DisplayCaptureMethod.Game },
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        File.WriteAllText(_settingsPath, Tript.Settings.SettingsSerialization.Serialize(seeded));
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"StartRecording","parameters":{"gameId":"Overwatch"}}""");
+        var (method, content) = await host.ReceiveAsyncParsed();
+
+        Assert.Equal("error", method);
+        Assert.Equal(
+            "Recording did not start because no game is detected. Set the capture method to Auto or Display to record the desktop.",
+            content.GetProperty("message").GetString());
+
+        await host.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task OneOffDisplayOverride_doesNotMutateSavedDisplay()
+    {
+        var seeded = new Tript.Settings.Settings
+        {
+            Capture =
+            {
+                Method = Tript.Settings.DisplayCaptureMethod.Display,
+                Display = "saved-display",
+                DisplayLabel = "Saved display",
+            },
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        File.WriteAllText(_settingsPath, Tript.Settings.SettingsSerialization.Serialize(seeded));
+        var settingsTrace = Path.Combine(_contentRoot, "fake-recorder-settings.jsonl");
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath,
+            fakeRecorderSettingsTrace: settingsTrace);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""
+            {"method":"StartRecording","parameters":{"applyDisplay":true,"displayId":"one-off-display"}}
+            """);
+        var (method, content) = await host.ReceiveAsyncParsed();
+        Assert.Equal("state", method);
+        Assert.True(content.GetProperty("state").GetProperty("recording").GetBoolean());
+
+        var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath)).RootElement.GetProperty("capture");
+        Assert.Equal("saved-display", onDisk.GetProperty("display").GetString());
+        Assert.Equal("Saved display", onDisk.GetProperty("displayLabel").GetString());
+
+        await host.SendAsync("""{"method":"StopRecording"}""");
+        await host.ReceiveAsyncParsed();
+
+        await host.SendAsync("""{"method":"StartRecording"}""");
+        var (secondMethod, secondContent) = await host.ReceiveAsyncParsed();
+        Assert.Equal("state", secondMethod);
+        Assert.True(secondContent.GetProperty("state").GetProperty("recording").GetBoolean());
+
+        var effectiveDisplays = File.ReadAllLines(settingsTrace)
+            .Select(line => JsonDocument.Parse(line).RootElement.GetProperty("Display").GetString())
+            .ToList();
+        Assert.Equal(["one-off-display", "saved-display"], effectiveDisplays);
+
+        await host.SendAsync("""{"method":"StopRecording"}""");
+        await host.ReceiveAsyncParsed();
         await host.ShutdownAsync();
     }
 

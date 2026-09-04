@@ -110,19 +110,39 @@ public class ModelClassCountTests
         Assert.Null(VisualEventDetector.FindClassMapMismatch(Definitions(), 7, names));
     }
 
-    // The exact edit the old code could not survive: one more entry than the model has classes.
+    // A newly appended event is safe for an older model: the decoder still uses the model's class
+    // count and the model can never emit the additional class.
     [Fact]
-    public void FindClassMapMismatch_RejectsAClassIdBeyondTheModelsClasses()
+    public void FindClassMapMismatch_AcceptsAClassIdBeyondTheModelsClasses()
     {
         var definitions = Definitions();
         definitions.Add(Def(7, "Class seven"));
 
-        var mismatch = VisualEventDetector.FindClassMapMismatch(
-            definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames));
+        Assert.Null(VisualEventDetector.FindClassMapMismatch(
+            definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames)));
+    }
 
-        Assert.NotNull(mismatch);
-        Assert.Contains("7", mismatch);
-        Assert.Contains("Class seven", mismatch);
+    [Fact]
+    public void RuntimeRegions_ExcludeDefinitionsBeyondTheModelsClasses()
+    {
+        var definitions = new List<EventDefinition>
+        {
+            new()
+            {
+                ClassId = 0, ScreenRegionX = 0.1f, ScreenRegionY = 0.2f,
+                ScreenRegionW = 0.3f, ScreenRegionH = 0.4f,
+            },
+            // An appended class with no region would otherwise add a full-frame inference pass,
+            // duplicating detections emitted for the older model's region.
+            new() { ClassId = 1 },
+        };
+
+        var group = Assert.Single(VisualEventDetector.BuildRuntimeRegionGroups(definitions, 1));
+
+        Assert.Equal(0.1f, group.X);
+        Assert.Equal(0.2f, group.Y);
+        Assert.Equal(0.3f, group.W);
+        Assert.Equal(0.4f, group.H);
     }
 
     // The shape check cannot see this one — the count still matches, only the meaning moved.
@@ -140,15 +160,16 @@ public class ModelClassCountTests
         Assert.Contains("Class two", mismatch);
     }
 
-    // Without a class map the names cannot be checked, but the count still can.
+    // Without a class map names cannot be checked. Appended definitions remain safe because the
+    // model output shape, rather than events.json, controls the decoder stride.
     [Fact]
-    public void FindClassMapMismatch_WithoutAModelClassMap_StillBoundsChecksClassIds()
+    public void FindClassMapMismatch_WithoutAModelClassMap_AcceptsAppendedClassIds()
     {
         var definitions = Definitions();
         Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
 
         definitions.Add(Def(9, "Class nine"));
-        Assert.NotNull(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
+        Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
     }
 
     // Fail loudly rather than skip, matching InputTensorReuseTests: this is the assertion that ties

@@ -95,10 +95,7 @@ internal static class TrainingLabelSuggestionFilter
             // producing out-of-bounds coordinates Ultralytics silently drops. Only offer boxes fully
             // inside the event's region; an event without one crops the whole frame, so any box fits.
             regions.TryGetValue(detection.ClassId, out var region);
-            if (region is not null
-                && (detection.X < region.Value.X || detection.Y < region.Value.Y
-                    || detection.X + detection.Width > region.Value.X + region.Value.Width
-                    || detection.Y + detection.Height > region.Value.Y + region.Value.Height))
+            if (region is not null && !TrainingRegionResolver.Contains(region.Value, label))
                 continue;
 
             var box = ToBox(label);
@@ -307,10 +304,29 @@ internal sealed class TrainingSampleStore
         if (!Directory.Exists(_workspace.SamplesPath))
             return [];
 
-        return Directory.EnumerateFiles(_workspace.SamplesPath, "*.json")
-            .Select(path => Load(path))
-            .OrderBy(sample => sample.Id, StringComparer.Ordinal)
-            .ToList();
+        string[] paths;
+        try
+        {
+            paths = Directory.GetFiles(_workspace.SamplesPath, "*.json");
+        }
+        catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
+        {
+            return [];
+        }
+
+        var samples = new List<TrainingSampleRecord>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                samples.Add(Load(path));
+            }
+            catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
+            {
+                // A workspace swap may remove a sample after enumeration. The next push retries it.
+            }
+        }
+        return samples.OrderBy(sample => sample.Id, StringComparer.Ordinal).ToList();
     }
 
     internal void RemoveDatasetBackedSamples()
@@ -364,7 +380,9 @@ internal sealed class TrainingSampleStore
             }
         }
 
-        foreach (var candidate in records)
+        var changedRecords = records.Where(candidate => candidate.Id == id
+            || candidate.Labels.Any(label => fixedUpdates.ContainsKey(label.ClassId))).ToList();
+        foreach (var candidate in changedRecords)
         {
             var labelError = TrainingLabelValidator.FindBlockingError(candidate.Labels, definitions);
             if (labelError is not null)
@@ -374,8 +392,7 @@ internal sealed class TrainingSampleStore
 
         var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
         var updates = new List<(string Path, byte[] Contents)>();
-        foreach (var candidate in records.Where(candidate => candidate.Id == id
-                     || candidate.Labels.Any(label => fixedUpdates.ContainsKey(label.ClassId))))
+        foreach (var candidate in changedRecords)
         {
             var path = MetadataPath(candidate.Id);
             originals[path] = File.Exists(path) ? File.ReadAllBytes(path) : null;

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Desktop-shell settings: startup, window/tray behavior, and native notifications. These values
-// persist on every platform, while only the desktop shell can apply Windows-specific effects.
+// Desktop-shell settings: startup, window/tray behavior, native notifications, plus clip and trash
+// behaviour (HDR clip conversion, linked-highlight deletion default, trash retention). These values
+// persist on every platform, while only the desktop shell can apply Windows-specific effects. The
+// clip and trash fields live on the recording page in the model, so they are read from and written
+// back to `recording`.
 
 import type { SettingsPageName } from '../useSettings';
-import type { GeneralSettings } from '../settingsModel';
-import { Field, SelectField, Toggle } from '../../components/ui/controls';
+import type { GeneralSettings, RecordingSettings } from '../settingsModel';
+import { Checkbox, Field, SelectField, Toggle } from '../../components/ui/controls';
 
 const STARTUP_VISIBILITY = [
   { value: 'Window', label: 'Open the Tript window' },
@@ -23,13 +26,22 @@ const CLOSE_BEHAVIOR = [
   { value: 'HideToTray', label: 'Hide Tript to the tray' },
 ];
 
+const TRASH_RETENTION = [
+  { value: '24', label: '1 day' },
+  { value: '168', label: '7 days' },
+  { value: '720', label: '30 days' },
+  { value: '0', label: 'Never' },
+];
+
 export function GeneralPage({
   settings,
+  recording,
   update,
   page,
 }: {
   settings: GeneralSettings;
-  update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => void;
+  recording: RecordingSettings;
+  update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
   page: SettingsPageName;
 }) {
   const notifications = settings.notifications ?? {
@@ -43,6 +55,14 @@ export function GeneralPage({
   function updateNotification(name: keyof GeneralSettings['notifications'], value: boolean) {
     update(page, { notifications: { [name]: value } });
   }
+
+  const storedTrashRetention = recording.trashRetentionHours ?? 24;
+  // The backend treats every non-positive value as disabled. Present that truthfully as Never
+  // rather than inventing a negative duration label for a legacy setting.
+  const trashRetentionValue = String(storedTrashRetention <= 0 ? 0 : storedTrashRetention);
+  const trashRetentionOptions = TRASH_RETENTION.some((option) => option.value === trashRetentionValue)
+    ? TRASH_RETENTION
+    : [...TRASH_RETENTION, { value: trashRetentionValue, label: `${trashRetentionValue} hours (current)` }];
 
   return (
     <div className="settings-page" data-page="general">
@@ -70,7 +90,28 @@ export function GeneralPage({
           onChange={(checked) => update(page, { convertHdrClipsToSdr: checked })}
           label="Convert HDR clips to SDR"
         />
-        <p className="muted small">Tone-map new clips from HDR footage to BT.709 SDR. Original recordings remain unchanged.</p>
+        <p className="muted small">New clips made from HDR footage are converted for players and displays that expect SDR. Original recordings stay as they were.</p>
+        <Field
+          label="Delete linked highlights by default"
+          hint="Preselects the option to delete linked highlights when deleting a session. Favourited highlights are always kept."
+        >
+          <Checkbox
+            checked={recording.deleteLinkedHighlightsByDefault === true}
+            onChange={(checked) => update('recording', { deleteLinkedHighlightsByDefault: checked })}
+            aria-label="Delete linked highlights by default"
+          />
+        </Field>
+        <Field
+          label="Empty the trash after"
+          hint="Deleted items are removed from the trash permanently after this time. Never keeps them until you empty the trash by hand."
+        >
+          <SelectField
+            value={trashRetentionValue}
+            onChange={(value) => update('recording', { trashRetentionHours: Number(value) })}
+            options={trashRetentionOptions}
+            aria-label="Empty the trash after"
+          />
+        </Field>
       </section>
 
       <section className="settings-section" aria-labelledby="general-window-heading">

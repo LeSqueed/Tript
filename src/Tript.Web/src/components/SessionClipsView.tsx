@@ -13,6 +13,7 @@ export function SessionClipsView({
   clips,
   client,
   onBack,
+  backLabel,
   onOpen,
   onToggleFavorite,
   onDelete,
@@ -21,6 +22,7 @@ export function SessionClipsView({
   clips: ContentItem[];
   client: IpcClient;
   onBack(): void;
+  backLabel: string;
   onOpen(item: ContentItem, navigation: ContentItem[]): void;
   onToggleFavorite(item: ContentItem): void;
   onDelete(item: ContentItem): void;
@@ -45,7 +47,7 @@ export function SessionClipsView({
     <section className="session-clips-view" aria-labelledby="session-clips-title">
       <div className="session-clips-header">
         <Button variant="ghost" size="small" icon="chevronLeft" onClick={onBack}>
-          Back to library
+          {backLabel}
         </Button>
         <div>
           <p className="muted small">Automated clips</p>

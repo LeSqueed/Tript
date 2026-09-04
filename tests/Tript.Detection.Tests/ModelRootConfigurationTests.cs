@@ -9,12 +9,14 @@ namespace Tript.Detection.Tests;
 public sealed class ModelRootConfigurationTests : IDisposable
 {
     private readonly string _userRoot = Path.Combine(Path.GetTempPath(), "tript-model-roots-" + Guid.NewGuid().ToString("N"));
+    private readonly string _secondaryRoot = Path.Combine(Path.GetTempPath(), "tript-model-roots-" + Guid.NewGuid().ToString("N"));
     private readonly List<string> _baseGames = [];
 
     public ModelRootConfigurationTests()
     {
         Directory.CreateDirectory(_userRoot);
-        ModelService.ConfigureUserModelRoot(_userRoot);
+        Directory.CreateDirectory(_secondaryRoot);
+        ModelService.ConfigureModelRoots(_userRoot, _secondaryRoot);
     }
 
     [Fact]
@@ -73,6 +75,36 @@ public sealed class ModelRootConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void LoadableGameIdsIncludeOnlyCompleteDistinctBundles()
+    {
+        var first = "A" + Guid.NewGuid().ToString("N");
+        var second = "B" + Guid.NewGuid().ToString("N");
+        CreateBundle(_userRoot, second, "second");
+        CreateBundle(_userRoot, first, "first");
+        CreateBundle(_secondaryRoot, first.ToUpperInvariant(), "duplicate");
+        Directory.CreateDirectory(Path.Combine(_userRoot, "Incomplete" + Guid.NewGuid().ToString("N")));
+
+        var ids = ModelService.GetLoadableGameIds();
+
+        Assert.Equal(1, ids.Count(id => id.Equals(first, StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(1, ids.Count(id => id.Equals(second, StringComparison.OrdinalIgnoreCase)));
+        Assert.True(Array.IndexOf(ids, first) < Array.IndexOf(ids, second));
+    }
+
+    [Fact]
+    public void LoadableGameIdsIgnoreARootThatVanished()
+    {
+        var gameId = "Remaining" + Guid.NewGuid().ToString("N");
+        CreateBundle(_userRoot, gameId, "remaining");
+        Directory.Delete(_secondaryRoot, recursive: true);
+
+        var ids = ModelService.GetLoadableGameIds();
+
+        Assert.Contains(ids, id => id.Equals(gameId, StringComparison.OrdinalIgnoreCase));
+        Directory.CreateDirectory(_secondaryRoot);
+    }
+
+    [Fact]
     public void InvalidateModelClearsDefinitionsRegardlessOfGameIdCasing()
     {
         var gameId = "InvalidateTest" + Guid.NewGuid().ToString("N");
@@ -90,6 +122,7 @@ public sealed class ModelRootConfigurationTests : IDisposable
     {
         ModelService.ConfigureUserModelRoot(ModelService.BasePath);
         Directory.Delete(_userRoot, recursive: true);
+        Directory.Delete(_secondaryRoot, recursive: true);
         foreach (var game in _baseGames)
             Directory.Delete(game, recursive: true);
     }

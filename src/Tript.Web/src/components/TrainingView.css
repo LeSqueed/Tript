@@ -658,8 +658,7 @@
   font-size: 0.68rem;
 }
 
-.training-folder-actions,
-.training-tree-event-actions {
+.training-folder-actions {
   display: flex;
   align-items: center;
   gap: 0.15rem;
@@ -679,13 +678,33 @@
 
 .training-tree-event {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'handle main'
+    '. actions';
   align-items: center;
-  gap: 0.45rem;
+  column-gap: 0.45rem;
+  row-gap: 0.2rem;
   min-width: 0;
   padding: 0.3rem 0.4rem;
   border-bottom: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
   background: transparent;
+}
+
+.training-tree-event-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+}
+
+.training-tree-event-actions .btn {
+  color: var(--color-muted);
+}
+
+.training-tree-event-actions .btn:hover:not(:disabled) {
+  color: var(--color-base-content);
 }
 
 .training-tree-event:last-child {
@@ -702,6 +721,7 @@
 }
 
 .training-drag-handle {
+  grid-area: handle;
   color: var(--color-muted);
   font-size: 0.75rem;
   letter-spacing: -0.08em;
@@ -709,6 +729,7 @@
 }
 
 .training-tree-event-main {
+  grid-area: main;
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr);
   align-items: center;
@@ -738,6 +759,7 @@ span.training-tree-event-main {
 }
 
 .training-event-tree.compact .training-tree-event {
+  row-gap: 0.1rem;
   padding: 0.25rem 0.3rem;
 }
 
@@ -957,13 +979,11 @@ span.training-tree-event-main {
     width: 100%;
   }
 
-  .training-event-folder-header,
-  .training-tree-event {
+  .training-event-folder-header {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .training-folder-actions,
-  .training-tree-event-actions {
+  .training-folder-actions {
     grid-column: 2;
     justify-content: start;
     flex-wrap: wrap;

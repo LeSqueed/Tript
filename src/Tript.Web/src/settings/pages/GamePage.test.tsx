@@ -31,6 +31,8 @@ function renderPage(
   selectedGameExecutable: SelectedGameExecutableMessage | null = null,
   globalClipBeforeSeconds = 5,
   globalClipAfterSeconds = 8,
+  globalRecordingMode: 'Session' | 'SessionWithReplayBuffer' = 'SessionWithReplayBuffer',
+  automaticClipsEnabled = true,
 ) {
   const update = vi.fn((_page: string, _patch: Partial<Record<string, unknown>>) => 'settings-request-1');
   const onBrowseExecutable = vi.fn();
@@ -49,6 +51,8 @@ function renderPage(
       onBrowseExecutable={onBrowseExecutable}
       globalClipBeforeSeconds={globalClipBeforeSeconds}
       globalClipAfterSeconds={globalClipAfterSeconds}
+      globalRecordingMode={globalRecordingMode}
+      automaticClipsEnabled={automaticClipsEnabled}
     />
   );
   const result = render(view());
@@ -322,6 +326,82 @@ describe('automatic clip overrides', () => {
     expect(gameListFrom(update)[0].automaticClipOverride).toEqual({
       beforeSeconds: 10,
       afterSeconds: 10,
+    });
+  });
+
+  it('disables overrides when automatic highlights are globally off', () => {
+    renderPage(oneGame(), null, 5, 8, 'SessionWithReplayBuffer', false);
+
+    expect((screen.getByLabelText('Before (s)') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('After (s)') as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('disables overrides when the game resolves to Session mode', () => {
+    renderPage({
+      ...oneGame(),
+      gameList: [{
+        ...oneGame().gameList[0],
+        recordingModeOverride: { mode: 'Session' },
+      }],
+    });
+
+    expect((screen.getByLabelText('Before (s)') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('After (s)') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe('per-game override disclosure', () => {
+  it('shows the disclosure without a modified marker when the game has no overrides', () => {
+    const { container } = renderPage(oneGame());
+    expect(screen.getByText('Customize for this game')).toBeTruthy();
+    const details = container.querySelector('details.settings-advanced');
+    expect(details).toBeTruthy();
+    expect(details?.querySelector('summary')?.textContent).toBe('Customize for this game');
+    expect(screen.queryByText('modified')).toBeNull();
+    // The override controls stay in the DOM (and queryable) while the disclosure is closed.
+    expect(screen.getByLabelText('Before (s)')).toBeTruthy();
+    expect(screen.getByLabelText('After (s)')).toBeTruthy();
+  });
+
+  it('shows the modified marker when the game has an override set', () => {
+    renderPage({
+      gameCaptureTimeout: 10,
+      gameList: [
+        {
+          id: PACKAGED_ID,
+          name: 'Overwatch',
+          integrations: { enabled: false },
+          qualityOverride: { fps: 144 },
+        },
+      ],
+    });
+    const marker = screen.getByText('modified');
+    expect(marker.className).toBe('settings-advanced-marker');
+  });
+
+  it('does not mark empty legacy override objects as modified', () => {
+    renderPage({
+      ...oneGame(),
+      gameList: [{
+        ...oneGame().gameList[0],
+        recordingModeOverride: {} as never,
+        captureMethodOverride: {} as never,
+      }],
+    });
+
+    expect(screen.queryByText('modified')).toBeNull();
+  });
+
+  it('sends the same gameList patch as before when an override is set through the select', () => {
+    const { update } = renderPage(oneGame());
+    fireEvent.change(screen.getByLabelText('Recording mode'), { target: { value: 'SessionWithReplayBuffer' } });
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(gameListFrom(update)[0]).toEqual({
+      id: PACKAGED_ID,
+      name: 'Overwatch',
+      integrations: { enabled: false },
+      recordingModeOverride: { mode: 'SessionWithReplayBuffer' },
     });
   });
 });

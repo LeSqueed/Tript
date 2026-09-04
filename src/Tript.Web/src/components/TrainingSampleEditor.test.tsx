@@ -21,14 +21,27 @@ const sample: TrainingSampleMessage = {
 const events = [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' as const }];
 
 function createClient() {
-  return {
+  const handlers = new Map<string, Set<(content: unknown) => void>>();
+  const client = {
     state: 'connected' as const,
-    on: vi.fn(() => () => undefined),
+    on: vi.fn((method: string, handler: (content: unknown) => void) => {
+      const listeners = handlers.get(method) ?? new Set();
+      listeners.add(handler);
+      handlers.set(method, listeners);
+      return () => listeners.delete(handler);
+    }),
     send: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
     onStateChange: vi.fn(() => () => undefined),
-  } as unknown as IpcClient & { send: ReturnType<typeof vi.fn> };
+    emit(method: string, content: unknown) {
+      for (const handler of handlers.get(method) ?? []) handler(content);
+    },
+  } as unknown as IpcClient & {
+    send: ReturnType<typeof vi.fn>;
+    emit(method: string, content: unknown): void;
+  };
+  return client;
 }
 
 function makeDirty() {
@@ -49,15 +62,55 @@ describe('TrainingSampleEditor save lifecycle', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps the modal open and shows confirmation after saving labels', () => {
+  it('keeps labels dirty until the matching server confirmation arrives', () => {
     const client = createClient();
-    render(<TrainingSampleEditor client={client} gameId="game-1" sample={sample} events={events} onClose={vi.fn()} />);
+    const onClose = vi.fn();
+    render(<TrainingSampleEditor client={client} gameId="game-1" sample={sample} events={events} onClose={onClose} />);
+    makeDirty();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
 
     expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toContain('Labels saved');
+    expect(screen.queryByText('Labels saved')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Saving...' }) as HTMLButtonElement).disabled).toBe(true);
     expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({ sampleId: 'sample-1' }));
+    const requestId = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingSample')?.[1]?.requestId;
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Close label frame' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('unsaved changes'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => client.emit('trainingSampleUpdateResult', { requestId: 'another-window-request', success: true }));
+    act(() => client.emit('error', { message: 'An unrelated action failed.' }));
+    expect(screen.queryByText('Labels saved')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeTruthy();
+
+    act(() => client.emit('trainingSampleUpdateResult', { requestId, success: true }));
+    expect(screen.getByRole('status').textContent).toContain('Labels saved');
+    fireEvent.click(screen.getByRole('button', { name: 'Close label frame' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed save and keeps the unsaved-change guard active', () => {
+    const client = createClient();
+    const onClose = vi.fn();
+    render(<TrainingSampleEditor client={client} gameId="game-1" sample={sample} events={events} onClose={onClose} />);
+    makeDirty();
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+    const requestId = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingSample')?.[1]?.requestId;
+
+    act(() => client.emit('trainingSampleUpdateResult', {
+      requestId, success: false, error: 'The sample could not be written.',
+    }));
+    expect(screen.getByRole('alert').textContent).toContain('could not be written');
+    expect(screen.getByRole('button', { name: 'Save labels' })).toBeTruthy();
+    expect(screen.queryByText('Labels saved')).toBeNull();
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Close label frame' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('unsaved changes'));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('warns before closing dirty labels and discards only after confirmation', () => {
@@ -205,6 +258,7 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', {
       gameId: 'game-1',
       sampleId: 'sample-1',
+      requestId: expect.any(String),
       labels: [{ classId: 4, centerX: 0.16, centerY: 0.05, width: 0.11, height: 0.03 }],
     });
   });
@@ -238,13 +292,16 @@ describe('TrainingSampleEditor save lifecycle', () => {
     };
     const eventRow = screen.getAllByText('Event')
       .find((node) => node.closest('.training-tree-event'))!.closest('.training-tree-event')!;
-    const groupFolder = screen.getByText('HUD').closest('.training-event-folder')!;
+    const groupFolder = screen.getByLabelText('HUD events').closest('.training-event-folder')!;
     fireEvent.dragStart(eventRow, { dataTransfer });
     fireEvent.drop(groupFolder, { dataTransfer });
-    expect(onEventsChange).toHaveBeenCalledWith([expect.objectContaining({ regionGroupId: 7 })]);
+    expect(onEventsChange).toHaveBeenCalledWith(
+      [expect.objectContaining({ regionGroupId: 7 })],
+      expect.any(String),
+    );
     fireEvent.click(screen.getAllByRole('button', { name: 'Region' })[0]);
     expect(screen.getByText(/All group members share this region/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save region' }));
-    expect(onRegionGroupsChange).toHaveBeenCalledWith(groups);
+    expect(onRegionGroupsChange).toHaveBeenCalledWith(groups, expect.any(String));
   });
 });

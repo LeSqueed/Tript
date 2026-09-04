@@ -41,4 +41,33 @@ describe('LoadingOverlay', () => {
     act(() => vi.advanceTimersByTime(250));
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
+
+  it('moves focus into the dialog, traps Tab, cancels on Escape, and restores focus', () => {
+    const onCancel = vi.fn();
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    const view = render(<LoadingOverlay title="Working" cancelLabel="Cancel" onCancel={onCancel} delayMs={0} />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Working' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: 'Tab' });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it('does not cancel on Escape when the overlay is not cancellable', () => {
+    render(<LoadingOverlay title="Working" delayMs={0} />);
+    const dialog = screen.getByRole('dialog', { name: 'Working' });
+    expect(fireEvent.keyDown(dialog, { key: 'Escape' })).toBe(true);
+    expect(document.activeElement).toBe(dialog);
+  });
 });

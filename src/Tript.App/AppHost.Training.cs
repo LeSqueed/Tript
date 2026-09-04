@@ -41,7 +41,7 @@ internal sealed partial class AppHost
     {
         lock (_recorderGate)
         {
-            var restart = IsRecording && string.Equals(_currentGameId, gameId, StringComparison.OrdinalIgnoreCase);
+            var restart = ShouldRestartDetectionForModelInstall(IsRecording, _activeDetectionGameId, gameId);
             if (restart)
                 StopDetection();
 
@@ -62,6 +62,11 @@ internal sealed partial class AppHost
             }
         }
     }
+
+    internal static bool ShouldRestartDetectionForModelInstall(bool isRecording,
+        string? activeDetectionGameId, string installedGameId) =>
+        isRecording && string.Equals(activeDetectionGameId, installedGameId,
+            StringComparison.OrdinalIgnoreCase);
 
     private TrainingWorkspace EnsureTrainingWorkspace(string gameId)
     {
@@ -85,16 +90,16 @@ internal sealed partial class AppHost
         return workspace;
     }
 
-    // Read-only: every workspace write is an atomic temp+rename and the export phase stages into a
-    // fresh directory before swapping it in, so a push is safe while a training phase is active.
-    // Keeping it off the gate is what lets a refreshed client load the tab mid-run.
-    internal Task PushTraining(string? requestedGameId)
+    // Snapshot reads share the workspace gate with short mutations and dataset export. The gate is
+    // released for the long model run, so refreshed clients still load while training is active.
+    internal Task PushTraining(string? requestedGameId) => WithTrainingWorkspaceLockAsync(() =>
     {
         PushTrainingCore(requestedGameId);
         return Task.CompletedTask;
-    }
+    });
 
-    private void PushTrainingCore(string? requestedGameId)
+    private void PushTrainingCore(string? requestedGameId, string? requestId = null,
+        string? updateKind = null)
     {
         var gameId = requestedGameId ?? GameList.FirstOrDefault()?.Id;
         if (string.IsNullOrWhiteSpace(gameId))
@@ -160,6 +165,8 @@ internal sealed partial class AppHost
 
         _ipc.Broadcast("training", JsonSerializer.SerializeToElement(new
         {
+            requestId,
+            updateKind,
             training = new
             {
                 gameId,
@@ -299,7 +306,7 @@ internal sealed partial class AppHost
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var workspace = TrainingWorkspace.ForGame(parameters.GameId);
         var store = new TrainingSampleStore(workspace);
         TrainingSampleRecord sample;
         try
@@ -326,7 +333,16 @@ internal sealed partial class AppHost
     internal async Task UpdateTrainingEvents(UpdateTrainingEventsParameters? parameters)
         => await WithTrainingWorkspaceLockAsync(() =>
         {
-            UpdateTrainingEventsCore(parameters);
+            try
+            {
+                UpdateTrainingEventsCore(parameters);
+                PushTrainingUpdateResult("trainingEventsUpdateResult", parameters?.RequestId, true, null);
+            }
+            catch (Exception exception)
+            {
+                PushTrainingUpdateResult("trainingEventsUpdateResult", parameters?.RequestId, false,
+                    exception.Message);
+            }
             return Task.CompletedTask;
         });
 
@@ -356,20 +372,25 @@ internal sealed partial class AppHost
             .Select((eventDefinition, index) => new { Old = eventDefinition.ClassId, New = index })
             .ToDictionary(pair => pair.Old, pair => pair.New);
         var sampleStore = new TrainingSampleStore(workspace);
+        var existingClassIds = workspace.LoadDefinitions()
+            .Select(eventDefinition => eventDefinition.ClassId).ToHashSet();
+        var deletesClass = existingClassIds.Any(classId => !classIdMap.ContainsKey(classId));
         InitializeFixedPositions(orderedEvents, sampleStore.List());
         TrainingEventValidator.ValidateRegions(orderedEvents);
         TrainingEventValidator.ValidateRegionGroupReferences(orderedEvents, regionGroups);
         TrainingEventValidator.ValidateFixedPositions(orderedEvents);
         TrainingEventValidator.ValidateSubtractorReferences(orderedEvents);
         var lastReportedPercent = -1;
-        var remap = sampleStore.RemapClassIds(classIdMap, (completed, total) =>
+        Action<int, int>? deleteProgress = deletesClass ? (completed, total) =>
         {
             var percent = (int)Math.Floor(completed * 100.0 / Math.Max(1, total));
             if (percent == lastReportedPercent) return;
             lastReportedPercent = percent;
             PushTrainingProgress(parameters.GameId, "eventDeleteProgress",
-                $"Removing labels from training samples… {percent}%", percent);
-        });
+                $"Removing labels from training samples… {percent}%", percent,
+                requestId: parameters.RequestId);
+        } : null;
+        var remap = sampleStore.RemapClassIds(classIdMap, deleteProgress);
         foreach (var eventDefinition in orderedEvents)
             eventDefinition.ClassId = classIdMap[eventDefinition.ClassId];
         var options = new JsonSerializerOptions
@@ -391,14 +412,24 @@ internal sealed partial class AppHost
             ? $"Training events updated. Removed {remap.RemovedLabelCount} label"
                 + $"{(remap.RemovedLabelCount == 1 ? string.Empty : "s")}."
             : "Training events updated.";
-        PushTrainingProgress(parameters.GameId, "eventsUpdated", removedMessage);
-        PushTrainingCore(parameters.GameId);
+        PushTrainingProgress(parameters.GameId, "eventsUpdated", removedMessage,
+            requestId: parameters.RequestId);
+        PushTrainingCore(parameters.GameId, parameters.RequestId, "events");
     }
 
     internal async Task UpdateTrainingRegionGroups(UpdateTrainingRegionGroupsParameters? parameters)
         => await WithTrainingWorkspaceLockAsync(() =>
         {
-            UpdateTrainingRegionGroupsCore(parameters);
+            try
+            {
+                UpdateTrainingRegionGroupsCore(parameters);
+                PushTrainingUpdateResult("trainingRegionGroupsUpdateResult", parameters?.RequestId, true, null);
+            }
+            catch (Exception exception)
+            {
+                PushTrainingUpdateResult("trainingRegionGroupsUpdateResult", parameters?.RequestId, false,
+                    exception.Message);
+            }
             return Task.CompletedTask;
         });
 
@@ -443,8 +474,9 @@ internal sealed partial class AppHost
             new TrainingSampleStore(workspace).RestoreMetadata(originals);
             throw;
         }
-        PushTrainingProgress(parameters.GameId, "regionGroupsUpdated", "Training region groups updated.");
-        PushTrainingCore(parameters.GameId);
+        PushTrainingProgress(parameters.GameId, "regionGroupsUpdated", "Training region groups updated.",
+            requestId: parameters.RequestId);
+        PushTrainingCore(parameters.GameId, parameters.RequestId, "regionGroups");
     }
 
     private static void InitializeFixedPositions(IReadOnlyList<EventDefinition> events,
@@ -471,7 +503,16 @@ internal sealed partial class AppHost
     internal async Task UpdateTrainingSample(UpdateTrainingSampleParameters? parameters)
         => await WithTrainingWorkspaceLockAsync(() =>
         {
-            UpdateTrainingSampleCore(parameters);
+            try
+            {
+                UpdateTrainingSampleCore(parameters);
+                PushTrainingUpdateResult("trainingSampleUpdateResult", parameters?.RequestId, true, null);
+            }
+            catch (Exception exception)
+            {
+                PushTrainingUpdateResult("trainingSampleUpdateResult", parameters?.RequestId, false,
+                    exception.Message);
+            }
             return Task.CompletedTask;
         });
 
@@ -483,7 +524,8 @@ internal sealed partial class AppHost
         var labels = parameters.Labels.Select(ToTrainingLabel).ToList();
         var sample = new TrainingSampleStore(workspace).UpdateLabels(parameters.SampleId, labels,
             workspace.LoadDefinitions(), workspace.LoadRegionGroups());
-        PushTrainingProgress(parameters.GameId, "sampleUpdated", sample.Id);
+        PushTrainingProgress(parameters.GameId, "sampleUpdated", sample.Id,
+            requestId: parameters.RequestId);
         PushTrainingCore(parameters.GameId);
     }
 
@@ -553,6 +595,9 @@ internal sealed partial class AppHost
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
             throw new ArgumentException("A game id is required to train a model.");
 
+        var augmentCopies = parameters.AugmentCopies ?? 0;
+        TrainingRunner.ValidateEpochs(parameters.Epochs);
+        TrainingRunner.ValidateAugmentCopies(augmentCopies);
         var workspace = EnsureTrainingWorkspace(parameters.GameId);
         var imageSize = parameters.ImageSize;
         var currentModelPath = ResolveTrainingModelPath(
@@ -560,29 +605,23 @@ internal sealed partial class AppHost
         if (imageSize is null && File.Exists(currentModelPath))
             imageSize = OnnxModelInspector.Inspect(currentModelPath).InputWidth;
         imageSize ??= 640;
-        if ((parameters.AugmentCopies ?? 0) < 0)
-            throw new ArgumentOutOfRangeException(nameof(parameters.AugmentCopies),
-                "Augmented copies per crop must be non-negative.");
-
-        // Remember these settings locally for the game so the training form restores them next
-        // time this workspace is opened. The file stays in the workspace; it is never installed.
-        workspace.SavePreferences(new TrainingPreferences
-        {
-            Epochs = parameters.Epochs,
-            Device = parameters.Device,
-            AugmentCopies = parameters.AugmentCopies ?? 0,
-        });
-
         lock (_trainingGate)
         {
             if (_trainingCancellation is not null)
                 throw new InvalidOperationException("Training is already running.");
 
+            // Persist only a request that is valid and has won the single-run gate.
+            workspace.SavePreferences(new TrainingPreferences
+            {
+                Epochs = parameters.Epochs,
+                Device = parameters.Device,
+                AugmentCopies = augmentCopies,
+            });
             _trainingCancellation = new CancellationTokenSource();
             _trainingGameId = parameters.GameId;
             _trainingPhase = "exporting";
             var cancellation = _trainingCancellation;
-            _ = RunTrainingAsync(workspace, imageSize.Value, parameters.AugmentCopies ?? 0, parameters, cancellation);
+            _ = RunTrainingAsync(workspace, imageSize.Value, augmentCopies, parameters, cancellation);
         }
         var augmentMessage = (parameters.AugmentCopies ?? 0) > 0
             ? $" augmentation: {parameters.AugmentCopies} copies per training crop (validation unchanged)."
@@ -598,6 +637,69 @@ internal sealed partial class AppHost
         {
             _trainingRunner.Cancel();
             _trainingCancellation?.Cancel();
+        }
+    }
+
+    internal void PushAvailableRecordingModels()
+    {
+        var models = ModelService.GetLoadableGameIds()
+            .Select(gameId => new AvailableRecordingModel
+            {
+                GameId = gameId,
+                Name = GameList.FirstOrDefault(game => game.Id.Equals(gameId,
+                    StringComparison.OrdinalIgnoreCase))?.Name ?? gameId,
+            })
+            .ToList();
+        _ipc.Broadcast("availableRecordingModels", new AvailableRecordingModelsMessage { Models = models });
+    }
+
+    internal void ActivateRecordingModel(string? gameId)
+    {
+        if (string.IsNullOrWhiteSpace(gameId))
+        {
+            PushError("Choose a model to load.");
+            return;
+        }
+
+        lock (_recorderGate)
+        {
+            if (!IsRecording)
+            {
+                PushError("Start a recording before loading a model.");
+                return;
+            }
+            if (!ModelService.HasModelForGame(gameId))
+            {
+                PushError($"No model is available for {gameId}.");
+                return;
+            }
+            if (string.Equals(_activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var previousGameId = _activeDetectionGameId;
+            // StartDetection owns a destructive detector swap. It must remain under _recorderGate
+            // so recording teardown cannot race the synchronous ONNX load and publish a stale host.
+            ActivateRecordingModelCore(gameId, previousGameId, StartDetection,
+                () => PushError($"The model for {gameId} could not be loaded."),
+                () => PushState(true, _currentGameId));
+        }
+    }
+
+    internal static void ActivateRecordingModelCore(string gameId, string? previousGameId,
+        Func<string, bool> startDetection, Action pushError, Action pushState)
+    {
+        try
+        {
+            if (startDetection(gameId))
+                return;
+            if (!string.IsNullOrWhiteSpace(previousGameId))
+                startDetection(previousGameId);
+            pushError();
+        }
+        finally
+        {
+            // A failed StartDetection clears the active id. Publish even if restoration also fails.
+            pushState();
         }
     }
 
@@ -702,8 +804,17 @@ internal sealed partial class AppHost
             try
             {
                 // The UI needs a final full state push so trainingActive becomes false after an error
-                // or cancellation, not only after a successful model installation.
-                PushTrainingCore(parameters.GameId);
+                // or cancellation, not only after a successful model installation. Snapshot reads
+                // must share the workspace gate with edits, but the long model run never holds it.
+                await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    PushTrainingCore(parameters.GameId);
+                }
+                finally
+                {
+                    _trainingWorkspaceGate.Release();
+                }
             }
             catch (Exception exception)
             {
@@ -724,9 +835,18 @@ internal sealed partial class AppHost
     private static int CountTrainingImages(string datasetPath, string split)
     {
         var path = Path.Combine(datasetPath, "images", split);
-        return Directory.Exists(path)
-            ? Directory.EnumerateFiles(path).Count(IsTrainingImage)
-            : 0;
+        if (!Directory.Exists(path))
+            return 0;
+        try
+        {
+            return Directory.EnumerateFiles(path)
+                .Count(file => !Path.GetFileName(file).Contains(".tmp-", StringComparison.OrdinalIgnoreCase)
+                    && IsTrainingImage(file));
+        }
+        catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
+        {
+            return 0;
+        }
     }
 
     private static bool IsTrainingImage(string path) =>
@@ -768,13 +888,14 @@ internal sealed partial class AppHost
     }
 
     private void PushTrainingProgress(string gameId, string status, string message, int? percent = null,
-        TrainingProgressUpdate? details = null) =>
+        TrainingProgressUpdate? details = null, string? requestId = null) =>
         _ipc.Broadcast("trainingProgress", JsonSerializer.SerializeToElement(new
         {
             gameId,
             status,
             message,
             percent,
+            requestId,
             details = details is null ? null : new
             {
                 epoch = details.Epoch,
@@ -783,5 +904,19 @@ internal sealed partial class AppHost
                 map50 = details.Map50,
             },
         }, Wire.Options));
+
+    private void PushTrainingUpdateResult(string messageName, string? requestId, bool success,
+        string? error)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+            return;
+
+        _ipc.Broadcast(messageName, JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            success,
+            error,
+        }, Wire.Options));
+    }
 }
 #endif

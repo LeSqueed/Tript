@@ -146,10 +146,10 @@ describe('SettingsView', () => {
   it('renders the six tabs and the recording page controls', () => {
     renderSettings('general');
     expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Buffer' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Highlights' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Audio' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Capture' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Game' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Games' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
@@ -233,10 +233,10 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
   });
 
-  it('describes the replay buffer settings', () => {
+  it('describes the replay buffer on the highlights page', () => {
     renderSettings();
-    fireEvent.click(screen.getByRole('tab', { name: 'Buffer' }));
-    expect(screen.getByText(/runs when the recording mode is set to Session \+ Replay Buffer/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Highlights' }));
+    expect(screen.getByText(/runs when the recording mode is Session \+ replay buffer/i)).toBeTruthy();
   });
 
   // Settings keeps its technical vocabulary on purpose: the people who open these pages are the
@@ -265,30 +265,37 @@ describe('SettingsView', () => {
     expect(sentUpdates(ws).at(-1)).toMatchObject({ recording: { enableHdr: false } });
   });
 
-  it('renders the buffer page controls', () => {
+  it('renders the highlights page controls', () => {
     renderSettings();
-    fireEvent.click(screen.getByRole('tab', { name: 'Buffer' }));
-    expect(screen.getByLabelText(/^Buffer duration/)).toBeTruthy();
-    expect(screen.getByLabelText(/^Maximum buffer size/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Highlights' }));
+    expect(screen.getByLabelText(/^Buffer length/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Automatic highlights/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Seconds before each highlight/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Seconds after each highlight/)).toBeTruthy();
+    // The buffer size cap lives on the recording page's advanced section, not here.
+    expect(screen.queryByLabelText(/^Maximum buffer size/)).toBeNull();
   });
 
   it('renders the audio page controls', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));
-    expect(screen.getByLabelText(/^Output mode/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Audio output while recording/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add track' })).toBeTruthy();
   });
 
-  it('renders the capture page controls', () => {
+  it('renders the capture page controls, including the game-capture timeout', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
     expect(screen.getByLabelText(/^Capture method/)).toBeTruthy();
+    // The timeout is a capture-behaviour setting, so it lives on this page, not on the game's row.
+    expect(screen.getByLabelText(/^Game-capture timeout/)).toBeTruthy();
   });
 
   it('renders the game page controls, and no capture setting of its own', () => {
     renderSettings();
-    fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
-    expect(screen.getByLabelText(/^Game-capture timeout/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Games' }));
+    // The game-capture timeout moved to the Capture page with the rest of the capture behaviour.
+    expect(screen.queryByLabelText(/^Game-capture timeout/)).toBeNull();
     expect(screen.getByText(/known games come from the project catalogue/i)).toBeTruthy();
     // How capture works is a Capture-page setting. This page only says which games depart from it,
     // and that lives on the game's own row rather than as a page-wide control.
@@ -297,7 +304,7 @@ describe('SettingsView', () => {
 
   it('correlates the custom-game executable picker command and response', () => {
     const { ws } = renderSettings();
-    fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Games' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
 
@@ -331,7 +338,7 @@ describe('SettingsView', () => {
 
   it('keeps a custom-game draft and validation response until its update is accepted', () => {
     const { ws } = renderSettings();
-    fireEvent.click(screen.getByRole('tab', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Games' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Pending game' } });
     fireEvent.change(screen.getByLabelText('Executable path'), {
@@ -572,8 +579,8 @@ describe('SettingsView', () => {
     const select = screen.getByLabelText(/^Encoder/) as HTMLSelectElement;
     const labels = Array.from(select.options).map((option) => option.text);
 
-    expect(labels).toContain('NVIDIA (NVENC) — jim_nvenc');
-    expect(labels).toContain('NVIDIA (NVENC) — obs_nvenc_h264_tex');
+    expect(labels).toContain('NVIDIA (NVENC) (jim_nvenc)');
+    expect(labels).toContain('NVIDIA (NVENC) (obs_nvenc_h264_tex)');
     expect(labels).toContain('Software (x264)');
   });
 
@@ -651,6 +658,17 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText(/^Bitrate/) as HTMLInputElement).value).toBe('15000');
     // CBR has no ceiling: max_bitrate is a VBR-only key on every family that has one at all.
     expect(screen.queryByLabelText(/^Maximum bitrate/)).toBeNull();
+  });
+
+  it('keeps a custom quality value visible instead of rendering a blank select', () => {
+    const custom = makeSettings();
+    custom.recording.quality = 7;
+    const { ws } = renderSettings();
+    pushSettings(ws, custom, 'server:init');
+
+    const quality = screen.getByLabelText(/^Quality/) as HTMLSelectElement;
+    expect(quality.value).toBe('7');
+    expect(quality.selectedOptions[0].text).toBe('7 (custom)');
   });
 
   it('VBR adds the ceiling field alongside the target bitrate', () => {
@@ -970,8 +988,8 @@ describe('SettingsView capture page — monitor selection', () => {
     renderCapture({ method: 'Display', display: null, displayLabel: null }, MONITORS);
     expect(Array.from(displaySelect().options).map((option) => option.text)).toEqual([
       'Primary monitor (automatic)',
-      'DP-1 — 2560x1440 (primary)',
-      'HDMI-A-1 — 1920x1080',
+      'DP-1: 2560x1440 (primary)',
+      'HDMI-A-1: 1920x1080',
     ]);
   });
 

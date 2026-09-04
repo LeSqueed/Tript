@@ -1,14 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // The game page: the known games and their per-game overrides. How capture works is a Capture-page
-// setting; this page only says which games depart from it. The game-capture timeout is the soft
-// timeout: how long game capture waits for the game's window before falling back.
+// setting (including the game-capture timeout); this page only says which games depart from it.
+// Per-game overrides are collapsed behind a disclosure per row, marked "modified" when set.
 
 import { useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
-import { Button, Checkbox, Field, SelectField, TextField } from '../../components/ui/controls';
+import { Button, Checkbox, SelectField, TextField } from '../../components/ui/controls';
+
+/** True when a game departs from the global settings in any way its row exposes. */
+function hasOverrides(game: GameSetting): boolean {
+  if (game.recordingModeOverride?.mode !== null && game.recordingModeOverride?.mode !== undefined) return true;
+  if (game.captureMethodOverride?.method !== null && game.captureMethodOverride?.method !== undefined) return true;
+  if (game.qualityOverride !== null && game.qualityOverride !== undefined) {
+    const q = game.qualityOverride;
+    if (q.resolutionWidth !== null && q.resolutionWidth !== undefined) return true;
+    if (q.resolutionHeight !== null && q.resolutionHeight !== undefined) return true;
+    if (q.fps !== null && q.fps !== undefined) return true;
+    if (q.encoder !== null && q.encoder !== undefined) return true;
+    if (q.quality !== null && q.quality !== undefined) return true;
+  }
+  if (game.automaticClipOverride !== null && game.automaticClipOverride !== undefined) {
+    const clip = game.automaticClipOverride;
+    if (clip.beforeSeconds !== null && clip.beforeSeconds !== undefined) return true;
+    if (clip.afterSeconds !== null && clip.afterSeconds !== undefined) return true;
+  }
+  if (game.integrations?.enabled === true) return true;
+  return false;
+}
 
 // "" means inherit; the global lives on the Capture page.
 const CAPTURE_METHOD_OVERRIDES: { value: string; label: string }[] = [
@@ -38,13 +59,16 @@ export function GamePage({
   settings,
   update,
   page,
-  externalPushCount,
+  // Accepted for the shared page contract; this page keeps no push-resynced draft.
+  externalPushCount: _externalPushCount,
   builtInGameIds,
   selectedGameExecutable,
   settingsUpdateResult,
   onBrowseExecutable,
   globalClipBeforeSeconds,
   globalClipAfterSeconds,
+  globalRecordingMode,
+  automaticClipsEnabled,
 }: {
   settings: import('../settingsModel').GameSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
@@ -60,21 +84,17 @@ export function GamePage({
    */
   globalClipBeforeSeconds?: number;
   globalClipAfterSeconds?: number;
+  globalRecordingMode: RecordingMode;
+  automaticClipsEnabled: boolean;
 }) {
   // The inherit baseline for each side: the global recording-page value, or the backend default.
   const clipBeforeSeconds = globalClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
   const clipAfterSeconds = globalClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
-  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(String(settings.gameCaptureTimeout));
   const [draft, setDraft] = useState<CustomGameDraft | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [pendingSaveRequest, setPendingSaveRequest] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const pendingBrowseRequest = useRef<string | null>(null);
-
-  // Re-sync the timeout draft from the model only on an external push, never on our own echo.
-  useEffect(() => {
-    setTimeoutSeconds(String(settings.gameCaptureTimeout));
-  }, [externalPushCount, settings.gameCaptureTimeout]);
 
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
   const builtInIds = new Set(builtInGameIds.map((id) => id.toLowerCase()));
@@ -185,33 +205,8 @@ export function GamePage({
     onBrowseExecutable(requestId);
   }
 
-  function commitTimeout() {
-    const parsed = Number(timeoutSeconds);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      update(page, { gameCaptureTimeout: Math.round(parsed) });
-    } else {
-      setTimeoutSeconds(String(settings.gameCaptureTimeout));
-    }
-  }
-
   return (
     <div className="settings-page" data-page="game">
-      <Field label="Game-capture timeout" hint="How long game capture waits for the game's window before falling back, in seconds.">
-        <TextField
-                  type="number"
-          min={1}
-          value={timeoutSeconds}
-          onChange={(value) => setTimeoutSeconds(value)}
-          onBlur={commitTimeout}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              commitTimeout();
-            }
-          }}
-          aria-label="Game-capture timeout"
-        />
-      </Field>
-
       <div className="game-list">
         <div className="game-list-heading">
           <h3 className="subheading">Games</h3>
@@ -277,6 +272,13 @@ export function GamePage({
 
         {gameList.map((game, index) => {
           const packaged = builtInIds.has(game.id.toLowerCase());
+          const modified = hasOverrides(game);
+          const effectiveMode = game.recordingModeOverride?.mode ?? globalRecordingMode;
+          const automaticClipOverridesDisabled = !automaticClipsEnabled
+            || effectiveMode !== 'SessionWithReplayBuffer';
+          const automaticClipDisabledReason = !automaticClipsEnabled
+            ? 'Automatic highlights are off in global settings.'
+            : 'Automatic highlights need the Session + replay buffer recording mode.';
           return (
           <div className="game-row" key={game.id ?? index}>
             <div className="game-row-main">
@@ -302,7 +304,9 @@ export function GamePage({
               <code>{game.executablePath ?? game.executable ?? 'Provided by the packaged game'}</code>
             </div>
 
-            <div className="game-row-overrides">
+            <details className="settings-advanced">
+              <summary>Customize for this game{modified ? <span className="settings-advanced-marker">modified</span> : null}</summary>
+              <div className="settings-advanced-body game-row-overrides">
               <label className="settings-inline-field">
                 <span className="muted small">Recording mode</span>
                 <SelectField
@@ -394,6 +398,7 @@ export function GamePage({
                 <span className="muted small">Integrations</span>
                 <Checkbox
                   checked={game.integrations?.enabled ?? false}
+                  title="Currently has no effect. Reserved for future per-game integrations."
                   onChange={(enabled) => patchGame(index, { integrations: { enabled } })}
                 />
               </label>
@@ -403,6 +408,8 @@ export function GamePage({
                 <TextField
                   type="number"
                   min={1}
+                  disabled={automaticClipOverridesDisabled}
+                  title={automaticClipOverridesDisabled ? automaticClipDisabledReason : undefined}
                   value={game.automaticClipOverride?.beforeSeconds ?? ''}
                   placeholder="global"
                   onChange={(value) => patchAutomaticClipOverride(
@@ -419,6 +426,8 @@ export function GamePage({
                 <TextField
                   type="number"
                   min={1}
+                  disabled={automaticClipOverridesDisabled}
+                  title={automaticClipOverridesDisabled ? automaticClipDisabledReason : undefined}
                   value={game.automaticClipOverride?.afterSeconds ?? ''}
                   placeholder="global"
                   onChange={(value) => patchAutomaticClipOverride(
@@ -429,7 +438,8 @@ export function GamePage({
                   )}
                 />
               </label>
-            </div>
+              </div>
+            </details>
           </div>
           );
         })}

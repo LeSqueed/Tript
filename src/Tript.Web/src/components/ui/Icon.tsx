@@ -24,7 +24,8 @@ export type IconName =
   | 'clip'
   | 'pencil'
   | 'folder'
-  | 'close';
+  | 'close'
+  | 'monitor';
 
 const SOLID = { fill: 'currentColor', stroke: 'none' } as const;
 
@@ -89,6 +90,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   folder: <path d="M3.5 7.5v10a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-7l-2-3h-4a2 2 0 0 0-2 2z" />,
   close: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
+  monitor: (
+    <>
+      <rect x="3" y="4.5" width="18" height="12.5" rx="2" />
+      <path d="M9 20.5h6M12 17v3.5" />
+    </>
+  ),
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

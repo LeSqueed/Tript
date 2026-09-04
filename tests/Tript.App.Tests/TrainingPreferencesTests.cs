@@ -4,6 +4,8 @@
 #if TRIPT_TRAINING
 
 using Tript.App.Training;
+using Tript.Core;
+using Tript.Settings;
 using Xunit;
 
 namespace Tript.App.Tests;
@@ -81,6 +83,106 @@ public sealed class TrainingPreferencesTests
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Invalid_training_options_are_rejected_without_persisting_preferences()
+    {
+        var gameId = "invalid-options-" + Guid.NewGuid().ToString("N");
+        var workspace = TrainingWorkspace.ForGame(gameId);
+        using var fixture = new HostFixture();
+        try
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => fixture.Host.StartTraining(
+                new StartTrainingParameters { GameId = gameId, Epochs = 0, AugmentCopies = 0 }));
+            Assert.Null(workspace.LoadPreferences());
+
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => fixture.Host.StartTraining(
+                new StartTrainingParameters { GameId = gameId, Epochs = 1, AugmentCopies = -1 }));
+            Assert.Null(workspace.LoadPreferences());
+        }
+        finally
+        {
+            if (Directory.Exists(workspace.RootPath)) Directory.Delete(workspace.RootPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Blocked_training_request_does_not_replace_preferences()
+    {
+        var gameId = "blocked-options-" + Guid.NewGuid().ToString("N");
+        var workspace = TrainingWorkspace.ForGame(gameId);
+        workspace.SavePreferences(new TrainingPreferences
+        {
+            Epochs = 25,
+            Device = "cpu",
+            AugmentCopies = 2,
+        });
+        using var fixture = new HostFixture();
+        var active = new CancellationTokenSource();
+        var field = typeof(AppHost).GetField("_trainingCancellation",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        field.SetValue(fixture.Host, active);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Host.StartTraining(
+                new StartTrainingParameters
+                {
+                    GameId = gameId,
+                    Epochs = 80,
+                    Device = "cuda",
+                    AugmentCopies = 8,
+                }));
+
+            var preferences = Assert.IsType<TrainingPreferences>(workspace.LoadPreferences());
+            Assert.Equal(25, preferences.Epochs);
+            Assert.Equal("cpu", preferences.Device);
+            Assert.Equal(2, preferences.AugmentCopies);
+        }
+        finally
+        {
+            field.SetValue(fixture.Host, null);
+            active.Dispose();
+            if (Directory.Exists(workspace.RootPath)) Directory.Delete(workspace.RootPath, recursive: true);
+        }
+    }
+
+    private sealed class HostFixture : IDisposable
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(),
+            "tript-training-start-" + Guid.NewGuid().ToString("N"));
+
+        internal HostFixture()
+        {
+            Directory.CreateDirectory(_root);
+            var settings = new SettingsStore(new SettingsFileProvider(Path.Combine(_root, "settings.json")));
+            settings.Load();
+            settings.Save();
+            Host = new AppHost(new AppOptions
+            {
+                ContentRoot = _root,
+                SettingsPath = Path.Combine(_root, "settings.json"),
+                WebRoot = _root,
+                FakeRecorder = true,
+                ControlPort = 0,
+                UiPort = 0,
+                ContentPort = 0,
+            }, settings, runtime: null, new RecordingSessionTracker());
+        }
+
+        internal AppHost Host { get; }
+
+        public void Dispose()
+        {
+            Host.Dispose();
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
         }
     }
 }

@@ -45,6 +45,7 @@ describe('SessionClipsView', () => {
         clips={[highlight]}
         client={mockClient()}
         onBack={() => {}}
+        backLabel="Back to library"
         onOpen={() => {}}
         onToggleFavorite={onToggleFavorite}
         onDelete={() => {}}
@@ -63,6 +64,7 @@ describe('SessionClipsView', () => {
         clips={[highlight]}
         client={mockClient()}
         onBack={() => {}}
+        backLabel="Back to library"
         onOpen={() => {}}
         onToggleFavorite={() => {}}
         onDelete={onDelete}

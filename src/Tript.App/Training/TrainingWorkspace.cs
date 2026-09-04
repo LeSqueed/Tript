@@ -149,12 +149,47 @@ internal sealed class TrainingWorkspace
         // Preferences are local form state and the training heartbeat churns while a run is active;
         // neither is workspace data, so neither counts as the workspace having changed under an
         // import's conflict guard.
-        return string.Join("|", Directory.EnumerateFiles(RootPath, "*", SearchOption.AllDirectories)
-            .Where(path => !string.Equals(path, PreferencesPath, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(path, TrainingProgressPath, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(path => $"{Path.GetRelativePath(RootPath, path)}:{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}"));
+        IEnumerable<string> paths;
+        try
+        {
+            paths = Directory.EnumerateFiles(RootPath, "*", SearchOption.AllDirectories).ToList();
+        }
+        catch (Exception exception) when (IsTransientFileSystemError(exception))
+        {
+            return string.Empty;
+        }
+
+        var revisions = new List<string>();
+        foreach (var path in paths.Where(IsRevisionFile).OrderBy(path => path,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var info = new FileInfo(path);
+                revisions.Add($"{Path.GetRelativePath(RootPath, path)}:{info.Length}:{info.LastWriteTimeUtc.Ticks}");
+            }
+            catch (Exception exception) when (IsTransientFileSystemError(exception))
+            {
+                // Atomic writes and dataset swaps can remove a discovered file before it is statted.
+            }
+        }
+        return string.Join("|", revisions);
     }
+
+    private bool IsRevisionFile(string path)
+    {
+        if (string.Equals(path, PreferencesPath, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, TrainingProgressPath, StringComparison.OrdinalIgnoreCase)
+            || Path.GetFileName(path).Contains(".tmp-", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return !Path.GetRelativePath(RootPath, path)
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.StartsWith("dataset.previous-", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static bool IsTransientFileSystemError(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException;
 
     private static string SafeGameSegment(string gameId)
     {

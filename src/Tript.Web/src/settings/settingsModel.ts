@@ -65,6 +65,12 @@ export interface RecordingSettings {
   automaticClipAfterSeconds?: number;
   /** Initial linked-highlight choice in session deletion confirmations. Undefined reads as false. */
   deleteLinkedHighlightsByDefault?: boolean;
+  /**
+   * How long deleted items stay in the trash before they are purged automatically, in hours.
+   * Zero or less keeps them until the trash is emptied by hand. Optional on this type as with
+   * `rateControl`: a push from a backend without the field must still render.
+   */
+  trashRetentionHours?: number;
   [key: string]: unknown;
 }
 

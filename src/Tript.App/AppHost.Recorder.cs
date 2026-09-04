@@ -28,12 +28,34 @@ internal sealed partial class AppHost
 {
     // ---- recorder wiring ----
 
+    private enum StartRecordingResult
+    {
+        Started,
+        AlreadyRunning,
+        ShuttingDown,
+        NoDetectedGame,
+        UnsupportedMode,
+        RecorderRefused,
+    }
+
     // The dispatch entry points. StartRecording/StopRecording answer bool and every refusal returns
     // before the state push, so a caller that drops the bool leaves the UI showing nothing happened.
-    internal void StartRecordingOrReport(string? gameId)
+    internal void StartRecordingOrReport(string? gameId, string? displayId = null, bool applyDisplay = false)
     {
-        if (!StartRecording(gameId))
-            PushError("Recording did not start. Either one is already running, or this machine refused it.");
+        var result = TryStartRecording(gameId, displayId, applyDisplay);
+        if (result == StartRecordingResult.Started)
+            return;
+
+        PushError(result switch
+        {
+            StartRecordingResult.NoDetectedGame =>
+                "Recording did not start because no game is detected. Set the capture method to Auto or Display to record the desktop.",
+            StartRecordingResult.AlreadyRunning => "A recording is already running or still stopping.",
+            StartRecordingResult.ShuttingDown => "Recording did not start because Tript is shutting down.",
+            StartRecordingResult.UnsupportedMode =>
+                "Recording did not start because the selected recording mode is not supported.",
+            _ => "Recording did not start because the recorder refused to start.",
+        });
     }
 
     internal void StopRecordingOrReport()
@@ -47,52 +69,74 @@ internal sealed partial class AppHost
         }
     }
 
-    internal bool StartRecording(string? gameId)
+    internal bool StartRecording(string? gameId, string? displayId = null, bool applyDisplay = false)
+        => TryStartRecording(gameId, displayId, applyDisplay) == StartRecordingResult.Started;
+
+    private StartRecordingResult TryStartRecording(string? gameId, string? displayId = null,
+        bool applyDisplay = false)
     {
         lock (_recorderGate)
         {
-            var effectiveGameId = gameId ?? CurrentDetectedGameId() ?? StartupGameId;
-            return StartRecordingLocked(effectiveGameId, DetectedProcessFor(effectiveGameId));
+            var effectiveGameId = gameId ?? CurrentDetectedGameId();
+            var processOwner = effectiveGameId is null ? null : DetectedProcessFor(effectiveGameId);
+            return StartRecordingLocked(effectiveGameId, processOwner, applyDisplay, displayId);
         }
     }
 
-    private bool StartRecordingLocked(string? gameId, string? processOwner = null)
+    private StartRecordingResult StartRecordingLocked(string? gameId, string? processOwner = null,
+        bool applyDisplay = false, string? displayId = null)
     {
-        var effectiveGameId = gameId ?? StartupGameId;
-        EnsureManagedModel(effectiveGameId);
+        // The detector is authoritative. A UI state push and its Record click can race a process
+        // exit; an id with no live owner must not select per-game settings, paths, metadata or models.
+        var effectiveGameId = processOwner is null ? null : gameId;
+        if (processOwner is not null && effectiveGameId is not null)
+            EnsureManagedModel(effectiveGameId);
 
         // Detector teardown owns the callback barrier; do not admit new recording starts while it is
         // being dismantled.
         if (_shuttingDown)
-            return false;
+            return StartRecordingResult.ShuttingDown;
 
         if (_stopFinalizationPending)
-            return false;
+            return StartRecordingResult.AlreadyRunning;
 
         if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
-            return false;
+            return StartRecordingResult.AlreadyRunning;
+
+        // No previous session decision may survive into an attempt that fails before the recorder
+        // starts. A successful attempt writes its effective value after Start returns true.
+        lock (_automaticClipGate)
+            _liveHighlightsEnabledAtSessionStart = false;
 
         var settings = _settingsStore.Load();
         var resolved = SettingsResolver.Resolve(settings, effectiveGameId);
 
-        if (!resolved.Mode.IsAlphaSupported())
-            return false;
+        if (applyDisplay && resolved.CaptureMethod != DisplayCaptureMethod.Game)
+            resolved.Display = displayId;
 
-        resolved.OutputPath = BuildOutputPath(settings, effectiveGameId);
+        if (processOwner is null && resolved.CaptureMethod == DisplayCaptureMethod.Game)
+            return StartRecordingResult.NoDetectedGame;
+
+        if (!resolved.Mode.IsAlphaSupported())
+            return StartRecordingResult.UnsupportedMode;
+
+        resolved.OutputPath = BuildOutputPath(effectiveGameId);
 
         EnsureRecorderBuilt(resolved);
 
         // Point the session's game-capture source at the detected game before the recording starts, so
         // the recording shows the game rather than the background. win-capture keeps retrying the hook
         // while the source is shown, so a game that appears mid-recording is still picked up.
-        RetargetGameCapture(effectiveGameId);
+        if (effectiveGameId is not null)
+            RetargetGameCapture(effectiveGameId);
 
         var recordingStarted = false;
         Volatile.Write(ref _recordingProcessOwner, processOwner);
         SetBackgroundWorkSuspendedForRecording(true);
         try
         {
-            if (_recorderSession is ObsRecorderSession capture &&
+            if (processOwner is not null &&
+                _recorderSession is ObsRecorderSession capture &&
                 capture.Policy.IncludesGameCapture && capture.HasGameCaptureSource)
             {
                 Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
@@ -111,7 +155,7 @@ internal sealed partial class AppHost
                         () => PushWarning("Still connecting game capture. Recording will start when the hook is ready."),
                         () => PushWarning(null), waitCancellation.Token);
                     if (!captureReady)
-                        return false;
+                        return StartRecordingResult.RecorderRefused;
                 }
                 finally
                 {
@@ -123,7 +167,7 @@ internal sealed partial class AppHost
             }
 
             if (!_recorder!.Start(resolved))
-                return false;
+                return StartRecordingResult.RecorderRefused;
             recordingStarted = true;
 
             _activeOutputPath = resolved.OutputPath;
@@ -145,6 +189,7 @@ internal sealed partial class AppHost
                 _recordingStartUtc = DateTime.UtcNow;
                 _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
                     && resolved.Mode.UsesReplayBuffer();
+                _liveHighlightsEnabledAtSessionStart = _liveHighlightsEnabled;
                 _liveHighlightCancellation?.Dispose();
                 _liveHighlightCancellation = _liveHighlightsEnabled
                     ? new CancellationTokenSource()
@@ -152,12 +197,15 @@ internal sealed partial class AppHost
                 _liveHighlightTasks.Clear();
             }
 
-            StartDetection(effectiveGameId);
+            if (processOwner is not null && effectiveGameId is not null)
+                StartDetection(effectiveGameId);
+            else
+                StopDetection();
 
             PushState(recording: true, effectiveGameId);
             RequestNotification(NotificationKind.RecordingStarted, "Recording started",
                 string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
-            return true;
+            return StartRecordingResult.Started;
         }
         finally
         {
@@ -245,6 +293,7 @@ internal sealed partial class AppHost
         var sourcePath = _activeOutputPath;
         List<Bookmark> automaticBookmarks;
         HashSet<Guid> liveBookmarkIds;
+        bool automaticClipsWereLive;
         lock (_automaticClipGate)
         {
             automaticBookmarks = _automaticClipBookmarks.ToList();
@@ -252,6 +301,8 @@ internal sealed partial class AppHost
             liveBookmarkIds = _liveHighlightBookmarkIds.ToHashSet();
             _liveHighlightRegions.Clear();
             _liveHighlightBookmarkIds.Clear();
+            automaticClipsWereLive = _liveHighlightsEnabledAtSessionStart;
+            _liveHighlightsEnabledAtSessionStart = false;
             _liveHighlightsEnabled = false;
         }
 
@@ -261,8 +312,12 @@ internal sealed partial class AppHost
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
             WriteMetadataRecord(_pendingMetadata);
 
+            // Post-stop clips are gated by the same effective flag the session started with
+            // (AutomaticClipsEnabled AND the resolved mode uses the replay buffer), so plain Session
+            // mode never cuts automatic clips, and a mid-session settings edit cannot rewrite what
+            // this recording did.
             if (sourcePath is not null && _pendingMetadata.VideoPath.Length > 0
-                && _settingsStore.Load().Recording.AutomaticClipsEnabled)
+                && automaticClipsWereLive)
             {
                 var unsavedBookmarks = automaticBookmarks
                     .Where(bookmark => !liveBookmarkIds.Contains(bookmark.Id))
@@ -398,9 +453,11 @@ internal sealed partial class AppHost
 
     // New recordings are scoped under <effectiveRoot>/<game>/sessions/. Existing legacy recordings
     // remain readable because catalogue classification accepts both layouts.
-    private string BuildOutputPath(SettingsModel settings, string gameId)
+    private string BuildOutputPath(string? gameId)
     {
-        var directory = Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
+        var directory = string.IsNullOrWhiteSpace(gameId)
+            ? Path.Combine(EffectiveRoot, "sessions")
+            : Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
         Directory.CreateDirectory(directory);
         // Millisecond resolution keeps two sessions started in the same second from colliding on one file
         // name, which would overwrite the recording and its metadata record.

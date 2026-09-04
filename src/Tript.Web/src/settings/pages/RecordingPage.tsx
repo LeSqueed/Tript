@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The recording page: the session recording itself. Mode (session/buffer/hybrid), resolution, frame
-// rate, and the codec-and-quality surface — which encoder, how it is told to spend its bits (rate
-// control), and the quality or bitrate that mode reads.
+// The recording page: the session recording itself. Mode, resolution, frame rate, the quality or
+// bitrate the chosen mode reads, HDR, and the output folder form the main section; the encoder and
+// its rate-control surface, plus the replay buffer's size cap, sit in the advanced disclosure.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type {
+  BufferSettings,
   DisplayResolution,
   RateControlMode,
   RecordingMode,
   RecordingSettings,
 } from '../settingsModel';
-import { Button, Checkbox, Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
+import { Button, Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
+import { ConfirmDialog } from '../../components/ui/confirmDialog';
 
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
-  { value: 'Session', label: 'Session — one continuous recording' },
-  { value: 'SessionWithReplayBuffer', label: 'Session + Replay Buffer — recording and live highlights' },
+  { value: 'Session', label: 'Session (one continuous recording)' },
+  { value: 'SessionWithReplayBuffer', label: 'Session + replay buffer (records and live highlights)' },
 ];
 
 /**
@@ -65,9 +67,8 @@ const FALLBACK_ENCODER = 'obs_x264';
  */
 const BACKEND_DECIDES_ENCODER = 'x264';
 
-/** The default highlight window the backend applies when a settings push carries no value. */
-const DEFAULT_CLIP_BEFORE_SECONDS = 5;
-const DEFAULT_CLIP_AFTER_SECONDS = 8;
+/** 1 MiB — the human-readable unit the buffer size field is edited in. */
+const MIB = 1024 * 1024;
 
 function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
   const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
@@ -231,7 +232,7 @@ function encoderLabel(id: string, ids: string[]): string {
     return id;
   }
   const sameFamily = ids.filter((other) => encoderFamily(other) === family).length;
-  return sameFamily > 1 ? `${label} — ${id}` : label;
+  return sameFamily > 1 ? `${label} (${id})` : label;
 }
 
 /**
@@ -277,14 +278,9 @@ function parseKbps(draft: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** A whole positive number of seconds, or null when the draft is not one. */
-function parseSeconds(draft: string): number | null {
-  const parsed = Number(draft);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
-}
-
 export function RecordingPage({
   settings,
+  buffer,
   update,
   page,
   externalPushCount,
@@ -293,6 +289,8 @@ export function RecordingPage({
   onBrowse,
 }: {
   settings: RecordingSettings;
+  /** The replay buffer model: this page's size cap edits buffer.maxSizeBytes under the buffer page. */
+  buffer: BufferSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => void;
   page: SettingsPageName;
   externalPushCount: number;
@@ -312,26 +310,30 @@ export function RecordingPage({
   const directoryExample = nativeDirectoryExample();
   const [bitrate, setBitrate] = useState<string>(String(settings.bitrateKbps ?? ''));
   const [maxBitrate, setMaxBitrate] = useState<string>(String(settings.maxBitrateKbps ?? ''));
-  const [beforeSeconds, setBeforeSeconds] = useState<string>(
-    String(settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS),
+  const [bufferSizeMiB, setBufferSizeMiB] = useState<string>(
+    String(Math.round(buffer.maxSizeBytes / MIB)),
   );
-  const [afterSeconds, setAfterSeconds] = useState<string>(String(
-    settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS,
-  ));
+  // Picking 'Session' with automatic highlights on needs a confirmation before it is sent.
+  const [confirmBufferOff, setConfirmBufferOff] = useState(false);
 
-  // Re-sync drafts from the model only on an external push, never on the echo of our own edit.
+  // Re-sync drafts from the model only on an external push. Including model values here would let
+  // a delayed self echo erase text entered after the preceding commit.
   useEffect(() => {
     setBitrate(String(settings.bitrateKbps ?? ''));
     setMaxBitrate(String(settings.maxBitrateKbps ?? ''));
-    setBeforeSeconds(String(settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS));
-    setAfterSeconds(String(settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS));
-  }, [
-    externalPushCount,
-    settings.bitrateKbps,
-    settings.maxBitrateKbps,
-    settings.automaticClipBeforeSeconds,
-    settings.automaticClipAfterSeconds,
-  ]);
+    setBufferSizeMiB(String(Math.round(buffer.maxSizeBytes / MIB)));
+  }, [externalPushCount]);
+
+  function changeMode(value: string) {
+    const mode = value as RecordingMode;
+    if (mode === 'Session' && settings.automaticClipsEnabled === true) {
+      // The select stays controlled by the stored value, so it keeps showing the mode on file while
+      // the dialog is open; nothing is sent until the user confirms.
+      setConfirmBufferOff(true);
+      return;
+    }
+    update(page, { mode });
+  }
 
   function commitResolution(value: string) {
     const parsed = parseResolution(value);
@@ -345,6 +347,7 @@ export function RecordingPage({
     if (kbps === null) {
       setBitrate(String(settings.bitrateKbps ?? ''));
     } else {
+      setBitrate(String(kbps));
       update(page, { bitrateKbps: kbps });
     }
   }
@@ -354,46 +357,20 @@ export function RecordingPage({
     if (kbps === null) {
       setMaxBitrate(String(settings.maxBitrateKbps ?? ''));
     } else {
+      setMaxBitrate(String(kbps));
       update(page, { maxBitrateKbps: kbps });
     }
   }
 
-  function storedBeforeSeconds(): number {
-    return settings.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
-  }
-
-  function storedAfterSeconds(): number {
-    return settings.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
-  }
-
-  function commitBefore() {
-    const before = parseSeconds(beforeSeconds);
-    if (before === null) {
-      setBeforeSeconds(String(storedBeforeSeconds()));
-      return;
-    }
-    const currentAfter = parseSeconds(afterSeconds) ?? storedAfterSeconds();
-    setBeforeSeconds(String(before));
-    if (before > currentAfter) {
-      // Raising before above after would break the pair; raise after along with it in one atomic patch.
-      setAfterSeconds(String(before));
-      update(page, { automaticClipBeforeSeconds: before, automaticClipAfterSeconds: before });
+  function commitBufferSize() {
+    const parsed = Number(bufferSizeMiB);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      const bytes = Math.round(parsed * MIB);
+      setBufferSizeMiB(String(Math.round(bytes / MIB)));
+      update('buffer', { maxSizeBytes: bytes });
     } else {
-      update(page, { automaticClipBeforeSeconds: before });
+      setBufferSizeMiB(String(Math.round(buffer.maxSizeBytes / MIB)));
     }
-  }
-
-  function commitAfter() {
-    const after = parseSeconds(afterSeconds);
-    if (after === null) {
-      setAfterSeconds(String(storedAfterSeconds()));
-      return;
-    }
-    const before = parseSeconds(beforeSeconds) ?? storedBeforeSeconds();
-    // The pair must stay coherent: after can never be below the before value it commits alongside.
-    const nextAfter = Math.max(after, before);
-    setAfterSeconds(String(nextAfter));
-    update(page, { automaticClipAfterSeconds: nextAfter });
   }
 
   const encoder = settings.encoder;
@@ -403,15 +380,16 @@ export function RecordingPage({
   // an out-of-list encoder. Changing it without being asked would persist a choice nobody made.
   const coercedFrom = settings.rateControl && settings.rateControl !== rateControl ? settings.rateControl : undefined;
   const usesQuantiser = QUANTISER_MODES.includes(rateControl);
-  // The browser-level floor for the after field tracks the current before value (draft or stored).
-  const afterMin = Math.max(1, parseSeconds(beforeSeconds) ?? storedBeforeSeconds());
 
   return (
     <div className="settings-page" data-page="recording">
-      <Field label="Recording mode" hint="Every mode records a session. The replay mode also keeps the rolling buffer available for live highlights.">
+      <Field
+        label="Recording mode"
+        hint="Every mode records the full session. The replay mode also keeps recent footage in memory so highlights can start before the moment happens."
+      >
         <SelectField
           value={settings.mode}
-          onChange={(value) => update(page, { mode: value as RecordingMode })}
+          onChange={changeMode}
           options={RECORDING_MODES}
         />
       </Field>
@@ -420,8 +398,8 @@ export function RecordingPage({
         label="Resolution"
         hint={
           displayResolution
-            ? 'Width × height of the recorded picture. Your display’s own size is marked; a stored size outside this list is kept and marked custom.'
-            : 'Width × height of the recorded picture. A stored size outside this list is kept and marked custom.'
+            ? "The size of the recorded video. Your display's own size is marked. A stored size outside this list is kept and marked custom."
+            : 'The size of the recorded video.'
         }
       >
         <SelectField
@@ -431,7 +409,10 @@ export function RecordingPage({
         />
       </Field>
 
-      <Field label="Frame rate" hint="Frames per second. A stored rate outside this list is kept and marked custom.">
+      <Field
+        label="Frame rate"
+        hint="Frames per second. Smoother at higher rates, but larger files and more CPU. A stored rate outside this list is kept and marked custom."
+      >
         <SelectField
           value={String(settings.fps)}
           onChange={(value) => update(page, { fps: Number(value) })}
@@ -439,91 +420,32 @@ export function RecordingPage({
         />
       </Field>
 
-      <Field label="Encoder" hint="The video encoder. Only encoders this machine supports are listed.">
-        <SelectField
-          value={encoder}
-          onChange={(value) => update(page, { encoder: value })}
-          options={encoderOptions(encoder, availableEncoders)}
-        />
-      </Field>
+      {usesQuantiser ? (
+        <Field
+          label="Quality"
+          hint="Higher quality looks better and uses more disk space. Applied when a game has no override of its own."
+        >
+          <SelectField
+            value={String(settings.quality)}
+            onChange={(value) => update(page, { quality: Number(value) })}
+            options={withStoredValue(QUALITY_OPTIONS, String(settings.quality))}
+          />
+        </Field>
+      ) : null}
 
       <Field
         label="HDR"
-        hint="Record in HDR when the captured display is in HDR mode and an HEVC or AV1 encoder is available. Off tonemaps an HDR game down to SDR instead, which is the right choice if your player cannot open a PQ file."
+        hint="Records in HDR when the captured display is in HDR mode and the encoder supports it. Turn off to always record in SDR, which every player can open. (In SDR, HDR footage is tone-mapped.)"
       >
         <SelectField
           value={settings.enableHdr === false ? 'off' : 'on'}
           onChange={(value) => update(page, { enableHdr: value === 'on' })}
           options={[
             { value: 'on', label: 'Record HDR when available' },
-            { value: 'off', label: 'Always record SDR' },
+            { value: 'off', label: 'Always record in SDR' },
           ]}
         />
       </Field>
-
-      <Field
-        label="Rate control"
-        hint={
-          coercedFrom
-            ? `${RATE_CONTROL_LABELS[coercedFrom]} is stored but this encoder does not support it; recordings use ${RATE_CONTROL_LABELS[rateControl]}.`
-            : 'How the encoder spends its bits. Only the modes this encoder supports are listed.'
-        }
-      >
-        <SelectField
-          value={rateControl}
-          onChange={(value) => update(page, { rateControl: value as RateControlMode })}
-          options={rateControlOptions(encoder)}
-        />
-      </Field>
-
-      {usesQuantiser ? (
-        <Field label="Quality" hint="Constant quality: the encoder spends whatever the picture needs. Applied when a game has no override of its own.">
-          <SelectField
-            value={String(settings.quality)}
-            onChange={(value) => update(page, { quality: Number(value) })}
-            options={QUALITY_OPTIONS}
-          />
-        </Field>
-      ) : (
-        <Field
-          label="Bitrate"
-          hint={
-            rateControl === 'Cbr'
-              ? 'Kbps held constant whatever the picture costs. Around 15000 suits 1080p60.'
-              : 'Target kbps. Around 15000 suits 1080p60.'
-          }
-        >
-          <TextField
-            value={bitrate}
-            onChange={setBitrate}
-            onBlur={commitBitrate}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                commitBitrate();
-              }
-            }}
-            inputMode="numeric"
-            aria-label="Bitrate"
-          />
-        </Field>
-      )}
-
-      {rateControl === 'Vbr' ? (
-        <Field label="Maximum bitrate" hint="The ceiling for peaks, in kbps. 0 derives one from the target (1.5×).">
-          <TextField
-            value={maxBitrate}
-            onChange={setMaxBitrate}
-            onBlur={commitMaxBitrate}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                commitMaxBitrate();
-              }
-            }}
-            inputMode="numeric"
-            aria-label="Maximum bitrate"
-          />
-        </Field>
-      ) : null}
 
       <Field label="Output directory" hint={`Where recordings are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
         <span className="settings-row">
@@ -541,64 +463,107 @@ export function RecordingPage({
         </span>
       </Field>
 
-      <Field
-        label="Automatic highlights"
-        hint="When enabled, Tript creates clips for positive detected events as soon as each recording stops, sized by the before/after windows below. You can always create them manually from a session review."
-      >
-        <Checkbox
-          checked={settings.automaticClipsEnabled === true}
-          onChange={(enabled) => update(page, { automaticClipsEnabled: enabled })}
-        />
-      </Field>
+      <details className="settings-advanced">
+        <summary>Encoder and bitrate</summary>
+        <div className="settings-advanced-body">
+          <Field label="Encoder" hint="The video encoder. Only encoders this machine supports are listed.">
+            <SelectField
+              value={encoder}
+              onChange={(value) => update(page, { encoder: value })}
+              options={encoderOptions(encoder, availableEncoders)}
+            />
+          </Field>
 
-      <Field label="Seconds before each highlight" hint="How far before a detected highlight's start the clip begins.">
-        <input
-          type="number"
-          className="input"
-          min={1}
-          value={beforeSeconds}
-          onChange={(event) => setBeforeSeconds(event.target.value)}
-          onBlur={commitBefore}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              commitBefore();
+          <Field
+            label="Rate control"
+            hint={
+              coercedFrom
+                ? `${RATE_CONTROL_LABELS[coercedFrom]} is stored, but this encoder does not support it. Recordings use ${RATE_CONTROL_LABELS[rateControl]}.`
+                : 'How the encoder spends its bits. Only the modes this encoder supports are listed.'
             }
+          >
+            <SelectField
+              value={rateControl}
+              onChange={(value) => update(page, { rateControl: value as RateControlMode })}
+              options={rateControlOptions(encoder)}
+            />
+          </Field>
+
+          {!usesQuantiser ? (
+            <Field
+              label="Bitrate"
+              hint={
+                rateControl === 'Cbr'
+                  ? 'Kilobits per second, held constant whatever the picture costs. Around 15000 suits 1080p60.'
+                  : 'Target kilobits per second. Around 15000 suits 1080p60.'
+              }
+            >
+              <TextField
+                value={bitrate}
+                onChange={setBitrate}
+                onBlur={commitBitrate}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    commitBitrate();
+                  }
+                }}
+                inputMode="numeric"
+                aria-label="Bitrate"
+              />
+            </Field>
+          ) : null}
+
+          {rateControl === 'Vbr' ? (
+            <Field label="Maximum bitrate" hint="The ceiling for peaks, in kbps. 0 derives one from the target (1.5x).">
+              <TextField
+                value={maxBitrate}
+                onChange={setMaxBitrate}
+                onBlur={commitMaxBitrate}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    commitMaxBitrate();
+                  }
+                }}
+                inputMode="numeric"
+                aria-label="Maximum bitrate"
+              />
+            </Field>
+          ) : null}
+
+          <Field
+            label="Maximum buffer size"
+            hint="The most memory the replay buffer may use. Edited in MiB, stored as bytes."
+          >
+            <TextField
+              type="number"
+              min={1}
+              value={bufferSizeMiB}
+              onChange={setBufferSizeMiB}
+              onBlur={commitBufferSize}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  commitBufferSize();
+                }
+              }}
+              aria-label="Maximum buffer size"
+            />
+          </Field>
+        </div>
+      </details>
+
+      {confirmBufferOff ? (
+        <ConfirmDialog
+          title="Turn off the replay buffer?"
+          notice="Automatic highlights are on, and they need the buffer to capture the seconds before a moment. Turning off the buffer turns them off too. You can turn them back on from the Highlights tab."
+          confirmLabel="Turn buffer off"
+          cancelLabel="Keep buffer on"
+          onConfirm={() => {
+            update(page, { mode: 'Session', automaticClipsEnabled: false });
+            setConfirmBufferOff(false);
           }}
-          aria-label="Seconds before each highlight"
+          onCancel={() => setConfirmBufferOff(false)}
         />
-      </Field>
-
-      <Field label="Seconds after each highlight" hint="How far after a detected highlight's end the clip continues. Cannot be less than the seconds before.">
-        <input
-          type="number"
-          className="input"
-          min={afterMin}
-          value={afterSeconds}
-          onChange={(event) => setAfterSeconds(event.target.value)}
-          onBlur={commitAfter}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              commitAfter();
-            }
-          }}
-          aria-label="Seconds after each highlight"
-        />
-      </Field>
-
-      <Field
-        label="Delete linked highlights by default"
-        hint="Preselects the option to delete linked highlights when deleting a session. Favourited highlights are always kept."
-      >
-        <Checkbox
-          checked={settings.deleteLinkedHighlightsByDefault === true}
-          onChange={(enabled) => update(page, { deleteLinkedHighlightsByDefault: enabled })}
-        />
-      </Field>
-
-      <div className="settings-actions">
-        {/* Named for what it does. It used to say "Reset to defaults" and reset one field. */}
-        <Button onClick={() => update(page, { mode: 'SessionWithReplayBuffer' })}>Reset the recording mode</Button>
-      </div>
+      ) : null}
     </div>
   );
 }

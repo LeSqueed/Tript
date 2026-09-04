@@ -22,10 +22,10 @@ export const PRIMARY_SUFFIX = ' (primary)';
 /** How the display field can be rendered — see `displayFieldMode`. */
 export type DisplayFieldMode = 'picker' | 'text' | 'none';
 
-/** One option's label: `"<name> — <width>x<height>"`, primary marked. A size the host did not report
+/** One option's label: `"<name>: <width>x<height>"`, primary marked. A size the host did not report
  * is left off rather than shown as 0x0. */
 export function displayOptionLabel(info: DisplayInfo): string {
-  const size = info.width > 0 && info.height > 0 ? ` — ${info.width}x${info.height}` : '';
+  const size = info.width > 0 && info.height > 0 ? `: ${info.width}x${info.height}` : '';
   return `${info.name}${size}${info.primary ? PRIMARY_SUFFIX : ''}`;
 }
 

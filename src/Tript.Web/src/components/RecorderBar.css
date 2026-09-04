@@ -124,3 +124,20 @@
   font-size: var(--text-small);
   font-weight: 600;
 }
+
+.rec-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-muted-strong);
+}
+
+.rec-source-select {
+  max-width: 168px;
+}
+
+.rec-source-label {
+  font-size: var(--text-small);
+  font-weight: 600;
+}

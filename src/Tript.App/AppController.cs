@@ -30,8 +30,14 @@ internal sealed class AppController
             // The refusal is reported, not discarded: StartRecording returns false before its
             // state push (recorder busy, a mode it does not record, a start libobs refused), so
             // without this the user presses record and nothing in the UI changes at all.
-            ["StartRecording"] = (parameters, _) => _host.StartRecordingOrReport(
-                parameters.Deserialize<StartRecordingParameters>()?.GameId),
+            ["StartRecording"] = (parameters, _) =>
+            {
+                var parsed = parameters.Deserialize<StartRecordingParameters>();
+                _host.StartRecordingOrReport(
+                    parsed?.GameId,
+                    parsed?.ApplyDisplay == true ? parsed.DisplayId : null,
+                    parsed?.ApplyDisplay == true);
+            },
             ["StopRecording"] = (_, _) => _host.StopRecordingOrReport(),
             ["ToggleFullscreen"] = (parameters, _) => _host.ToggleFullscreen(
                 parameters.GetPropertyOrDefault("enabled").GetBooleanOr(false)),
@@ -137,6 +143,12 @@ internal sealed class AppController
                 await _host.StartTraining(parameters.Deserialize<StartTrainingParameters>()),
             ["InstallTrainingModel"] = async (parameters, _) =>
                 await _host.InstallTrainingModelCommand(parameters.Deserialize<TrainingGameParameters>()),
+            ["ListAvailableRecordingModels"] = (_, _) => Task.Run(_host.PushAvailableRecordingModels),
+            ["ActivateRecordingModel"] = (parameters, _) =>
+            {
+                var parsed = parameters.Deserialize<TrainingGameParameters>();
+                return Task.Run(() => _host.ActivateRecordingModel(parsed?.GameId));
+            },
 #endif
         };
     }

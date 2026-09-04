@@ -132,7 +132,7 @@ public class VisualEventDetector : IDisposable
                 };
 
                 var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
-                var regionGroups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
+                var regionGroups = BuildRuntimeRegionGroups(definitions, numClasses);
                 var grayscaleStrategy = DetectionFramePreprocessor.SelectGrayscaleStrategy(regionGroups);
                 var divisor = ComputeFrameRateDivisor(GetConfiguredOutputFps());
 
@@ -352,11 +352,20 @@ public class VisualEventDetector : IDisposable
     internal static IReadOnlyDictionary<int, string>? ParseClassNames(string? names)
         => OnnxModelInspector.ParseClassNames(names);
 
-    // events.json keys bookmarks by classId; the model decides what each classId means. An entry
-    // added, removed or renamed without retraining mislabels every detection. Null when they agree.
+    // events.json keys bookmarks by classId; the model decides what each emitted classId means.
+    // Appended entries are safe for an older model, but removing or renaming its classes is not.
     internal static string? FindClassMapMismatch(IReadOnlyList<EventDefinition> definitions,
         int numClasses, IReadOnlyDictionary<int, string>? modelClassNames)
         => ModelEventCompatibility.FindMismatch(definitions, numClasses, modelClassNames);
+
+    internal static List<RegionGroup> BuildRuntimeRegionGroups(
+        IReadOnlyList<EventDefinition> definitions, int numClasses)
+    {
+        var modelDefinitions = definitions
+            .Where(definition => (uint)definition.ClassId < (uint)numClasses)
+            .ToList();
+        return DetectionFramePreprocessor.BuildRegionGroups(modelDefinitions);
+    }
 
     private void OnFrame(in VideoFrame frame)
     {

@@ -27,7 +27,7 @@ public sealed class ContentServerLoadTests : IDisposable
         var extractor = new BlockingExtractor();
         using var thumbnails = new ThumbnailStore(Path.Combine(_root, "metadata", "thumbnails"), () => extractor);
         var token = new SessionToken();
-        var port = TestPorts.Content;
+        var port = AppHostDriver.AllocateFreePort();
         using var server = new ContentServer(_root, token, thumbnails, port);
         server.Start();
 

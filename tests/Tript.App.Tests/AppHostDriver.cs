@@ -2,6 +2,8 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -21,6 +23,27 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     private readonly TaskCompletionSource<string?> _ready = new();
     private ClientWebSocket? _socket;
 
+    // Child hosts bind ephemeral loopback ports so concurrent test runs never collide. The
+    // allocator asks the OS for a free port; the TOCTOU window between release and the child's
+    // bind is accepted — a collision then degrades to "the host never prints READY" and
+    // WaitForReady throws a clear error instead of hanging the run.
+    internal int UiPort { get; }
+
+    internal int ContentPort { get; }
+
+    internal int ControlPort { get; }
+
+    // Asks the OS for a free loopback port: bind a listener to port 0, read the port it was
+    // assigned, and release it.
+    internal static int AllocateFreePort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
     // The per-launch session token, read off the READY line. Every request the suite makes to any
     // of the three listeners carries it; a host that never printed one leaves this empty and the
     // tests fail on the 403 rather than hanging.
@@ -34,9 +57,12 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 
     internal static bool AppHostExists => File.Exists(AppHostPath);
 
-    private AppHostDriver(Process process)
+    private AppHostDriver(Process process, int uiPort, int contentPort, int controlPort)
     {
         _process = process;
+        UiPort = uiPort;
+        ContentPort = contentPort;
+        ControlPort = controlPort;
         // Drain stdout continuously so the READY line is captured without deadlocking the child,
         // and so the host's log stays readable if a test fails.
         _drain = Task.Run(async () =>
@@ -61,18 +87,27 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     }
 
     internal static AppHostDriver StartFake(string contentRoot, string settingsPath, string? gameListJson = null,
-        string? webRoot = null)
-        => Start(contentRoot, settingsPath, gameListJson, fake: true, webRoot);
+        string? webRoot = null, string? fakeRecorderSettingsTrace = null)
+        => Start(contentRoot, settingsPath, gameListJson, fake: true, webRoot, fakeRecorderSettingsTrace);
 
     // The real recording path: no --fake-recorder, so the host starts libobs, resets video/audio,
     // loads the safe modules, and wires a real ObsRecorderSession. The caller is responsible for
     // ensuring the muxer helper sits next to the app binary first.
     internal static AppHostDriver StartReal(string contentRoot, string settingsPath)
-        => Start(contentRoot, settingsPath, gameListJson: null, fake: false, webRoot: null);
+        => Start(contentRoot, settingsPath, gameListJson: null, fake: false, webRoot: null,
+            fakeRecorderSettingsTrace: null);
 
     private static AppHostDriver Start(string contentRoot, string settingsPath, string? gameListJson, bool fake,
-        string? webRoot)
+        string? webRoot, string? fakeRecorderSettingsTrace)
     {
+        var uiPort = AllocateFreePort();
+        var contentPort = AllocateFreePort();
+        while (contentPort == uiPort)
+            contentPort = AllocateFreePort();
+        var controlPort = AllocateFreePort();
+        while (controlPort == uiPort || controlPort == contentPort)
+            controlPort = AllocateFreePort();
+
         var startInfo = new ProcessStartInfo
         {
             FileName = AppHostPath,
@@ -85,6 +120,8 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         startInfo.ArgumentList.Add(settingsPath);
         if (fake)
             startInfo.ArgumentList.Add("--fake-recorder");
+        if (fakeRecorderSettingsTrace is not null)
+            startInfo.Environment[FakeRecorderSession.SettingsTraceEnvironmentVariable] = fakeRecorderSettingsTrace;
         if (gameListJson is not null)
         {
             startInfo.ArgumentList.Add("--game-list");
@@ -96,15 +133,15 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             startInfo.ArgumentList.Add(webRoot);
         }
         startInfo.ArgumentList.Add("--ui-port");
-        startInfo.ArgumentList.Add(TestPorts.Ui.ToString());
+        startInfo.ArgumentList.Add(uiPort.ToString());
         startInfo.ArgumentList.Add("--content-port");
-        startInfo.ArgumentList.Add(TestPorts.Content.ToString());
+        startInfo.ArgumentList.Add(contentPort.ToString());
         startInfo.ArgumentList.Add("--control-port");
-        startInfo.ArgumentList.Add(TestPorts.ControlSocket.ToString());
+        startInfo.ArgumentList.Add(controlPort.ToString());
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("The app host could not be started.");
-        var driver = new AppHostDriver(process);
+        var driver = new AppHostDriver(process, uiPort, contentPort, controlPort);
 
         // The READY line is the single-line contract: the control socket, content server and UI
         // host are all reachable once it appears.
@@ -153,7 +190,7 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     internal async Task ConnectWebSocketAsync()
     {
         _socket = new ClientWebSocket();
-        await _socket.ConnectAsync(new Uri(WithToken($"ws://localhost:{TestPorts.ControlSocket}/")),
+        await _socket.ConnectAsync(new Uri(WithToken($"ws://localhost:{ControlPort}/")),
             CancellationToken.None);
         await SendAsync("""{"method":"NewConnection","parameters":{"protocolVersion":1}}""");
     }

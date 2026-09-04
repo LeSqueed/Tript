@@ -204,6 +204,46 @@ public sealed class TrainingSamplesTests
     }
 
     [Fact]
+    public void UpdateLabels_ignores_unrelated_legacy_corruption()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tript-training-legacy-label-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workspace = TrainingWorkspace.ForGame("Example", Path.Combine(root, "workspaces"));
+            var store = new TrainingSampleStore(workspace);
+            var source = Path.Combine(root, "recording.mp4");
+            File.WriteAllBytes(source, [1]);
+            var originalDefinitions = new List<EventDefinition>
+            {
+                new() { Id = 1, Name = "Current", ClassId = 0, Type = EventType.Trigger },
+                new() { Id = 2, Name = "Removed", ClassId = 1, Type = EventType.Trigger },
+            };
+            var target = store.Save(source, 1, 1920, 1080,
+                [new TrainingLabel { ClassId = 0, CenterX = 0.2, CenterY = 0.2, Width = 0.1, Height = 0.1 }],
+                [137, 80], originalDefinitions);
+            var corrupt = store.Save(source, 2, 1920, 1080,
+                [new TrainingLabel { ClassId = 1, CenterX = 0.7, CenterY = 0.7, Width = 0.1, Height = 0.1 }],
+                [137, 80], originalDefinitions);
+            var currentDefinitions = new List<EventDefinition>
+            {
+                new() { Id = 1, Name = "Current", ClassId = 0, Type = EventType.Trigger },
+            };
+
+            store.UpdateLabels(target.Id,
+                [new TrainingLabel { ClassId = 0, CenterX = 0.4, CenterY = 0.4, Width = 0.1, Height = 0.1 }],
+                currentDefinitions);
+
+            Assert.Equal(0.4, store.LoadById(target.Id).Labels.Single().CenterX, 6);
+            Assert.Equal(1, store.LoadById(corrupt.Id).Labels.Single().ClassId);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Save_allows_an_unlabeled_pending_sample_for_later_annotation()
     {
         var root = Path.Combine(Path.GetTempPath(), "tript-training-empty-sample-" + Guid.NewGuid().ToString("N"));
@@ -371,6 +411,46 @@ public sealed class TrainingSamplesTests
         Assert.Equal(0.5, suggestion.Label.CenterY, 6);
         Assert.Equal(0.1, suggestion.Label.Width, 6);
         Assert.Equal(0.05, suggestion.Label.Height, 6);
+    }
+
+    [Fact]
+    public void LabelSuggestions_accept_fixed_geometry_inside_region_when_prediction_is_outside()
+    {
+        var definition = new EventDefinition
+        {
+            Id = 1, ClassId = 1, Name = "Fixed", Type = EventType.Trigger,
+            FixedPosition = true,
+            FixedLabelCenterX = 0.6, FixedLabelCenterY = 0.6,
+            FixedLabelWidth = 0.1, FixedLabelHeight = 0.1,
+            ScreenRegionX = 0.5f, ScreenRegionY = 0.5f,
+            ScreenRegionW = 0.3f, ScreenRegionH = 0.3f,
+        };
+        var prediction = new DetectionResult
+        {
+            ClassId = 1, Confidence = 0.9f, X = 0.1f, Y = 0.1f, Width = 0.1f, Height = 0.1f,
+        };
+
+        Assert.Single(TrainingLabelSuggestionFilter.Merge([], [prediction], [definition]));
+    }
+
+    [Fact]
+    public void LabelSuggestions_reject_fixed_geometry_outside_region_when_prediction_is_inside()
+    {
+        var definition = new EventDefinition
+        {
+            Id = 1, ClassId = 1, Name = "Fixed", Type = EventType.Trigger,
+            FixedPosition = true,
+            FixedLabelCenterX = 0.2, FixedLabelCenterY = 0.2,
+            FixedLabelWidth = 0.1, FixedLabelHeight = 0.1,
+            ScreenRegionX = 0.5f, ScreenRegionY = 0.5f,
+            ScreenRegionW = 0.3f, ScreenRegionH = 0.3f,
+        };
+        var prediction = new DetectionResult
+        {
+            ClassId = 1, Confidence = 0.9f, X = 0.55f, Y = 0.55f, Width = 0.1f, Height = 0.1f,
+        };
+
+        Assert.Empty(TrainingLabelSuggestionFilter.Merge([], [prediction], [definition]));
     }
 
     [Fact]

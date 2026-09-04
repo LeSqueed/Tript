@@ -54,6 +54,30 @@ public sealed class TrainingProgressTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void Revision_ignores_atomic_write_and_previous_dataset_paths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tript-training-transient-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var workspace = TrainingWorkspace.AtRoot("Overwatch", root);
+            Directory.CreateDirectory(workspace.RootPath);
+            File.WriteAllText(workspace.EventsPath, "[]");
+            var before = workspace.Revision();
+
+            File.WriteAllText(workspace.EventsPath + ".tmp-deadbeef", "partial");
+            var previous = Path.Combine(workspace.RootPath, "dataset.previous-deadbeef");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "old.txt"), "old");
+
+            Assert.Equal(before, workspace.Revision());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }
 
 #endif

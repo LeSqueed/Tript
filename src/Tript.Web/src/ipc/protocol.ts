@@ -173,6 +173,7 @@ export interface DisplayFallbackWarning {
 export interface RecordingState {
   recording: boolean;
   game?: GameInfo | null;
+  activeModelGameId?: string | null;
   /**
    * When the current recording started, in unix SECONDS, or null when nothing is recording. Present
    * so a UI that connects mid-session shows a true elapsed time rather than counting from the
@@ -217,6 +218,15 @@ export interface GameModelStatus {
 /** Complete model-status snapshot. Entries omitted from a later message are no longer current. */
 export interface ModelStatusMessage {
   models: GameModelStatus[];
+}
+
+export interface AvailableRecordingModel {
+  gameId: string;
+  name: string;
+}
+
+export interface AvailableRecordingModelsMessage {
+  models: AvailableRecordingModel[];
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +390,6 @@ export interface TrainingMessage {
 }
 
 export type TrainingProgressStatus =
-  | 'started'
   | 'exporting'
   | 'progress'
   | 'imported'
@@ -399,8 +408,21 @@ export interface TrainingProgressMessage {
   status: TrainingProgressStatus;
   message: string;
   percent?: number | null;
+  requestId?: string | null;
   /** Per-epoch heartbeat from the training run (epoch progress, loss, mAP50). */
   details?: { epoch: number; epochs: number; loss: number | null; map50: number | null } | null;
+}
+
+export interface TrainingUpdateResultMessage {
+  requestId: string;
+  success: boolean;
+  error?: string | null;
+}
+
+export interface TrainingPushMessage {
+  training: TrainingMessage;
+  requestId?: string | null;
+  updateKind?: 'events' | 'regionGroups' | null;
 }
 
 export interface TrainingSampleMessage {
@@ -484,7 +506,9 @@ export interface CreateAutomaticClipsParameters {
 }
 
 export interface StartRecordingParameters {
-  gameId: string;
+  gameId?: string;
+  applyDisplay?: boolean;
+  displayId?: string | null;
 }
 
 export interface ConvertToSdrParameters {
@@ -633,16 +657,19 @@ export interface CaptureTrainingSampleParameters {
 export interface UpdateTrainingSampleParameters {
   gameId: string;
   sampleId: string;
+  requestId: string;
   labels: TrainingLabel[];
 }
 
 export interface UpdateTrainingEventsParameters {
   gameId: string;
+  requestId: string;
   events: TrainingEventDefinition[];
 }
 
 export interface UpdateTrainingRegionGroupsParameters {
   gameId: string;
+  requestId: string;
   regionGroups: TrainingRegionGroup[];
 }
 
@@ -777,7 +804,9 @@ export type CommandName =
   | 'DeleteTrainingSample'
   | 'StartTraining'
   | 'CancelTraining'
-  | 'InstallTrainingModel';
+  | 'InstallTrainingModel'
+  | 'ListAvailableRecordingModels'
+  | 'ActivateRecordingModel';
 
 /**
  * Backend → frontend messages, all lowercase. The reference contract split these between lowercase
@@ -788,6 +817,7 @@ export type MessageName =
   | 'settings'
   | 'state'
   | 'modelStatus'
+  | 'availableRecordingModels'
   | 'content'
   | 'trash'
   | 'importProgress'
@@ -807,6 +837,9 @@ export type MessageName =
   | 'warning'
   | 'training'
   | 'trainingProgress'
+  | 'trainingEventsUpdateResult'
+  | 'trainingRegionGroupsUpdateResult'
+  | 'trainingSampleUpdateResult'
   | 'trainingSample'
   | 'trainingSamplePreview'
   | 'trainingLabelSuggestions'

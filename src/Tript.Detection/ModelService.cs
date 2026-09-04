@@ -230,7 +230,7 @@ public static class ModelService
             if (!Directory.Exists(root))
                 continue;
 
-            foreach (var directory in Directory.EnumerateDirectories(root))
+            foreach (var directory in EnumerateDirectories(root))
             {
                 if (Path.GetFileName(directory).Equals(gameId, StringComparison.OrdinalIgnoreCase))
                 {
@@ -257,12 +257,40 @@ public static class ModelService
     private static string[] GetAvailableGameIds()
     {
         return ModelRoots()
-            .Where(Directory.Exists)
-            .SelectMany(Directory.EnumerateDirectories)
+            .SelectMany(EnumerateDirectories)
             .Select(Path.GetFileName)
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public static string[] GetLoadableGameIds()
+    {
+        return ModelRoots()
+            .SelectMany(EnumerateDirectories)
+            .Where(IsCompleteModelBundle)
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(HasModelForGame)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] EnumerateDirectories(string root)
+    {
+        try
+        {
+            // Materialize inside the try: enumeration is lazy and can fail after Directory.Exists
+            // if a removable/network root disappears or loses permission during the walk.
+            return Directory.Exists(root) ? Directory.EnumerateDirectories(root).ToArray() : [];
+        }
+        catch (Exception exception) when (exception is DirectoryNotFoundException
+            or UnauthorizedAccessException or IOException)
+        {
+            Log.Debug(exception, "Model root {ModelRoot} became unavailable while it was being enumerated", root);
+            return [];
+        }
     }
 
     private static IEnumerable<string> ModelRoots()

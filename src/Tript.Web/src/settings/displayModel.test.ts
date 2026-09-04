@@ -27,9 +27,9 @@ const DISPLAYS: DisplayInfo[] = [
 ];
 
 describe('option labels', () => {
-  it('is "<name> — <width>x<height>", with the primary marked', () => {
-    expect(displayOptionLabel(DISPLAYS[1])).toBe('HDMI-A-1 — 1920x1080');
-    expect(displayOptionLabel(DISPLAYS[0])).toBe('DP-1 — 2560x1440 (primary)');
+  it('is "<name>: <width>x<height>", with the primary marked', () => {
+    expect(displayOptionLabel(DISPLAYS[1])).toBe('HDMI-A-1: 1920x1080');
+    expect(displayOptionLabel(DISPLAYS[0])).toBe('DP-1: 2560x1440 (primary)');
   });
 
   it('leaves the size off when the host reported none', () => {

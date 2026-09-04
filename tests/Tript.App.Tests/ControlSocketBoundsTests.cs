@@ -33,7 +33,7 @@ public sealed class ControlSocketBoundsTests
         await using var _ = host;
 
         using var socket = new ClientWebSocket();
-        await socket.ConnectAsync(new Uri(host.WithToken($"ws://localhost:{TestPorts.ControlSocket}/")), Cancel);
+        await socket.ConnectAsync(new Uri(host.WithToken($"ws://localhost:{host.ControlPort}/")), Cancel);
 
         // Well past the cap, and valid JSON throughout, so nothing but the size can be refusing it.
         var padding = new string('a', IpcServer.ClientConnection.MaxInboundMessageBytes * 2);

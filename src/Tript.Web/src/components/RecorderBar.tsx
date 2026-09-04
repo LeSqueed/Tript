@@ -12,8 +12,24 @@
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { ConnectionState } from '../ipc/websocketClient';
-import type { GameModelStatus, ModelStatusMessage, RecordingState, StateMessage } from '../ipc/protocol';
-import { Button } from './ui/controls';
+import type {
+  AvailableRecordingModel,
+  AvailableRecordingModelsMessage,
+  GameModelStatus,
+  ModelStatusMessage,
+  RecordingState,
+  StateMessage,
+  StartRecordingParameters,
+} from '../ipc/protocol';
+import { trainingEnabled } from '../buildFeatures';
+import { useSettings } from '../settings/useSettings';
+import {
+  PRIMARY_DISPLAY_VALUE,
+  buildDisplayOptions,
+  displayFieldMode,
+  displaySelectValue,
+} from '../settings/displayModel';
+import { Button, Icon, SelectField } from './ui/controls';
 import { deriveRecorderState, formatElapsed } from './recorder/recorderState';
 
 function ModelStatusIndicator({ status }: { status?: GameModelStatus }) {
@@ -68,17 +84,22 @@ function ModelStatusIndicator({ status }: { status?: GameModelStatus }) {
 export function RecorderBar({
   client,
   connectionState,
+  trainingFeatureEnabled = trainingEnabled,
   /** Injectable clock so the elapsed time is testable without fake timers. */
   nowSeconds,
 }: {
   client: IpcClient;
   connectionState: ConnectionState;
+  trainingFeatureEnabled?: boolean;
   nowSeconds?: number;
 }) {
   const [recordingState, setRecordingState] = useState<RecordingState | null>(null);
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [clipJobs, setClipJobs] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(() => Date.now() / 1000);
+  const [pendingDisplay, setPendingDisplay] = useState<string | undefined>(undefined);
+  const [availableModels, setAvailableModels] = useState<AvailableRecordingModel[]>([]);
+  const { settings, availableDisplays } = useSettings(client);
 
   useEffect(() => {
     return client.on('state', (content) => {
@@ -100,6 +121,16 @@ export function RecorderBar({
   }, [client]);
 
   useEffect(() => {
+    if (!trainingFeatureEnabled) {
+      return;
+    }
+    return client.on('availableRecordingModels', (content) => {
+      const message = content as AvailableRecordingModelsMessage;
+      setAvailableModels(Array.isArray(message?.models) ? message.models : []);
+    });
+  }, [client, trainingFeatureEnabled]);
+
+  useEffect(() => {
     return client.on('importProgress', (content) => {
       const message = content as { id?: unknown; status?: unknown };
       if (typeof message.id !== 'string') {
@@ -118,6 +149,13 @@ export function RecorderBar({
   }, [client]);
 
   const recording = recordingState?.recording ?? false;
+
+  useEffect(() => {
+    if (trainingFeatureEnabled && recording) {
+      client.send('ListAvailableRecordingModels');
+    }
+  }, [client, recording, trainingFeatureEnabled]);
+
   const automaticClips = recordingState?.automaticClips;
   const creatingClips = clipJobs.size > 0 || automaticClips?.active === true;
   const clipStatus = automaticClips?.active
@@ -125,7 +163,17 @@ export function RecorderBar({
       ? `Highlights paused (${automaticClips.completed}/${automaticClips.total})`
       : `Creating highlights (${automaticClips.completed}/${automaticClips.total})`
     : 'Creating clips…';
-  const modelStatus = modelStatuses.find((status) => status.gameId === recordingState?.game?.id);
+  const activeModelGameId = recordingState?.activeModelGameId ?? null;
+  const modelStatus = modelStatuses.find((status) =>
+    status.gameId === (activeModelGameId ?? recordingState?.game?.id));
+  const modelOptions = [
+    { value: '', label: 'Load model…', disabled: true },
+    ...availableModels.map((model) => ({ value: model.gameId, label: model.name })),
+  ];
+  const selectedModelId = activeModelGameId === null
+    ? ''
+    : availableModels.find((model) =>
+        model.gameId.localeCompare(activeModelGameId, undefined, { sensitivity: 'accent' }) === 0)?.gameId ?? '';
 
   // One tick a second, and only while there is a clock to advance.
   useEffect(() => {
@@ -144,6 +192,33 @@ export function RecorderBar({
     startedAt: typeof recordingState?.startedAt === 'number' ? recordingState.startedAt : null,
   });
 
+  const detected = recordingState?.game?.detected === true;
+  const method = settings.capture.method;
+  const displayCaptureActive = !detected && method !== 'Game';
+  const showDisplaySelector = displayCaptureActive && displayFieldMode(availableDisplays) === 'picker';
+  const recordDisabled = !detected && method === 'Game';
+  const displaySelectorValue = pendingDisplay ?? displaySelectValue(settings.capture.display);
+  const displayOptions = buildDisplayOptions(
+    availableDisplays ?? [],
+    settings.capture.display,
+    settings.capture.displayLabel,
+  );
+
+  useEffect(() => {
+    if (!showDisplaySelector) {
+      setPendingDisplay(undefined);
+    }
+  }, [showDisplaySelector]);
+
+  useEffect(() => {
+    if (pendingDisplay === undefined || pendingDisplay === PRIMARY_DISPLAY_VALUE) {
+      return;
+    }
+    if (!availableDisplays?.some((display) => display.id === pendingDisplay)) {
+      setPendingDisplay(PRIMARY_DISPLAY_VALUE);
+    }
+  }, [availableDisplays, pendingDisplay]);
+
   if (state.kind === 'disconnected') {
     return (
       <div className="recorder-bar recorder-bar-error" data-testid="recorder-bar">
@@ -158,11 +233,28 @@ export function RecorderBar({
       <div className="recorder-bar" data-testid="recorder-bar">
         <span className="rec-dot recording" aria-hidden="true" />
         <span className="rec-elapsed" data-testid="recording-elapsed">
-          {state.startedAt === null ? '—' : formatElapsed(now - state.startedAt)}
+          {state.startedAt === null ? '--:--' : formatElapsed(now - state.startedAt)}
         </span>
         {state.game && <span className="rec-game">{state.game}</span>}
         {creatingClips && <span className="rec-activity" data-testid="clip-creation-status">{clipStatus}</span>}
         <ModelStatusIndicator status={modelStatus} />
+        {trainingFeatureEnabled && availableModels.length > 0 && (
+          <span className="rec-source" data-testid="recording-model-source">
+            <span className="rec-source-label">Model</span>
+            <SelectField
+              compact
+              className="rec-source-select"
+              aria-label="Detection model"
+              value={selectedModelId}
+              options={modelOptions}
+              onChange={(gameId) => {
+                if (gameId) {
+                  client.send('ActivateRecordingModel', { gameId });
+                }
+              }}
+            />
+          </span>
+        )}
         <Button variant="ghost" size="small" onClick={() => client.send('StopRecording')}>
           Stop
         </Button>
@@ -180,12 +272,38 @@ export function RecorderBar({
           <ModelStatusIndicator status={modelStatus} />
         </>
       )}
+      {showDisplaySelector && (
+        <span className="rec-source" data-testid="capture-source">
+          <Icon name="monitor" size={16} />
+          <SelectField
+            compact
+            className="rec-source-select"
+            aria-label="Capture display"
+            value={displaySelectorValue}
+            options={displayOptions}
+            onChange={(value) => setPendingDisplay(value)}
+          />
+        </span>
+      )}
       <Button
         variant="ghost"
         size="small"
-        onClick={() => recordingState?.game?.detected
-          ? client.send('StartRecording', { gameId: recordingState.game.id })
-          : client.send('StartRecording')}
+        disabled={recordDisabled}
+        title={recordDisabled
+          ? 'No game is detected. Set the capture method to Auto or Display to record the desktop.'
+          : undefined}
+        onClick={() => {
+          const params: StartRecordingParameters = {};
+          if (recordingState?.game?.detected && recordingState.game.id) {
+            params.gameId = recordingState.game.id;
+          }
+          if (showDisplaySelector) {
+            params.applyDisplay = true;
+            params.displayId = displaySelectorValue === PRIMARY_DISPLAY_VALUE ? null : displaySelectorValue;
+            setPendingDisplay(undefined);
+          }
+          client.send('StartRecording', Object.keys(params).length > 0 ? params : undefined);
+        }}
       >
         Record
       </Button>

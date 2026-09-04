@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS: SettingsModel = {
     bitrateKbps: 15000,
     maxBitrateKbps: 0,
     outputDirectory: null,
+    trashRetentionHours: 24,
   },
   buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
   audio: { outputMode: 'Normal', tracks: [], devices: [], mic: null, desktop: null },

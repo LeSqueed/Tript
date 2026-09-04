@@ -19,6 +19,65 @@ public class ModelApiV1CompatibilityTests
         Assert.Null(ModelApiV1Compatibility.FindMismatch(Definitions, Metadata()));
     }
 
+    [Fact]
+    public void EqualEventAndModelClassCountsAreCompatible()
+    {
+        var definitions = new[]
+        {
+            new EventDefinition { Id = 0, ClassId = 0, Name = "first", Type = EventType.Trigger },
+            new EventDefinition { Id = 1, ClassId = 1, Name = "second", Type = EventType.Trigger },
+        };
+
+        Assert.Null(ModelApiV1Compatibility.FindMismatch(definitions,
+            Metadata(outputDimensions: [1, 6, 8400], classNames: new Dictionary<int, string>
+            {
+                [0] = "first",
+                [1] = "second",
+            })));
+    }
+
+    [Fact]
+    public void AdditionalEventClassesAreCompatibleWithAnOlderModel()
+    {
+        var definitions = new[]
+        {
+            new EventDefinition { Id = 0, ClassId = 0, Name = "existing", Type = EventType.Trigger },
+            new EventDefinition { Id = 1, ClassId = 1, Name = "new event", Type = EventType.Trigger },
+        };
+
+        Assert.Null(ModelApiV1Compatibility.FindMismatch(definitions,
+            Metadata(classNames: new Dictionary<int, string> { [0] = "existing" })));
+    }
+
+    [Fact]
+    public void ModelWithMoreClassesThanEventsIsRejected()
+    {
+        var mismatch = ModelApiV1Compatibility.FindMismatch(Definitions,
+            Metadata(outputDimensions: [1, 6, 8400], classNames: new Dictionary<int, string>
+            {
+                [0] = "event",
+                [1] = "removed",
+            }));
+
+        Assert.Contains("model declares 2 classes", mismatch);
+    }
+
+    [Fact]
+    public void AdditionalEventsDoNotHideAnOverlappingClassIdentityMismatch()
+    {
+        var definitions = new[]
+        {
+            new EventDefinition { Id = 0, ClassId = 0, Name = "renamed", Type = EventType.Trigger },
+            new EventDefinition { Id = 1, ClassId = 1, Name = "new event", Type = EventType.Trigger },
+        };
+
+        var mismatch = ModelApiV1Compatibility.FindMismatch(definitions,
+            Metadata(classNames: new Dictionary<int, string> { [0] = "original" }));
+
+        Assert.Contains("renamed", mismatch);
+        Assert.Contains("original", mismatch);
+    }
+
     [Theory]
     [InlineData(1, 640, 640, 3)]
     [InlineData(1, 3, 320, 320)]
@@ -82,7 +141,8 @@ public class ModelApiV1CompatibilityTests
         Type? inputElementType = null,
         IReadOnlyList<int>? inputDimensions = null,
         Type? outputElementType = null,
-        IReadOnlyList<int>? outputDimensions = null)
+        IReadOnlyList<int>? outputDimensions = null,
+        IReadOnlyDictionary<int, string>? classNames = null)
         => new()
         {
             ModelPath = "model.onnx",
@@ -92,6 +152,6 @@ public class ModelApiV1CompatibilityTests
             OutputName = "output0",
             OutputElementType = outputElementType ?? typeof(float),
             OutputDimensions = outputDimensions ?? [1, 5, 8400],
-            ClassNames = new Dictionary<int, string> { [0] = "event" },
+            ClassNames = classNames ?? new Dictionary<int, string> { [0] = "event" },
         };
 }

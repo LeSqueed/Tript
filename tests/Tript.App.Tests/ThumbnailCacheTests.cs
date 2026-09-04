@@ -247,7 +247,6 @@ public sealed class ThumbnailRouteTests : IDisposable
     private readonly AppHostCollectionFixture _fixture;
     private readonly string _contentRoot;
     private readonly string _settingsPath;
-    private static readonly string Base = $"http://localhost:{TestPorts.Content}";
 
     public ThumbnailRouteTests(AppHostCollectionFixture fixture)
     {
@@ -396,7 +395,8 @@ public sealed class ThumbnailRouteTests : IDisposable
 
     // With the launch's session token; the content server serves no thumbnail without it.
     private static Task<HttpResponseMessage> GetAsync(AppHostDriver host, string path)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Get, host.WithToken($"{Base}/api/thumbnail/{path}")));
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get,
+            host.WithToken($"http://localhost:{host.ContentPort}/api/thumbnail/{path}")));
 
     private static async Task<HttpResponseMessage> GetUntilReadyAsync(AppHostDriver host, string path)
     {
@@ -425,9 +425,9 @@ public sealed class ThumbnailRouteTests : IDisposable
     {
         rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
-        await client.ConnectAsync("localhost", TestPorts.Content);
+        await client.ConnectAsync("localhost", host.ContentPort);
         await using var stream = client.GetStream();
-        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{TestPorts.Content}\r\nConnection: close\r\n\r\n";
+        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{host.ContentPort}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
 
         using var buffered = new MemoryStream();

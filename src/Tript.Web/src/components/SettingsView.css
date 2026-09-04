@@ -103,6 +103,49 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Advanced disclosure                                                 */
+/* ------------------------------------------------------------------ */
+
+/* The collapsed area a page keeps for its unavoidably technical options. Closed by default: the
+ * default user never needs it, and the summary text is what a technical user looks for. */
+
+.settings-advanced {
+  border-top: 1px solid var(--color-line);
+  padding-top: var(--space-2);
+}
+
+.settings-advanced summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-muted-strong);
+}
+
+.settings-advanced summary:hover {
+  color: var(--color-base-content);
+}
+
+.settings-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+/* Author display rules outrank the browser's details stylesheet in some engines. Keep closed
+ * disclosure content genuinely hidden while leaving the native summary keyboard behavior intact. */
+.settings-advanced:not([open]) > .settings-advanced-body {
+  display: none;
+}
+
+/* Marks a disclosure that already carries a non-default choice, so it is found without opening it. */
+.settings-advanced-marker {
+  margin-left: var(--space-2);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
 /* Toggle                                                              */
 /* ------------------------------------------------------------------ */
 

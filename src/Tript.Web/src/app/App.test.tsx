@@ -126,9 +126,11 @@ describe('App shell', () => {
     captureSessionToken('');
   });
 
-  function renderApp() {
+  function renderApp(trainingFeatureEnabled?: boolean) {
     const factory = (url: string) => new ContentBackend(url);
-    const result = render(<App ipcOptions={{ createSocket: factory }} />);
+    const result = render(
+      <App ipcOptions={{ createSocket: factory }} trainingFeatureEnabled={trainingFeatureEnabled} />,
+    );
     return { ...result, factory };
   }
 
@@ -434,6 +436,56 @@ describe('App shell', () => {
     });
   });
 
+  it('returns through session review to the source recording after opening a highlight', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('button', { name: 'Back to session' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to session' }));
+
+    expect(document.querySelector('.player-view')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Back to session' })).toBeNull();
+    expect(screen.queryByText('2 highlights')).toBeNull();
+    expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Session 1');
+  });
+
+  it('returns to the library when the source recording vanishes while viewing a highlight', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1] },
+      }));
+    });
+
+    expect(document.querySelector('.player-view')).toBeNull();
+    expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
+  });
+
   it('returns from the player route to the library', () => {
     renderApp();
     connect();
@@ -445,6 +497,30 @@ describe('App shell', () => {
     expect(document.querySelector('.player-view')).toBeNull();
     expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
     expect(library.querySelectorAll('img').length).toBeGreaterThan(0);
+  });
+
+  it('returns to the library when an open session vanishes from a content push', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [] },
+      }));
+    });
+
+    expect(document.querySelector('.player-view')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Back to session' })).toBeNull();
+    expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
   });
 
   it('keeps the player inside the shell at compact width', () => {
@@ -567,6 +643,28 @@ describe('App shell', () => {
     expect(screen.queryByTestId('connection-state')).toBeNull();
     expect(screen.queryByText(/not connected/i)).toBeNull();
     expect(screen.getByRole('button', { name: 'Record' })).toBeTruthy();
+  });
+
+  it('wires the enabled training feature into navigation, its route, and the player', () => {
+    renderApp(true);
+    connect();
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 2' }));
+    expect(screen.getByRole('button', { name: 'Label frame' })).toBeTruthy();
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Training' }));
+    expect(screen.getByRole('heading', { name: 'Build a game-specific training set' })).toBeTruthy();
+  });
+
+  it('omits the training route and player feature when the build feature is disabled', () => {
+    renderApp(false);
+    connect();
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(nav).queryByRole('button', { name: 'Training' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 2' }));
+    expect(screen.queryByRole('button', { name: 'Label frame' })).toBeNull();
   });
 
   it('shows an error banner for an error push and dismisses it', () => {

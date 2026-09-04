@@ -913,8 +913,8 @@ export function PlayerView({
           events={trainingEvents}
           regionGroups={trainingRegionGroups}
           hasModel={trainingModelAvailable}
-          onEventsChange={(events) => client.send('UpdateTrainingEvents', { gameId: currentGameId, events })}
-          onRegionGroupsChange={(regionGroups) => client.send('UpdateTrainingRegionGroups', { gameId: currentGameId, regionGroups })}
+          onEventsChange={(events, requestId) => client.send('UpdateTrainingEvents', { gameId: currentGameId, requestId, events })}
+          onRegionGroupsChange={(regionGroups, requestId) => client.send('UpdateTrainingRegionGroups', { gameId: currentGameId, requestId, regionGroups })}
           onClose={() => setLabelingSample(null)}
         />
       )}

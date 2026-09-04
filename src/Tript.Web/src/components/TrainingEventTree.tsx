@@ -50,8 +50,11 @@ export function TrainingEventTree({
 
   const drop = (dragEvent: DragEvent, groupId: number | null) => {
     dragEvent.preventDefault();
-    const eventId = Number(dragEvent.dataTransfer.getData(EVENT_DRAG_TYPE));
-    if (Number.isInteger(eventId)) onMove(eventId, groupId);
+    const payload = dragEvent.dataTransfer.getData(EVENT_DRAG_TYPE).trim();
+    const eventId = Number(payload);
+    if (payload && Number.isInteger(eventId) && events.some((event) => event.id === eventId)) {
+      onMove(eventId, groupId);
+    }
     setDraggingEventId(null);
     setDropGroupId(undefined);
   };
@@ -112,9 +115,9 @@ export function TrainingEventTree({
                 >
                   <span className="training-drag-handle" title="Drag to another folder" aria-hidden="true">::</span>
                   {onSelect ? (
-                    <button
+                    <Button
+                      variant="ghost"
                       className="training-tree-event-main"
-                      type="button"
                       onClick={() => onSelect(event)}
                     >
                       <span className="training-event-swatch">{event.classId}</span>
@@ -122,7 +125,7 @@ export function TrainingEventTree({
                         <strong>{event.name}</strong>
                         <small>{eventMeta?.(event) ?? event.type}</small>
                       </span>
-                    </button>
+                    </Button>
                   ) : (
                     <span className="training-tree-event-main">
                       <span className="training-event-swatch">{event.classId}</span>
@@ -132,7 +135,7 @@ export function TrainingEventTree({
                       </span>
                     </span>
                   )}
-                  <span className="training-tree-event-actions">
+                  <div className="training-tree-event-actions">
                     {event.fixedPosition && onAddFixedLabel && (
                       <Button
                         variant="ghost"
@@ -145,7 +148,7 @@ export function TrainingEventTree({
                     <Button variant="ghost" size="small" onClick={() => onEdit(event)}>Edit</Button>
                     <Button variant="ghost" size="small" onClick={() => onRegion(event)}>Region</Button>
                     {onDelete && <Button variant="ghost" size="small" onClick={() => onDelete(event)}>Delete</Button>}
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>

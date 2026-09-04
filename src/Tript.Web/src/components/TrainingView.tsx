@@ -11,10 +11,12 @@ import type {
   TrainingEventDefinition,
   TrainingMessage,
   TrainingProgressMessage,
+  TrainingPushMessage,
   TrainingRegionGroup,
   TrainingSample,
   TrainingSampleMessage,
   TrainingSamplePreviewMessage,
+  TrainingUpdateResultMessage,
 } from '../ipc/protocol';
 
 interface TrainingViewProps {
@@ -40,12 +42,17 @@ function formatDuration(totalMs: number): string {
   return minutes === 0 ? `${seconds}s` : `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-// The first heartbeat lands at the end of epoch 1, so the span between heartbeats covers
-// (count - 1) epochs; scale that pace by the completed epoch count for the elapsed estimate.
 function trainingPace(history: TrainingEpochPoint[], totalEpochs: number): { elapsedMs: number; remainingMs: number | null } {
   if (history.length < 2) return { elapsedMs: 0, remainingMs: null };
   const last = history[history.length - 1];
-  const perEpochMs = Math.max(0, last.receivedAt - history[0].receivedAt) / (history.length - 1);
+  const intervals = history.slice(1).map((point, index) => {
+    const previous = history[index];
+    return Math.max(0, point.receivedAt - previous.receivedAt) / Math.max(1, point.epoch - previous.epoch);
+  }).slice(-7).sort((left, right) => left - right);
+  const middle = Math.floor(intervals.length / 2);
+  const perEpochMs = intervals.length % 2 === 0
+    ? (intervals[middle - 1] + intervals[middle]) / 2
+    : intervals[middle];
   return {
     elapsedMs: perEpochMs * last.epoch,
     remainingMs: perEpochMs * Math.max(0, totalEpochs - last.epoch),
@@ -54,12 +61,11 @@ function trainingPace(history: TrainingEpochPoint[], totalEpochs: number): { ela
 
 // Each series is min/max-normalized on its own scale and aligned by epoch, so epochs without
 // validation metrics leave a gap instead of shifting the line.
-function TrainingSparkline({ points }: { points: TrainingEpochPoint[] }) {
+function TrainingSparkline({ points, totalEpochs }: { points: TrainingEpochPoint[]; totalEpochs: number }) {
   const width = 100;
   const height = 40;
   const pad = 4;
-  const total = points.length;
-  const xFor = (epoch: number) => (total <= 1 ? width / 2 : ((epoch - 1) / (total - 1)) * width);
+  const xFor = (epoch: number) => (totalEpochs <= 1 ? width / 2 : ((epoch - 1) / (totalEpochs - 1)) * width);
   const seriesFor = (pick: (point: TrainingEpochPoint) => number | null) => {
     const series = points.filter((point) => pick(point) != null);
     if (series.length === 0) return null;
@@ -147,7 +153,14 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [deletingEventName, setDeletingEventName] = useState<string | null>(null);
   const [deletePercent, setDeletePercent] = useState<number | null>(null);
-  const pendingEventsRef = useRef<{ gameId: string; events: TrainingEventDefinition[] } | null>(null);
+  const [installedRegionsStale, setInstalledRegionsStale] = useState(false);
+  const pendingEventsRef = useRef<{ gameId: string; requestId: string; events: TrainingEventDefinition[] } | null>(null);
+  const pendingRegionGroupsRef = useRef<{
+    gameId: string; requestId: string; regionGroups: TrainingRegionGroup[];
+  } | null>(null);
+  const latestEventsRequestRef = useRef<string | null>(null);
+  const latestRegionGroupsRequestRef = useRef<string | null>(null);
+  const editRequestCounterRef = useRef(0);
   const importingRef = useRef(false);
   const loadedTrainingGameIdRef = useRef<string | null>(null);
   const activeGameIdRef = useRef(gameId);
@@ -168,15 +181,26 @@ export function TrainingView({ client }: TrainingViewProps) {
       setGameId((current) => current || nextGames[0]?.id || '');
     });
     const removeTraining = client.on('training', (content) => {
-      const message = (content as { training?: TrainingMessage }).training;
+      const push = content as Partial<TrainingPushMessage>;
+      const message = push.training;
       if (message) {
         if (message.gameId && message.gameId !== activeGameIdRef.current) return;
-        if (pendingEventsRef.current?.gameId === message.gameId) return;
+        if (push.updateKind === 'events' && push.requestId !== latestEventsRequestRef.current) return;
+        if (push.updateKind === 'regionGroups' && push.requestId !== latestRegionGroupsRequestRef.current) return;
+        if (push.updateKind === 'events') pendingEventsRef.current = null;
+        if (push.updateKind === 'regionGroups') pendingRegionGroupsRef.current = null;
         // Only the first push for a game restores the form; later re-pushes (samples, progress)
         // must not clobber what the user is currently editing.
         const freshLoad = loadedTrainingGameIdRef.current !== message.gameId;
         loadedTrainingGameIdRef.current = message.gameId;
-        setTraining({ ...message, regionGroups: message.regionGroups ?? [], invalidSamples: message.invalidSamples ?? [] });
+        setTraining({
+          ...message,
+          events: pendingEventsRef.current?.gameId === message.gameId
+            ? pendingEventsRef.current.events : message.events,
+          regionGroups: pendingRegionGroupsRef.current?.gameId === message.gameId
+            ? pendingRegionGroupsRef.current.regionGroups : message.regionGroups ?? [],
+          invalidSamples: message.invalidSamples ?? [],
+        });
         if (message.gameId) {
           setGameId(message.gameId);
           if (freshLoad) {
@@ -190,6 +214,10 @@ export function TrainingView({ client }: TrainingViewProps) {
     const removeProgress = client.on('trainingProgress', (content) => {
       const message = content as TrainingProgressMessage;
       if (message.gameId !== activeGameIdRef.current) return;
+      if ((message.status === 'eventsUpdated' || message.status === 'eventDeleteProgress')
+        && message.requestId !== latestEventsRequestRef.current) return;
+      if (message.status === 'regionGroupsUpdated'
+        && message.requestId !== latestRegionGroupsRequestRef.current) return;
       setProgress(message);
       if (message.details && message.details.epoch > 0) {
         const details = message.details;
@@ -203,7 +231,7 @@ export function TrainingView({ client }: TrainingViewProps) {
           return [...current.filter((entry) => entry.epoch !== point.epoch), point]
             .sort((a, b) => a.epoch - b.epoch);
         });
-      } else if (message.status === 'exporting' || message.status === 'started') {
+      } else if (message.status === 'exporting') {
         // A new run is beginning: drop the previous run's history and note.
         setEpochHistory([]);
         setStatusNote(message.message);
@@ -211,7 +239,6 @@ export function TrainingView({ client }: TrainingViewProps) {
         setStatusNote(message.message);
       }
       if (message.status === 'eventsUpdated') {
-        pendingEventsRef.current = null;
         setDeletingEventName(null);
         setDeletePercent(null);
       }
@@ -219,6 +246,7 @@ export function TrainingView({ client }: TrainingViewProps) {
         setDeletePercent(message.percent ?? null);
       }
       if (message.status === 'imported') {
+        setInstalledRegionsStale(false);
         importingRef.current = false;
         setIsImporting(false);
         setSelectedSample(null);
@@ -230,19 +258,31 @@ export function TrainingView({ client }: TrainingViewProps) {
         setSamplePage(1);
         client.send('ListTraining', { gameId: message.gameId });
       }
+      if (message.status === 'completed') setInstalledRegionsStale(false);
     });
     const removeError = client.on('error', () => {
       if (importingRef.current) {
         importingRef.current = false;
         setIsImporting(false);
-        if (gameId) client.send('ListTraining', { gameId });
+        if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
       }
-      if (pendingEventsRef.current) {
-        pendingEventsRef.current = null;
-        setDeletingEventName(null);
-        setDeletePercent(null);
-        if (gameId) client.send('ListTraining', { gameId });
-      }
+    });
+    const removeEventsResult = client.on('trainingEventsUpdateResult', (content) => {
+      const result = content as TrainingUpdateResultMessage;
+      if (result.requestId !== latestEventsRequestRef.current) return;
+      setDeletingEventName(null);
+      setDeletePercent(null);
+      if (result.success) return;
+      pendingEventsRef.current = null;
+      setEventError(result.error ?? 'Could not update training events.');
+      if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
+    });
+    const removeRegionGroupsResult = client.on('trainingRegionGroupsUpdateResult', (content) => {
+      const result = content as TrainingUpdateResultMessage;
+      if (result.requestId !== latestRegionGroupsRequestRef.current || result.success) return;
+      pendingRegionGroupsRef.current = null;
+      setEventError(result.error ?? 'Could not update training region groups.');
+      if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
     });
     const removeSample = client.on('trainingSample', (content) => {
       const message = content as TrainingSampleMessage;
@@ -281,12 +321,14 @@ export function TrainingView({ client }: TrainingViewProps) {
       removeTraining();
       removeProgress();
       removeError();
+      removeEventsResult();
+      removeRegionGroupsResult();
       removeSample();
       removePreview();
       removeFolder();
       removeFolderCancelled();
     };
-  }, [client, gameId]);
+  }, [client]);
 
   useEffect(() => {
     if (gameId) {
@@ -296,11 +338,16 @@ export function TrainingView({ client }: TrainingViewProps) {
       setProgress(null);
       setEpochHistory([]);
       setStatusNote(null);
+      setInstalledRegionsStale(false);
       setSamplePreviews({});
       setPreviewErrors({});
       previewRequestsRef.current.clear();
       previewRetryCountRef.current.clear();
       selectedSampleRequestRef.current = null;
+      pendingEventsRef.current = null;
+      pendingRegionGroupsRef.current = null;
+      latestEventsRequestRef.current = null;
+      latestRegionGroupsRequestRef.current = null;
       setSamplePage(1);
     }
   }, [client, gameId]);
@@ -328,7 +375,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const validLabeledSampleCount = training.samples.filter((sample) =>
     sample.labels.length > 0 && !invalidById.has(sample.id)).length;
   const trainingIsActive = training.trainingActive
-    || progress?.status === 'exporting' || progress?.status === 'started' || progress?.status === 'progress';
+    || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
   // connected mid-run and learned the phase from the training push.
   const exportingDataset = progress?.status === 'exporting' || training.trainingPhase === 'exporting';
@@ -434,9 +481,19 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const saveEvents = (events: TrainingEventDefinition[]) => {
     if (!gameId) return;
-    pendingEventsRef.current = { gameId, events };
+    const regionFields: Array<keyof TrainingEventDefinition> = [
+      'regionGroupId', 'screenRegionX', 'screenRegionY', 'screenRegionW', 'screenRegionH',
+    ];
+    const regionsChanged = events.length !== training.events.length || events.some((event) => {
+      const previous = training.events.find((candidate) => candidate.id === event.id);
+      return !previous || regionFields.some((field) => previous[field] !== event[field]);
+    });
+    if (training.model && regionsChanged) setInstalledRegionsStale(true);
+    const requestId = `events-${++editRequestCounterRef.current}`;
+    latestEventsRequestRef.current = requestId;
+    pendingEventsRef.current = { gameId, requestId, events };
     setTraining((current) => ({ ...current, events }));
-    client.send('UpdateTrainingEvents', { gameId, events });
+    client.send('UpdateTrainingEvents', { gameId, requestId, events });
   };
 
   const saveEventsFromEditor = (events: TrainingEventDefinition[]) => {
@@ -465,8 +522,20 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const saveRegionGroups = (regionGroups: TrainingRegionGroup[]) => {
     if (!gameId) return;
+    const regionFields: Array<keyof TrainingRegionGroup> = [
+      'screenRegionX', 'screenRegionY', 'screenRegionW', 'screenRegionH',
+    ];
+    const regionsChanged = regionGroups.length !== (training.regionGroups ?? []).length
+      || regionGroups.some((group) => {
+        const previous = (training.regionGroups ?? []).find((candidate) => candidate.id === group.id);
+        return !previous || regionFields.some((field) => previous[field] !== group[field]);
+      });
+    if (training.model && regionsChanged) setInstalledRegionsStale(true);
+    const requestId = `region-groups-${++editRequestCounterRef.current}`;
+    latestRegionGroupsRequestRef.current = requestId;
+    pendingRegionGroupsRef.current = { gameId, requestId, regionGroups };
     setTraining((current) => ({ ...current, regionGroups }));
-    client.send('UpdateTrainingRegionGroups', { gameId, regionGroups });
+    client.send('UpdateTrainingRegionGroups', { gameId, requestId, regionGroups });
   };
 
   const openRegion = (event: TrainingEventDefinition) => {
@@ -610,6 +679,11 @@ export function TrainingView({ client }: TrainingViewProps) {
               {training.dataset?.warnings.map((warning) => (
                 <p className="training-event-error" role="alert" key={warning}>{warning}</p>
               ))}
+              {installedRegionsStale && (
+                <p className="training-invalid-warning" role="status">
+                  Region changes are saved for future training. The installed model still uses its previous regions; train and install again to apply them at runtime.
+                </p>
+              )}
               <div className="training-region-groups">
                 <div className="training-palette-heading">
                   <div>
@@ -802,7 +876,7 @@ export function TrainingView({ client }: TrainingViewProps) {
                   )}
                   {(hasLoss || hasMap50) && (
                     <div className="training-metrics">
-                      <TrainingSparkline points={epochHistory} />
+                      <TrainingSparkline points={epochHistory} totalEpochs={epochDetails?.epochs ?? epochs} />
                       <span className="muted small training-metrics-legend">
                         {hasLoss && <span className="training-metrics-legend-loss">loss</span>}
                         {hasMap50 && <span className="training-metrics-legend-map">mAP50</span>}

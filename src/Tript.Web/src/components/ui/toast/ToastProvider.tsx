@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The toast provider: owns the stack's state and its clocks. The model (toastModel.ts) is pure
-// data; this is the only place timers exist.
-//
-// Two clocks per timed toast: its lifetime (the reading time, or whatever duration was given) and
-// the exit removal (the exit animation finishing). A third, short-lived one is the release grace:
-// the pointer left a held toast, and it gets a beat to move back before the toast goes.
 
 import {
   createContext,

@@ -1,26 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The audio page: the plain default up front, the advanced tucked in the disclosure.
-//
-//   - The page opens by saying what the default is: microphone and desktop audio at system
-//     volume. The track routing below changes that.
-//   - Tracks are destinations, not devices. The user chooses how many audio tracks a recording
-//     has. A track is a place in the output file, not bound to a single device.
-//   - Sources are routed into tracks. Each track has one or more sources assigned to it, each
-//     with its own volume.
-//   - Inputs and outputs are both source types. Inputs are mics and other capture endpoints;
-//     outputs are speakers and playback endpoints, and game audio is an output source.
-//   - A track may carry several merged sources, and a source's volume is per-source, never
-//     per-track.
-//   - What happens to the recorded app's own audio output (Normal / Mute / Disable) is the one
-//     non-default knob, and it lives in the advanced disclosure at the bottom.
-//
-// The model: a track is `{ id, name, sources: AudioSource[] }`. A source references a device by
-// id (a device can be absent while its selection persists) and carries `kind`, `name` and
-// `volume`. Device enumeration is a seam for the alpha — the route is built from the devices list
-// in the settings message plus a known input/output source set (mic, system, game) so the routing
-// UI is real end-to-end. The key deliverable is the routing: add/remove tracks, assign sources to
-// tracks, set per-source volume.
 
 import type { SettingsPageName } from '../useSettings';
 import type {

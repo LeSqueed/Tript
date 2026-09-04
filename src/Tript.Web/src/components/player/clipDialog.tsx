@@ -1,30 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The in-player clip dialog (T9). Created in the player, not in a separate workspace
-//.
-//
-// The dialog owns the region list, the mode selector (combine/separate), the output title, the
-// per-track audio overrides (driven by the session's audio-track layout when the recording had
-// tracks), and the Create action that sends `CreateClip` — one call for combine (all regions as
-// the `segments` of a single clip), one per region for separate. The backend result arrives as an
-// `importProgress` message; the controller tracks it to gate the Create button, and the shell
-// surfaces the outcome (the top bar shows the count, a toast reports each finished clip).
-//
-// Regions are *marked* in the player (in/out points at the playhead — the dialog is a modal panel,
-// so the playhead cannot be moved while it is open) and *adjusted* here as well as by dragging them
-// on the timeline. Each row therefore carries three affordances beyond select/remove:
-//
-//   - typed start/end fields — the precise path, seconds, committed on blur or Enter;
-//   - "Start ←" / "End ←" — snap that bound to the playhead, the fast path, and the exact
-//     counterpart of the I/O marking keys in the player;
-//   - (on the timeline) drag the body to slide the segment, drag an edge to trim it.
-//
-// All three commit through `dialog.updateRegion`, which normalises and clamps bounds once
-// (clipModel.normalizeRegionBounds), so a typed edit, a playhead snap and a dragged edge cannot
-// disagree about the region that reaches CreateClip.
 
 import { useState } from 'react';
-import type { IpcClient } from '../../ipc/websocketClient';
 import { formatTime } from './timelineModel';
 import type { TimelineRegion } from './clipSeam';
 import { DEFAULT_REGION_SECONDS, resizeRegionEnd, resizeRegionStart } from './clipModel';
@@ -32,8 +9,6 @@ import type { ClipDialogController } from './useClipDialog';
 import { Button, Slider } from '../../components/ui/controls';
 
 export interface ClipDialogProps {
-  client: IpcClient;
-  /** The dialog controller from useClipDialog. */
   dialog: ClipDialogController;
   /**
    * The playhead position, so a region bound can be snapped to it ("Start ←" / "End ←"). The dialog

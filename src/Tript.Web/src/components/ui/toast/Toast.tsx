@@ -45,6 +45,12 @@ export function Toast({ item, onDismissSelf, onHover }: ToastProps) {
       style={{ '--toast-duration': `${item.duration}ms` } as CSSProperties}
       onPointerEnter={() => onHover(item.id, true)}
       onPointerLeave={() => onHover(item.id, false)}
+      onFocusCapture={() => onHover(item.id, true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onHover(item.id, false);
+        }
+      }}
     >
       <Icon name={KIND_ICON[item.kind]} size={20} className="toast-icon" />
       <div className="toast-body">
@@ -78,8 +84,6 @@ export function Toast({ item, onDismissSelf, onHover }: ToastProps) {
             <circle cx="11" cy="11" r="9.5" strokeDasharray={RING_LENGTH} />
           </svg>
         )}
-        // Even size on purpose: an odd one leaves the 22px box with a half-pixel margin, and the
-        // anti-aliasing splits each stroke unevenly so the X reads off-centre against the ring.
         <Icon name="close" size={16} />
       </button>
     </div>

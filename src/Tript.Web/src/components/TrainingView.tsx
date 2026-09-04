@@ -153,6 +153,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [deletingEventName, setDeletingEventName] = useState<string | null>(null);
   const [deletePercent, setDeletePercent] = useState<number | null>(null);
+  const [preparingDataset, setPreparingDataset] = useState(false);
   const [installedRegionsStale, setInstalledRegionsStale] = useState(false);
   const pendingEventsRef = useRef<{ gameId: string; requestId: string; events: TrainingEventDefinition[] } | null>(null);
   const pendingRegionGroupsRef = useRef<{
@@ -220,6 +221,7 @@ export function TrainingView({ client }: TrainingViewProps) {
         && message.requestId !== latestRegionGroupsRequestRef.current) return;
       setProgress(message);
       if (message.details && message.details.epoch > 0) {
+        setPreparingDataset(false);
         const details = message.details;
         setEpochHistory((current) => {
           const point: TrainingEpochPoint = {
@@ -232,7 +234,7 @@ export function TrainingView({ client }: TrainingViewProps) {
             .sort((a, b) => a.epoch - b.epoch);
         });
       } else if (message.status === 'exporting') {
-        // A new run is beginning: drop the previous run's history and note.
+        setPreparingDataset(true);
         setEpochHistory([]);
         setStatusNote(message.message);
       } else if (message.status === 'progress') {
@@ -259,6 +261,9 @@ export function TrainingView({ client }: TrainingViewProps) {
         client.send('ListTraining', { gameId: message.gameId });
       }
       if (message.status === 'completed') setInstalledRegionsStale(false);
+      if (message.status === 'completed' || message.status === 'cancelled' || message.status === 'error') {
+        setPreparingDataset(false);
+      }
     });
     const removeError = client.on('error', () => {
       if (importingRef.current) {
@@ -272,14 +277,21 @@ export function TrainingView({ client }: TrainingViewProps) {
       if (result.requestId !== latestEventsRequestRef.current) return;
       setDeletingEventName(null);
       setDeletePercent(null);
-      if (result.success) return;
+      if (result.success) {
+        setEventError(null);
+        return;
+      }
       pendingEventsRef.current = null;
       setEventError(result.error ?? 'Could not update training events.');
       if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
     });
     const removeRegionGroupsResult = client.on('trainingRegionGroupsUpdateResult', (content) => {
       const result = content as TrainingUpdateResultMessage;
-      if (result.requestId !== latestRegionGroupsRequestRef.current || result.success) return;
+      if (result.requestId !== latestRegionGroupsRequestRef.current) return;
+      if (result.success) {
+        setEventError(null);
+        return;
+      }
       pendingRegionGroupsRef.current = null;
       setEventError(result.error ?? 'Could not update training region groups.');
       if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
@@ -313,6 +325,12 @@ export function TrainingView({ client }: TrainingViewProps) {
     const removeFolderCancelled = client.on('trainingFolderCancelled', () => {
       setFolderPickerStatus('cancelled');
     });
+    const removeConnection = client.onStateChange((state) => {
+      if (state === 'connected') return;
+      setDeletingEventName(null);
+      setDeletePercent(null);
+      setPreparingDataset(false);
+    });
     // The initial gameList push can happen before this route mounts. Request it again so the
     // training picker is populated when the user navigates here later.
     client.send('ListGames');
@@ -327,6 +345,7 @@ export function TrainingView({ client }: TrainingViewProps) {
       removePreview();
       removeFolder();
       removeFolderCancelled();
+      removeConnection();
     };
   }, [client]);
 
@@ -336,6 +355,7 @@ export function TrainingView({ client }: TrainingViewProps) {
       client.send('ListTraining', { gameId });
       setSelectedSample(null);
       setProgress(null);
+      setPreparingDataset(false);
       setEpochHistory([]);
       setStatusNote(null);
       setInstalledRegionsStale(false);
@@ -378,7 +398,7 @@ export function TrainingView({ client }: TrainingViewProps) {
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
   // connected mid-run and learned the phase from the training push.
-  const exportingDataset = progress?.status === 'exporting' || training.trainingPhase === 'exporting';
+  const exportingDataset = preparingDataset || training.trainingPhase === 'exporting';
   const epochDetails = progress?.details && progress.details.epoch > 0 ? progress.details : null;
   const pace = trainingPace(epochHistory, epochDetails?.epochs ?? epochs);
   // A series only earns its legend entry once a real value arrives; a run whose metrics never
@@ -468,6 +488,10 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const deleteEvent = (eventId: number) => {
     if (!gameId) return;
+    if (client.state !== 'connected') {
+      setEventError('Tript is not connected.');
+      return;
+    }
     const currentEvents = pendingEventsRef.current?.events ?? training.events;
     if (currentEvents.length <= 1) {
       setEventError('A training workspace must keep at least one event.');
@@ -481,6 +505,11 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const saveEvents = (events: TrainingEventDefinition[]) => {
     if (!gameId) return;
+    if (client.state !== 'connected') {
+      setEventError('Tript is not connected.');
+      return;
+    }
+    setEventError(null);
     const regionFields: Array<keyof TrainingEventDefinition> = [
       'regionGroupId', 'screenRegionX', 'screenRegionY', 'screenRegionW', 'screenRegionH',
     ];
@@ -522,6 +551,11 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const saveRegionGroups = (regionGroups: TrainingRegionGroup[]) => {
     if (!gameId) return;
+    if (client.state !== 'connected') {
+      setEventError('Tript is not connected.');
+      return;
+    }
+    setEventError(null);
     const regionFields: Array<keyof TrainingRegionGroup> = [
       'screenRegionX', 'screenRegionY', 'screenRegionW', 'screenRegionH',
     ];

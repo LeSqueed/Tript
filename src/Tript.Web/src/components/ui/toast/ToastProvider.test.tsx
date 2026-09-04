@@ -172,6 +172,19 @@ describe('ToastProvider', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('restarts the clock when a replacement has the same duration', () => {
+    const { push } = renderProvider();
+    push({ key: 'a', kind: 'info', message: 'first', duration: 4000 });
+    act(() => vi.advanceTimersByTime(3500));
+    push({ key: 'a', kind: 'info', message: 'second', duration: 4000 });
+
+    act(() => vi.advanceTimersByTime(700));
+    expect(screen.getByText('second')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(3300));
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('revives a keyed toast that is mid-exit when the backend pushes it again', () => {
     const { api, push } = renderProvider();
     push({ key: 'a', kind: 'info', message: 'bye', duration: 0 });
@@ -210,6 +223,24 @@ describe('ToastProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Do it' }));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds a timed toast while one of its actions has keyboard focus', () => {
+    const { push } = renderProvider();
+    push({
+      kind: 'info',
+      message: 'Review it.',
+      duration: 2000,
+      actions: [{ label: 'View', onClick: vi.fn() }],
+    });
+    fireEvent.focus(screen.getByRole('button', { name: 'View' }));
+    act(() => vi.advanceTimersByTime(2000));
+    expect(screen.getByText('Review it.')).toBeTruthy();
+
+    fireEvent.blur(screen.getByRole('button', { name: 'View' }));
+    act(() => vi.advanceTimersByTime(400));
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('marks errors as alerts and everything else as statuses', () => {

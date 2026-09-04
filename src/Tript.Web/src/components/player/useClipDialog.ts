@@ -1,51 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The clip dialog controller — the state behind the in-player clip dialog (T9).
-//
-// The dialog is created in the player.
-// Opening it proposes a default region centred on the playbar cursor; the user moves, extends or
-// shrinks it and marks further regions on the timeline. The two modes differ only in how the
-// marked regions are grouped when `CreateClip` is sent:
-//
-//   - combine  — one CreateClip whose `segments` are all the marked regions (simple concat).
-//   - separate — one CreateClip per region, each carrying a single `segments` entry.
-//
-// `CreateClip` is asynchronous: the backend never returns synchronously, it reports progress as an
-// unrelated `importProgress` message. The seam owner (the player) wires the IPC surface in: it
-// registers a handler via `addImportHandler` to actually send the payloads `create()` builds, and
-// it feeds `importProgress` frames in via `applyImportProgress`.
-//
-// Regions are in seconds (TimelineRegion.start/end), as are CreateClip's startTime/endTime and
-// segments.
-//
-// Marking happens *outside* the dialog. The dialog is a modal panel over the player, so the playhead
-// cannot be moved while it is open; the in/out marking controls therefore live in the player and the
-// controller must hold marks before the dialog is ever opened. Two consequences shape the state
-// below:
-//
-//   - `attachSession` — the player attaches the session under review as it plays, so marks can be
-//     made (and clamped to the session) with the dialog closed. Attaching a *different* session
-//     drops the marks: they belong to the session they were marked on.
-//   - the seeded default is a *proposal*, tracked by id. It is only seeded when nothing is marked
-//     yet, and the user's first real mark replaces it — nobody wants to clip a region they never
-//     asked for. Once a proposal is edited or marked over it stops being a proposal.
-//
-// Editing (`updateRegion`) replaces a region's bounds in place: same id, same row position, no
-// overlap merging. The merge rules in `addRegion` belong to *marking* — applying them to an edit
-// would let a drag across a neighbour eat that neighbour irreversibly, mid-gesture, while the
-// pointer is still down. An edit is therefore never destructive to other regions.
-//
-// THE CLIPPABLE DURATION. Every mark, edit and payload is clamped against the duration the caller
-// passes in (`useClipDialog(clipDuration)`), which the player resolves from the media itself
-// (clipModel's `resolveClipBounds` + `markableDuration`, i.e. only a length the media itself
-// reported). It used to be `session.endTime ?? Infinity` — literally unbounded for any recording whose
-// content record carries no length, which is the normal case for a recording with no metadata record —
-// and then, briefly, the record's declared `endTime`, which is not a measurement of the file either:
-// one was seen declaring 100s in front of a 9.13s file. Because marks deliberately outlive the dialog
-// (closing it keeps them), a segment marked against a wrong duration could still be sitting there at
-// Create time, so the duration is not only a gate on new edits: when it changes, the regions are
-// reconciled against it (clipModel's `reconcileRegions` — truncate what straddles the real end, drop
-// what lies beyond it), and it is applied once more when the payloads are built.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContentItem, CreateClipParameters } from '../../ipc/protocol';
@@ -147,17 +101,6 @@ export interface ClipDialogController {
   applyImportProgress(content: ImportProgressContent): void;
 }
 
-/**
- * @param clipDuration The media length regions are clamped against, seconds — the *measured* one, as
- *   the player resolves it from the video element (clipModel's `resolveClipBounds` +
- *   `markableDuration`). 0 means nothing has been measured yet, and nothing is markable until it has.
- *
- *   Required, and deliberately so. This used to be optional, falling back to the attached session's
- *   own declared `endTime` — a number that has been observed claiming 100s for a 9.13s file, i.e. the
- *   very hole `markableDuration` closes on the player's side, reopened one layer down for any caller
- *   that omitted the argument. There is no honest default here: a controller that does not know how
- *   long the media is has to be told, not guess.
- */
 export function useClipDialog(clipDuration: number): ClipDialogController {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<ContentItem | null>(null);

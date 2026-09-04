@@ -118,13 +118,19 @@ def write_progress(
 
 
 def _epoch_loss(trainer) -> float | None:
-    # Ultralytics keeps per-term losses as a dict of tensors (keys like "box", "cls", "dfl"), not
-    # a single tensor: tloss is the epoch's running average and loss_items the final batch.
     for source in (getattr(trainer, "tloss", None), getattr(trainer, "loss_items", None)):
-        if not isinstance(source, dict) or not source:
+        if source is None:
             continue
         try:
-            values = [float(term.detach().cpu().item()) for term in source.values()]
+            terms = source.values() if isinstance(source, dict) else source
+            if hasattr(terms, "detach"):
+                terms = terms.detach().cpu().flatten().tolist()
+            elif not isinstance(terms, (list, tuple)):
+                terms = [terms]
+            values = [float(term.detach().cpu().item()) if hasattr(term, "detach") else float(term)
+                      for term in terms]
+            if not values:
+                continue
             return sum(values) / len(values)
         except Exception:
             continue

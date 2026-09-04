@@ -254,7 +254,6 @@ internal sealed class TrainingSampleStore
     internal TrainingSampleStore(TrainingWorkspace workspace)
     {
         _workspace = workspace;
-        _workspace.EnsureDirectories();
     }
 
     internal TrainingSampleRecord Save(string sourcePath, double timestampSeconds, int imageWidth,
@@ -262,6 +261,7 @@ internal sealed class TrainingSampleStore
         IReadOnlyList<EventDefinition> definitions, string? datasetImagePath = null,
         IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
+        _workspace.EnsureDirectories();
         if (string.IsNullOrWhiteSpace(sourcePath))
             throw new ArgumentException("A sample requires its source video path.", nameof(sourcePath));
         if (!double.IsFinite(timestampSeconds) || timestampSeconds < 0)
@@ -432,6 +432,7 @@ internal sealed class TrainingSampleStore
     // rejecting the delete. dataset-backed label files stay in step. `progress(completed, total)`
     // reports progress so the UI can show a meaningful loading indicator on large workspaces.
     internal RemapClassIdsResult RemapClassIds(IReadOnlyDictionary<int, int> mapping,
+        IReadOnlyDictionary<int, TrainingLabel>? fixedPositions = null,
         Action<int, int>? progress = null)
     {
         var records = List().ToList();
@@ -448,10 +449,24 @@ internal sealed class TrainingSampleStore
             var changed = removed > 0;
             foreach (var label in nextLabels)
             {
-                var nextClassId = mapping[label.ClassId];
+                var previousClassId = label.ClassId;
+                var nextClassId = mapping[previousClassId];
                 if (label.ClassId != nextClassId)
                 {
                     label.ClassId = nextClassId;
+                    changed = true;
+                }
+                if (fixedPositions is not null
+                    && fixedPositions.TryGetValue(previousClassId, out var fixedPosition)
+                    && (label.CenterX != fixedPosition.CenterX
+                        || label.CenterY != fixedPosition.CenterY
+                        || label.Width != fixedPosition.Width
+                        || label.Height != fixedPosition.Height))
+                {
+                    label.CenterX = fixedPosition.CenterX;
+                    label.CenterY = fixedPosition.CenterY;
+                    label.Width = fixedPosition.Width;
+                    label.Height = fixedPosition.Height;
                     changed = true;
                 }
             }

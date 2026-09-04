@@ -9,7 +9,6 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
-import type { IpcClient } from '../../ipc/websocketClient';
 import { ClipDialog } from './clipDialog';
 import { MIN_REGION_SECONDS } from './clipModel';
 import { useClipDialog, type ClipDialogController } from './useClipDialog';
@@ -21,15 +20,6 @@ const session: ContentItem = {
   title: 'Session 1',
   startTime: 0,
   endTime: 100,
-};
-
-const clientStub: IpcClient = {
-  state: 'disconnected',
-  connect: () => {},
-  close: () => {},
-  send: () => {},
-  on: () => () => {},
-  onStateChange: () => () => {},
 };
 
 interface SentCommand {
@@ -61,7 +51,7 @@ function probe(
     const dialog = useClipDialog(MEASURED_SECONDS);
     // Keep the ref fresh across re-renders so the test reads the live controller.
     ref.dialog = dialog;
-    return <ClipDialog client={clientStub} dialog={dialog} currentTime={currentTime} />;
+    return <ClipDialog dialog={dialog} currentTime={currentTime} />;
   }
   render(<Probe />);
   const dialog = () => {
@@ -436,7 +426,7 @@ function boundedProbe(initialDuration: number): {
     const dialog = useClipDialog(duration);
     ref.dialog = dialog;
     ref.setDuration = setDuration;
-    return <ClipDialog client={clientStub} dialog={dialog} currentTime={0} />;
+    return <ClipDialog dialog={dialog} currentTime={0} />;
   }
   render(<Probe />);
   const dialog = () => {

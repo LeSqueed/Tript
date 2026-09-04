@@ -84,7 +84,7 @@ describe('pushToast', () => {
     const replaced = push(items, { key: 'a', message: 'replaced' });
     expect(replaced).toHaveLength(2);
     expect(replaced[0].message).toBe('replaced');
-    expect(replaced[0].id).toBe(items[0].id);
+    expect(replaced[0].id).not.toBe(items[0].id);
     expect(replaced[1].message).toBe('second');
     expect(replaced[0].held).toBe(false);
   });
@@ -97,6 +97,14 @@ describe('pushToast', () => {
     expect(revived).toHaveLength(1);
     expect(revived[0].state).toBe('visible');
     expect(revived[0].message).toBe('back');
+  });
+
+  it('keeps a replaced queued toast waiting when the stack is full', () => {
+    let items = stackOf(MAX_VISIBLE);
+    items = push(items, { key: 'queued', message: 'waiting' });
+    const replaced = push(items, { key: 'queued', message: 'still waiting' });
+    expect(replaced.filter((toast) => toast.state === 'visible')).toHaveLength(MAX_VISIBLE);
+    expect(replaced.find((toast) => toast.key === 'queued')?.state).toBe('waiting');
   });
 });
 

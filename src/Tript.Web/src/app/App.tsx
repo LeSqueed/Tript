@@ -15,13 +15,13 @@ import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionClipsView } from '../components/SessionClipsView';
-import { PlayerView, type ClipCreatedResult } from '../components/PlayerView';
+import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
 import { cascadableLinkedHighlights, itemLabel } from '../components/library/libraryModel';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
-import type { ContentItem, GameInfo, RecordingState } from '../ipc/protocol';
+import type { ContentItem, CreateClipParameters, GameInfo, ImportProgressMessage, RecordingState } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
@@ -110,6 +110,9 @@ function AppShell({
   const [recording, setRecording] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ item: ContentItem; advancePlayer: boolean } | null>(null);
   const [builtInGameIds, setBuiltInGameIds] = useState<readonly string[]>(FALLBACK_BUILT_IN_GAME_IDS);
+  const [clipJobCount, setClipJobCount] = useState(0);
+  const queuedClipJobs = useRef<CreateClipParameters[]>([]);
+  const activeClipJob = useRef<CreateClipParameters | null>(null);
 
   useEffect(() => {
     const remove = client.on('gameList', (content) => {
@@ -184,6 +187,8 @@ function AppShell({
   // `content` push anywhere is reflected everywhere.
   const source = useIpcSessionSource(client);
   const { items, loaded } = useSessionSource(source);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   // Owned by the shell, not by the trash screen: the library's delete confirmation quotes
   // `retentionHours`, and it must be right the first time a user deletes anything.
@@ -252,11 +257,7 @@ function AppShell({
     setPlayerTitle(itemLabel(item));
   }, []);
 
-  // The player reports each CreateClip it sent as the backend finishes it. Success toasts the new
-  // clip with a View that opens it in the player in place (the return route and the rest of the
-  // flow are left exactly as they were); a clip made while the player is now closed opens the
-  // player on it. Failure toasts the backend's message.
-  const notifyClipCreated = useCallback((result: ClipCreatedResult) => {
+  const notifyClipCreated = useCallback((result: { title: string; item?: ContentItem; error?: string }) => {
     const clip = result.item;
     if (clip) {
       push({
@@ -267,12 +268,13 @@ function AppShell({
           label: 'View',
           onClick: () => {
             dismiss(`clip-created-${clip.filePath}`);
-            const fresh = items.find((candidate) => candidate.filePath === clip.filePath);
+            const currentItems = itemsRef.current;
+            const fresh = currentItems.find((candidate) => candidate.filePath === clip.filePath);
             const target = fresh ?? clip;
             if (routeRef.current === 'player') {
               adoptPlayerItem(target);
             } else {
-              openInPlayer(target, items);
+              openInPlayer(target, currentItems);
             }
           },
         }],
@@ -284,7 +286,58 @@ function AppShell({
       message: `Creating "${result.title}" failed.`,
       note: result.error,
     });
-  }, [push, dismiss, items, adoptPlayerItem, openInPlayer]);
+  }, [push, dismiss, adoptPlayerItem, openInPlayer]);
+
+  const startNextClip = useCallback(() => {
+    if (activeClipJob.current !== null) {
+      return;
+    }
+    const next = queuedClipJobs.current.shift();
+    if (next !== undefined) {
+      activeClipJob.current = next;
+      client.send('CreateClip', next);
+    }
+  }, [client]);
+
+  const enqueueClip = useCallback((parameters: CreateClipParameters) => {
+    if (connectionState !== 'connected') {
+      notifyClipCreated({ title: parameters.title, error: 'Tript is not connected.' });
+      return;
+    }
+    queuedClipJobs.current.push(parameters);
+    setClipJobCount(queuedClipJobs.current.length + (activeClipJob.current === null ? 0 : 1));
+    startNextClip();
+  }, [connectionState, notifyClipCreated, startNextClip]);
+
+  useEffect(() => client.on('importProgress', (content) => {
+    const message = content as ImportProgressMessage;
+    const active = activeClipJob.current;
+    if (active === null || message.id !== active.id
+      || (message.status !== 'done' && message.status !== 'error')) {
+      return;
+    }
+
+    activeClipJob.current = null;
+    notifyClipCreated(message.status === 'done'
+      ? { title: active.title, item: message.content }
+      : { title: active.title, error: message.error ?? 'Clip creation failed' });
+    startNextClip();
+    setClipJobCount(queuedClipJobs.current.length + (activeClipJob.current === null ? 0 : 1));
+  }), [client, notifyClipCreated, startNextClip]);
+
+  useEffect(() => {
+    if (connectionState === 'connected' || clipJobCount === 0) {
+      return;
+    }
+    const interrupted = [activeClipJob.current, ...queuedClipJobs.current]
+      .filter((job): job is CreateClipParameters => job !== null);
+    activeClipJob.current = null;
+    queuedClipJobs.current = [];
+    setClipJobCount(0);
+    for (const job of interrupted) {
+      notifyClipCreated({ title: job.title, error: 'The connection was lost during clip creation.' });
+    }
+  }, [connectionState, clipJobCount, notifyClipCreated]);
 
   const advanceAfterPlayerDelete = useCallback((item: ContentItem) => {
     const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
@@ -593,6 +646,7 @@ function AppShell({
           client={client}
           connectionState={connectionState}
           trainingFeatureEnabled={trainingFeatureEnabled}
+          clipJobCount={clipJobCount}
         />
       </header>
       <main className="app-main">
@@ -639,7 +693,7 @@ function AppShell({
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}
                onItemChange={adoptPlayerItem}
-               onClipCreated={notifyClipCreated}
+               onCreateClip={enqueueClip}
              />
            )}
           {route === 'session' && sessionReview && (

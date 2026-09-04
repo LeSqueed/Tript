@@ -139,6 +139,9 @@ internal sealed partial class AppHost : IDisposable
     private readonly object _gameListGate = new();
     private List<GameInfo> _catalogueGames = [];
     private IClipEngine? _clipEngine;
+    private readonly object _clipQueueGate = new();
+    private readonly Queue<ClipRequest> _clipQueue = [];
+    private bool _clipQueueActive;
     private readonly object _sdrConversionGate = new();
     private readonly HashSet<string> _sdrConversions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _reservedClipOutputs = new(StringComparer.OrdinalIgnoreCase);

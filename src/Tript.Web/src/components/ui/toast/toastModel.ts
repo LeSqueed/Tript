@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The toast model: a pure state machine over the stack. The provider owns the clocks; everything
-// here is a data transformation a test can run with no socket, no DOM and no real time.
-//
-// A toast's life: pushed, waiting for a slot if the stack is full, visible, then leaving (the exit
-// animation plays), then gone. A timed toast whose time runs out while the pointer is over it is
-// HELD: it stays until the pointer leaves, and even then it gets a short grace before it goes, so
-// an errant mouse does not take the message out from under the user.
 
 export type ToastKind = 'success' | 'error' | 'warning' | 'info';
 
@@ -18,23 +11,17 @@ export interface ToastAction {
 }
 
 export interface ToastSpec {
-  /** Upsert identity: a push with the same key replaces the live toast in place and restarts its clock. */
   key?: string;
   kind: ToastKind;
   message: string;
   title?: string;
-  /**
-   * Milliseconds the toast stays. Omit it for reading time: 60 ms per character of visible text,
-   * clamped so a short note is still readable and a long one does not sit up forever. 0 is
-   * permanent: the toast stays until it is dismissed.
-   */
+  /** Milliseconds on screen; omitted uses reading time and 0 is permanent. */
   duration?: number;
   actions?: ToastAction[];
   /** A second line under the message, used for a correlated failure. */
   note?: string;
   /** Fired when the user dismisses this toast. Programmatic dismissal does not fire it. */
   onDismiss?: () => void;
-  /** Test hook: rendered as data-testid when present. */
   testId?: string;
 }
 
@@ -89,11 +76,6 @@ function normalize(items: ToastItem[]): ToastItem[] {
   });
 }
 
-/**
- * Push or replace a toast. A key that matches a live toast replaces it in place: same position in
- * the stack, new content, fresh clock. A toast mid-exit is not live, so a re-push revives it rather
- * than stacking a second copy. When the stack is full the newcomer waits.
- */
 export function pushToast(items: ToastItem[], spec: ToastSpec, id: number): ToastItem[] {
   const fresh: ToastItem = {
     id,
@@ -113,12 +95,11 @@ export function pushToast(items: ToastItem[], spec: ToastSpec, id: number): Toas
   if (spec.key !== undefined) {
     const existing = items.find((toast) => toast.key === spec.key);
     if (existing !== undefined) {
-      // A toast finishing its exit animation is revived, not duplicated.
-      return normalize(items.map((toast) =>
-        toast.id === existing.id
-          ? { ...fresh, id: existing.id, state: 'visible' as const }
-          : toast,
-      ));
+      const others = items.filter((toast) => toast.id !== existing.id);
+      fresh.state = existing.state === 'waiting' || visibleCount(others) >= MAX_VISIBLE
+        ? 'waiting'
+        : 'visible';
+      return normalize(items.map((toast) => toast.id === existing.id ? fresh : toast));
     }
   }
 
@@ -128,10 +109,6 @@ export function pushToast(items: ToastItem[], spec: ToastSpec, id: number): Toas
   return normalize([...items, fresh]);
 }
 
-/**
- * Dismiss by key: a visible toast plays its exit, a queued one is dropped without ever rendering.
- * A key with nothing left to dismiss is a no-op that returns the stack untouched.
- */
 export function dismissKey(items: ToastItem[], key: string): ToastItem[] {
   if (!items.some((toast) => toast.key === key && toast.state !== 'leaving')) {
     return items;

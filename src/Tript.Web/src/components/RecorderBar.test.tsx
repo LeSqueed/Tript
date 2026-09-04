@@ -301,26 +301,18 @@ describe('RecorderBar', () => {
 
   it('counts the clips being created in the top bar', () => {
     const client = mockClient();
-    render(<RecorderBar client={client} connectionState="connected" />);
-
-    act(() => {
-      client.emit('importProgress', { id: 'clip-a', status: 'importing' });
-    });
+    const { rerender } = render(
+      <RecorderBar client={client} connectionState="connected" clipJobCount={1} />,
+    );
     expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating clips…');
 
-    act(() => {
-      client.emit('importProgress', { id: 'clip-b', status: 'importing' });
-    });
+    rerender(<RecorderBar client={client} connectionState="connected" clipJobCount={2} />);
     expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating 2 clips…');
 
-    act(() => {
-      client.emit('importProgress', { id: 'clip-a', status: 'done', content: {} });
-    });
+    rerender(<RecorderBar client={client} connectionState="connected" clipJobCount={1} />);
     expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating clips…');
 
-    act(() => {
-      client.emit('importProgress', { id: 'clip-b', status: 'done', content: {} });
-    });
+    rerender(<RecorderBar client={client} connectionState="connected" clipJobCount={0} />);
     expect(screen.queryByTestId('clip-creation-status')).toBeNull();
   });
 

@@ -142,13 +142,20 @@ internal sealed class TrainingWorkspace
     }
 
     internal string Revision()
+        => BuildRevision(IsRevisionFile);
+
+    internal string SourceRevision()
+        => BuildRevision(path =>
+            string.Equals(path, EventsPath, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, RegionGroupsPath, StringComparison.OrdinalIgnoreCase)
+            || Path.GetRelativePath(RootPath, path).StartsWith(
+                "samples" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+
+    private string BuildRevision(Func<string, bool> include)
     {
         if (!Directory.Exists(RootPath))
             return string.Empty;
 
-        // Preferences are local form state and the training heartbeat churns while a run is active;
-        // neither is workspace data, so neither counts as the workspace having changed under an
-        // import's conflict guard.
         IEnumerable<string> paths;
         try
         {
@@ -160,7 +167,7 @@ internal sealed class TrainingWorkspace
         }
 
         var revisions = new List<string>();
-        foreach (var path in paths.Where(IsRevisionFile).OrderBy(path => path,
+        foreach (var path in paths.Where(include).OrderBy(path => path,
                      StringComparer.OrdinalIgnoreCase))
         {
             try

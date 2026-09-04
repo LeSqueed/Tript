@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { PlayerView, type ClipCreatedResult } from './PlayerView';
+import { PlayerView } from './PlayerView';
 import type { SessionSource } from './player/sessionSource';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -748,7 +748,7 @@ describe('editing the looping segment moves the playhead with it', () => {
   });
 });
 
-describe('importProgress result surface in the player', () => {
+describe('clip creation handoff', () => {
   beforeEach(() => {
     stubLayout();
     vi.useFakeTimers();
@@ -758,53 +758,22 @@ describe('importProgress result surface in the player', () => {
     vi.useRealTimers();
   });
 
-  it('reports a finished clip to the shell with the clip the backend named', () => {
+  it('hands clip requests to the shell when it owns the queue', () => {
     const client = mockClient();
-    const results: ClipCreatedResult[] = [];
+    const requests: { id: string; title: string }[] = [];
     const { container } = render(
-      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
+      <PlayerView
+        client={client}
+        source={source}
+        onCreateClip={(parameters) => requests.push(parameters)}
+      />,
     );
     setVideoDuration(container, 100);
     markDefaultSegment();
     openClipDialog();
     fireEvent.click(createButton());
-    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string; title: string };
-    const clip = { contentType: 'clip', fileName: 'clip-1.mp4', filePath: 'clips/clip-1.mp4', title: sent.title };
-    act(() => {
-      client.emit('importProgress', { id: sent.id, status: 'done', content: clip });
-    });
-    expect(results).toEqual([{ title: sent.title, item: clip }]);
-  });
-
-  it('reports a failed clip to the shell with the backend message', () => {
-    const client = mockClient();
-    const results: ClipCreatedResult[] = [];
-    const { container } = render(
-      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
-    );
-    setVideoDuration(container, 100);
-    markDefaultSegment();
-    openClipDialog();
-    fireEvent.click(createButton());
-    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string; title: string };
-    act(() => {
-      client.emit('importProgress', { id: sent.id, status: 'error', error: 'encoder failed' });
-    });
-    expect(results).toEqual([{ title: sent.title, error: 'encoder failed' }]);
-  });
-
-  it('does not report importProgress frames for jobs the player did not send', () => {
-    const client = mockClient();
-    const results: ClipCreatedResult[] = [];
-    const { container } = render(
-      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
-    );
-    setVideoDuration(container, 100);
-    act(() => {
-      // An SDR conversion rides the same channel with its own id; it is not this player's clip.
-      client.emit('importProgress', { id: 'sdr-1', status: 'done', content: {} });
-    });
-    expect(results).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(client.sent.filter((entry) => entry.method === 'CreateClip')).toHaveLength(0);
   });
 
   it('no longer renders a per-clip progress list under the player', () => {

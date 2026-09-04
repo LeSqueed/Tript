@@ -9,11 +9,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// Whether a stopped recording cuts its automatic clips is decided at start, not at stop. The post-stop
-// path re-uses the effective flag the session began with (AutomaticClipsEnabled AND the resolved mode
-// uses the replay buffer), so a plain Session recording never queues automatic clips on stop, and a
-// mid-session settings edit cannot flip that decision for a recording already running. Driven through
-// the same in-process fake-recorder seam as RecorderLifecycleTests.
 public sealed class AutomaticClipStopGateTests : IDisposable
 {
     private readonly string _root;

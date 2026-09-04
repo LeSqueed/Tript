@@ -51,6 +51,7 @@ internal sealed partial class AppHost
                 var result = TrainingModelInstaller.Install(TrainingWorkspace.ForGame(gameId), modelSourcePath);
                 if (restart)
                     StartDetection(gameId);
+                PushAvailableRecordingModels();
                 return result;
             }
             catch
@@ -238,7 +239,8 @@ internal sealed partial class AppHost
     {
         lock (_recorderGate)
         {
-            var restart = IsRecording && string.Equals(_currentGameId, gameId, StringComparison.OrdinalIgnoreCase);
+            var restart = IsRecording
+                && string.Equals(_activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase);
             if (restart)
                 StopDetection();
             try
@@ -249,6 +251,7 @@ internal sealed partial class AppHost
                     Directory.Delete(installedRoot, recursive: true);
                 if (restart)
                     StartDetection(gameId);
+                PushAvailableRecordingModels();
             }
             catch
             {
@@ -298,8 +301,6 @@ internal sealed partial class AppHost
         }
     }
 
-    // Read-only sample lookup, kept off the workspace gate so previews keep streaming while a
-    // training run is in flight.
     internal Task GetTrainingSample(TrainingSampleParameters? parameters) => GetTrainingSampleCore(parameters);
 
     private async Task GetTrainingSampleCore(TrainingSampleParameters? parameters)
@@ -375,6 +376,13 @@ internal sealed partial class AppHost
         var existingClassIds = workspace.LoadDefinitions()
             .Select(eventDefinition => eventDefinition.ClassId).ToHashSet();
         var deletesClass = existingClassIds.Any(classId => !classIdMap.ContainsKey(classId));
+        foreach (var eventDefinition in orderedEvents.Where(eventDefinition => !eventDefinition.FixedPosition))
+        {
+            eventDefinition.FixedLabelCenterX = null;
+            eventDefinition.FixedLabelCenterY = null;
+            eventDefinition.FixedLabelWidth = null;
+            eventDefinition.FixedLabelHeight = null;
+        }
         InitializeFixedPositions(orderedEvents, sampleStore.List());
         TrainingEventValidator.ValidateRegions(orderedEvents);
         TrainingEventValidator.ValidateRegionGroupReferences(orderedEvents, regionGroups);
@@ -390,7 +398,21 @@ internal sealed partial class AppHost
                 $"Removing labels from training samples… {percent}%", percent,
                 requestId: parameters.RequestId);
         } : null;
-        var remap = sampleStore.RemapClassIds(classIdMap, deleteProgress);
+        var fixedPositions = orderedEvents
+            .Where(eventDefinition => eventDefinition.FixedPosition
+                && eventDefinition.FixedLabelCenterX is not null
+                && eventDefinition.FixedLabelCenterY is not null
+                && eventDefinition.FixedLabelWidth is not null
+                && eventDefinition.FixedLabelHeight is not null)
+            .ToDictionary(eventDefinition => eventDefinition.ClassId, eventDefinition => new TrainingLabel
+            {
+                ClassId = eventDefinition.ClassId,
+                CenterX = eventDefinition.FixedLabelCenterX!.Value,
+                CenterY = eventDefinition.FixedLabelCenterY!.Value,
+                Width = eventDefinition.FixedLabelWidth!.Value,
+                Height = eventDefinition.FixedLabelHeight!.Value,
+            });
+        var remap = sampleStore.RemapClassIds(classIdMap, fixedPositions, deleteProgress);
         foreach (var eventDefinition in orderedEvents)
             eventDefinition.ClassId = classIdMap[eventDefinition.ClassId];
         var options = new JsonSerializerOptions
@@ -692,13 +714,22 @@ internal sealed partial class AppHost
         {
             if (startDetection(gameId))
                 return;
+        }
+        catch
+        {
+        }
+
+        try
+        {
             if (!string.IsNullOrWhiteSpace(previousGameId))
                 startDetection(previousGameId);
-            pushError();
+        }
+        catch
+        {
         }
         finally
         {
-            // A failed StartDetection clears the active id. Publish even if restoration also fails.
+            pushError();
             pushState();
         }
     }
@@ -738,24 +769,22 @@ internal sealed partial class AppHost
     {
         try
         {
-            // Phase one: dataset export. The only phase that reads every editable sample, so it
-            // keeps the workspace gate — and the one the UI shows the loading modal for.
+            string sourceRevision;
             await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
             try
             {
                 await _trainingRunner.PrepareDatasetAsync(workspace, imageSize, augmentCopies,
                     (message, _) => PushTrainingProgress(parameters.GameId, "progress", message),
                     cancellation.Token).ConfigureAwait(false);
+                sourceRevision = workspace.SourceRevision();
             }
             finally
             {
                 _trainingWorkspaceGate.Release();
             }
 
-            // Phase two: the model run. The gate stays released for its whole (possibly long)
-            // duration: the script only reads dataset/ and writes runs/, so sample navigation,
-            // edits and pushes keep working while it trains.
             SetTrainingPhase("training");
+            PushTrainingCore(parameters.GameId);
             var modelPath = await _trainingRunner.TrainModelAsync(workspace, imageSize, parameters.Epochs,
                 parameters.Device, parameters.BaseModel,
                 (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
@@ -764,11 +793,14 @@ internal sealed partial class AppHost
                     details),
                 cancellation.Token).ConfigureAwait(false);
 
-            // Phase three: validation and install. Short and gate-protected, so no edit can land
-            // between validating the model and installing it.
             await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
             try
             {
+                if (!string.Equals(sourceRevision, workspace.SourceRevision(), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "The training workspace changed after the dataset was prepared. Start training again to use the latest data.");
+                }
                 _trainingRunner.ValidateTrainingResult(workspace, modelPath,
                     message => PushTrainingProgress(parameters.GameId, "progress", message));
                 var installed = InstallTrainingModel(parameters.GameId, modelPath);

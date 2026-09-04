@@ -49,6 +49,25 @@ public sealed class TrainingModelActivationTests
         Assert.Null(pushedGameId);
     }
 
+    [Fact]
+    public void Activation_exception_restores_the_previous_model_and_reports_the_failure()
+    {
+        var attempts = new List<string>();
+        var errors = 0;
+        var statePushes = 0;
+
+        AppHost.ActivateRecordingModelCore("requested", "previous", gameId =>
+        {
+            attempts.Add(gameId);
+            if (gameId == "requested") throw new InvalidDataException("bad model");
+            return true;
+        }, () => errors++, () => statePushes++);
+
+        Assert.Equal(["requested", "previous"], attempts);
+        Assert.Equal(1, errors);
+        Assert.Equal(1, statePushes);
+    }
+
     // Manual activation lets the game whose model runs differ from the game being recorded. An
     // install/replace over that model must stop the ACTIVE session (the one holding the model
     // refcount), invalidate, install, and restore detection to the activated game — not to the

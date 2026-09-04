@@ -85,17 +85,18 @@ export function RecorderBar({
   client,
   connectionState,
   trainingFeatureEnabled = trainingEnabled,
+  clipJobCount = 0,
   /** Injectable clock so the elapsed time is testable without fake timers. */
   nowSeconds,
 }: {
   client: IpcClient;
   connectionState: ConnectionState;
   trainingFeatureEnabled?: boolean;
+  clipJobCount?: number;
   nowSeconds?: number;
 }) {
   const [recordingState, setRecordingState] = useState<RecordingState | null>(null);
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
-  const [clipJobs, setClipJobs] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(() => Date.now() / 1000);
   const [pendingDisplay, setPendingDisplay] = useState<string | undefined>(undefined);
   const [availableModels, setAvailableModels] = useState<AvailableRecordingModel[]>([]);
@@ -130,24 +131,6 @@ export function RecorderBar({
     });
   }, [client, trainingFeatureEnabled]);
 
-  useEffect(() => {
-    return client.on('importProgress', (content) => {
-      const message = content as { id?: unknown; status?: unknown };
-      if (typeof message.id !== 'string') {
-        return;
-      }
-      setClipJobs((current) => {
-        const next = new Set(current);
-        if (message.status === 'importing') {
-          next.add(message.id as string);
-        } else if (message.status === 'done' || message.status === 'error') {
-          next.delete(message.id as string);
-        }
-        return next;
-      });
-    });
-  }, [client]);
-
   const recording = recordingState?.recording ?? false;
 
   useEffect(() => {
@@ -157,13 +140,13 @@ export function RecorderBar({
   }, [client, recording, trainingFeatureEnabled]);
 
   const automaticClips = recordingState?.automaticClips;
-  const creatingClips = clipJobs.size > 0 || automaticClips?.active === true;
+  const creatingClips = clipJobCount > 0 || automaticClips?.active === true;
   const clipStatus = automaticClips?.active
     ? automaticClips.paused
       ? `Highlights paused (${automaticClips.completed}/${automaticClips.total})`
       : `Creating highlights (${automaticClips.completed}/${automaticClips.total})`
-    : clipJobs.size > 1
-      ? `Creating ${clipJobs.size} clips…`
+    : clipJobCount > 1
+      ? `Creating ${clipJobCount} clips…`
       : 'Creating clips…';
   const activeModelGameId = recordingState?.activeModelGameId ?? null;
   const modelStatus = modelStatuses.find((status) =>

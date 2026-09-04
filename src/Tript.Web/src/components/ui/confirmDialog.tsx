@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The generic confirmation dialog: a title, a notice, and two buttons. It carries the same focus
-// contract as the delete confirmation (focus moves in, Tab stays in, Escape cancels, focus returns
-// on close) because it is the same kind of interrupt; what differs is only what it confirms. It
-// reuses the confirm-dialog panel classes, so it reads as the same chrome wherever it appears.
 
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';

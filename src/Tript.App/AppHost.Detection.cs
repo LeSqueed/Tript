@@ -547,6 +547,9 @@ internal sealed partial class AppHost
                 }, StartDetection);
         }
 
+#if TRIPT_TRAINING
+        PushAvailableRecordingModels();
+#endif
         return Task.CompletedTask;
     }
 

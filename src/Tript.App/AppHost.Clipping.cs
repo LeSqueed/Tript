@@ -210,51 +210,36 @@ internal sealed partial class AppHost
 
     internal void CreateClip(ClipRequest request)
     {
-        _clipEngine ??= BuildClipEngine();
-
-        // Never block synchronously: the ffmpeg run is off the IPC thread and progress arrives as
-        // importProgress messages.
-        ThreadPool.QueueUserWorkItem(_ =>
+        lock (_clipQueueGate)
         {
+            _clipEngine ??= BuildClipEngine();
+            _clipQueue.Enqueue(request);
+            if (_clipQueueActive)
+                return;
+
+            _clipQueueActive = true;
+        }
+
+        ThreadPool.QueueUserWorkItem(_ => ProcessClipQueue());
+    }
+
+    private void ProcessClipQueue()
+    {
+        while (true)
+        {
+            ClipRequest request;
+            lock (_clipQueueGate)
+            {
+                if (!_clipQueue.TryDequeue(out request!))
+                {
+                    _clipQueueActive = false;
+                    return;
+                }
+            }
+
             try
             {
-                _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
-                {
-                    id = request.OperationId,
-                    status = "importing",
-                }, Wire.Options));
-
-                var results = _clipEngine.CreateClips(request);
-
-                // Persisted against every produced file (one in combine mode, one per region in separate mode).
-                // A failed write is logged inside the store and does not fail the clip.
-                if (!string.IsNullOrWhiteSpace(request.Title))
-                {
-                    foreach (var result in results)
-                        _clipTitles.Save(Path.GetFileName(result), request.Title);
-                }
-                if (!string.IsNullOrWhiteSpace(request.SourceSessionPath))
-                {
-                    foreach (var result in results)
-                        _clipTitles.SaveSourceSession(Path.GetFileName(result), request.SourceSessionPath);
-                    AttachGameToClips(results, request.SourceSessionPath);
-                }
-
-                _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
-                {
-                    id = request.OperationId,
-                    status = "done",
-                    content = new ContentItem
-                    {
-                        ContentType = "clip",
-                        FileName = Path.GetFileName(results[0]),
-                        FilePath = Path.GetRelativePath(EffectiveRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
-                        Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title,
-                    },
-                }, Wire.Options));
-
-                // A clip completed: the catalogue changed.
-                PushContent();
+                ProcessClip(request);
             }
             catch (Exception exception)
             {
@@ -265,7 +250,45 @@ internal sealed partial class AppHost
                     error = exception.Message,
                 }, Wire.Options));
             }
-        });
+        }
+    }
+
+    private void ProcessClip(ClipRequest request)
+    {
+        _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
+        {
+            id = request.OperationId,
+            status = "importing",
+        }, Wire.Options));
+
+        var results = _clipEngine!.CreateClips(request);
+
+        if (!string.IsNullOrWhiteSpace(request.Title))
+        {
+            foreach (var result in results)
+                _clipTitles.Save(Path.GetFileName(result), request.Title);
+        }
+        if (!string.IsNullOrWhiteSpace(request.SourceSessionPath))
+        {
+            foreach (var result in results)
+                _clipTitles.SaveSourceSession(Path.GetFileName(result), request.SourceSessionPath);
+            AttachGameToClips(results, request.SourceSessionPath);
+        }
+
+        _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
+        {
+            id = request.OperationId,
+            status = "done",
+            content = new ContentItem
+            {
+                ContentType = "clip",
+                FileName = Path.GetFileName(results[0]),
+                FilePath = Path.GetRelativePath(EffectiveRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
+                Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title,
+            },
+        }, Wire.Options));
+
+        PushContent();
     }
 
     internal void ConvertToSdr(ConvertToSdrParameters? parameters)

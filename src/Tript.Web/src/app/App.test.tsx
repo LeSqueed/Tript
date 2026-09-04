@@ -532,7 +532,7 @@ describe('App shell', () => {
       filePath: 'clips/nice-save.mp4',
       title: 'Nice save',
     };
-    // The backend names the finished clip before the content list picks it up.
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     act(() => {
       const ws = activeSocket();
       ws.serverMessage(JSON.stringify({

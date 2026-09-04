@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Settings — logical pages: recording, highlights, general, audio, capture, games. The highlights
-// page owns the replay buffer and the automatic-clip switch; the audio page drives the multi-track
-// model (track count, source→track routing, per-source volume).
+// Settings — logical pages: general, recording, highlights, audio, capture, games. General leads
+// the tab strip because it is the page settings opens on. The highlights page owns the replay
+// buffer and the automatic-clip switch; the audio page drives the multi-track model (track count,
+// source→track routing, per-source volume).
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -16,9 +17,9 @@ import { GamePage } from '../settings/pages/GamePage';
 import { GeneralPage } from '../settings/pages/GeneralPage';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
+  { id: 'general', label: 'General' },
   { id: 'recording', label: 'Recording' },
   { id: 'buffer', label: 'Highlights' },
-  { id: 'general', label: 'General' },
   { id: 'audio', label: 'Audio' },
   { id: 'capture', label: 'Capture' },
   { id: 'game', label: 'Games' },

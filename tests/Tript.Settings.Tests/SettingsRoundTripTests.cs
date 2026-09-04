@@ -69,6 +69,44 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
     }
 
+    // The game-capture timeout crosses the JSON boundary as whole seconds: the settings UI sends a
+    // number (that is the shape an UpdateSettings patch arrives in) and reads a number back off a
+    // settings push. The TimeSpan string the serializer would otherwise demand is what made the
+    // settings save fail, so the numeric form is pinned here.
+    [Fact]
+    public void TheGameCaptureTimeout_IsPersistedAsWholeSeconds()
+    {
+        _store.Load().Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
+        _store.Save();
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
+        var value = doc.RootElement.GetProperty("game").GetProperty("gameCaptureTimeout");
+        Assert.Equal(JsonValueKind.Number, value.ValueKind);
+        Assert.Equal(25, value.GetDouble());
+    }
+
+    // A file written before the numeric seam carried an ISO 8601 duration: it still loads.
+    [Fact]
+    public void ALegacyTimeSpanStringGameCaptureTimeout_StillLoads()
+    {
+        File.WriteAllText(_provider.FilePath, """{"version":1,"game":{"gameCaptureTimeout":"00:01:35"}}""");
+
+        var settings = _store.Load();
+        Assert.Equal(TimeSpan.FromSeconds(95), settings.Game.GameCaptureTimeout);
+    }
+
+    // A hand-edited value the converter cannot use degrades to a non-positive timeout, which the
+    // capture policy already maps to its default, rather than failing the whole file.
+    [Fact]
+    public void AnInvalidGameCaptureTimeoutNumber_ReadsBackNonPositive()
+    {
+        File.WriteAllText(_provider.FilePath, """{"version":1,"game":{"gameCaptureTimeout":-5}}""");
+        Assert.True(_store.Load().Game.GameCaptureTimeout <= TimeSpan.Zero);
+
+        File.WriteAllText(_provider.FilePath, """{"version":1,"game":{"gameCaptureTimeout":1e18}}""");
+        Assert.True(_store.Load().Game.GameCaptureTimeout <= TimeSpan.Zero);
+    }
+
     [Fact]
     public void TryUpdate_RejectionLeavesMemoryAndDiskUnchanged()
     {

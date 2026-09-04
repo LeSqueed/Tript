@@ -145,6 +145,15 @@ afterEach(() => {
 describe('SettingsView', () => {
   it('renders the six tabs and the recording page controls', () => {
     renderSettings('general');
+    // General leads the strip because it is the page settings opens on.
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'General',
+      'Recording',
+      'Highlights',
+      'Audio',
+      'Capture',
+      'Games',
+    ]);
     expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Highlights' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Audio' })).toBeTruthy();

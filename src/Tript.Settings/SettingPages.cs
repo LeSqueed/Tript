@@ -160,7 +160,10 @@ public sealed class GameSettings
 
     // The soft timeout: how long game capture waits for the game's window before falling back.
     // What the timeout governs is part of the recorder's contract; the settings model records
-    // the value.
+    // the value. The wire speaks whole seconds as a number (the settings UI sends and reads
+    // numbers), so the property crosses the JSON boundary through the seconds converter rather
+    // than the default TimeSpan string the serializer would otherwise demand.
+    [JsonConverter(typeof(SecondsTimeSpanConverter))]
     public TimeSpan GameCaptureTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     // The known games. A fresh install ships with Overwatch so the auto-start detection watches

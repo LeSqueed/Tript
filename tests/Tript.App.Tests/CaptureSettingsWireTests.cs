@@ -77,6 +77,33 @@ public sealed class CaptureSettingsWireTests
         await host.ShutdownAsync();
     }
 
+    // The game-capture timeout is a `game` page field the capture page patches, and it arrives on
+    // the wire as whole seconds: the settings UI sends a number and reads a number back. Before the
+    // seconds converter existed the TimeSpan this value resolves to made the patch fail to
+    // deserialize ("The JSON value could not be converted to System.TimeSpan") and refused the save.
+    [Fact]
+    public async Task TheGameCaptureTimeout_AcceptsWholeSecondsFromTheWire()
+    {
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var scope = host;
+        await host.ConnectWebSocketAsync();
+        await ReceiveSettingsAsync(host);
+
+        await host.SendAsync("""
+            {"method":"UpdateSettings","parameters":{"settings":{"game":{"gameCaptureTimeout":5000}}}}
+            """);
+
+        var game = (await ReceiveSettingsAsync(host)).GetProperty("settings").GetProperty("game");
+        Assert.Equal(JsonValueKind.Number, game.GetProperty("gameCaptureTimeout").ValueKind);
+        Assert.Equal(5000, game.GetProperty("gameCaptureTimeout").GetDouble());
+
+        var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath)).RootElement.GetProperty("game");
+        Assert.Equal(JsonValueKind.Number, onDisk.GetProperty("gameCaptureTimeout").ValueKind);
+        Assert.Equal(5000, onDisk.GetProperty("gameCaptureTimeout").GetDouble());
+
+        await host.ShutdownAsync();
+    }
+
     // A client that echoes the whole settings message back — the shape the settings UI actually
     // sends — must not be able to write the machine facts into the stored configuration.
     [Fact]

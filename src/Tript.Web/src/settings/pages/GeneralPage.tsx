@@ -85,12 +85,14 @@ export function GeneralPage({
 
       <section className="settings-section" aria-labelledby="general-clips-heading">
         <h3 className="subheading" id="general-clips-heading">Clips</h3>
-        <Toggle
-          checked={settings.convertHdrClipsToSdr === true}
-          onChange={(checked) => update(page, { convertHdrClipsToSdr: checked })}
-          label="Convert HDR clips to SDR"
-        />
-        <p className="muted small">New clips made from HDR footage are converted for players and displays that expect SDR. Original recordings stay as they were.</p>
+        <div className="field">
+          <Toggle
+            checked={settings.convertHdrClipsToSdr === true}
+            onChange={(checked) => update(page, { convertHdrClipsToSdr: checked })}
+            label="Convert HDR clips to SDR"
+          />
+          <span className="field-hint">New clips made from HDR footage are converted for players and displays that expect SDR. Original recordings stay as they were.</span>
+        </div>
         <Field
           label="Delete linked highlights by default"
           hint="Preselects the option to delete linked highlights when deleting a session. Favourited highlights are always kept."

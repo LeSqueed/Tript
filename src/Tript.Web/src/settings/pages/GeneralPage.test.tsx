@@ -106,6 +106,13 @@ describe('linked-highlight deletion default', () => {
 });
 
 describe('HDR clip conversion', () => {
+  it('shows its descriptor in the standard field hint', () => {
+    renderPage();
+
+    const hint = screen.getByText('New clips made from HDR footage are converted for players and displays that expect SDR. Original recordings stay as they were.');
+    expect(hint.className).toBe('field-hint');
+  });
+
   it('sends a general page patch on toggle', () => {
     const update = renderPage();
     fireEvent.click(screen.getByLabelText('Convert HDR clips to SDR'));

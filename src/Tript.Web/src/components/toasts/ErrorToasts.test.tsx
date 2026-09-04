@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// ErrorBanner tests: an `error` push on the IPC client shows the backend's message in a dismissible
-// banner; the banner is absent until an error arrives and is cleared by the dismiss button. The IPC
-// client is a fake that captures the registered `error` handler, so the wire shape is exercised
-// directly without a socket.
+// ErrorToasts tests: an `error` push shows the backend's message as an alert toast that reads at
+// 60 ms per character and takes itself down; a dismiss click takes it down sooner. The IPC client
+// is a fake that captures the registered `error` handler, so the wire shape is exercised directly
+// without a socket.
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import { ErrorBanner } from './ErrorBanner';
-import type { IpcClient } from '../ipc/websocketClient';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { ErrorToasts } from './ErrorToasts';
+import { ToastProvider } from '../ui/toast/ToastProvider';
+import type { IpcClient } from '../../ipc/websocketClient';
 
 /** A fake IpcClient that captures the `error` handler so a test can fire it directly. */
 function fakeClient(): {
@@ -38,20 +39,33 @@ function fakeClient(): {
   return { client, emitError };
 }
 
-describe('ErrorBanner', () => {
+function renderBridge(client: IpcClient): void {
+  render(
+    <ToastProvider>
+      <ErrorToasts client={client} />
+    </ToastProvider>,
+  );
+}
+
+describe('ErrorToasts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it('renders nothing before any error push', () => {
     const { client } = fakeClient();
-    render(<ErrorBanner client={client} />);
+    renderBridge(client);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows the backend error message and clears on dismiss', () => {
     const { client, emitError } = fakeClient();
-    render(<ErrorBanner client={client} />);
+    renderBridge(client);
     act(() => {
       emitError({ message: 'The bookmark could not be saved — check the recording folder is writable.' });
     });
@@ -59,13 +73,29 @@ describe('ErrorBanner', () => {
       'The bookmark could not be saved — check the recording folder is writable.',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('takes itself down on its reading time without a click', () => {
+    const { client, emitError } = fakeClient();
+    renderBridge(client);
+    act(() => {
+      emitError({ message: 'x'.repeat(80) }); // 80 × 60 = 4800 ms
+    });
+
+    act(() => vi.advanceTimersByTime(4799));
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(1)); // the time is up: the exit plays
+    act(() => vi.advanceTimersByTime(200)); // the exit is done: it is gone
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('ignores a malformed error push (no string message)', () => {
     const { client, emitError } = fakeClient();
-    render(<ErrorBanner client={client} />);
+    renderBridge(client);
     act(() => {
       emitError({});
       emitError({ message: 42 });

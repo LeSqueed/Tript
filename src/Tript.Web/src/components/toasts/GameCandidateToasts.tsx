@@ -1,13 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+//
+// The unknown-fullscreen game suggestion, as a permanent keyed toast with its two actions. The
+// candidate state, the pending action and a correlated failure all live here and are projected
+// into one toast: a new candidate or a changed result replaces it in place, a cleared candidate
+// takes it down.
 
-import { useEffect, useState } from 'react';
-import type { IpcClient } from '../ipc/websocketClient';
-import type { GameCandidateActionResultMessage, GameCandidateMessage } from '../ipc/protocol';
-import { Button } from './ui/controls';
+import { useCallback, useEffect, useState } from 'react';
+import type { IpcClient } from '../../ipc/websocketClient';
+import type { GameCandidateActionResultMessage, GameCandidateMessage } from '../../ipc/protocol';
+import { useToast } from '../ui/toast/ToastProvider';
 
-export function GameCandidateBanner({ client }: { client: IpcClient }) {
+interface PendingAction {
+  requestId: string;
+  executablePath: string;
+  action: 'add' | 'ignore';
+}
+
+export function GameCandidateToasts({ client }: { client: IpcClient }) {
+  const { push, dismiss } = useToast();
   const [candidate, setCandidate] = useState<GameCandidateMessage | null>(null);
-  const [pending, setPending] = useState<{ requestId: string; executablePath: string; action: 'add' | 'ignore' } | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,40 +68,47 @@ export function GameCandidateBanner({ client }: { client: IpcClient }) {
     };
   }, [client]);
 
-  if (candidate === null) {
-    return null;
-  }
-
-  const active = candidate;
-
-  function addAsCustomGame() {
+  const addAsCustomGame = useCallback(() => {
+    if (candidate === null) {
+      return;
+    }
     const requestId = crypto.randomUUID();
-    setPending({ requestId, executablePath: active.executablePath, action: 'add' });
+    setPending({ requestId, executablePath: candidate.executablePath, action: 'add' });
     setError(null);
     client.send('AddGameCandidate', {
       requestId,
-      name: active.executable,
-      executablePath: active.executablePath,
+      name: candidate.executable,
+      executablePath: candidate.executablePath,
     });
-  }
+  }, [candidate, client]);
 
-  function ignore() {
+  const ignore = useCallback(() => {
+    if (candidate === null) {
+      return;
+    }
     const requestId = crypto.randomUUID();
-    setPending({ requestId, executablePath: active.executablePath, action: 'ignore' });
+    setPending({ requestId, executablePath: candidate.executablePath, action: 'ignore' });
     setError(null);
-    client.send('IgnoreGameCandidate', { requestId, executablePath: active.executablePath });
-  }
+    client.send('IgnoreGameCandidate', { requestId, executablePath: candidate.executablePath });
+  }, [candidate, client]);
 
-  return (
-    <div className="error-banner game-candidate-banner" role="status">
-      <span className="error-banner-message">
-        <code>{active.executablePath}</code> is running fullscreen but is not a known game. Add it as a custom game?
-      </span>
-      {error && <span className="game-validation" role="alert">{error}</span>}
-      <span className="game-candidate-actions">
-        <Button onClick={addAsCustomGame} disabled={pending !== null}>Add as custom game</Button>
-        <Button variant="ghost" onClick={ignore} disabled={pending !== null}>Ignore</Button>
-      </span>
-    </div>
-  );
+  useEffect(() => {
+    if (candidate === null) {
+      dismiss('game-candidate');
+      return;
+    }
+    push({
+      key: 'game-candidate',
+      kind: 'info',
+      duration: 0,
+      message: `${candidate.executablePath} is running fullscreen but is not a known game. Add it as a custom game?`,
+      note: error ?? undefined,
+      actions: [
+        { label: 'Add as custom game', onClick: addAsCustomGame, disabled: pending !== null },
+        { label: 'Ignore', variant: 'ghost', onClick: ignore, disabled: pending !== null },
+      ],
+    });
+  }, [candidate, error, pending, push, dismiss, addAsCustomGame, ignore]);
+
+  return null;
 }

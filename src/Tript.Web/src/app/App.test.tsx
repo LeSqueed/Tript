@@ -436,6 +436,75 @@ describe('App shell', () => {
     });
   });
 
+  it('offers a restore on the highlight delete toast that puts the item back and opens it', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    const toast = screen.getByRole('status');
+    expect(toast.textContent).toContain('Moved "First highlight" to trash.');
+    expect(screen.queryByTestId('confirm-delete')).toBeNull();
+
+    // The backend's trash push names the entry; the content push drops the item from the list.
+    act(() => {
+      const ws = activeSocket();
+      ws.serverMessage(JSON.stringify({
+        method: 'trash',
+        content: {
+          // The wire spells the entry with the BARE file name, not the relative path the content
+          // list uses — the restore match depends on that.
+          entries: [{ id: 'trash-1', contentType: 'clip', fileName: HIGHLIGHT_1.fileName, deletedAt: 1000, purgeAt: 2000 }],
+          retentionHours: 72,
+        },
+      }));
+      ws.serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, SESSION_1] },
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(activeSocket().sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      method: 'RestoreTrash',
+      parameters: { entryIds: ['trash-1'] },
+    });
+
+    // The restore is only visible once the item is back in the content; that is also when the
+    // player lands on it and the toast leaves.
+    act(() => {
+      const ws = activeSocket();
+      ws.serverMessage(JSON.stringify({
+        method: 'trash',
+        content: { entries: [], retentionHours: 72 },
+      }));
+      ws.serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByRole('status')).toBeNull();
+
+    // The restore lands back in the highlights flow: back from the player returns to the
+    // session's clip list, not the library.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByText('2 highlights')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to session' })).toBeTruthy();
+  });
+
   it('returns through session review to the source recording after opening a highlight', () => {
     renderApp();
     connect();
@@ -667,7 +736,7 @@ describe('App shell', () => {
     expect(screen.queryByRole('button', { name: 'Label frame' })).toBeNull();
   });
 
-  it('shows an error banner for an error push and dismisses it', () => {
+  it('shows an error toast for an error push and dismisses it', () => {
     renderApp();
     const ws = activeSocket();
     act(() => {
@@ -683,7 +752,10 @@ describe('App shell', () => {
       'The bookmark could not be saved — check the recording folder is writable.',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
+    act(() => {
+      vi.advanceTimersByTime(200); // the exit plays before the toast leaves
+    });
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

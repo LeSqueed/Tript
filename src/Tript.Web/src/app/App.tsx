@@ -6,11 +6,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useIpcClient } from './useConnection';
 import { RecorderBar } from '../components/RecorderBar';
-import { ErrorBanner } from '../components/ErrorBanner';
-import { WarningBanner } from '../components/WarningBanner';
-import { ConnectionBanner } from '../components/ConnectionBanner';
-import { DisplayFallbackBanner } from '../components/DisplayFallbackBanner';
-import { GameCandidateBanner } from '../components/GameCandidateBanner';
+import { ToastProvider } from '../components/ui/toast/ToastProvider';
+import { ErrorToasts } from '../components/toasts/ErrorToasts';
+import { WarningToasts } from '../components/toasts/WarningToasts';
+import { ConnectionToasts } from '../components/toasts/ConnectionToasts';
+import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToasts';
+import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
+import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
@@ -52,7 +54,12 @@ export function App({
   if (!hasSessionToken()) {
     return <MissingKeyNotice />;
   }
-  return <AppShell ipcOptions={ipcOptions} trainingFeatureEnabled={trainingFeatureEnabled} />;
+  // The provider sits above the shell, not inside it: the shell's own restore toast needs useToast.
+  return (
+    <ToastProvider>
+      <AppShell ipcOptions={ipcOptions} trainingFeatureEnabled={trainingFeatureEnabled} />
+    </ToastProvider>
+  );
 }
 
 function MissingKeyNotice() {
@@ -177,6 +184,9 @@ function AppShell({
   // Owned by the shell, not by the trash screen: the library's delete confirmation quotes
   // `retentionHours`, and it must be right the first time a user deletes anything.
   const trash = useTrash(client);
+  const { push, dismiss } = useToast();
+  const [pendingRestore, setPendingRestore] = useState<ContentItem | null>(null);
+  const restoreSentRef = useRef(false);
 
   // The scrolling content column. Save its position while the library remains mounted under the
   // player route so returning to Library restores the user's place.
@@ -272,13 +282,27 @@ function AppShell({
     }
   }, [client, advanceAfterPlayerDelete]);
 
+  const beginRestore = useCallback((item: ContentItem) => {
+    restoreSentRef.current = false;
+    setPendingRestore(item);
+  }, []);
+
   const requestPlayerDelete = useCallback((item: ContentItem) => {
     if (playerReturnRoute === 'session') {
       deleteItem(item, false, false, true);
+      // Highlights delete without a confirmation on purpose, so the toast is the acknowledgement:
+      // the message says where the item went, and its action is the undo for the one slip.
+      push({
+        key: `trashed-${item.filePath}`,
+        kind: 'success',
+        message: `Moved "${itemLabel(item)}" to trash.`,
+        duration: 10_000,
+        actions: [{ label: 'Restore', onClick: () => beginRestore(item) }],
+      });
       return;
     }
     setPendingDelete({ item, advancePlayer: true });
-  }, [deleteItem, playerReturnRoute]);
+  }, [deleteItem, playerReturnRoute, push, beginRestore]);
 
   const requestSessionDelete = useCallback((item: ContentItem) => {
     setPendingDelete({ item, advancePlayer: false });
@@ -353,6 +377,56 @@ function AppShell({
       }),
     );
   }, [items, playerItem, closePlayer]);
+
+  // The click may land before the backend's `trash` push that follows the delete, and only that push
+  // names the entry RestoreTrash needs. Send the restore the first time the entry is seen.
+  //
+  // The wire carries the BARE file name, not the relative path the content list uses, so match on
+  // that. The list is newest-first, so the first hit is the item just deleted even if an older entry
+  // happens to share its name.
+  useEffect(() => {
+    if (pendingRestore === null || restoreSentRef.current) {
+      return;
+    }
+    const entry = trash.entries.find(
+      (candidate) =>
+        candidate.contentType === pendingRestore.contentType
+        && candidate.fileName === pendingRestore.fileName,
+    );
+    if (entry !== undefined) {
+      restoreSentRef.current = true;
+      trash.restore([entry.id]);
+    }
+  }, [pendingRestore, trash]);
+
+  // The restore is done when the item is back in the content. Open it only then: the player
+  // closes itself on any item the list does not have, so landing early would immediately bounce.
+  //
+  // Land where the item came from: with the session review still open, the player's back returns
+  // to that session's highlight list. Leaving for the library has already closed the review, so
+  // the library route is the fallback for anything the open review does not own.
+  useEffect(() => {
+    if (pendingRestore === null || !restoreSentRef.current) {
+      return;
+    }
+    const restored = items.find((candidate) => candidate.filePath === pendingRestore.filePath);
+    if (restored !== undefined) {
+      setPendingRestore(null);
+      dismiss(`trashed-${restored.filePath}`);
+      // Membership is judged against the live content list, not the review's cached clip array:
+      // the push that restores the item rebuilds that array a beat AFTER this effect has run.
+      if (sessionReview !== null
+        && restored.automated === true
+        && restored.sourceSessionPath === sessionReview.recording.filePath) {
+        const clips = items
+          .filter((candidate) => candidate.automated && candidate.sourceSessionPath === sessionReview.recording.filePath)
+          .sort((left, right) => (left.clipStartTime ?? Number.POSITIVE_INFINITY) - (right.clipStartTime ?? Number.POSITIVE_INFINITY));
+        openSessionClip(restored, clips);
+      } else {
+        openInPlayer(restored, items);
+      }
+    }
+  }, [pendingRestore, items, dismiss, openInPlayer, openSessionClip, sessionReview]);
 
   useEffect(() => {
     if (sessionReview
@@ -484,11 +558,11 @@ function AppShell({
         />
       </header>
       <main className="app-main">
-        <ConnectionBanner reachability={reachability} />
-        <ErrorBanner client={client} />
-        <WarningBanner client={client} />
-        <DisplayFallbackBanner client={client} />
-        <GameCandidateBanner client={client} />
+        <ConnectionToasts reachability={reachability} />
+        <ErrorToasts client={client} />
+        <WarningToasts client={client} />
+        <DisplayFallbackToasts client={client} />
+        <GameCandidateToasts client={client} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}
@@ -526,9 +600,9 @@ function AppShell({
               highlightCount={items.filter(
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}
-              onItemChange={adoptPlayerItem}
-            />
-          )}
+               onItemChange={adoptPlayerItem}
+             />
+           )}
           {route === 'session' && sessionReview && (
             <SessionClipsView
               recording={sessionReview.recording}
@@ -552,7 +626,7 @@ function AppShell({
           onConfirm={confirmDelete}
         />
       )}
-    </div>
+      </div>
   );
 }
 

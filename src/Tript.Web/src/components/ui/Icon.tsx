@@ -25,7 +25,11 @@ export type IconName =
   | 'pencil'
   | 'folder'
   | 'close'
-  | 'monitor';
+  | 'monitor'
+  | 'checkCircle'
+  | 'infoCircle'
+  | 'errorCircle'
+  | 'alertTriangle';
 
 const SOLID = { fill: 'currentColor', stroke: 'none' } as const;
 
@@ -89,11 +93,39 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   folder: <path d="M3.5 7.5v10a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-7l-2-3h-4a2 2 0 0 0-2 2z" />,
-  close: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
+  // A touch bolder and wider than the set's default stroke so it holds its own inside the toast's ring.
+  close: <path strokeWidth={2} d="M5.5 5.5l13 13M18.5 5.5l-13 13" />,
   monitor: (
     <>
       <rect x="3" y="4.5" width="18" height="12.5" rx="2" />
       <path d="M9 20.5h6M12 17v3.5" />
+    </>
+  ),
+  checkCircle: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.4 12.4l2.4 2.4 4.8-5.3" />
+    </>
+  ),
+  infoCircle: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11.3V16" />
+      <path d="M12 8.2v.01" />
+    </>
+  ),
+  errorCircle: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.8V13" />
+      <path d="M12 16.2v.01" />
+    </>
+  ),
+  alertTriangle: (
+    <>
+      <path d="M12 5L21 19.5H3z" />
+      <path d="M12 10.5V14" />
+      <path d="M12 16.8v.01" />
     </>
   ),
 };

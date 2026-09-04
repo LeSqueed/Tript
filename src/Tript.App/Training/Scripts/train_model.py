@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
+import tempfile
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -42,6 +44,9 @@ def main() -> int:
     run_root = workspace / "runs"
     run_root.mkdir(parents=True, exist_ok=True)
     model = YOLO(args.base_model)
+    # The host polls this file while the process runs and mirrors the heartbeat into the UI.
+    model.add_callback("on_fit_epoch_end", make_epoch_progress_writer(workspace, args.epochs))
+    write_progress(workspace, "starting", epochs=args.epochs)
     print(f"TRAINING epochs={args.epochs} size={args.size} base={args.base_model}", flush=True)
     train_options = {
         "data": str(dataset_config),
@@ -73,6 +78,7 @@ def main() -> int:
         raise FileNotFoundError(f"training completed without a model checkpoint: {best}")
 
     print("EXPORTING format=onnx", flush=True)
+    write_progress(workspace, "exporting")
     trained = YOLO(str(best))
     # DirectML is useful for training, but ONNX export is more reliable from CPU.
     export_device = "cpu" if device == "directml" else device
@@ -80,7 +86,85 @@ def main() -> int:
     target = dataset / "model.onnx"
     shutil.copy2(exported, target)
     print(f"MODEL {target}", flush=True)
+    write_progress(workspace, "done")
     return 0
+
+
+def write_progress(
+    workspace: Path,
+    status: str,
+    epoch: int = 0,
+    epochs: int = 0,
+    loss: float | None = None,
+    map50: float | None = None,
+) -> None:
+    """Atomically publish the heartbeat the host polls (dataset/progress.json)."""
+    dataset = workspace / "dataset"
+    payload = {"status": status, "epoch": epoch, "epochs": epochs, "loss": loss, "map50": map50}
+    try:
+        descriptor, temporary = tempfile.mkstemp(dir=dataset, prefix=".progress-", suffix=".json")
+    except OSError:
+        return
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        os.replace(temporary, dataset / "progress.json")
+    except OSError:
+        # Progress is a convenience for the UI; a heartbeat failure must not kill the run.
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def _epoch_loss(trainer) -> float | None:
+    # Ultralytics keeps per-term losses as a dict of tensors (keys like "box", "cls", "dfl"), not
+    # a single tensor: tloss is the epoch's running average and loss_items the final batch.
+    for source in (getattr(trainer, "tloss", None), getattr(trainer, "loss_items", None)):
+        if not isinstance(source, dict) or not source:
+            continue
+        try:
+            values = [float(term.detach().cpu().item()) for term in source.values()]
+            return sum(values) / len(values)
+        except Exception:
+            continue
+    return None
+
+
+def _epoch_map50(trainer) -> float | None:
+    metrics = getattr(trainer, "metrics", None)
+    if metrics is None:
+        return None
+    # 8.4.x: the validator returns results_dict (trainer.metrics is a plain dict, keys like
+    # "metrics/mAP50(B)" — see runs/latest/results.csv). Older versions keep a Metrics object
+    # whose .box exposes map50.
+    if isinstance(metrics, dict):
+        for key in ("metrics/mAP50(B)", "val/mAP50", "mAP50"):
+            value = metrics.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+    box = getattr(metrics, "box", None)
+    if box is None:
+        return None
+    try:
+        return float(box.map50)
+    except Exception:
+        return None
+
+
+def make_epoch_progress_writer(workspace: Path, epochs: int):
+    def on_fit_epoch_end(trainer) -> None:
+        write_progress(
+            workspace, "training", int(trainer.epoch) + 1, epochs,
+            _epoch_loss(trainer), _epoch_map50(trainer),
+        )
+
+    return on_fit_epoch_end
 
 
 def choose_device(torch, requested: str, directml_available: bool | None = None) -> str:

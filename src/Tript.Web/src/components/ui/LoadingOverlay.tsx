@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button } from './controls';
 import './LoadingOverlay.css';
 
 interface LoadingOverlayProps {
@@ -6,6 +7,9 @@ interface LoadingOverlayProps {
   description?: string;
   progress?: number | null;
   delayMs?: number;
+  /** When set with onCancel, renders a cancel action in the dialog. */
+  cancelLabel?: string;
+  onCancel?: () => void;
 }
 
 export function LoadingOverlay({
@@ -13,6 +17,8 @@ export function LoadingOverlay({
   description,
   progress = null,
   delayMs = 250,
+  cancelLabel,
+  onCancel,
 }: LoadingOverlayProps) {
   const [visible, setVisible] = useState(delayMs <= 0);
 
@@ -43,6 +49,11 @@ export function LoadingOverlay({
           >
             <span style={{ width: `${percent}%` }} />
           </div>
+        )}
+        {cancelLabel && onCancel && (
+          <Button variant="ghost" className="ui-loading-cancel" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
         )}
       </section>
     </div>

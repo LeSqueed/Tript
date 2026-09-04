@@ -19,6 +19,10 @@ internal sealed partial class AppHost
     private readonly SemaphoreSlim _trainingWorkspaceGate = new(1, 1);
     private CancellationTokenSource? _trainingCancellation;
     private string? _trainingGameId;
+    // "exporting" while the dataset is being prepared (the locked, modal phase) and "training" for
+    // the model run itself. Null when no run is active. Surfaced on the training push so a client
+    // that connects mid-run knows which phase to render.
+    private string? _trainingPhase;
 
     private async Task WithTrainingWorkspaceLockAsync(Func<Task> action)
     {
@@ -81,12 +85,14 @@ internal sealed partial class AppHost
         return workspace;
     }
 
-    internal async Task PushTraining(string? requestedGameId)
-        => await WithTrainingWorkspaceLockAsync(() =>
-        {
-            PushTrainingCore(requestedGameId);
-            return Task.CompletedTask;
-        });
+    // Read-only: every workspace write is an atomic temp+rename and the export phase stages into a
+    // fresh directory before swapping it in, so a push is safe while a training phase is active.
+    // Keeping it off the gate is what lets a refreshed client load the tab mid-run.
+    internal Task PushTraining(string? requestedGameId)
+    {
+        PushTrainingCore(requestedGameId);
+        return Task.CompletedTask;
+    }
 
     private void PushTrainingCore(string? requestedGameId)
     {
@@ -144,6 +150,14 @@ internal sealed partial class AppHost
             }
         }
 
+        bool trainingActive;
+        string? trainingPhase;
+        lock (_trainingGate)
+        {
+            trainingActive = string.Equals(_trainingGameId, gameId, StringComparison.OrdinalIgnoreCase);
+            trainingPhase = trainingActive ? _trainingPhase : null;
+        }
+
         _ipc.Broadcast("training", JsonSerializer.SerializeToElement(new
         {
             training = new
@@ -163,7 +177,8 @@ internal sealed partial class AppHost
                     classCount = metadata.ClassCount,
                     classNames = metadata.ClassNames,
                 },
-                trainingActive = string.Equals(_trainingGameId, gameId, StringComparison.OrdinalIgnoreCase),
+                trainingActive,
+                trainingPhase,
             },
         }, Wire.Options));
     }
@@ -276,8 +291,9 @@ internal sealed partial class AppHost
         }
     }
 
-    internal async Task GetTrainingSample(TrainingSampleParameters? parameters)
-        => await WithTrainingWorkspaceLockAsync(() => GetTrainingSampleCore(parameters));
+    // Read-only sample lookup, kept off the workspace gate so previews keep streaming while a
+    // training run is in flight.
+    internal Task GetTrainingSample(TrainingSampleParameters? parameters) => GetTrainingSampleCore(parameters);
 
     private async Task GetTrainingSampleCore(TrainingSampleParameters? parameters)
     {
@@ -564,15 +580,16 @@ internal sealed partial class AppHost
 
             _trainingCancellation = new CancellationTokenSource();
             _trainingGameId = parameters.GameId;
+            _trainingPhase = "exporting";
             var cancellation = _trainingCancellation;
             _ = RunTrainingAsync(workspace, imageSize.Value, parameters.AugmentCopies ?? 0, parameters, cancellation);
         }
         var augmentMessage = (parameters.AugmentCopies ?? 0) > 0
-            ? $" augmentation: {parameters.AugmentCopies} copies per training crop (validation unchanged);"
+            ? $" augmentation: {parameters.AugmentCopies} copies per training crop (validation unchanged)."
             : string.Empty;
-        PushTrainingProgress(parameters.GameId, "started",
-            $"Training is running in a console window. Requested device: {parameters.Device}; " +
-            $"epochs: {parameters.Epochs}; input: {imageSize}x{imageSize};" + augmentMessage);
+        PushTrainingProgress(parameters.GameId, "exporting",
+            $"Preparing the training dataset in a console window. Requested device: {parameters.Device}; " +
+            $"epochs: {parameters.Epochs}; input: {imageSize}x{imageSize}." + augmentMessage);
     }
 
     internal void CancelTraining()
@@ -595,6 +612,11 @@ internal sealed partial class AppHost
     {
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
             throw new ArgumentException("A game id is required to install a model.");
+        lock (_trainingGate)
+        {
+            if (_trainingCancellation is not null)
+                throw new InvalidOperationException("Stop training before installing a model.");
+        }
         var workspace = EnsureTrainingWorkspace(parameters.GameId);
         var source = Path.Combine(workspace.DatasetPath, "model.onnx");
         var result = InstallTrainingModel(parameters.GameId, source);
@@ -603,20 +625,59 @@ internal sealed partial class AppHost
         PushTrainingCore(parameters.GameId);
     }
 
+    private void SetTrainingPhase(string? phase)
+    {
+        lock (_trainingGate)
+            _trainingPhase = phase;
+    }
+
     private async Task RunTrainingAsync(TrainingWorkspace workspace, int imageSize, int augmentCopies,
         StartTrainingParameters parameters, CancellationTokenSource cancellation)
     {
-        await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            var result = await _trainingRunner.RunAsync(workspace, imageSize, parameters.Epochs,
-                augmentCopies, parameters.Device, parameters.BaseModel,
-                message => PushTrainingProgress(parameters.GameId, "progress", message),
+            // Phase one: dataset export. The only phase that reads every editable sample, so it
+            // keeps the workspace gate — and the one the UI shows the loading modal for.
+            await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _trainingRunner.PrepareDatasetAsync(workspace, imageSize, augmentCopies,
+                    (message, _) => PushTrainingProgress(parameters.GameId, "progress", message),
+                    cancellation.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _trainingWorkspaceGate.Release();
+            }
+
+            // Phase two: the model run. The gate stays released for its whole (possibly long)
+            // duration: the script only reads dataset/ and writes runs/, so sample navigation,
+            // edits and pushes keep working while it trains.
+            SetTrainingPhase("training");
+            var modelPath = await _trainingRunner.TrainModelAsync(workspace, imageSize, parameters.Epochs,
+                parameters.Device, parameters.BaseModel,
+                (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
+                    details is null || details.Epochs == 0 ? null
+                        : (int)Math.Round(100.0 * details.Epoch / details.Epochs),
+                    details),
                 cancellation.Token).ConfigureAwait(false);
-            var installed = InstallTrainingModel(parameters.GameId, result.DatasetModelPath);
-            RefreshWorkspaceModel(workspace, result.DatasetModelPath);
-            PushTrainingProgress(parameters.GameId, "completed", $"Installed {installed.ModelPath}.");
-            PushTrainingCore(parameters.GameId);
+
+            // Phase three: validation and install. Short and gate-protected, so no edit can land
+            // between validating the model and installing it.
+            await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _trainingRunner.ValidateTrainingResult(workspace, modelPath,
+                    message => PushTrainingProgress(parameters.GameId, "progress", message));
+                var installed = InstallTrainingModel(parameters.GameId, modelPath);
+                RefreshWorkspaceModel(workspace, modelPath);
+                PushTrainingProgress(parameters.GameId, "completed", $"Installed {installed.ModelPath}.");
+                PushTrainingCore(parameters.GameId);
+            }
+            finally
+            {
+                _trainingWorkspaceGate.Release();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -634,10 +695,10 @@ internal sealed partial class AppHost
                 {
                     _trainingCancellation = null;
                     _trainingGameId = null;
+                    _trainingPhase = null;
                 }
             }
             cancellation.Dispose();
-            _trainingWorkspaceGate.Release();
             try
             {
                 // The UI needs a final full state push so trainingActive becomes false after an error
@@ -706,13 +767,21 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
-    private void PushTrainingProgress(string gameId, string status, string message, int? percent = null) =>
+    private void PushTrainingProgress(string gameId, string status, string message, int? percent = null,
+        TrainingProgressUpdate? details = null) =>
         _ipc.Broadcast("trainingProgress", JsonSerializer.SerializeToElement(new
         {
             gameId,
             status,
             message,
             percent,
+            details = details is null ? null : new
+            {
+                epoch = details.Epoch,
+                epochs = details.Epochs,
+                loss = details.Loss,
+                map50 = details.Map50,
+            },
         }, Wire.Options));
 }
 #endif

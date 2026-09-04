@@ -24,6 +24,98 @@ interface TrainingViewProps {
 const EMPTY_TRAINING: TrainingMessage = { gameId: null, events: [], samples: [], regionGroups: [], invalidSamples: [] };
 const SAMPLE_PAGE_SIZE = 8;
 
+// One per-epoch heartbeat (loss/mAP50 plus arrival time) for the in-progress panel: it feeds the
+// sparkline and the elapsed/remaining pacing derived from when each epoch finished.
+interface TrainingEpochPoint {
+  epoch: number;
+  loss: number | null;
+  map50: number | null;
+  receivedAt: number;
+}
+
+function formatDuration(totalMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(totalMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes === 0 ? `${seconds}s` : `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+// The first heartbeat lands at the end of epoch 1, so the span between heartbeats covers
+// (count - 1) epochs; scale that pace by the completed epoch count for the elapsed estimate.
+function trainingPace(history: TrainingEpochPoint[], totalEpochs: number): { elapsedMs: number; remainingMs: number | null } {
+  if (history.length < 2) return { elapsedMs: 0, remainingMs: null };
+  const last = history[history.length - 1];
+  const perEpochMs = Math.max(0, last.receivedAt - history[0].receivedAt) / (history.length - 1);
+  return {
+    elapsedMs: perEpochMs * last.epoch,
+    remainingMs: perEpochMs * Math.max(0, totalEpochs - last.epoch),
+  };
+}
+
+// Each series is min/max-normalized on its own scale and aligned by epoch, so epochs without
+// validation metrics leave a gap instead of shifting the line.
+function TrainingSparkline({ points }: { points: TrainingEpochPoint[] }) {
+  const width = 100;
+  const height = 40;
+  const pad = 4;
+  const total = points.length;
+  const xFor = (epoch: number) => (total <= 1 ? width / 2 : ((epoch - 1) / (total - 1)) * width);
+  const seriesFor = (pick: (point: TrainingEpochPoint) => number | null) => {
+    const series = points.filter((point) => pick(point) != null);
+    if (series.length === 0) return null;
+    const values = series.map((point) => pick(point) as number);
+    const min = Math.min(...values);
+    const span = Math.max(...values) - min;
+    const toCoord = (point: TrainingEpochPoint, x?: number) => {
+      const normalized = span === 0 ? 0.5 : ((pick(point) as number) - min) / span;
+      return { x: x ?? xFor(point.epoch), y: pad + (1 - normalized) * (height - pad * 2) };
+    };
+    const coords = series.map((point) => toCoord(point));
+    const drawn = coords.length === 1
+      ? [{ x: coords[0].x - 1.5, y: coords[0].y }, { x: coords[0].x + 1.5, y: coords[0].y }]
+      : coords;
+    return {
+      line: drawn.map((c) => `${c.x.toFixed(2)},${c.y.toFixed(2)}`).join(' '),
+      first: coords[0],
+      last: coords[coords.length - 1],
+    };
+  };
+  const loss = seriesFor((point) => point.loss);
+  const map = seriesFor((point) => point.map50);
+  if (!loss && !map) return null;
+  const grid = [0.25, 0.5, 0.75].map((f) => pad + f * (height - pad * 2));
+  const lossArea = loss
+    ? `${loss.first.x.toFixed(2)},${height - pad} ${loss.line} ${loss.last.x.toFixed(2)},${height - pad}`
+    : null;
+  return (
+    <svg
+      className="training-sparkline"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Training metrics per epoch"
+    >
+      {grid.map((y) => <line key={y} className="training-sparkline-grid" x1={0} x2={width} y1={y} y2={y} />)}
+      <line className="training-sparkline-grid training-sparkline-baseline" x1={0} x2={width} y1={height - pad} y2={height - pad} />
+      {lossArea && <polygon className="training-sparkline-fill" points={lossArea} />}
+      {map && <polyline className="training-sparkline-map" points={map.line} />}
+      {loss && <polyline className="training-sparkline-loss" points={loss.line} />}
+      {map && (
+        <line
+          className="training-sparkline-tick training-sparkline-map"
+          x1={map.last.x} x2={map.last.x} y1={map.last.y - 2} y2={map.last.y + 2}
+        />
+      )}
+      {loss && (
+        <line
+          className="training-sparkline-tick training-sparkline-loss"
+          x1={loss.last.x} x2={loss.last.x} y1={loss.last.y - 2} y2={loss.last.y + 2}
+        />
+      )}
+    </svg>
+  );
+}
+
 export function TrainingView({ client }: TrainingViewProps) {
   const [games, setGames] = useState<GameInfo[]>([]);
   const [training, setTraining] = useState<TrainingMessage>(EMPTY_TRAINING);
@@ -34,6 +126,10 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [device, setDevice] = useState('auto');
   const [augmentCopies, setAugmentCopies] = useState(0);
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
+  const [epochHistory, setEpochHistory] = useState<TrainingEpochPoint[]>([]);
+  // Latest non-epoch runner message (export console lines, coverage summary, ONNX export note),
+  // shown inside the in-progress panel while the run is active.
+  const [statusNote, setStatusNote] = useState<string | null>(null);
   const [selectedSample, setSelectedSample] = useState<TrainingSampleMessage | null>(null);
   const [eventEditor, setEventEditor] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
   const [regionEditor, setRegionEditor] = useState<
@@ -95,6 +191,25 @@ export function TrainingView({ client }: TrainingViewProps) {
       const message = content as TrainingProgressMessage;
       if (message.gameId !== activeGameIdRef.current) return;
       setProgress(message);
+      if (message.details && message.details.epoch > 0) {
+        const details = message.details;
+        setEpochHistory((current) => {
+          const point: TrainingEpochPoint = {
+            epoch: details.epoch,
+            loss: details.loss,
+            map50: details.map50,
+            receivedAt: Date.now(),
+          };
+          return [...current.filter((entry) => entry.epoch !== point.epoch), point]
+            .sort((a, b) => a.epoch - b.epoch);
+        });
+      } else if (message.status === 'exporting' || message.status === 'started') {
+        // A new run is beginning: drop the previous run's history and note.
+        setEpochHistory([]);
+        setStatusNote(message.message);
+      } else if (message.status === 'progress') {
+        setStatusNote(message.message);
+      }
       if (message.status === 'eventsUpdated') {
         pendingEventsRef.current = null;
         setDeletingEventName(null);
@@ -178,6 +293,9 @@ export function TrainingView({ client }: TrainingViewProps) {
       loadedTrainingGameIdRef.current = null;
       client.send('ListTraining', { gameId });
       setSelectedSample(null);
+      setProgress(null);
+      setEpochHistory([]);
+      setStatusNote(null);
       setSamplePreviews({});
       setPreviewErrors({});
       previewRequestsRef.current.clear();
@@ -209,7 +327,17 @@ export function TrainingView({ client }: TrainingViewProps) {
   const invalidById = new Map(invalidSamples.map((sample) => [sample.id, sample.reason]));
   const validLabeledSampleCount = training.samples.filter((sample) =>
     sample.labels.length > 0 && !invalidById.has(sample.id)).length;
-  const trainingIsActive = training.trainingActive || progress?.status === 'started' || progress?.status === 'progress';
+  const trainingIsActive = training.trainingActive
+    || progress?.status === 'exporting' || progress?.status === 'started' || progress?.status === 'progress';
+  // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
+  // connected mid-run and learned the phase from the training push.
+  const exportingDataset = progress?.status === 'exporting' || training.trainingPhase === 'exporting';
+  const epochDetails = progress?.details && progress.details.epoch > 0 ? progress.details : null;
+  const pace = trainingPace(epochHistory, epochDetails?.epochs ?? epochs);
+  // A series only earns its legend entry once a real value arrives; a run whose metrics never
+  // populate (e.g. DirectML skips validation) must not show an empty graph frame.
+  const hasLoss = epochHistory.some((point) => point.loss != null);
+  const hasMap50 = epochHistory.some((point) => point.map50 != null);
   const normalizedSampleFilter = sampleFilter.trim().toLowerCase();
   const filteredSamples = training.samples.filter((sample) => {
     const isInvalid = invalidById.has(sample.id);
@@ -648,19 +776,51 @@ export function TrainingView({ client }: TrainingViewProps) {
                 </p>
               )}
              </div>
-             {trainingIsActive && (
-               <div className="training-active-status" role="status">
-                 <div className="training-active-heading">
-                   <span className="training-active-dot" aria-hidden="true" />
-                   <strong>Training in progress</strong>
-                 </div>
-                 <span className="muted small">
-                   Requested device: {device === 'auto' ? 'Auto (actual device is shown in the console)' : device.toUpperCase()}
-                   {' · '} {epochs} epochs {' · '} {training.model?.inputWidth ?? 640}x{training.model?.inputHeight ?? 640} input
-                 </span>
-                 <span className="muted small">Detailed Ultralytics output is open in the training console window.</span>
-               </div>
-             )}
+              {trainingIsActive && (
+                <div className="training-active-status" role="status">
+                  <div className="training-active-heading">
+                    <span className="training-active-dot" aria-hidden="true" />
+                    <strong>Training in progress</strong>
+                    {epochDetails && (
+                      <span className="training-epoch-badge">Epoch {epochDetails.epoch}/{epochDetails.epochs}</span>
+                    )}
+                  </div>
+                   <span className="muted small">
+                    Requested device: {device === 'auto' ? 'Auto (actual device is shown in the console)' : device.toUpperCase()}
+                    {' · '} {epochs} epochs {' · '} {training.model?.inputWidth ?? 640}x{training.model?.inputHeight ?? 640} input
+                  </span>
+                  {epochDetails && (
+                    <div
+                      className="training-epoch-progress"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.min(100, Math.round((epochDetails.epoch / epochDetails.epochs) * 100))}
+                    >
+                      <span style={{ width: `${Math.min(100, (epochDetails.epoch / epochDetails.epochs) * 100)}%` }} />
+                    </div>
+                  )}
+                  {(hasLoss || hasMap50) && (
+                    <div className="training-metrics">
+                      <TrainingSparkline points={epochHistory} />
+                      <span className="muted small training-metrics-legend">
+                        {hasLoss && <span className="training-metrics-legend-loss">loss</span>}
+                        {hasMap50 && <span className="training-metrics-legend-map">mAP50</span>}
+                      </span>
+                    </div>
+                  )}
+                  {epochDetails && (
+                    <span className="muted small training-metrics-numbers">
+                      {epochDetails.loss != null && <span>loss {epochDetails.loss.toFixed(4)}</span>}
+                      {epochDetails.map50 != null && <span>mAP50 {epochDetails.map50.toFixed(4)}</span>}
+                      {pace.elapsedMs > 0 && <span>{formatDuration(pace.elapsedMs)} elapsed</span>}
+                      {pace.remainingMs != null && <span>~{formatDuration(pace.remainingMs)} remaining</span>}
+                    </span>
+                  )}
+                  {statusNote && <span className="muted small">{statusNote}</span>}
+                  <span className="muted small">Detailed Ultralytics output is open in the training console window.</span>
+                </div>
+              )}
             <div className="training-field compact">
               <Field label="Epochs">
                 <TextField type="number" value={epochs} min={1} onChange={(value) => setEpochs(Number(value))} />
@@ -703,7 +863,10 @@ export function TrainingView({ client }: TrainingViewProps) {
             </Button>
           </section>
 
-          {progress && (
+          {/* While a run is active every message is mirrored into the in-progress panel above;
+              this line only surfaces terminal states (completed/cancelled/error) and the
+              non-training flows (import, event deletion). */}
+          {progress && !trainingIsActive && (
             <p className={`training-progress training-progress-${progress.status}`} role="status">
               <strong>{progress.status}</strong> {progress.message}
             </p>
@@ -753,6 +916,14 @@ export function TrainingView({ client }: TrainingViewProps) {
           title={`Deleting ${deletingEventName} event`}
           description="Removing its labels from every training sample."
           progress={deletePercent}
+        />
+      )}
+      {exportingDataset && (
+        <LoadingOverlay
+          title="Preparing training data"
+          description="Cropping, splitting and augmenting the dataset. The workspace is locked until the dataset is ready; the console window shows details."
+          cancelLabel="Cancel"
+          onCancel={() => client.send('CancelTraining')}
         />
       )}
     </section>

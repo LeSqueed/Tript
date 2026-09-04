@@ -45,6 +45,9 @@ internal sealed class TrainingWorkspace
 
     internal string RunsPath => Path.Combine(RootPath, "runs");
 
+    // The training script's per-epoch heartbeat, polled by the host while the model trains.
+    internal string TrainingProgressPath => Path.Combine(DatasetPath, "progress.json");
+
     internal List<EventDefinition> LoadDefinitions()
     {
         if (!File.Exists(EventsPath))
@@ -143,10 +146,12 @@ internal sealed class TrainingWorkspace
         if (!Directory.Exists(RootPath))
             return string.Empty;
 
-        // Preferences are local form state, not workspace data: remembering the last epochs never
-        // counts as the workspace having changed under an import's conflict guard.
+        // Preferences are local form state and the training heartbeat churns while a run is active;
+        // neither is workspace data, so neither counts as the workspace having changed under an
+        // import's conflict guard.
         return string.Join("|", Directory.EnumerateFiles(RootPath, "*", SearchOption.AllDirectories)
-            .Where(path => !string.Equals(path, PreferencesPath, StringComparison.OrdinalIgnoreCase))
+            .Where(path => !string.Equals(path, PreferencesPath, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(path, TrainingProgressPath, StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(path => $"{Path.GetRelativePath(RootPath, path)}:{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}"));
     }

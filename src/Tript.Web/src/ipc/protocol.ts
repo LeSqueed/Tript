@@ -373,12 +373,15 @@ export interface TrainingMessage {
   };
   model?: TrainingModelInfo | null;
   trainingActive?: boolean;
+  /** Active run's phase so a client connecting mid-run renders the right state. */
+  trainingPhase?: 'exporting' | 'training' | null;
   /** Last training settings used for this game (local to the machine, absent until the first run). */
   preferences?: { epochs: number; device: string; augmentCopies: number } | null;
 }
 
 export type TrainingProgressStatus =
   | 'started'
+  | 'exporting'
   | 'progress'
   | 'imported'
   | 'sampleSaved'
@@ -396,6 +399,8 @@ export interface TrainingProgressMessage {
   status: TrainingProgressStatus;
   message: string;
   percent?: number | null;
+  /** Per-epoch heartbeat from the training run (epoch progress, loss, mAP50). */
+  details?: { epoch: number; epochs: number; loss: number | null; map50: number | null } | null;
 }
 
 export interface TrainingSampleMessage {

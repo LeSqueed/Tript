@@ -334,6 +334,106 @@
   box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--color-success) 18%, transparent);
 }
 
+.training-epoch-progress {
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-base-300);
+}
+
+.training-epoch-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transition: width 120ms ease;
+}
+
+.training-epoch-badge {
+  margin-left: auto;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  background: var(--color-base-300);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-metrics {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.training-sparkline {
+  width: 100%;
+  height: 3rem;
+}
+
+.training-sparkline polyline,
+.training-sparkline .training-sparkline-tick {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.training-sparkline-loss {
+  stroke: var(--color-accent);
+}
+
+.training-sparkline-map {
+  stroke: var(--color-success);
+}
+
+.training-sparkline-tick {
+  stroke-width: 2.5;
+}
+
+.training-sparkline-fill {
+  fill: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  stroke: none;
+}
+
+.training-sparkline-grid {
+  stroke: color-mix(in srgb, var(--color-line) 50%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.training-sparkline-baseline {
+  stroke: var(--color-line);
+}
+
+.training-metrics-legend {
+  display: flex;
+  gap: 0.9rem;
+}
+
+.training-metrics-legend-loss::before,
+.training-metrics-legend-map::before {
+  content: '';
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+}
+
+.training-metrics-legend-loss::before {
+  background: var(--color-accent);
+}
+
+.training-metrics-legend-map::before {
+  background: var(--color-success);
+}
+
+.training-metrics-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .training-editor-actions {
   display: flex;
   align-items: center;

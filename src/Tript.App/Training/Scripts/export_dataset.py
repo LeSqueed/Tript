@@ -58,9 +58,19 @@ def main() -> int:
             (dataset / "labels" / split).mkdir(parents=True)
 
         assignments = split_samples(samples, args.validation)
+        # The per-sample loop below is the whole run; without these lines the console window the
+        # host opens sits blank for minutes, so report the plan and then steady progress.
+        total_samples = sum(len(value) for value in assignments.values())
+        progress_step = max(1, total_samples // 20)
+        print(
+            f"EXPORT size={args.size} augment={args.augment} samples={len(samples)} "
+            f"train={len(assignments['train'])} val={len(assignments['val'])}",
+            flush=True,
+        )
         exported = 0
         augmented_crops = 0
         split_crops = {"train": 0, "val": 0}
+        processed = 0
         for split, split_samples_list in assignments.items():
             for sample in split_samples_list:
                 emitted, augmented = export_sample(
@@ -69,6 +79,9 @@ def main() -> int:
                 exported += emitted
                 augmented_crops += augmented
                 split_crops[split] += emitted
+                processed += 1
+                if processed % progress_step == 0 or processed == total_samples:
+                    print(f"PROGRESS {processed}/{total_samples} samples (crops={exported})", flush=True)
 
         if exported == 0:
             raise ValueError("no valid training crops were exported")

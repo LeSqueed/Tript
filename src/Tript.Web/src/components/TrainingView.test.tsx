@@ -325,3 +325,207 @@ describe('TrainingView training preferences', () => {
     expect((screen.getByLabelText(/^Augmentation/) as HTMLSelectElement).value).toBe('0');
   });
 });
+
+describe('TrainingView training run feedback', () => {
+  afterEach(cleanup);
+
+  it('shows the dataset-prep modal while exporting and cancels the run from it', async () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+    } satisfies TrainingMessage }));
+    expect(screen.queryByRole('dialog', { name: 'Preparing training data' })).toBeNull();
+
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1', status: 'exporting', message: 'Preparing the training dataset.',
+    }));
+    // The overlay waits a short delay before appearing, so poll for it.
+    const overlay = await screen.findByRole('dialog', { name: 'Preparing training data' });
+
+    fireEvent.click(within(overlay).getByRole('button', { name: 'Cancel' }));
+    expect(client.send).toHaveBeenCalledWith('CancelTraining');
+  });
+
+  it('shows the dataset-prep modal for a client that connects mid-run via the training phase', async () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      trainingActive: true,
+      trainingPhase: 'exporting',
+    } satisfies TrainingMessage }));
+
+    expect(await screen.findByRole('dialog', { name: 'Preparing training data' })).toBeTruthy();
+  });
+
+  it('shows epoch progress and metrics while the model trains without blocking the view', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      trainingActive: true,
+      trainingPhase: 'training',
+    } satisfies TrainingMessage }));
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1',
+      status: 'progress',
+      message: 'Epoch 12/100 · loss 0.8321 · mAP50 0.4231',
+      percent: 12,
+      details: { epoch: 12, epochs: 100, loss: 0.8321, map50: 0.4231 },
+    }));
+
+    expect(screen.getByText('Training in progress')).toBeTruthy();
+    // The epoch counter lives in the panel heading.
+    expect(screen.getByText('Epoch 12/100')).toBeTruthy();
+    const bar = screen.getByRole('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('12');
+    // Key numbers render as separate cells inside the panel.
+    expect(screen.getByText('loss 0.8321')).toBeTruthy();
+    expect(screen.getByText('mAP50 0.4231')).toBeTruthy();
+    // The per-epoch message itself no longer prints in the bottom progress line while active.
+    expect(screen.queryByText('Epoch 12/100 · loss 0.8321 · mAP50 0.4231')).toBeNull();
+    // The view stays interactive while the model trains: no dataset-prep modal, start disabled.
+    expect(screen.queryByRole('dialog', { name: 'Preparing training data' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Start training' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('plots each epoch in the sparkline and paces the estimate from heartbeat times', () => {
+    const { client, emit } = createClient();
+    // Deterministic heartbeat cadence: every epoch finishes 10s after the previous one.
+    const clock = vi.spyOn(Date, 'now');
+    let now = 1_000_000;
+    clock.mockImplementation(() => (now += 10_000));
+    try {
+      render(<TrainingView client={client} />);
+      act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+      act(() => emit('training', { training: {
+        gameId: 'game-1',
+        events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+        samples: [],
+        trainingActive: true,
+        trainingPhase: 'training',
+      } satisfies TrainingMessage }));
+      for (const [epoch, loss, map50] of [
+        [1, 1.0, null],
+        [2, 0.8, 0.5],
+        [3, 0.6, 0.7],
+      ] as const) {
+        act(() => emit('trainingProgress', {
+          gameId: 'game-1',
+          status: 'progress',
+          message: `Epoch ${epoch}/4`,
+          details: { epoch, epochs: 4, loss, map50 },
+        }));
+      }
+
+      const chart = screen.getByRole('img', { name: 'Training metrics per epoch' });
+      // One polyline per available series: loss from epoch 1, mAP50 from epoch 2.
+      expect(chart.querySelectorAll('polyline').length).toBe(2);
+      expect(chart.querySelector('.training-sparkline-fill')).toBeTruthy();
+      expect(chart.querySelectorAll('.training-sparkline-grid').length).toBe(4);
+      expect(chart.querySelectorAll('.training-sparkline-tick').length).toBe(2);
+      expect(screen.getByText('Epoch 3/4')).toBeTruthy();
+      expect(screen.getByText('mAP50')).toBeTruthy();
+      // Three completed epochs at ~10s each, one of four left.
+      expect(screen.getByText('30s elapsed')).toBeTruthy();
+      expect(screen.getByText('~10s remaining')).toBeTruthy();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('shows runner notes in the panel while active and only terminal messages at the bottom', () => {
+    const { client, emit } = createClient();
+    const view = render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      trainingActive: true,
+      trainingPhase: 'training',
+    } satisfies TrainingMessage }));
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1',
+      status: 'progress',
+      message: 'Dataset exported: 84 train and 21 validation frames.',
+    }));
+
+    expect(screen.getByText('Dataset exported: 84 train and 21 validation frames.')).toBeTruthy();
+    // While the run is active nothing prints in the bottom progress line.
+    expect(view.container.querySelector('.training-progress')).toBeNull();
+
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1', status: 'completed', message: 'Installed models/overwatch.onnx.',
+    }));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      trainingActive: false,
+    } satisfies TrainingMessage }));
+
+    expect(screen.queryByText('Training in progress')).toBeNull();
+    const bottom = view.container.querySelector('.training-progress');
+    expect(bottom?.textContent).toContain('Installed models/overwatch.onnx.');
+  });
+
+  it('renders no graph or legend while the heartbeats carry no metric values', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+      trainingActive: true,
+      trainingPhase: 'training',
+    } satisfies TrainingMessage }));
+    for (const epoch of [1, 2]) {
+      act(() => emit('trainingProgress', {
+        gameId: 'game-1',
+        status: 'progress',
+        message: `Epoch ${epoch}/4`,
+        details: { epoch, epochs: 4, loss: null, map50: null },
+      }));
+    }
+
+    expect(screen.queryByRole('img', { name: 'Training metrics per epoch' })).toBeNull();
+    expect(screen.queryByText('loss')).toBeNull();
+    // Pacing still works off the heartbeat times alone.
+    expect(screen.getByText(/remaining/)).toBeTruthy();
+  });
+
+  it('clears stale progress state when switching games', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'One' }, { id: 'game-2', name: 'Two' }]));
+    act(() => emit('training', { training: {
+      gameId: 'game-1',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+    } satisfies TrainingMessage }));
+    act(() => emit('trainingProgress', {
+      gameId: 'game-1', status: 'progress', message: 'Epoch 1/10',
+    }));
+    expect(screen.getByText('Epoch 1/10')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Game'), { target: { value: 'game-2' } });
+    act(() => emit('training', { training: {
+      gameId: 'game-2',
+      events: [{ id: 1, classId: 0, name: 'Event', type: 'Trigger' }],
+      samples: [],
+    } satisfies TrainingMessage }));
+    expect(screen.queryByText('Epoch 1/10')).toBeNull();
+  });
+});

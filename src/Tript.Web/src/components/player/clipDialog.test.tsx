@@ -405,15 +405,6 @@ describe('clip dialog — importProgress surface', () => {
     expect(states[0]).toMatchObject({ status: 'error', error: 'encoder failed' });
   });
 
-  it('renders the done/error state in the dialog', () => {
-    const { dialog } = probe();
-    act(() => dialog().openDialog(session, 42));
-    act(() => dialog().create());
-    const id = Object.keys(dialog().progress)[0];
-    act(() => dialog().applyImportProgress({ id, status: 'error', error: 'boom' }));
-    expect(screen.getByTestId('clip-progress-error').textContent).toContain('boom');
-  });
-
   it('a done/error with nothing in flight is dropped, not misattributed', () => {
     const { dialog } = probe();
     act(() => dialog().applyImportProgress({ id: 'missing', status: 'done', content: session }));

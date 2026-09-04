@@ -299,6 +299,31 @@ describe('RecorderBar', () => {
     });
   });
 
+  it('counts the clips being created in the top bar', () => {
+    const client = mockClient();
+    render(<RecorderBar client={client} connectionState="connected" />);
+
+    act(() => {
+      client.emit('importProgress', { id: 'clip-a', status: 'importing' });
+    });
+    expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating clips…');
+
+    act(() => {
+      client.emit('importProgress', { id: 'clip-b', status: 'importing' });
+    });
+    expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating 2 clips…');
+
+    act(() => {
+      client.emit('importProgress', { id: 'clip-a', status: 'done', content: {} });
+    });
+    expect(screen.getByTestId('clip-creation-status').textContent).toBe('Creating clips…');
+
+    act(() => {
+      client.emit('importProgress', { id: 'clip-b', status: 'done', content: {} });
+    });
+    expect(screen.queryByTestId('clip-creation-status')).toBeNull();
+  });
+
   it('shows the disabled model placeholder when no model is active', () => {
     const client = mockClient();
     render(<RecorderBar client={client} connectionState="connected" trainingFeatureEnabled />);

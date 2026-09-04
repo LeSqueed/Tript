@@ -2,13 +2,14 @@
 //
 // The in-player clipping UI integration tests. These drive the real PlayerView (video + dual
 // timeline + the clip dialog + segment looping) and assert the clip payloads the dialog sends, the
-// loop decisions that seek the playhead, and the importProgress result surface. jsdom has no
+// loop decisions that seek the playhead, and the clip results the player reports to the shell.
+// jsdom has no
 // layout, so the same geometry stubs as PlayerView.test.tsx apply: every element is a 100px-wide
 // rect at x=0, so a pointer clientX maps one-to-one to a time in a 100-second session.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { PlayerView } from './PlayerView';
+import { PlayerView, type ClipCreatedResult } from './PlayerView';
 import type { SessionSource } from './player/sessionSource';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -757,31 +758,67 @@ describe('importProgress result surface in the player', () => {
     vi.useRealTimers();
   });
 
-  it('the dialog renders the backend importProgress result', () => {
+  it('reports a finished clip to the shell with the clip the backend named', () => {
     const client = mockClient();
-    renderPlayer(client);
+    const results: ClipCreatedResult[] = [];
+    const { container } = render(
+      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
+    );
+    setVideoDuration(container, 100);
     markDefaultSegment();
     openClipDialog();
     fireEvent.click(createButton());
-    expect(screen.getByTestId('clip-progress-importing')).toBeTruthy();
-    const id = (client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string }).id;
+    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string; title: string };
+    const clip = { contentType: 'clip', fileName: 'clip-1.mp4', filePath: 'clips/clip-1.mp4', title: sent.title };
     act(() => {
-      client.emit('importProgress', { id, status: 'done', content: {} });
+      client.emit('importProgress', { id: sent.id, status: 'done', content: clip });
     });
-    expect(screen.getByTestId('clip-progress-done')).toBeTruthy();
+    expect(results).toEqual([{ title: sent.title, item: clip }]);
   });
 
-  it('an error surfaces the message', () => {
+  it('reports a failed clip to the shell with the backend message', () => {
     const client = mockClient();
-    renderPlayer(client);
+    const results: ClipCreatedResult[] = [];
+    const { container } = render(
+      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
+    );
+    setVideoDuration(container, 100);
     markDefaultSegment();
     openClipDialog();
     fireEvent.click(createButton());
-    const id = (client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string }).id;
+    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string; title: string };
     act(() => {
-      client.emit('importProgress', { id, status: 'error', error: 'encoder failed' });
+      client.emit('importProgress', { id: sent.id, status: 'error', error: 'encoder failed' });
     });
-    expect(screen.getByTestId('clip-progress-error').textContent).toContain('encoder failed');
+    expect(results).toEqual([{ title: sent.title, error: 'encoder failed' }]);
+  });
+
+  it('does not report importProgress frames for jobs the player did not send', () => {
+    const client = mockClient();
+    const results: ClipCreatedResult[] = [];
+    const { container } = render(
+      <PlayerView client={client} source={source} onClipCreated={(result) => results.push(result)} />,
+    );
+    setVideoDuration(container, 100);
+    act(() => {
+      // An SDR conversion rides the same channel with its own id; it is not this player's clip.
+      client.emit('importProgress', { id: 'sdr-1', status: 'done', content: {} });
+    });
+    expect(results).toEqual([]);
+  });
+
+  it('no longer renders a per-clip progress list under the player', () => {
+    const client = mockClient();
+    const container = renderPlayer(client);
+    markDefaultSegment();
+    openClipDialog();
+    fireEvent.click(createButton());
+    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string };
+    act(() => {
+      client.emit('importProgress', { id: sent.id, status: 'done', content: {} });
+    });
+    expect(container.querySelector('.player-clip-progress')).toBeNull();
+    expect(screen.queryByText('Creating…')).toBeNull();
   });
 
   it('the state message audio tracks surface per-track controls in the dialog', () => {

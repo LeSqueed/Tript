@@ -505,6 +505,55 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Back to session' })).toBeTruthy();
   });
 
+  it('toasts a created clip with a View that opens the new clip in the player', () => {
+    renderApp();
+    connect();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+
+    // The player only marks against a length the media itself has reported.
+    const video = document.querySelector('video') as HTMLVideoElement;
+    act(() => {
+      Object.defineProperty(video, 'duration', { configurable: true, writable: true, value: 120 });
+      fireEvent.durationChange(video);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open clip dialog' }));
+    fireEvent.change(screen.getByLabelText('Output'), { target: { value: 'Nice save' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create clip' }));
+
+    const sent = activeSocket().sent
+      .map((frame) => JSON.parse(frame) as { method?: string; parameters?: { id?: string } })
+      .find((frame) => frame.method === 'CreateClip');
+    expect(sent?.parameters?.id).toBeTruthy();
+
+    const clip = {
+      contentType: 'clip',
+      fileName: 'nice-save.mp4',
+      filePath: 'clips/nice-save.mp4',
+      title: 'Nice save',
+    };
+    // The backend names the finished clip before the content list picks it up.
+    act(() => {
+      const ws = activeSocket();
+      ws.serverMessage(JSON.stringify({
+        method: 'importProgress',
+        content: { id: sent?.parameters?.id, status: 'done', content: clip },
+      }));
+      ws.serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [CLIP_1, SESSION_2, SESSION_1, clip] },
+      }));
+    });
+
+    expect(screen.getByRole('status').textContent).toContain('Created "Nice save".');
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Nice save');
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('returns through session review to the source recording after opening a highlight', () => {
     renderApp();
     connect();

@@ -40,6 +40,19 @@ import { formatTime } from './player/timelineModel';
 import { Button, RadioOption } from '../components/ui/controls';
 import { TrainingSampleEditor } from './TrainingSampleEditor';
 
+/**
+ * The outcome of a CreateClip the player sent. The backend answers on the shared importProgress
+ * channel, so the player hands the result to the shell, which surfaces it.
+ */
+export interface ClipCreatedResult {
+  /** The title the clip was created under. */
+  title: string;
+  /** The created clip, as the backend named it. Present on success. */
+  item?: ContentItem;
+  /** The failure message, present when the clip could not be created. */
+  error?: string;
+}
+
 export interface PlayerViewProps {
   client: IpcClient;
   trainingEnabled?: boolean;
@@ -57,6 +70,8 @@ export interface PlayerViewProps {
   /** The complete filtered/sorted library result set used for previous/next navigation. */
   navigationItems?: ContentItem[];
   onItemChange?(item: ContentItem): void;
+  /** Report a CreateClip the player sent as the backend finishes it, so the shell can surface it. */
+  onClipCreated?(result: ClipCreatedResult): void;
   onDelete?(item: ContentItem): void;
   onToggleFavorite?(item: ContentItem): void;
   onReviewSession?(recording: ContentItem): void;
@@ -80,6 +95,7 @@ export function PlayerView({
   item: requestedItem,
   navigationItems,
   onItemChange,
+  onClipCreated,
   onDelete,
   onToggleFavorite,
   onReviewSession,
@@ -264,21 +280,42 @@ export function PlayerView({
   );
   const clipInFlight = Object.values(dialog.progress).some((entry) => entry.status === 'importing');
 
+  // The clip jobs this player sent, by operation id, with the title each was created under. The
+  // backend answers on the shared importProgress channel (SDR conversions ride it too), so only a
+  // frame for an id this player sent is a clip result worth reporting to the shell.
+  const clipJobs = useRef(new Map<string, string>());
+
   // The dialog wires itself into the IPC surface. The owner of the connection does the sending:
   // `addImportHandler` fires for every CreateClip payload the dialog builds, and `create()` is
   // asynchronous — the backend result arrives later as an `importProgress` message, which is fed
   // back through `applyImportProgress`.
   useEffect(() => {
     return dialog.addImportHandler((content) => {
+      const payload = content as { id?: string; title?: string };
+      if (typeof payload?.id === 'string' && payload.id !== '') {
+        clipJobs.current.set(payload.id, payload.title ?? 'Clip');
+      }
       client.send('CreateClip', content as Parameters<IpcClient['send']>[1] & { id: string });
     });
   }, [dialog, client]);
 
   useEffect(() => {
     return client.on('importProgress', (content) => {
-      dialog.applyImportProgress(content as Parameters<typeof dialog.applyImportProgress>[0]);
+      const message = content as { id?: string; status?: string; error?: string; content?: ContentItem };
+      dialog.applyImportProgress(message as Parameters<typeof dialog.applyImportProgress>[0]);
+      const id = message.id;
+      if (typeof id !== 'string' || !clipJobs.current.has(id) || (message.status !== 'done' && message.status !== 'error')) {
+        return;
+      }
+      const title = clipJobs.current.get(id) ?? 'Clip';
+      clipJobs.current.delete(id);
+      if (message.status === 'done') {
+        onClipCreated?.({ title, item: message.content });
+      } else {
+        onClipCreated?.({ title, error: message.error ?? 'Clip creation failed' });
+      }
     });
-  }, [dialog, client]);
+  }, [dialog, client, onClipCreated]);
 
   // The item's own layout, when the library knows it — which is the normal case for anything opened
   // from the library, and the only case for a recording made before this session started. Keyed by
@@ -886,23 +923,6 @@ export function PlayerView({
         }
         </div>
       </div>
-
-      {Object.keys(dialog.progress).length > 0 && (
-        <ul className="player-clip-progress" aria-live="polite">
-          {Object.values(dialog.progress).map((entry) => (
-            <li key={entry.clipId} className={`player-clip-progress-${entry.status}`}>
-              <span>{entry.label}</span>
-              <span>
-                {entry.status === 'importing'
-                  ? 'Creating…'
-                  : entry.status === 'done'
-                    ? 'Created'
-                    : entry.error}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
 
       <ClipDialog client={client} dialog={dialog} currentTime={currentTime} />
       {labelingSample && currentGameId && (

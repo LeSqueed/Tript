@@ -162,7 +162,9 @@ export function RecorderBar({
     ? automaticClips.paused
       ? `Highlights paused (${automaticClips.completed}/${automaticClips.total})`
       : `Creating highlights (${automaticClips.completed}/${automaticClips.total})`
-    : 'Creating clips…';
+    : clipJobs.size > 1
+      ? `Creating ${clipJobs.size} clips…`
+      : 'Creating clips…';
   const activeModelGameId = recordingState?.activeModelGameId ?? null;
   const modelStatus = modelStatuses.find((status) =>
     status.gameId === (activeModelGameId ?? recordingState?.game?.id));

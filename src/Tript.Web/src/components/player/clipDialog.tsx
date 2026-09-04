@@ -7,7 +7,8 @@
 // per-track audio overrides (driven by the session's audio-track layout when the recording had
 // tracks), and the Create action that sends `CreateClip` — one call for combine (all regions as
 // the `segments` of a single clip), one per region for separate. The backend result arrives as an
-// `importProgress` message and is rendered in the dialog (in-progress / done / error).
+// `importProgress` message; the controller tracks it to gate the Create button, and the shell
+// surfaces the outcome (the top bar shows the count, a toast reports each finished clip).
 //
 // Regions are *marked* in the player (in/out points at the playhead — the dialog is a modal panel,
 // so the playhead cannot be moved while it is open) and *adjusted* here as well as by dragging them
@@ -27,7 +28,7 @@ import type { IpcClient } from '../../ipc/websocketClient';
 import { formatTime } from './timelineModel';
 import type { TimelineRegion } from './clipSeam';
 import { DEFAULT_REGION_SECONDS, resizeRegionEnd, resizeRegionStart } from './clipModel';
-import type { ClipDialogController, ClipProgressState } from './useClipDialog';
+import type { ClipDialogController } from './useClipDialog';
 import { Button, Slider } from '../../components/ui/controls';
 
 export interface ClipDialogProps {
@@ -46,16 +47,11 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
   if (!dialog.open || !dialog.session) {
     return null;
   }
-  const entries = Object.entries(dialog.progress).filter(
-    (entry): entry is [string, NonNullable<(typeof dialog.progress)[string]>] => entry[1] !== undefined,
-  );
-  const inFlight = entries.filter(
-    (entry): entry is [string, Extract<ClipProgressState, { status: 'importing' }>] =>
-      entry[1].status === 'importing',
-  );
-  const finished = entries.filter(
-    (entry): entry is [string, Exclude<ClipProgressState, { status: 'importing' }>] =>
-      entry[1].status !== 'importing',
+  // The Create button stays disabled while a job is in flight; the outcome itself is not rendered
+  // here (the shell toasts it) — the list below the player and the one here used to both say what
+  // the top bar already says.
+  const inFlight = Object.values(dialog.progress).some(
+    (entry) => entry !== undefined && entry.status === 'importing',
   );
 
   return (
@@ -177,36 +173,11 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
           <Button variant="primary"
             
             onClick={dialog.create}
-            disabled={dialog.regions.length === 0 || inFlight.length> 0}
+            disabled={dialog.regions.length === 0 || inFlight}
           >
             {dialog.mode === 'combine' ? 'Create clip' : `Create ${dialog.regions.length} clip${dialog.regions.length === 1 ? '' : 's'}`}
           </Button>
         </div>
-
-        {(inFlight.length > 0 || finished.length > 0) && (
-          <ul className="clip-progress-list">
-            {inFlight.map(([id, state]) => (
-              <li key={id} className="clip-progress importing" data-testid="clip-progress-importing">
-                <span className="clip-progress-label">{state.label}</span>
-                <span className="clip-progress-state">Importing…</span>
-              </li>
-            ))}
-            {finished.map(([id, state]) => (
-              <li
-                key={id}
-                className={`clip-progress ${state.status}`}
-                data-testid={`clip-progress-${state.status}`}
-              >
-                <span className="clip-progress-label">{state.label}</span>
-                {state.status === 'done' ? (
-                  <span className="clip-progress-state">Done</span>
-                ) : (
-                  <span className="clip-progress-state">{state.error}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionClipsView } from '../components/SessionClipsView';
-import { PlayerView } from '../components/PlayerView';
+import { PlayerView, type ClipCreatedResult } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
 import { cascadableLinkedHighlights, itemLabel } from '../components/library/libraryModel';
@@ -91,6 +91,10 @@ function AppShell({
   const reachability = useHostReachability(connectionState);
   const startupRoute = readStartupRoute();
   const [route, setRoute] = useState<Route>(startupRoute);
+  // The latest route, readable from a toast action that was pushed on another route: the clip's
+  // View button may be clicked long after the player it was made in has closed.
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
@@ -247,6 +251,40 @@ function AppShell({
     setPlayerItem(item);
     setPlayerTitle(itemLabel(item));
   }, []);
+
+  // The player reports each CreateClip it sent as the backend finishes it. Success toasts the new
+  // clip with a View that opens it in the player in place (the return route and the rest of the
+  // flow are left exactly as they were); a clip made while the player is now closed opens the
+  // player on it. Failure toasts the backend's message.
+  const notifyClipCreated = useCallback((result: ClipCreatedResult) => {
+    const clip = result.item;
+    if (clip) {
+      push({
+        key: `clip-created-${clip.filePath}`,
+        kind: 'success',
+        message: `Created "${result.title}".`,
+        actions: [{
+          label: 'View',
+          onClick: () => {
+            dismiss(`clip-created-${clip.filePath}`);
+            const fresh = items.find((candidate) => candidate.filePath === clip.filePath);
+            const target = fresh ?? clip;
+            if (routeRef.current === 'player') {
+              adoptPlayerItem(target);
+            } else {
+              openInPlayer(target, items);
+            }
+          },
+        }],
+      });
+      return;
+    }
+    push({
+      kind: 'error',
+      message: `Creating "${result.title}" failed.`,
+      note: result.error,
+    });
+  }, [push, dismiss, items, adoptPlayerItem, openInPlayer]);
 
   const advanceAfterPlayerDelete = useCallback((item: ContentItem) => {
     const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
@@ -601,6 +639,7 @@ function AppShell({
                 (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
               ).length}
                onItemChange={adoptPlayerItem}
+               onClipCreated={notifyClipCreated}
              />
            )}
           {route === 'session' && sessionReview && (

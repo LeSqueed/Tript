@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
-import type { TrainingEventDefinition } from '../ipc/protocol';
+import type { TrainingEventDefinition, TrainingRegionGroup } from '../ipc/protocol';
 
 const source: TrainingEventDefinition = {
   id: 1,
@@ -17,33 +17,23 @@ const source: TrainingEventDefinition = {
 describe('TrainingRegionEditor', () => {
   afterEach(cleanup);
 
-  it('copies normalized coordinates from another event without changing target fields', () => {
-    const target: TrainingEventDefinition = {
-      id: 2,
-      classId: 2,
-      name: 'Round end',
-      type: 'Exclusion',
-      bookmarkType: null,
+  it('edits a shared group and explains that members share its region', () => {
+    const target: TrainingRegionGroup = {
+      id: 2, name: 'HUD', screenRegionX: 0.1, screenRegionY: 0.2, screenRegionW: 0.3, screenRegionH: 0.4,
     };
     const onSave = vi.fn();
-    render(<TrainingRegionEditor event={target} events={[source, target]} onCancel={vi.fn()} onSave={onSave} />);
+    render(<TrainingRegionEditor target={target} targetType="group" onCancel={vi.fn()} onSave={onSave} />);
 
-    fireEvent.change(screen.getByLabelText('Copy region from event'), { target: { value: '1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Copy region' }));
+    expect(screen.getByText(/All group members share this region/)).toBeTruthy();
+    expect(screen.queryByLabelText('Copy region from event')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save region' }));
 
-    expect(onSave).toHaveBeenCalledWith({
-      ...target,
-      screenRegionX: 0.1,
-      screenRegionY: 0.2,
-      screenRegionW: 0.3,
-      screenRegionH: 0.4,
-    });
+    expect(onSave).toHaveBeenCalledWith(target);
   });
 
   it('clears a saved region as null coordinates', () => {
     const onSave = vi.fn();
-    render(<TrainingRegionEditor event={source} events={[source]} onCancel={vi.fn()} onSave={onSave} />);
+    render(<TrainingRegionEditor target={source} targetType="event" onCancel={vi.fn()} onSave={onSave} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear region' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save region' }));

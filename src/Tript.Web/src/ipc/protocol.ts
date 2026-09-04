@@ -304,10 +304,25 @@ export interface TrainingEventDefinition {
   bookmarkType?: string | null;
   includeInAutoClips?: boolean;
   subtractsEventId?: number | null;
+  regionGroupId?: number | null;
   screenRegionX?: number | null;
   screenRegionY?: number | null;
   screenRegionW?: number | null;
   screenRegionH?: number | null;
+  fixedPosition?: boolean;
+  fixedLabelCenterX?: number | null;
+  fixedLabelCenterY?: number | null;
+  fixedLabelWidth?: number | null;
+  fixedLabelHeight?: number | null;
+}
+
+export interface TrainingRegionGroup {
+  id: number;
+  name: string;
+  screenRegionX: number | null;
+  screenRegionY: number | null;
+  screenRegionW: number | null;
+  screenRegionH: number | null;
 }
 
 export interface TrainingLabel {
@@ -348,6 +363,8 @@ export interface TrainingMessage {
   revision?: string;
   events: TrainingEventDefinition[];
   samples: TrainingSample[];
+  regionGroups?: TrainingRegionGroup[];
+  invalidSamples?: Array<{ id: string; reason: string }>;
   dataset?: {
     trainingImages: number;
     validationImages: number;
@@ -356,6 +373,8 @@ export interface TrainingMessage {
   };
   model?: TrainingModelInfo | null;
   trainingActive?: boolean;
+  /** Last training settings used for this game (local to the machine, absent until the first run). */
+  preferences?: { epochs: number; device: string; augmentCopies: number } | null;
 }
 
 export type TrainingProgressStatus =
@@ -364,8 +383,10 @@ export type TrainingProgressStatus =
   | 'imported'
   | 'sampleSaved'
   | 'sampleUpdated'
-   | 'sampleDeleted'
+  | 'sampleDeleted'
   | 'eventsUpdated'
+  | 'eventDeleteProgress'
+  | 'regionGroupsUpdated'
   | 'completed'
   | 'cancelled'
   | 'error';
@@ -374,6 +395,7 @@ export interface TrainingProgressMessage {
   gameId: string;
   status: TrainingProgressStatus;
   message: string;
+  percent?: number | null;
 }
 
 export interface TrainingSampleMessage {
@@ -614,6 +636,11 @@ export interface UpdateTrainingEventsParameters {
   events: TrainingEventDefinition[];
 }
 
+export interface UpdateTrainingRegionGroupsParameters {
+  gameId: string;
+  regionGroups: TrainingRegionGroup[];
+}
+
 export interface TrainingSampleParameters {
   gameId: string;
   sampleId: string;
@@ -633,6 +660,8 @@ export interface StartTrainingParameters {
   epochs?: number;
   device?: string;
   baseModel?: string | null;
+  /** Extra mildly-distorted copies of every training crop; validation is never augmented. */
+  augmentCopies?: number;
 }
 
 /** The protocol version carried on NewConnection. */
@@ -671,6 +700,7 @@ export type CommandParameters =
   | CaptureTrainingSampleParameters
   | UpdateTrainingSampleParameters
   | UpdateTrainingEventsParameters
+  | UpdateTrainingRegionGroupsParameters
   | TrainingSampleParameters
   | SuggestTrainingLabelsParameters
   | StartTrainingParameters
@@ -738,6 +768,7 @@ export type CommandName =
   | 'UpdateTrainingSample'
   | 'SuggestTrainingLabels'
   | 'UpdateTrainingEvents'
+  | 'UpdateTrainingRegionGroups'
   | 'DeleteTrainingSample'
   | 'StartTraining'
   | 'CancelTraining'

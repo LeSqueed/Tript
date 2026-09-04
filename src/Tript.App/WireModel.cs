@@ -414,6 +414,13 @@ internal sealed class UpdateTrainingEventsParameters
     public List<EventDefinition> Events { get; set; } = [];
 }
 
+internal sealed class UpdateTrainingRegionGroupsParameters
+{
+    public string GameId { get; set; } = string.Empty;
+
+    public List<Training.TrainingRegionGroup> RegionGroups { get; set; } = [];
+}
+
 internal sealed class TrainingSampleParameters
 {
     public string GameId { get; set; } = string.Empty;
@@ -445,6 +452,9 @@ internal sealed class StartTrainingParameters
     public string Device { get; set; } = "auto";
 
     public string? BaseModel { get; set; }
+
+    // Extra mildly-distorted copies of every training crop. Validation is never augmented.
+    public int? AugmentCopies { get; set; }
 }
 
 #endif

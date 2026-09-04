@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import { Button, Field, SelectField, TextField } from './ui/controls';
+import { LoadingOverlay } from './ui/LoadingOverlay';
 import { TrainingSampleEditor } from './TrainingSampleEditor';
 import { TrainingEventEditor } from './TrainingEventEditor';
+import { TrainingEventTree } from './TrainingEventTree';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
 import type {
   GameInfo,
   TrainingEventDefinition,
   TrainingMessage,
   TrainingProgressMessage,
+  TrainingRegionGroup,
   TrainingSample,
   TrainingSampleMessage,
   TrainingSamplePreviewMessage,
@@ -18,7 +21,7 @@ interface TrainingViewProps {
   client: IpcClient;
 }
 
-const EMPTY_TRAINING: TrainingMessage = { gameId: null, events: [], samples: [] };
+const EMPTY_TRAINING: TrainingMessage = { gameId: null, events: [], samples: [], regionGroups: [], invalidSamples: [] };
 const SAMPLE_PAGE_SIZE = 8;
 
 export function TrainingView({ client }: TrainingViewProps) {
@@ -29,16 +32,25 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [folderPickerStatus, setFolderPickerStatus] = useState<'idle' | 'selected' | 'cancelled'>('idle');
   const [epochs, setEpochs] = useState(100);
   const [device, setDevice] = useState('auto');
+  const [augmentCopies, setAugmentCopies] = useState(0);
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
   const [selectedSample, setSelectedSample] = useState<TrainingSampleMessage | null>(null);
   const [eventEditor, setEventEditor] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
-  const [regionEditor, setRegionEditor] = useState<TrainingEventDefinition | null>(null);
+  const [regionEditor, setRegionEditor] = useState<
+    { target: TrainingEventDefinition; targetType: 'event'; sampleId?: string }
+    | { target: TrainingRegionGroup; targetType: 'group'; sampleId?: string }
+    | null
+  >(null);
   const [eventError, setEventError] = useState<string | null>(null);
   const [samplePreviews, setSamplePreviews] = useState<Record<string, string>>({});
   const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({});
   const [sampleFilter, setSampleFilter] = useState('');
+  const [sampleValidity, setSampleValidity] = useState<'all' | 'invalid' | 'valid'>('all');
+  const [newGroupName, setNewGroupName] = useState('');
   const [samplePage, setSamplePage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
+  const [deletingEventName, setDeletingEventName] = useState<string | null>(null);
+  const [deletePercent, setDeletePercent] = useState<number | null>(null);
   const pendingEventsRef = useRef<{ gameId: string; events: TrainingEventDefinition[] } | null>(null);
   const importingRef = useRef(false);
   const loadedTrainingGameIdRef = useRef<string | null>(null);
@@ -64,16 +76,33 @@ export function TrainingView({ client }: TrainingViewProps) {
       if (message) {
         if (message.gameId && message.gameId !== activeGameIdRef.current) return;
         if (pendingEventsRef.current?.gameId === message.gameId) return;
+        // Only the first push for a game restores the form; later re-pushes (samples, progress)
+        // must not clobber what the user is currently editing.
+        const freshLoad = loadedTrainingGameIdRef.current !== message.gameId;
         loadedTrainingGameIdRef.current = message.gameId;
-        setTraining(message);
-        if (message.gameId) setGameId(message.gameId);
+        setTraining({ ...message, regionGroups: message.regionGroups ?? [], invalidSamples: message.invalidSamples ?? [] });
+        if (message.gameId) {
+          setGameId(message.gameId);
+          if (freshLoad) {
+            setEpochs(message.preferences?.epochs ?? 100);
+            setDevice(message.preferences?.device ?? 'auto');
+            setAugmentCopies(message.preferences?.augmentCopies ?? 0);
+          }
+        }
       }
     });
     const removeProgress = client.on('trainingProgress', (content) => {
       const message = content as TrainingProgressMessage;
       if (message.gameId !== activeGameIdRef.current) return;
       setProgress(message);
-      if (message.status === 'eventsUpdated') pendingEventsRef.current = null;
+      if (message.status === 'eventsUpdated') {
+        pendingEventsRef.current = null;
+        setDeletingEventName(null);
+        setDeletePercent(null);
+      }
+      if (message.status === 'eventDeleteProgress') {
+        setDeletePercent(message.percent ?? null);
+      }
       if (message.status === 'imported') {
         importingRef.current = false;
         setIsImporting(false);
@@ -95,6 +124,8 @@ export function TrainingView({ client }: TrainingViewProps) {
       }
       if (pendingEventsRef.current) {
         pendingEventsRef.current = null;
+        setDeletingEventName(null);
+        setDeletePercent(null);
         if (gameId) client.send('ListTraining', { gameId });
       }
     });
@@ -173,11 +204,17 @@ export function TrainingView({ client }: TrainingViewProps) {
     });
   };
 
-  const regionPreviewSample = training.samples.find((sample) => samplePreviews[sample.id]);
-  const hasUnlabeledSamples = training.samples.some((sample) => sample.labels.length === 0);
+  const regionGroups = training.regionGroups ?? [];
+  const invalidSamples = training.invalidSamples ?? [];
+  const invalidById = new Map(invalidSamples.map((sample) => [sample.id, sample.reason]));
+  const validLabeledSampleCount = training.samples.filter((sample) =>
+    sample.labels.length > 0 && !invalidById.has(sample.id)).length;
   const trainingIsActive = training.trainingActive || progress?.status === 'started' || progress?.status === 'progress';
   const normalizedSampleFilter = sampleFilter.trim().toLowerCase();
   const filteredSamples = training.samples.filter((sample) => {
+    const isInvalid = invalidById.has(sample.id);
+    if (sampleValidity === 'invalid' && !isInvalid) return false;
+    if (sampleValidity === 'valid' && isInvalid) return false;
     if (!normalizedSampleFilter) return true;
     const labels = sample.labels.map((label) => training.events.find((event) => event.classId === label.classId)?.name ?? String(label.classId));
     return [sample.id, sample.timestampSeconds.toFixed(2), ...labels]
@@ -189,6 +226,9 @@ export function TrainingView({ client }: TrainingViewProps) {
   const eventCoverage = new Map(
     training.dataset?.eventCoverage.map((coverage) => [coverage.classId, coverage]) ?? [],
   );
+  const regionPreviewSample = regionEditor?.sampleId
+    ? training.samples.find((sample) => sample.id === regionEditor.sampleId)
+    : undefined;
 
   const requestPreview = (sample: TrainingSample) => {
     if (!gameId) return;
@@ -221,7 +261,7 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const startTraining = () => {
     if (gameId) {
-      client.send('StartTraining', { gameId, epochs, device });
+      client.send('StartTraining', { gameId, epochs, device, augmentCopies });
     }
   };
 
@@ -258,7 +298,10 @@ export function TrainingView({ client }: TrainingViewProps) {
       setEventError('A training workspace must keep at least one event.');
       return;
     }
-    saveEvents(currentEvents.filter((event) => event.id !== eventId));
+    const event = currentEvents.find((candidate) => candidate.id === eventId);
+    setDeletingEventName(event?.name ?? 'event');
+    setDeletePercent(0);
+    saveEvents(currentEvents.filter((candidate) => candidate.id !== eventId));
   };
 
   const saveEvents = (events: TrainingEventDefinition[]) => {
@@ -272,10 +315,96 @@ export function TrainingView({ client }: TrainingViewProps) {
     saveEvents(events);
   };
 
-  const saveRegion = (updatedEvent: TrainingEventDefinition) => {
-    const currentEvents = pendingEventsRef.current?.events ?? training.events;
-    saveEventsFromEditor(currentEvents.map((event) => event.id === updatedEvent.id ? updatedEvent : event));
+  const findRegionPreviewSample = (classIds: Set<number>) => {
+    const matches = training.samples.filter((sample) =>
+      sample.labels.some((label) => classIds.has(label.classId)));
+    return matches.find((sample) => samplePreviews[sample.id]) ?? matches[0];
+  };
+
+  const openRegionEditor = (
+    target: TrainingEventDefinition | TrainingRegionGroup,
+    targetType: 'event' | 'group',
+    classIds: Set<number>,
+  ) => {
+    const sample = findRegionPreviewSample(classIds);
+    if (sample && !samplePreviews[sample.id] && !previewRequestsRef.current.has(sample.id)) {
+      requestPreview(sample);
+    }
+    setRegionEditor(targetType === 'group'
+      ? { target: target as TrainingRegionGroup, targetType, sampleId: sample?.id }
+      : { target: target as TrainingEventDefinition, targetType, sampleId: sample?.id });
+  };
+
+  const saveRegionGroups = (regionGroups: TrainingRegionGroup[]) => {
+    if (!gameId) return;
+    setTraining((current) => ({ ...current, regionGroups }));
+    client.send('UpdateTrainingRegionGroups', { gameId, regionGroups });
+  };
+
+  const openRegion = (event: TrainingEventDefinition) => {
+    const group = event.regionGroupId == null
+      ? undefined
+      : regionGroups.find((candidate) => candidate.id === event.regionGroupId);
+    if (group) {
+      openRegionEditor(group, 'group', new Set(training.events
+        .filter((candidate) => candidate.regionGroupId === group.id)
+        .map((candidate) => candidate.classId)));
+    } else {
+      openRegionEditor(event, 'event', new Set([event.classId]));
+    }
+  };
+
+  const openRegionGroup = (group: TrainingRegionGroup) => {
+    openRegionEditor(group, 'group', new Set(training.events
+      .filter((event) => event.regionGroupId === group.id)
+      .map((event) => event.classId)));
+  };
+
+  const saveRegion = (updated: TrainingEventDefinition | TrainingRegionGroup) => {
+    if (regionEditor?.targetType === 'group') {
+      saveRegionGroups(regionGroups.map((group) => group.id === updated.id ? updated as TrainingRegionGroup : group));
+    } else {
+      const currentEvents = pendingEventsRef.current?.events ?? training.events;
+      saveEventsFromEditor(currentEvents.map((event) => event.id === updated.id ? updated as TrainingEventDefinition : event));
+    }
     setRegionEditor(null);
+  };
+
+  const updateEventGroup = (eventId: number, value: string) => {
+    const currentEvents = pendingEventsRef.current?.events ?? training.events;
+    saveEvents(currentEvents.map((event) => event.id === eventId
+      ? { ...event, regionGroupId: value ? Number(value) : null }
+      : event));
+  };
+
+  const createRegionGroup = () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    saveRegionGroups([...regionGroups, {
+      id: Math.max(0, ...regionGroups.map((group) => group.id)) + 1,
+      name,
+      screenRegionX: null,
+      screenRegionY: null,
+      screenRegionW: null,
+      screenRegionH: null,
+    }]);
+    setNewGroupName('');
+  };
+
+  const renameRegionGroup = (group: TrainingRegionGroup) => {
+    const name = window.prompt('Region group name', group.name)?.trim();
+    if (name && name !== group.name) {
+      saveRegionGroups(regionGroups.map((candidate) => candidate.id === group.id ? { ...candidate, name } : candidate));
+    }
+  };
+
+  const deleteRegionGroup = (group: TrainingRegionGroup) => {
+    if (!window.confirm(`Delete the ${group.name} region group? Its events will be detached.`)) return;
+    saveRegionGroups(regionGroups.filter((candidate) => candidate.id !== group.id));
+    const currentEvents = pendingEventsRef.current?.events ?? training.events;
+    saveEvents(currentEvents.map((event) => event.regionGroupId === group.id
+      ? { ...event, regionGroupId: null }
+      : event));
   };
 
   const loadSample = (sample: TrainingSample) => {
@@ -353,26 +482,41 @@ export function TrainingView({ client }: TrainingViewProps) {
               {training.dataset?.warnings.map((warning) => (
                 <p className="training-event-error" role="alert" key={warning}>{warning}</p>
               ))}
-              <ul className="training-event-list">
-                {training.events.map((event) => {
-                  const coverage = eventCoverage.get(event.classId);
-                  return <li key={event.classId}>
-                    <span className="training-class-id">{event.classId}</span>
-                    <span>{event.name}</span>
-                    <span className="training-event-actions">
-                      <small>
-                        {event.type}
-                        {coverage && ` · ${coverage.trainingSamples} train / ${coverage.validationSamples} validation frames`}
-                      </small>
-                      <Button variant="ghost" size="small" onClick={() => setEventEditor({ event, isNew: false })}>Edit</Button>
-                      <Button variant="ghost" size="small" onClick={() => setRegionEditor(event)}>Region</Button>
-                      <Button variant="ghost" size="small" onClick={() => {
-                        if (window.confirm(`Delete the ${event.name} event?`)) deleteEvent(event.id);
-                      }}>Delete</Button>
-                    </span>
-                  </li>;
-                })}
-              </ul>
+              <div className="training-region-groups">
+                <div className="training-palette-heading">
+                  <div>
+                    <p className="training-eyebrow">Shared crops</p>
+                    <h3>Event folders</h3>
+                  </div>
+                </div>
+                <div className="training-region-group-create">
+                  <TextField
+                    value={newGroupName}
+                    onChange={setNewGroupName}
+                    placeholder="New group name"
+                    aria-label="New region group name"
+                  />
+                  <Button variant="ghost" size="small" onClick={createRegionGroup} disabled={!newGroupName.trim()}>Create group</Button>
+                </div>
+                <p className="muted small training-folder-help">Drag an event into a folder to share its region. Drop it into Ungrouped to use its own region.</p>
+                <TrainingEventTree
+                  events={training.events}
+                  groups={regionGroups}
+                  eventMeta={(event) => {
+                    const coverage = eventCoverage.get(event.classId);
+                    return <>{event.type}{coverage && ` · ${coverage.trainingSamples} train / ${coverage.validationSamples} validation frames`}</>;
+                  }}
+                  onEdit={(event) => setEventEditor({ event, isNew: false })}
+                  onRegion={openRegion}
+                  onDelete={(event) => {
+                    if (window.confirm(`Delete the ${event.name} event?`)) deleteEvent(event.id);
+                  }}
+                  onMove={(eventId, groupId) => updateEventGroup(eventId, groupId == null ? '' : String(groupId))}
+                  onRenameGroup={renameRegionGroup}
+                  onRegionGroup={openRegionGroup}
+                  onDeleteGroup={deleteRegionGroup}
+                />
+              </div>
             </section>
 
             <section className="panel training-panel training-import-panel">
@@ -429,6 +573,18 @@ export function TrainingView({ client }: TrainingViewProps) {
                       aria-label="Filter samples"
                     />
                   </Field>
+                  <Field label="Validity">
+                    <SelectField
+                      value={sampleValidity}
+                      onChange={(value) => { setSampleValidity(value as typeof sampleValidity); setSamplePage(1); }}
+                      aria-label="Sample validity"
+                      options={[
+                        { value: 'all', label: 'All samples' },
+                        { value: 'invalid', label: `Invalid (${invalidSamples.length})` },
+                        { value: 'valid', label: `Valid (${training.samples.length - invalidSamples.length})` },
+                      ]}
+                    />
+                  </Field>
                   <span className="muted small">Showing {pageSamples.length} samples</span>
                 </div>
                 {pageSamples.length === 0 ? (
@@ -440,7 +596,7 @@ export function TrainingView({ client }: TrainingViewProps) {
                 ) : (
                   <div className="training-sample-list">
                 {pageSamples.map((sample) => (
-                  <Button variant="ghost" className="training-sample-card" key={sample.id} onClick={() => loadSample(sample)}>
+                  <Button variant="ghost" className={`training-sample-card${invalidById.has(sample.id) ? ' invalid' : ''}`} key={sample.id} onClick={() => loadSample(sample)}>
                     {samplePreviews[sample.id] && !previewErrors[sample.id] ? (
                       <img
                         className="training-sample-thumb"
@@ -457,6 +613,7 @@ export function TrainingView({ client }: TrainingViewProps) {
                     <span className="training-sample-card-body">
                       <strong>{sample.id}</strong>
                       <small>{sample.labels.length} label{sample.labels.length === 1 ? '' : 's'} at {sample.timestampSeconds.toFixed(2)}s</small>
+                      {invalidById.has(sample.id) && <span className="training-sample-invalid">Invalid: {invalidById.get(sample.id)}</span>}
                       <span className="training-label-chips">
                         {sample.labels.length === 0 ? (
                           <span className="training-label-chip muted">Unlabeled</span>
@@ -485,6 +642,11 @@ export function TrainingView({ client }: TrainingViewProps) {
               <p className="training-eyebrow">Train</p>
               <h2>Build and activate</h2>
               <p className="muted">A model can only be trained from labeled frames. It is validated against the event contract before reload.</p>
+              {invalidSamples.length > 0 && (
+                <p className="training-invalid-warning" role="alert">
+                  {invalidSamples.length} invalid sample{invalidSamples.length === 1 ? '' : 's'} will be skipped. {validLabeledSampleCount} valid labeled sample{validLabeledSampleCount === 1 ? '' : 's'} available.
+                </p>
+              )}
              </div>
              {trainingIsActive && (
                <div className="training-active-status" role="status">
@@ -519,7 +681,21 @@ export function TrainingView({ client }: TrainingViewProps) {
                 />
               </Field>
             </div>
-             <Button onClick={startTraining} disabled={trainingIsActive || hasUnlabeledSamples || (training.samples.length === 0 && !training.model)}>
+            <div className="training-field compact">
+              <Field label="Augmentation" hint="Adds mildly distorted copies of each training crop to grow small sample sets. Validation is never augmented.">
+                <SelectField
+                  value={String(augmentCopies)}
+                  onChange={(value) => setAugmentCopies(Number(value))}
+                  options={[
+                    { value: '0', label: 'Off' },
+                    { value: '2', label: '2 copies per crop' },
+                    { value: '4', label: '4 copies per crop' },
+                    { value: '8', label: '8 copies per crop' },
+                  ]}
+                />
+              </Field>
+            </div>
+             <Button onClick={startTraining} disabled={trainingIsActive || validLabeledSampleCount === 0}>
                Start training
              </Button>
              <Button variant="ghost" onClick={() => client.send('CancelTraining')} disabled={!trainingIsActive}>
@@ -539,8 +715,10 @@ export function TrainingView({ client }: TrainingViewProps) {
               gameId={gameId}
               sample={selectedSample}
               events={training.events}
+              regionGroups={regionGroups}
               hasModel={training.model != null}
               onEventsChange={saveEventsFromEditor}
+              onRegionGroupsChange={saveRegionGroups}
               onNavigate={navigateSample}
               canNavigatePrevious={canNavigatePrevious}
               canNavigateNext={canNavigateNext}
@@ -561,13 +739,20 @@ export function TrainingView({ client }: TrainingViewProps) {
       )}
       {regionEditor && (
         <TrainingRegionEditor
-          event={regionEditor}
-          events={training.events}
+          target={regionEditor.target}
+          targetType={regionEditor.targetType}
           backgroundImage={regionPreviewSample ? samplePreviews[regionPreviewSample.id] : undefined}
           imageWidth={regionPreviewSample?.imageWidth}
           imageHeight={regionPreviewSample?.imageHeight}
           onCancel={() => setRegionEditor(null)}
           onSave={saveRegion}
+        />
+      )}
+      {deletingEventName && (
+        <LoadingOverlay
+          title={`Deleting ${deletingEventName} event`}
+          description="Removing its labels from every training sample."
+          progress={deletePercent}
         />
       )}
     </section>

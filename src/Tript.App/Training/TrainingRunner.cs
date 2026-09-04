@@ -22,8 +22,13 @@ internal sealed class TrainingEventCoverage
 
 internal sealed class TrainingDatasetExportSummary
 {
+    public int Size { get; init; }
+    public int Augment { get; init; }
     public int SampleCount { get; init; }
     public int CropCount { get; init; }
+    public int AugmentedCrops { get; init; }
+    public int InvalidLabels { get; init; }
+    public int SkippedSamples { get; init; }
     public int TrainingSamples { get; init; }
     public int ValidationSamples { get; init; }
     public int TrainingCrops { get; init; }
@@ -37,6 +42,11 @@ internal sealed class TrainingDatasetExportSummary
             $"{item.Name}: {item.TrainingSamples} train/{item.ValidationSamples} validation"));
         var message = $"Dataset exported: {TrainingSamples} train and {ValidationSamples} validation " +
             $"frames ({TrainingCrops}/{ValidationCrops} crops). Event coverage: {coverage}.";
+        if (Augment > 0)
+            message += $" Training data augmented with {Augment} copied crops per crop " +
+                $"({AugmentedCrops} extra); validation is untouched.";
+        if (InvalidLabels > 0 || SkippedSamples > 0)
+            message += $" Skipped {InvalidLabels} invalid labels and {SkippedSamples} samples.";
         if (Warnings.Count > 0)
             message += " Warnings: " + string.Join(" ", Warnings);
         return message;
@@ -49,13 +59,15 @@ internal sealed class TrainingRunner
     private Process? _process;
 
     internal async Task<TrainingRunResult> RunAsync(TrainingWorkspace workspace, int imageSize,
-        int epochs, string device, string? baseModel, Action<string> progress,
+        int epochs, int augmentCopies, string device, string? baseModel, Action<string> progress,
         CancellationToken cancellationToken)
     {
         if (imageSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(imageSize));
         if (epochs <= 0)
             throw new ArgumentOutOfRangeException(nameof(epochs));
+        if (augmentCopies < 0)
+            throw new ArgumentOutOfRangeException(nameof(augmentCopies));
 
         var scriptsPath = Path.Combine(AppContext.BaseDirectory, "Training", "Scripts");
         var exportScript = Path.Combine(scriptsPath, "export_dataset.py");
@@ -74,7 +86,8 @@ internal sealed class TrainingRunner
         }
 
         await RunProcessAsync(python, exportScript, workspace.RootPath,
-            ["--size", imageSize.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+            ["--size", imageSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+             "--augment", augmentCopies.ToString(System.Globalization.CultureInfo.InvariantCulture)],
             progress, cancellationToken).ConfigureAwait(false);
         var exportSummary = LoadExportSummary(workspace)
             ?? throw new InvalidDataException("Dataset export completed without export.json.");
@@ -100,16 +113,13 @@ internal sealed class TrainingRunner
             throw new InvalidDataException($"Training completed without producing '{modelPath}'.");
 
         var metadata = OnnxModelInspector.Inspect(modelPath);
-        var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
-            File.ReadAllText(workspace.EventsPath), new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            }) ?? [];
+        var definitions = workspace.LoadDefinitions();
         var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
         if (mismatch is not null)
             throw new InvalidDataException($"The trained model and events.json do not match: {mismatch}");
 
-        ValidateKnownSamples(workspace, modelPath, definitions);
+        var regionGroups = workspace.LoadRegionGroups();
+        ValidateKnownSamples(workspace, modelPath, definitions, regionGroups);
 
         var selectedDevice = device == "auto" ? "auto (see training progress)" : device;
         progress($"VALIDATED input={metadata.InputWidth}x{metadata.InputHeight} classes={metadata.ClassCount}");
@@ -129,9 +139,12 @@ internal sealed class TrainingRunner
     }
 
     private static void ValidateKnownSamples(TrainingWorkspace workspace, string modelPath,
-        IReadOnlyList<EventDefinition> definitions)
+        IReadOnlyList<EventDefinition> definitions,
+        IReadOnlyList<TrainingRegionGroup> regionGroups)
     {
         var samples = new TrainingSampleStore(workspace).List();
+        var effectiveDefinitions = TrainingRegionResolver.MaterializeEffectiveRegions(definitions,
+            regionGroups);
         var required = definitions
             .Where(definition => definition.BookmarkType is not null)
             .Append(definitions.MaxBy(definition => definition.ClassId)!)
@@ -140,7 +153,9 @@ internal sealed class TrainingRunner
         foreach (var definition in required)
         {
             var candidates = samples
-                .Where(sample => sample.Labels.Any(label => label.ClassId == definition.ClassId))
+                .Where(sample => TrainingLabelValidator.FindError(sample.Labels, definitions,
+                        requireLabel: true, regionGroups: regionGroups) is null
+                    && sample.Labels.Any(label => label.ClassId == definition.ClassId))
                 .Take(3)
                 .ToList();
             if (candidates.Count == 0)
@@ -148,7 +163,8 @@ internal sealed class TrainingRunner
                     $"No labeled sample exists to validate '{definition.Name}' (class {definition.ClassId}).");
 
             var detected = candidates.Any(sample => ModelPredictionService.Predict(modelPath,
-                    File.ReadAllBytes(Path.Combine(workspace.SamplesPath, sample.ImageFile)), definitions)
+                    File.ReadAllBytes(Path.Combine(workspace.SamplesPath, sample.ImageFile)),
+                    effectiveDefinitions)
                 .Any(result => result.ClassId == definition.ClassId));
             if (!detected)
             {

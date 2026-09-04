@@ -42,6 +42,13 @@ internal static class TrainingAssetImporter
             throw new InvalidDataException("events.json contains no event definitions.");
         TrainingEventValidator.ValidateRegions(definitions);
         TrainingEventValidator.ValidateSubtractorReferences(definitions);
+        var sourceGroupsPath = Path.Combine(sourceRoot, "regionGroups.json");
+        var regionGroups = File.Exists(sourceGroupsPath)
+            ? JsonSerializer.Deserialize<List<TrainingRegionGroup>>(
+                File.ReadAllText(sourceGroupsPath), JsonOptions) ?? []
+            : [];
+        TrainingEventValidator.ValidateRegionGroups(regionGroups);
+        TrainingEventValidator.ValidateRegionGroupReferences(definitions, regionGroups);
 
         var sourceModelPath = Path.Combine(sourceRoot, "model.onnx");
         OnnxModelMetadata? modelMetadata = null;
@@ -76,6 +83,10 @@ internal static class TrainingAssetImporter
                 Directory.CreateDirectory(staging.RootPath);
 
             File.Copy(eventsPath, staging.EventsPath, overwrite: true);
+            if (regionGroups.Count > 0)
+                File.Copy(sourceGroupsPath, staging.RegionGroupsPath, overwrite: true);
+            else if (File.Exists(staging.RegionGroupsPath))
+                File.Delete(staging.RegionGroupsPath);
             if (modelMetadata is not null)
                 File.Copy(sourceModelPath, staging.ModelPath, overwrite: true);
             else if (File.Exists(staging.ModelPath))
@@ -89,7 +100,7 @@ internal static class TrainingAssetImporter
             foreach (var sample in importedSamples)
             {
                 sampleStore.Save(sample.SourcePath, sample.TimestampSeconds, sample.Width, sample.Height, sample.Labels,
-                    File.ReadAllBytes(sample.SourcePath), definitions);
+                    File.ReadAllBytes(sample.SourcePath), definitions, regionGroups: regionGroups);
             }
             if (existingWorkspace)
             {

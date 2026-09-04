@@ -128,4 +128,123 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(screen.getByText(/85%/)).toBeTruthy();
     expect(screen.getByText('2 labels on this frame')).toBeTruthy();
   });
+
+  it('marks out-of-region labels but still allows saving them', () => {
+    const client = createClient();
+    render(
+      <TrainingSampleEditor
+        client={client}
+        gameId="game-1"
+        sample={sample}
+        events={[{ ...events[0], regionGroupId: 7 }]}
+        regionGroups={[{
+          id: 7, name: 'Corner', screenRegionX: 0.6, screenRegionY: 0.6,
+          screenRegionW: 0.3, screenRegionH: 0.3,
+        }]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('alert').textContent).toContain('will be skipped when training');
+    expect(document.querySelector('.training-box.invalid')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({
+      sampleId: 'sample-1',
+      labels: [expect.objectContaining({ classId: 0 })],
+    }));
+  });
+
+  it('shows the effective region for the first existing label when opened', () => {
+    const labeledSample = {
+      ...sample,
+      sample: {
+        ...sample.sample,
+        labels: [{ classId: 4, centerX: 0.16, centerY: 0.05, width: 0.1, height: 0.03 }],
+      },
+    };
+    render(
+      <TrainingSampleEditor
+        client={createClient()}
+        gameId="game-1"
+        sample={labeledSample}
+        events={[
+          { id: 1, classId: 0, name: 'Death', type: 'Trigger' },
+          {
+            id: 2, classId: 4, name: 'Death Spectating', type: 'Exclusion',
+            screenRegionX: 0.095, screenRegionY: 0.022, screenRegionW: 0.133, screenRegionH: 0.052,
+          },
+        ]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const region = screen.getByLabelText('Effective region for Death Spectating');
+    expect(Number.parseFloat(region.style.left)).toBeCloseTo(9.5);
+    expect(Number.parseFloat(region.style.top)).toBeCloseTo(2.2);
+  });
+
+  it('adds a fixed-position label from its canonical event geometry', () => {
+    const client = createClient();
+    render(
+      <TrainingSampleEditor
+        client={client}
+        gameId="game-1"
+        sample={{ ...sample, sample: { ...sample.sample, labels: [] } }}
+        events={[{
+          id: 1, classId: 4, name: 'Death Spectating', type: 'Exclusion', fixedPosition: true,
+          fixedLabelCenterX: 0.16, fixedLabelCenterY: 0.05,
+          fixedLabelWidth: 0.11, fixedLabelHeight: 0.03,
+        }]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add fixed label for Death Spectating' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+
+    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', {
+      gameId: 'game-1',
+      sampleId: 'sample-1',
+      labels: [{ classId: 4, centerX: 0.16, centerY: 0.05, width: 0.11, height: 0.03 }],
+    });
+  });
+
+  it('updates membership and edits the selected group region', () => {
+    const onEventsChange = vi.fn();
+    const onRegionGroupsChange = vi.fn();
+    const groups = [{
+      id: 7, name: 'HUD', screenRegionX: null, screenRegionY: null,
+      screenRegionW: null, screenRegionH: null,
+    }];
+    render(
+      <TrainingSampleEditor
+        client={createClient()}
+        gameId="game-1"
+        sample={sample}
+        events={events}
+        regionGroups={groups}
+        onEventsChange={onEventsChange}
+        onRegionGroupsChange={onRegionGroupsChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const transferred = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: (type: string, value: string) => transferred.set(type, value),
+      getData: (type: string) => transferred.get(type) ?? '',
+    };
+    const eventRow = screen.getAllByText('Event')
+      .find((node) => node.closest('.training-tree-event'))!.closest('.training-tree-event')!;
+    const groupFolder = screen.getByText('HUD').closest('.training-event-folder')!;
+    fireEvent.dragStart(eventRow, { dataTransfer });
+    fireEvent.drop(groupFolder, { dataTransfer });
+    expect(onEventsChange).toHaveBeenCalledWith([expect.objectContaining({ regionGroupId: 7 })]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Region' })[0]);
+    expect(screen.getByText(/All group members share this region/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save region' }));
+    expect(onRegionGroupsChange).toHaveBeenCalledWith(groups);
+  });
 });

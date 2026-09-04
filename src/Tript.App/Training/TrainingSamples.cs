@@ -36,8 +36,12 @@ internal static class TrainingLabelSuggestionFilter
     private const float OverlapIouThreshold = 0.3f;
 
     internal static List<TrainingLabelSuggestion> Merge(
-        IReadOnlyList<TrainingLabel> existing, IReadOnlyList<DetectionResult> detections)
+        IReadOnlyList<TrainingLabel> existing, IReadOnlyList<DetectionResult> detections,
+        IReadOnlyList<EventDefinition> definitions,
+        IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
+        var regions = TrainingRegionResolver.ResolveByClassId(definitions, regionGroups ?? []);
+        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
         var accepted = existing.Select(ToBox).ToList();
         var suggestions = new List<TrainingLabelSuggestion>();
         foreach (var detection in detections.OrderByDescending(detection => detection.Confidence))
@@ -49,21 +53,62 @@ internal static class TrainingLabelSuggestionFilter
                 || detection.X + detection.Width > 1 || detection.Y + detection.Height > 1)
                 continue;
 
-            var box = ToBox(detection);
-            if (accepted.Any(existingBox => IoU(existingBox, box) >= OverlapIouThreshold))
+            if (!definitionsByClass.TryGetValue(detection.ClassId, out var definition))
                 continue;
 
-            accepted.Add(box);
-            suggestions.Add(new TrainingLabelSuggestion
+            // A fixed-position event has one authoritative label geometry. The model only
+            // indicates presence; the inserted box must be the canonical one, never the
+            // detector's. An uninitialized fixed event has no geometry to trust yet, so skip it
+            // until a fixed position is set manually (otherwise a suggestion would seed it).
+            TrainingLabel label;
+            if (definition.FixedPosition && definition.FixedLabelCenterX is not null
+                && definition.FixedLabelCenterY is not null && definition.FixedLabelWidth is not null
+                && definition.FixedLabelHeight is not null)
             {
-                Label = new TrainingLabel
+                label = new TrainingLabel
+                {
+                    ClassId = detection.ClassId,
+                    CenterX = definition.FixedLabelCenterX.Value,
+                    CenterY = definition.FixedLabelCenterY.Value,
+                    Width = definition.FixedLabelWidth.Value,
+                    Height = definition.FixedLabelHeight.Value,
+                };
+            }
+            else if (definition.FixedPosition)
+            {
+                continue;
+            }
+            else
+            {
+                label = new TrainingLabel
                 {
                     ClassId = detection.ClassId,
                     CenterX = detection.X + detection.Width / 2,
                     CenterY = detection.Y + detection.Height / 2,
                     Width = detection.Width,
                     Height = detection.Height,
-                },
+                };
+            }
+
+            // An event's screen region is the exact area that becomes a training crop. A detection
+            // that bleeds outside it would accept a label the exporter cannot fit into the crop,
+            // producing out-of-bounds coordinates Ultralytics silently drops. Only offer boxes fully
+            // inside the event's region; an event without one crops the whole frame, so any box fits.
+            regions.TryGetValue(detection.ClassId, out var region);
+            if (region is not null
+                && (detection.X < region.Value.X || detection.Y < region.Value.Y
+                    || detection.X + detection.Width > region.Value.X + region.Value.Width
+                    || detection.Y + detection.Height > region.Value.Y + region.Value.Height))
+                continue;
+
+            var box = ToBox(label);
+            if (accepted.Any(existingBox => IoU(existingBox, box) >= OverlapIouThreshold))
+                continue;
+
+            accepted.Add(box);
+            suggestions.Add(new TrainingLabelSuggestion
+            {
+                Label = label,
                 Confidence = detection.Confidence,
             });
         }
@@ -123,17 +168,25 @@ internal sealed class TrainingSampleRecord
 internal static class TrainingLabelValidator
 {
     internal static string? FindError(IReadOnlyList<TrainingLabel> labels,
-        IReadOnlyList<EventDefinition> definitions, bool requireLabel = true)
+        IReadOnlyList<EventDefinition> definitions, bool requireLabel = true,
+        IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
         if (requireLabel && labels.Count == 0)
             return "a sample must contain at least one label";
 
-        var classIds = definitions.Select(definition => definition.ClassId).ToHashSet();
+        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var groups = regionGroups ?? [];
+        var regions = TrainingRegionResolver.ResolveByClassId(definitions, groups);
         for (var index = 0; index < labels.Count; index++)
         {
             var label = labels[index];
-            if (!classIds.Contains(label.ClassId))
+            if (!definitionsByClass.TryGetValue(label.ClassId, out var definition))
                 return $"label {index} uses unknown classId {label.ClassId}";
+            if (definition.RegionGroupId is int groupId
+                && !groups.Any(group => group.Id == groupId))
+            {
+                return $"label {index} references a missing region group through '{definition.Name}'";
+            }
 
             if (!double.IsFinite(label.CenterX) || !double.IsFinite(label.CenterY)
                 || !double.IsFinite(label.Width) || !double.IsFinite(label.Height))
@@ -150,8 +203,43 @@ internal static class TrainingLabelValidator
             var bottom = label.CenterY + label.Height / 2;
             if (left < 0 || top < 0 || right > 1 || bottom > 1)
                 return $"label {index} lies outside the image bounds";
+
+            if (regions[label.ClassId] is TrainingScreenRegion region
+                && !TrainingRegionResolver.Contains(region, label))
+            {
+                return $"label {index} lies outside the '{definition.Name}' screen region";
+            }
         }
 
+        return null;
+    }
+
+    // Saves must never be blocked by crop containment: the user can deliberately place a label
+    // outside its effective region ("erroneous"), which training/export then skips as invalid.
+    // Only structural corruption (unknown class, unusable coordinates, out-of-frame) is fatal.
+    internal static string? FindBlockingError(IReadOnlyList<TrainingLabel> labels,
+        IReadOnlyList<EventDefinition> definitions)
+    {
+        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        for (var index = 0; index < labels.Count; index++)
+        {
+            var label = labels[index];
+            if (!definitionsByClass.ContainsKey(label.ClassId))
+                return $"label {index} uses unknown classId {label.ClassId}";
+            if (!double.IsFinite(label.CenterX) || !double.IsFinite(label.CenterY)
+                || !double.IsFinite(label.Width) || !double.IsFinite(label.Height))
+            {
+                return $"label {index} contains a non-finite coordinate";
+            }
+            if (label.Width <= 0 || label.Height <= 0)
+                return $"label {index} has no area";
+            var left = label.CenterX - label.Width / 2;
+            var top = label.CenterY - label.Height / 2;
+            var right = label.CenterX + label.Width / 2;
+            var bottom = label.CenterY + label.Height / 2;
+            if (left < 0 || top < 0 || right > 1 || bottom > 1)
+                return $"label {index} lies outside the image bounds";
+        }
         return null;
     }
 }
@@ -174,7 +262,8 @@ internal sealed class TrainingSampleStore
 
     internal TrainingSampleRecord Save(string sourcePath, double timestampSeconds, int imageWidth,
         int imageHeight, IReadOnlyList<TrainingLabel> labels, ReadOnlySpan<byte> png,
-        IReadOnlyList<EventDefinition> definitions, string? datasetImagePath = null)
+        IReadOnlyList<EventDefinition> definitions, string? datasetImagePath = null,
+        IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
         if (string.IsNullOrWhiteSpace(sourcePath))
             throw new ArgumentException("A sample requires its source video path.", nameof(sourcePath));
@@ -185,7 +274,8 @@ internal sealed class TrainingSampleStore
 
         // Captured frames start unlabeled and are completed in the sample editor. Dataset export
         // still requires labels before a sample can be used for training.
-        var labelError = TrainingLabelValidator.FindError(labels, definitions, requireLabel: false);
+        var labelError = TrainingLabelValidator.FindError(labels, definitions, requireLabel: false,
+            regionGroups);
         if (labelError is not null)
             throw new InvalidDataException($"Invalid training sample: {labelError}.");
         if (png.Length == 0)
@@ -238,51 +328,108 @@ internal sealed class TrainingSampleStore
     }
 
     internal TrainingSampleRecord UpdateLabels(string id, IReadOnlyList<TrainingLabel> labels,
-        IReadOnlyList<EventDefinition> definitions)
+        IReadOnlyList<EventDefinition> definitions,
+        IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
-        var path = MetadataPath(id);
-        var record = LoadById(id);
-        var labelError = TrainingLabelValidator.FindError(labels, definitions, requireLabel: false);
-        if (labelError is not null)
-            throw new InvalidDataException($"Invalid training sample: {labelError}.");
+        var records = List().ToList();
+        var record = records.FirstOrDefault(candidate => candidate.Id == id)
+            ?? throw new FileNotFoundException("Training sample not found.", MetadataPath(id));
+        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var fixedUpdates = new Dictionary<int, TrainingLabel>();
+        foreach (var group in labels.GroupBy(label => label.ClassId))
+        {
+            if (!definitionsByClass.TryGetValue(group.Key, out var definition)
+                || !definition.FixedPosition)
+                continue;
+            var fixedLabel = group.SingleOrDefault()
+                ?? throw new InvalidDataException(
+                    $"A sample cannot contain multiple fixed-position '{definition.Name}' labels.");
+            fixedUpdates[group.Key] = fixedLabel;
+            definition.FixedLabelCenterX = fixedLabel.CenterX;
+            definition.FixedLabelCenterY = fixedLabel.CenterY;
+            definition.FixedLabelWidth = fixedLabel.Width;
+            definition.FixedLabelHeight = fixedLabel.Height;
+        }
 
         record.Labels = labels.Select(Clone).ToList();
-        var datasetLabelPath = DatasetLabelPath(record);
-        var previousDatasetLabels = datasetLabelPath is not null && File.Exists(datasetLabelPath)
-            ? File.ReadAllBytes(datasetLabelPath)
-            : null;
+        foreach (var other in records.Where(candidate => candidate.Id != id))
+        {
+            foreach (var label in other.Labels)
+            {
+                if (!fixedUpdates.TryGetValue(label.ClassId, out var fixedLabel)) continue;
+                label.CenterX = fixedLabel.CenterX;
+                label.CenterY = fixedLabel.CenterY;
+                label.Width = fixedLabel.Width;
+                label.Height = fixedLabel.Height;
+            }
+        }
+
+        foreach (var candidate in records)
+        {
+            var labelError = TrainingLabelValidator.FindBlockingError(candidate.Labels, definitions);
+            if (labelError is not null)
+                throw new InvalidDataException($"Invalid training sample: {labelError}.");
+        }
+        TrainingEventValidator.ValidateFixedPositions(definitions);
+
+        var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+        var updates = new List<(string Path, byte[] Contents)>();
+        foreach (var candidate in records.Where(candidate => candidate.Id == id
+                     || candidate.Labels.Any(label => fixedUpdates.ContainsKey(label.ClassId))))
+        {
+            var path = MetadataPath(candidate.Id);
+            originals[path] = File.Exists(path) ? File.ReadAllBytes(path) : null;
+            updates.Add((path, JsonSerializer.SerializeToUtf8Bytes(candidate, JsonOptions)));
+            var datasetLabelPath = DatasetLabelPath(candidate);
+            if (datasetLabelPath is null) continue;
+            originals[datasetLabelPath] = File.Exists(datasetLabelPath)
+                ? File.ReadAllBytes(datasetLabelPath) : null;
+            updates.Add((datasetLabelPath, SerializeLabels(candidate.Labels)));
+        }
+        if (fixedUpdates.Count > 0)
+        {
+            originals[_workspace.EventsPath] = File.Exists(_workspace.EventsPath)
+                ? File.ReadAllBytes(_workspace.EventsPath) : null;
+            updates.Add((_workspace.EventsPath,
+                JsonSerializer.SerializeToUtf8Bytes(definitions, JsonOptions)));
+        }
         try
         {
-            if (datasetLabelPath is not null)
-                WriteAtomically(datasetLabelPath, SerializeLabels(record.Labels));
-            WriteAtomically(path, JsonSerializer.SerializeToUtf8Bytes(record, JsonOptions));
+            foreach (var (path, contents) in updates)
+                WriteAtomically(path, contents);
             return record;
         }
         catch
         {
-            if (datasetLabelPath is not null)
-            {
-                if (previousDatasetLabels is null && File.Exists(datasetLabelPath))
-                    File.Delete(datasetLabelPath);
-                else if (previousDatasetLabels is not null)
-                    WriteAtomically(datasetLabelPath, previousDatasetLabels);
-            }
+            RestoreMetadata(originals);
             throw;
         }
     }
 
-    internal IReadOnlyDictionary<string, byte[]?> RemapClassIds(IReadOnlyDictionary<int, int> mapping)
+    internal sealed record RemapClassIdsResult(
+        IReadOnlyDictionary<string, byte[]?> Originals,
+        int RemovedLabelCount);
+
+    // Remaps surviving event class ids and, when an event is being deleted (its class is missing
+    // from the mapping), strips those labels from every sample in the same transaction instead of
+    // rejecting the delete. dataset-backed label files stay in step. `progress(completed, total)`
+    // reports progress so the UI can show a meaningful loading indicator on large workspaces.
+    internal RemapClassIdsResult RemapClassIds(IReadOnlyDictionary<int, int> mapping,
+        Action<int, int>? progress = null)
     {
         var records = List().ToList();
-        if (records.SelectMany(record => record.Labels).Any(label => !mapping.ContainsKey(label.ClassId)))
-            throw new InvalidDataException("An event with labeled samples cannot be deleted.");
-
         var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
         var updates = new List<(string Path, byte[] Contents)>();
-        foreach (var record in records)
+        var removedLabelCount = 0;
+        for (var recordIndex = 0; recordIndex < records.Count; recordIndex++)
         {
-            var changed = false;
-            foreach (var label in record.Labels)
+            progress?.Invoke(recordIndex + 1, records.Count);
+            var record = records[recordIndex];
+            var removed = record.Labels.Count(label => !mapping.ContainsKey(label.ClassId));
+            removedLabelCount += removed;
+            var nextLabels = record.Labels.Where(label => mapping.ContainsKey(label.ClassId)).ToList();
+            var changed = removed > 0;
+            foreach (var label in nextLabels)
             {
                 var nextClassId = mapping[label.ClassId];
                 if (label.ClassId != nextClassId)
@@ -291,19 +438,18 @@ internal sealed class TrainingSampleStore
                     changed = true;
                 }
             }
+            record.Labels = nextLabels;
+            if (!changed) continue;
 
-            if (changed)
+            var path = MetadataPath(record.Id);
+            originals[path] = File.ReadAllBytes(path);
+            updates.Add((path, JsonSerializer.SerializeToUtf8Bytes(record, JsonOptions)));
+            var datasetLabelPath = DatasetLabelPath(record);
+            if (datasetLabelPath is not null)
             {
-                var path = MetadataPath(record.Id);
-                originals[path] = File.ReadAllBytes(path);
-                updates.Add((path, JsonSerializer.SerializeToUtf8Bytes(record, JsonOptions)));
-                var datasetLabelPath = DatasetLabelPath(record);
-                if (datasetLabelPath is not null)
-                {
-                    originals.TryAdd(datasetLabelPath,
-                        File.Exists(datasetLabelPath) ? File.ReadAllBytes(datasetLabelPath) : null);
-                    updates.Add((datasetLabelPath, SerializeLabels(record.Labels)));
-                }
+                originals.TryAdd(datasetLabelPath,
+                    File.Exists(datasetLabelPath) ? File.ReadAllBytes(datasetLabelPath) : null);
+                updates.Add((datasetLabelPath, SerializeLabels(record.Labels)));
             }
         }
 
@@ -318,7 +464,7 @@ internal sealed class TrainingSampleStore
             throw;
         }
 
-        return originals;
+        return new RemapClassIdsResult(originals, removedLabelCount);
     }
 
     internal void RestoreMetadata(IReadOnlyDictionary<string, byte[]?> originals)

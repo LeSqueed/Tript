@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageOps
 
 
 @dataclass(frozen=True)
@@ -35,14 +36,20 @@ def main() -> int:
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--size", type=int, default=640)
     parser.add_argument("--validation", type=float, default=0.2)
+    parser.add_argument("--augment", type=int, default=0,
+        help="per-training-crop augmented copies (contrast, brightness, gamma, pixelation); validation is never augmented")
     args = parser.parse_args()
 
     if args.size <= 0 or not 0 < args.validation < 1:
         raise ValueError("size must be positive and validation must be between 0 and 1")
+    if args.augment < 0:
+        raise ValueError("augment must be non-negative")
 
     workspace = args.workspace.resolve()
     events = load_events(workspace / "events.json")
-    samples = load_samples(workspace, events)
+    region_groups = load_region_groups(workspace / "regionGroups.json")
+    events = materialize_event_regions(events, region_groups)
+    samples, invalid_labels, skipped_samples, data_warnings = load_samples(workspace, events)
     dataset = workspace / f"dataset.export-{uuid.uuid4().hex}"
 
     try:
@@ -52,12 +59,16 @@ def main() -> int:
 
         assignments = split_samples(samples, args.validation)
         exported = 0
+        augmented_crops = 0
         split_crops = {"train": 0, "val": 0}
         for split, split_samples_list in assignments.items():
             for sample in split_samples_list:
-                crop_count = export_sample(sample, split, dataset, events, args.size, exported)
-                exported += crop_count
-                split_crops[split] += crop_count
+                emitted, augmented = export_sample(
+                    sample, split, dataset, events, args.size, exported, args.augment
+                )
+                exported += emitted
+                augmented_crops += augmented
+                split_crops[split] += emitted
 
         if exported == 0:
             raise ValueError("no valid training crops were exported")
@@ -77,13 +88,18 @@ def main() -> int:
         (dataset / "dataset.yaml").write_text(
             json.dumps(dataset_config, indent=2) + "\n", encoding="utf-8"
         )
-        event_coverage, warnings = summarize_coverage(assignments, events)
+        event_coverage, coverage_warnings = summarize_coverage(assignments, events)
+        warnings = data_warnings + coverage_warnings
         (dataset / "export.json").write_text(
             json.dumps(
                 {
                     "size": args.size,
+                    "augment": args.augment,
                     "sampleCount": len(samples),
                     "cropCount": exported,
+                    "augmentedCrops": augmented_crops,
+                    "invalidLabels": invalid_labels,
+                    "skippedSamples": skipped_samples,
                     "trainingSamples": len(assignments["train"]),
                     "validationSamples": len(assignments["val"]),
                     "trainingCrops": split_crops["train"],
@@ -117,6 +133,10 @@ def main() -> int:
         print(f"COVERAGE train/val frames: {coverage}", flush=True)
         for warning in warnings:
             print(f"WARNING {warning}", flush=True)
+        if augmented_crops:
+            print(
+                f"AUGMENT copies={args.augment} extra={augmented_crops} train-only", flush=True
+            )
         print(
             f"EXPORTED samples={len(samples)} train={len(assignments['train'])} "
             f"val={len(assignments['val'])} crops={exported} size={args.size}",
@@ -144,46 +164,127 @@ def load_events(path: Path) -> list[dict]:
     return ordered
 
 
-def load_samples(workspace: Path, events: list[dict]) -> list[dict]:
+def load_region_groups(path: Path) -> dict[int, dict]:
+    if not path.is_file():
+        return {}
+    groups = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(groups, list):
+        raise ValueError("regionGroups.json must contain an array")
+    result: dict[int, dict] = {}
+    for group in groups:
+        group_id = group.get("id")
+        if not isinstance(group_id, int) or group_id in result:
+            raise ValueError("regionGroups.json group IDs must be unique integers")
+        if not isinstance(group.get("name"), str) or not group["name"].strip():
+            raise ValueError("every region group must have a non-empty name")
+        validate_region(group, f"region group '{group['name']}'")
+        result[group_id] = group
+    return result
+
+
+def materialize_event_regions(events: list[dict], groups: dict[int, dict]) -> list[dict]:
+    materialized = []
+    for event in events:
+        copy = dict(event)
+        group_id = event.get("regionGroupId")
+        if group_id is not None:
+            if group_id not in groups:
+                raise ValueError(f"event '{event['name']}' references a missing region group")
+            source = groups[group_id]
+            for key in ("screenRegionX", "screenRegionY", "screenRegionW", "screenRegionH"):
+                copy[key] = source.get(key)
+        validate_region(copy, f"event '{event['name']}'")
+        materialized.append(copy)
+    return materialized
+
+
+def validate_region(target: dict, description: str) -> None:
+    keys = ("screenRegionX", "screenRegionY", "screenRegionW", "screenRegionH")
+    values = [target.get(key) for key in keys]
+    present = sum(value is not None for value in values)
+    if present == 0:
+        return
+    if present != len(values) or any(
+        not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+        for value in values
+    ):
+        raise ValueError(f"{description} has an incomplete screen region")
+    region = Region(*values)
+    if region.w <= 0 or region.h <= 0 or region.x < 0 or region.y < 0 or region.right > 1 or region.bottom > 1:
+        raise ValueError(f"{description} screen region must be inside the normalized frame")
+
+
+def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, int, list[str]]:
     samples_dir = workspace / "samples"
     samples = []
+    invalid_labels = 0
+    skipped_samples = 0
+    warnings: list[str] = []
+    events_by_class = {event["classId"]: event for event in events}
     for metadata_path in sorted(samples_dir.glob("*.json")):
         sample = json.loads(metadata_path.read_text(encoding="utf-8"))
         image_path = samples_dir / sample["imageFile"]
         if not image_path.is_file():
             raise ValueError(f"sample image is missing: {image_path}")
-        validate_labels(
-            sample["labels"],
-            sample["imageFile"],
-            require_label=True,
-            class_ids={event["classId"] for event in events},
-        )
+        labels = sample.get("labels")
+        if not isinstance(labels, list):
+            raise ValueError(f"sample labels must be an array: {sample['imageFile']}")
+        errors = [
+            error
+            for label in labels
+            if (error := label_error(label, events_by_class)) is not None
+        ]
+        if not labels or errors:
+            skipped_samples += 1
+            invalid_labels += len(errors)
+            reason = "it has no labels" if not labels else "; ".join(errors)
+            warnings.append(f"Skipped sample {sample['imageFile']}: {reason}.")
+            continue
         samples.append(sample)
     if not samples:
-        raise ValueError("workspace contains no samples")
-    return samples
+        raise ValueError("workspace contains no valid labeled samples")
+    return samples, invalid_labels, skipped_samples, warnings
 
 
-def validate_labels(
-    labels: list[dict],
-    image_name: str,
-    require_label: bool = True,
-    class_ids: set[int] | None = None,
-) -> None:
-    if require_label and not labels:
-        raise ValueError(f"sample has no labels: {image_name}")
-    for label in labels:
-        if class_ids is not None and label["classId"] not in class_ids:
-            raise ValueError(f"sample uses an unknown class ID: {image_name}")
-        values = [label[key] for key in ("centerX", "centerY", "width", "height")]
-        if any(not isinstance(value, (int, float)) for value in values):
-            raise ValueError(f"sample has non-numeric label coordinates: {image_name}")
-        left = label["centerX"] - label["width"] / 2
-        top = label["centerY"] - label["height"] / 2
-        right = label["centerX"] + label["width"] / 2
-        bottom = label["centerY"] + label["height"] / 2
-        if label["width"] <= 0 or label["height"] <= 0 or min(left, top) < 0 or max(right, bottom) > 1:
-            raise ValueError(f"sample label is outside the image: {image_name}")
+def label_inside_region(label: dict, region: Region) -> bool:
+    epsilon = 0.000001
+    left = label["centerX"] - label["width"] / 2
+    top = label["centerY"] - label["height"] / 2
+    right = label["centerX"] + label["width"] / 2
+    bottom = label["centerY"] + label["height"] / 2
+    return (
+        left + epsilon >= region.x
+        and top + epsilon >= region.y
+        and right <= region.right + epsilon
+        and bottom <= region.bottom + epsilon
+    )
+
+
+def label_error(label: object, events_by_class: dict[int, dict]) -> str | None:
+    if not isinstance(label, dict):
+        return "a label is not an object"
+    class_id = label.get("classId")
+    if not isinstance(class_id, int) or isinstance(class_id, bool) or class_id not in events_by_class:
+        return f"a label uses unknown class ID {class_id}"
+    keys = ("centerX", "centerY", "width", "height")
+    values = [label.get(key) for key in keys]
+    if any(
+        not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+        for value in values
+    ):
+        return f"a '{events_by_class[class_id]['name']}' label has invalid coordinates"
+    left = label["centerX"] - label["width"] / 2
+    top = label["centerY"] - label["height"] / 2
+    right = label["centerX"] + label["width"] / 2
+    bottom = label["centerY"] + label["height"] / 2
+    if label["width"] <= 0 or label["height"] <= 0:
+        return f"a '{events_by_class[class_id]['name']}' label has no area"
+    if min(left, top) < 0 or max(right, bottom) > 1:
+        return f"a '{events_by_class[class_id]['name']}' label lies outside the image"
+    region = event_region(events_by_class[class_id])
+    if region is not None and not label_inside_region(label, region):
+        return f"a '{events_by_class[class_id]['name']}' label lies outside its screen region"
+    return None
 
 
 def split_samples(samples: list[dict], validation_fraction: float) -> dict[str, list[dict]]:
@@ -311,9 +412,16 @@ def summarize_coverage(assignments: dict[str, list[dict]], events: list[dict]) -
     return coverage, warnings
 
 
-def export_sample(sample: dict, split: str, dataset: Path, events: list[dict], size: int, sequence: int) -> int:
+AUGMENT_SEED = 0x7E57
+
+
+def export_sample(
+    sample: dict, split: str, dataset: Path, events: list[dict], size: int, sequence: int, augment: int
+) -> tuple[int, int]:
     samples_dir = dataset.parent / "samples"
     image_path = samples_dir / sample["imageFile"]
+    emitted = 0
+    augmented = 0
     with Image.open(image_path) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
         groups = crop_groups(sample["labels"], events)
@@ -327,11 +435,42 @@ def export_sample(sample: dict, split: str, dataset: Path, events: list[dict], s
                     (right - left) / image.width,
                     (bottom - top) / image.height,
                 )
-            crop = ImageOps.grayscale(crop).convert("RGB").resize((size, size), Image.Resampling.LANCZOS)
-            stem = f"{sequence:06d}_{group_index:02d}"
-            crop.save(dataset / "images" / split / f"{stem}.png", format="PNG")
-            write_labels(dataset / "labels" / split / f"{stem}.txt", labels, crop_region)
-    return len(groups)
+            base = ImageOps.grayscale(crop).convert("RGB").resize((size, size), Image.Resampling.LANCZOS)
+            copies = 1 + (augment if split == "train" else 0)
+            for copy_index in range(copies):
+                stem = f"{sequence:06d}_{group_index:02d}"
+                out = base if copy_index == 0 else augment_crop(base, sequence, copy_index)
+                out.save(dataset / "images" / split / f"{stem}.png", format="PNG")
+                write_labels(dataset / "labels" / split / f"{stem}.txt", labels, crop_region)
+                sequence += 1
+                emitted += 1
+                if copy_index > 0:
+                    augmented += 1
+    return emitted, augmented
+
+
+def augment_crop(image: Image.Image, sample_sequence: int, variant: int) -> Image.Image:
+    """One deterministic mild distortion, seeded so every export of the same workspace agrees."""
+    seed = AUGMENT_SEED
+    for value in (AUGMENT_SEED, sample_sequence, variant):
+        seed = (seed * 1009 + value) & 0xFFFFFFFF
+    rng = random.Random(seed)
+    choice = rng.randrange(4)
+    if choice == 0:
+        return ImageEnhance.Contrast(image).enhance(rng.uniform(0.8, 1.2))
+    if choice == 1:
+        return ImageEnhance.Brightness(image).enhance(rng.uniform(0.9, 1.1))
+    if choice == 2:
+        gamma = rng.uniform(0.85, 1.15)
+        lookup = [round(255 * (pixel / 255) ** gamma) for pixel in range(256)]
+        return image.convert("L").point(lookup).convert("RGB")
+    # Gentle pixelation, never worse than roughly "1080p downscaled to 720p": the crop is shrunk
+    # to at most 2/3 and no less than 0.9 of its size, then block-upscaled back. A small capture
+    # region is already soft after being upscaled, so any chunkier block size destroys it.
+    scale = rng.uniform(2 / 3, 0.9)
+    down = max(4, int(round(image.width * scale)))
+    small = image.resize((down, down), Image.Resampling.NEAREST)
+    return small.resize(image.size, Image.Resampling.NEAREST)
 
 
 def crop_groups(labels: list[dict], events: list[dict]) -> list[tuple[Region | None, list[dict]]]:

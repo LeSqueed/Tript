@@ -34,6 +34,12 @@ public class EventDefinition
     public float? ScreenRegionY { get; set; }
     public float? ScreenRegionW { get; set; }
     public float? ScreenRegionH { get; set; }
+    public int? RegionGroupId { get; set; }
+    public bool FixedPosition { get; set; }
+    public double? FixedLabelCenterX { get; set; }
+    public double? FixedLabelCenterY { get; set; }
+    public double? FixedLabelWidth { get; set; }
+    public double? FixedLabelHeight { get; set; }
 }
 
 public class DetectionResult

@@ -18,6 +18,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
   const [type, setType] = useState<TrainingEventDefinition['type']>(event.type);
   const [bookmarkType, setBookmarkType] = useState(event.bookmarkType ?? '');
   const [includeInAutoClips, setIncludeInAutoClips] = useState(event.includeInAutoClips === true);
+  const [fixedPosition, setFixedPosition] = useState(event.fixedPosition === true);
   const [subtractsEventId, setSubtractsEventId] = useState(
     event.subtractsEventId == null ? '' : String(event.subtractsEventId),
   );
@@ -48,6 +49,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
       type,
       bookmarkType: type === 'Subtractor' ? null : bookmarkType || null,
       includeInAutoClips: type === 'Trigger' && includeInAutoClips,
+      ...(fixedPosition || event.fixedPosition !== undefined ? { fixedPosition } : {}),
        ...(type === 'Subtractor' || event.subtractsEventId !== undefined
          ? { subtractsEventId: type === 'Subtractor' ? parsedSubtractsEventId : null }
          : {}),
@@ -95,6 +97,10 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
             <span>Include in automatic clips</span>
           </label>
         )}
+        <label className="training-event-checkbox">
+          <Checkbox checked={fixedPosition} onChange={setFixedPosition} />
+          <span>Fixed position and size across samples</span>
+        </label>
         {type === 'Subtractor' && (
           <Field label="Subtracts event" hint="One matching trigger occurrence is removed per detected subtractor instance in the same batch.">
             <SelectField

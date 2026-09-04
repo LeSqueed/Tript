@@ -1,17 +1,18 @@
 import { useRef, useState, type PointerEvent } from 'react';
-import type { TrainingEventDefinition } from '../ipc/protocol';
-import { Button, SelectField } from './ui/controls';
+import type { TrainingEventDefinition, TrainingRegionGroup } from '../ipc/protocol';
+import { Button } from './ui/controls';
 import { boxFromPoints, moveBox, normalizedPoint, type TrainingPoint } from './trainingCoordinates';
+import { regionFromTarget } from './trainingRegions';
 import { useTrainingDialog } from './useTrainingDialog';
 
 interface TrainingRegionEditorProps {
-  event: TrainingEventDefinition;
-  events: TrainingEventDefinition[];
+  target: TrainingEventDefinition | TrainingRegionGroup;
+  targetType: 'event' | 'group';
   backgroundImage?: string;
   imageWidth?: number;
   imageHeight?: number;
   onCancel(): void;
-  onSave(event: TrainingEventDefinition): void;
+  onSave(target: TrainingEventDefinition | TrainingRegionGroup): void;
 }
 
 interface RegionBox {
@@ -26,31 +27,33 @@ type Gesture =
   | { kind: 'move'; start: TrainingPoint; original: RegionBox }
   | { kind: 'resize'; original: RegionBox; handle: string };
 
-function regionFromEvent(event: TrainingEventDefinition): RegionBox | null {
-  const values = [event.screenRegionX, event.screenRegionY, event.screenRegionW, event.screenRegionH];
-  if (values.some((value) => value == null || !Number.isFinite(value))) return null;
-  const [x, y, width, height] = values as number[];
-  if (width <= 0 || height <= 0 || x < 0 || y < 0 || x + width > 1 || y + height > 1) return null;
-  return { centerX: x + width / 2, centerY: y + height / 2, width, height };
+function regionFromEditorTarget(target: TrainingEventDefinition | TrainingRegionGroup): RegionBox | null {
+  const region = regionFromTarget(target);
+  return region && {
+    centerX: region.x + region.width / 2,
+    centerY: region.y + region.height / 2,
+    width: region.width,
+    height: region.height,
+  };
 }
 
-function eventWithRegion(event: TrainingEventDefinition, region: RegionBox | null): TrainingEventDefinition {
+function targetWithRegion<T extends TrainingEventDefinition | TrainingRegionGroup>(target: T, region: RegionBox | null): T {
   if (!region) {
     return {
-      ...event,
+      ...target,
       screenRegionX: null,
       screenRegionY: null,
       screenRegionW: null,
       screenRegionH: null,
-    };
+    } as T;
   }
   return {
-    ...event,
+    ...target,
     screenRegionX: region.centerX - region.width / 2,
     screenRegionY: region.centerY - region.height / 2,
     screenRegionW: region.width,
     screenRegionH: region.height,
-  };
+  } as T;
 }
 
 function resizeRegion(box: RegionBox, point: TrainingPoint, handle: string): RegionBox {
@@ -69,9 +72,8 @@ function resizeRegion(box: RegionBox, point: TrainingPoint, handle: string): Reg
   return { centerX: (left + right) / 2, centerY: (top + bottom) / 2, width: right - left, height: bottom - top };
 }
 
-export function TrainingRegionEditor({ event, events, backgroundImage, imageWidth = 16, imageHeight = 9, onCancel, onSave }: TrainingRegionEditorProps) {
-  const [region, setRegion] = useState<RegionBox | null>(() => regionFromEvent(event));
-  const [copySource, setCopySource] = useState('');
+export function TrainingRegionEditor({ target, targetType, backgroundImage, imageWidth = 16, imageHeight = 9, onCancel, onSave }: TrainingRegionEditorProps) {
+  const [region, setRegion] = useState<RegionBox | null>(() => regionFromEditorTarget(target));
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const dialogRef = useTrainingDialog<HTMLElement>(onCancel);
   const imageNode = useRef<HTMLDivElement>(null);
@@ -134,22 +136,21 @@ export function TrainingRegionEditor({ event, events, backgroundImage, imageWidt
     setGesture(null);
   };
 
-  const copyRegion = () => {
-    const source = events.find((candidate) => String(candidate.id) === copySource);
-    if (source) setRegion(regionFromEvent(source));
-  };
-
   return (
     <div className="training-region-overlay" role="presentation">
       <section ref={dialogRef} tabIndex={-1} className="training-region-dialog" role="dialog" aria-modal="true" aria-labelledby="training-region-title">
         <div className="training-palette-heading">
           <div>
             <p className="training-eyebrow">Screen region</p>
-            <h3 id="training-region-title">{event.name}</h3>
+            <h3 id="training-region-title">{target.name}</h3>
           </div>
           <Button variant="ghost" size="small" onClick={onCancel}>Cancel</Button>
         </div>
-        <p className="muted small">Draw the part of the screen this event should use. Coordinates are saved normalized to the full frame.</p>
+        <p className="muted small">
+          {targetType === 'group'
+            ? 'Draw the part of the screen this group should use. All group members share this region.'
+            : 'Draw the part of the screen this event should use. Coordinates are saved normalized to the full frame.'}
+        </p>
         <div
           className="training-region-canvas"
           ref={imageNode}
@@ -178,20 +179,11 @@ export function TrainingRegionEditor({ event, events, backgroundImage, imageWidt
           )}
         </div>
         <div className="training-region-tools">
-          <SelectField
-            aria-label="Copy region from event"
-            value={copySource}
-            onChange={setCopySource}
-            options={[{ value: '', label: 'Copy region from event' }, ...events
-              .filter((candidate) => candidate.id !== event.id && regionFromEvent(candidate))
-              .map((candidate) => ({ value: String(candidate.id), label: candidate.name }))]}
-          />
-          <Button variant="ghost" onClick={copyRegion} disabled={!copySource}>Copy region</Button>
           <Button variant="ghost" onClick={() => setRegion(null)} disabled={!region}>Clear region</Button>
         </div>
         <div className="training-event-dialog-actions">
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button onClick={() => onSave(eventWithRegion(event, region))}>Save region</Button>
+          <Button onClick={() => onSave(targetWithRegion(target, region))}>Save region</Button>
         </div>
       </section>
     </div>

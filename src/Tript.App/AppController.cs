@@ -122,6 +122,9 @@ internal sealed class AppController
                 await _host.CaptureTrainingSample(parameters.Deserialize<CaptureTrainingSampleParameters>()),
             ["UpdateTrainingEvents"] = async (parameters, _) =>
                 await _host.UpdateTrainingEvents(parameters.Deserialize<UpdateTrainingEventsParameters>()),
+            ["UpdateTrainingRegionGroups"] = async (parameters, _) =>
+                await _host.UpdateTrainingRegionGroups(
+                    parameters.Deserialize<UpdateTrainingRegionGroupsParameters>()),
             ["GetTrainingSample"] = async (parameters, _) =>
                 await _host.GetTrainingSample(parameters.Deserialize<TrainingSampleParameters>()),
             ["UpdateTrainingSample"] = async (parameters, _) =>

@@ -4,11 +4,14 @@ import type {
   TrainingEventDefinition,
   TrainingLabel,
   TrainingLabelSuggestionsMessage,
+  TrainingRegionGroup,
   TrainingSampleMessage,
 } from '../ipc/protocol';
 import { Button } from './ui/controls';
 import { TrainingEventEditor } from './TrainingEventEditor';
+import { TrainingEventTree } from './TrainingEventTree';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
+import { effectiveTrainingRegion, isLabelInsideEffectiveRegion } from './trainingRegions';
 import { useTrainingDialog } from './useTrainingDialog';
 import {
   boxFromPoints,
@@ -23,7 +26,9 @@ interface TrainingSampleEditorProps {
   gameId: string;
   sample: TrainingSampleMessage;
   events: TrainingEventDefinition[];
+  regionGroups?: TrainingRegionGroup[];
   onEventsChange?: (events: TrainingEventDefinition[]) => void;
+  onRegionGroupsChange?: (groups: TrainingRegionGroup[]) => void;
   onNavigate?: (direction: 'previous' | 'next') => void;
   canNavigatePrevious?: boolean;
   canNavigateNext?: boolean;
@@ -35,6 +40,8 @@ type Gesture =
   | { kind: 'draw'; start: TrainingPoint; classId: number; index: number }
   | { kind: 'move'; index: number; start: TrainingPoint; original: TrainingLabel }
   | { kind: 'resize'; index: number; original: TrainingLabel };
+
+const EMPTY_REGION_GROUPS: TrainingRegionGroup[] = [];
 
 function boxesOverlap(left: TrainingLabel, right: TrainingLabel): boolean {
   const leftArea = left.width * left.height;
@@ -51,12 +58,21 @@ function boxesOverlap(left: TrainingLabel, right: TrainingLabel): boolean {
   return intersection / (leftArea + rightArea - intersection) >= 0.3;
 }
 
+function fixedLabelFor(event: TrainingEventDefinition): TrainingLabel | null {
+  const values = [event.fixedLabelCenterX, event.fixedLabelCenterY, event.fixedLabelWidth, event.fixedLabelHeight];
+  if (!event.fixedPosition || values.some((value) => value == null || !Number.isFinite(value))) return null;
+  const [centerX, centerY, width, height] = values as number[];
+  return { classId: event.classId, centerX, centerY, width, height };
+}
+
 export function TrainingSampleEditor({
   client,
   gameId,
   sample,
   events,
+  regionGroups,
   onEventsChange,
+  onRegionGroupsChange,
   onNavigate,
   canNavigatePrevious = false,
   canNavigateNext = false,
@@ -70,16 +86,28 @@ export function TrainingSampleEditor({
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionConfidence, setSuggestionConfidence] = useState<Record<number, number>>({});
   const [eventDefinitions, setEventDefinitions] = useState(events);
+  const resolvedRegionGroups = regionGroups ?? EMPTY_REGION_GROUPS;
+  const [groupDefinitions, setGroupDefinitions] = useState(resolvedRegionGroups);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [classId, setClassId] = useState(String(events[0]?.classId ?? 0));
+  const [classId, setClassId] = useState(String(sample.sample.labels[0]?.classId ?? events[0]?.classId ?? 0));
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [eventDraft, setEventDraft] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
-  const [regionDraft, setRegionDraft] = useState<TrainingEventDefinition | null>(null);
+  const [regionDraft, setRegionDraft] = useState<
+    { target: TrainingEventDefinition; targetType: 'event' }
+    | { target: TrainingRegionGroup; targetType: 'group' }
+    | null
+  >(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const suggestionRequestRef = useRef<string | null>(null);
   const labelsAreDirty = JSON.stringify(labels) !== JSON.stringify(savedLabels);
+  const invalidLabelIndexes = new Set(labels.flatMap((label, index) =>
+    isLabelInsideEffectiveRegion(label, eventDefinitions, groupDefinitions) ? [] : [index]));
+  const activeEvent = eventDefinitions.find((event) => event.classId === (
+    selectedIndex == null ? Number(classId) : labels[selectedIndex]?.classId
+  ));
+  const activeRegion = activeEvent ? effectiveTrainingRegion(activeEvent, groupDefinitions) : null;
 
   const requestClose = () => {
     if (labelsAreDirty && !window.confirm(
@@ -99,6 +127,7 @@ export function TrainingSampleEditor({
     setSuggestionConfidence({});
     setSelectedIndex(null);
     setGesture(null);
+    if (sample.sample.labels[0]) setClassId(String(sample.sample.labels[0].classId));
   }, [sample.sample.id, sample.sample.labels]);
 
   useEffect(() => {
@@ -149,8 +178,14 @@ export function TrainingSampleEditor({
 
   useEffect(() => {
     setEventDefinitions(events);
-    setClassId(String(events[0]?.classId ?? 0));
+    setClassId((current) => events.some((event) => event.classId === Number(current))
+      ? current
+      : String(events[0]?.classId ?? 0));
   }, [events]);
+
+  useEffect(() => {
+    setGroupDefinitions(resolvedRegionGroups);
+  }, [resolvedRegionGroups]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -246,10 +281,26 @@ export function TrainingSampleEditor({
   const updateSelectedClass = (value: string) => {
     setClassId(value);
     if (selectedIndex !== null) {
+      const event = eventDefinitions.find((candidate) => candidate.classId === Number(value));
+      const fixedLabel = event ? fixedLabelFor(event) : null;
       setLabels((current) => current.map((label, index) => index === selectedIndex
-        ? { ...label, classId: Number(value) }
+        ? fixedLabel ?? { ...label, classId: Number(value) }
         : label));
     }
+  };
+
+  const addFixedLabel = (event: TrainingEventDefinition) => {
+    const existing = labels.findIndex((label) => label.classId === event.classId);
+    if (existing >= 0) {
+      setSelectedIndex(existing);
+      setClassId(String(event.classId));
+      return;
+    }
+    const fixedLabel = fixedLabelFor(event);
+    if (!fixedLabel) return;
+    setLabels((current) => [...current, fixedLabel]);
+    setSelectedIndex(labels.length);
+    setClassId(String(event.classId));
   };
 
   const deleteSelected = () => {
@@ -309,9 +360,36 @@ export function TrainingSampleEditor({
     setEventDraft(null);
   };
 
-  const saveRegion = (nextEvent: TrainingEventDefinition) => {
-    const next = eventDefinitions.map((event) => event.id === nextEvent.id ? nextEvent : event);
-    onEventsChange?.(next);
+  const updateEventGroup = (eventId: number, value: string) => {
+    const next = eventDefinitions.map((event) => event.id === eventId
+      ? { ...event, regionGroupId: value ? Number(value) : null }
+      : event);
+    setEventDefinitions(next);
+    if (onEventsChange) onEventsChange(next);
+    else client.send('UpdateTrainingEvents', { gameId, events: next });
+  };
+
+  const openRegion = (event: TrainingEventDefinition) => {
+    const group = event.regionGroupId == null
+      ? undefined
+      : groupDefinitions.find((candidate) => candidate.id === event.regionGroupId);
+    setRegionDraft(group
+      ? { target: group, targetType: 'group' }
+      : { target: event, targetType: 'event' });
+  };
+
+  const saveRegion = (target: TrainingEventDefinition | TrainingRegionGroup) => {
+    if (regionDraft?.targetType === 'group') {
+      const next = groupDefinitions.map((group) => group.id === target.id ? target as TrainingRegionGroup : group);
+      setGroupDefinitions(next);
+      if (onRegionGroupsChange) onRegionGroupsChange(next);
+      else client.send('UpdateTrainingRegionGroups', { gameId, regionGroups: next });
+    } else {
+      const next = eventDefinitions.map((event) => event.id === target.id ? target as TrainingEventDefinition : event);
+      setEventDefinitions(next);
+      if (onEventsChange) onEventsChange(next);
+      else client.send('UpdateTrainingEvents', { gameId, events: next });
+    }
     setRegionDraft(null);
   };
 
@@ -338,9 +416,21 @@ export function TrainingSampleEditor({
               onPointerCancel={cancelGesture}
             >
               <img src={sample.imageData} alt="Training frame to label" draggable={false} />
+              {activeRegion && (
+                <span
+                  className="training-effective-region"
+                  aria-label={`Effective region for ${activeEvent?.name}`}
+                  style={{
+                    left: `${activeRegion.x * 100}%`,
+                    top: `${activeRegion.y * 100}%`,
+                    width: `${activeRegion.width * 100}%`,
+                    height: `${activeRegion.height * 100}%`,
+                  }}
+                />
+              )}
               {labels.map((label, index) => (
                 <span
-                  className={`${index === selectedIndex ? 'training-box selected' : 'training-box'}${suggestionConfidence[index] == null ? '' : ' suggested'}`}
+                  className={`${index === selectedIndex ? 'training-box selected' : 'training-box'}${suggestionConfidence[index] == null ? '' : ' suggested'}${invalidLabelIndexes.has(index) ? ' invalid' : ''}`}
                   key={`${sample.sample.id}-${index}`}
                   style={{
                     left: `${(label.centerX - label.width / 2) * 100}%`,
@@ -369,33 +459,31 @@ export function TrainingSampleEditor({
               <Button variant="ghost" size="small" onClick={openNewEvent} aria-label="Create event">+ Add</Button>
             </div>
             <div className="training-event-scroll">
-              {eventDefinitions.map((event) => (
-                <div className={Number(classId) === event.classId ? 'training-event-row active' : 'training-event-row'} key={event.id}>
-                  <Button
-                    variant="ghost"
-                    className="training-event-select"
-                    onClick={() => updateSelectedClass(String(event.classId))}
-                  >
-                    <span className="training-event-swatch">{event.classId}</span>
-                    <span>
-                      <strong>{event.name}</strong>
-                      <small>{event.type}</small>
-                    </span>
-                  </Button>
-                   <Button variant="ghost" size="small" onClick={() => setEventDraft({ event, isNew: false })}>
-                     Edit
-                   </Button>
-                   <Button variant="ghost" size="small" onClick={() => setRegionDraft(event)}>
-                     Region
-                   </Button>
-                </div>
-              ))}
+              <TrainingEventTree
+                compact
+                events={eventDefinitions}
+                groups={groupDefinitions}
+                activeClassId={Number(classId)}
+                onSelect={(event) => updateSelectedClass(String(event.classId))}
+                onEdit={(event) => setEventDraft({ event, isNew: false })}
+                onRegion={openRegion}
+                onAddFixedLabel={addFixedLabel}
+                canAddFixedLabel={(event) => fixedLabelFor(event) !== null
+                  && !labels.some((label) => label.classId === event.classId)}
+                onMove={(eventId, groupId) => updateEventGroup(eventId, groupId == null ? '' : String(groupId))}
+                onRegionGroup={(group) => setRegionDraft({ target: group, targetType: 'group' })}
+              />
             </div>
           </aside>
         </div>
 
         <footer className="training-modal-footer">
           <span className="muted small">{labels.length} label{labels.length === 1 ? '' : 's'} on this frame</span>
+          {invalidLabelIndexes.size > 0 && (
+            <span className="training-label-warning" role="alert">
+              {invalidLabelIndexes.size} label{invalidLabelIndexes.size === 1 ? '' : 's'} outside the effective event region and will be skipped when training.
+            </span>
+          )}
           <div className="training-editor-actions">
             <div className="training-sample-navigation" aria-label="Sample navigation">
               <Button
@@ -439,8 +527,8 @@ export function TrainingSampleEditor({
       )}
       {regionDraft && (
         <TrainingRegionEditor
-          event={regionDraft}
-          events={eventDefinitions}
+          target={regionDraft.target}
+          targetType={regionDraft.targetType}
           backgroundImage={sample.imageData}
           imageWidth={sample.sample.imageWidth}
           imageHeight={sample.sample.imageHeight}

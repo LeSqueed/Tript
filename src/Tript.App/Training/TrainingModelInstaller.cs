@@ -12,11 +12,6 @@ internal sealed record TrainingInstallResult(string GameId, string ModelPath, On
 
 internal static class TrainingModelInstaller
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     internal static TrainingInstallResult Install(TrainingWorkspace workspace, string modelSourcePath)
     {
         if (!File.Exists(modelSourcePath))
@@ -24,8 +19,12 @@ internal static class TrainingModelInstaller
         if (!File.Exists(workspace.EventsPath))
             throw new FileNotFoundException("The workspace has no events.json.", workspace.EventsPath);
 
-        var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
-            File.ReadAllText(workspace.EventsPath), JsonOptions) ?? [];
+        var definitions = workspace.LoadDefinitions();
+        var regionGroups = workspace.LoadRegionGroups();
+        TrainingEventValidator.ValidateRegionGroups(regionGroups);
+        TrainingEventValidator.ValidateRegionGroupReferences(definitions, regionGroups);
+        var runtimeDefinitions = TrainingRegionResolver.MaterializeEffectiveRegions(definitions,
+            regionGroups);
         var metadata = OnnxModelInspector.Inspect(modelSourcePath);
         var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
         if (mismatch is not null)
@@ -41,7 +40,15 @@ internal static class TrainingModelInstaller
         try
         {
             File.Copy(modelSourcePath, staging.ModelPath);
-            File.Copy(workspace.EventsPath, staging.EventsPath);
+            TrainingSampleStore.WriteAtomically(staging.EventsPath,
+                JsonSerializer.SerializeToUtf8Bytes(runtimeDefinitions,
+                    TrainingRegionResolver.WriteJsonOptions));
+            if (regionGroups.Count > 0)
+            {
+                TrainingSampleStore.WriteAtomically(staging.RegionGroupsPath,
+                    JsonSerializer.SerializeToUtf8Bytes(regionGroups,
+                        TrainingRegionResolver.WriteJsonOptions));
+            }
             var stagedMetadata = OnnxModelInspector.Inspect(staging.ModelPath);
             var stagedMismatch = ModelApiV1Compatibility.FindMismatch(definitions, stagedMetadata);
             if (stagedMismatch is not null)

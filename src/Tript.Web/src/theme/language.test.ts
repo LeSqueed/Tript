@@ -15,6 +15,7 @@ const SETTINGS = join(SRC_ROOT, 'settings');
 // Training uses "region" as the documented normalized ONNX contract, not as a general clip term.
 const TRAINING_REGION_SURFACES = new Set([
   join(SRC_ROOT, 'components', 'TrainingRegionEditor.tsx'),
+  join(SRC_ROOT, 'components', 'TrainingEventTree.tsx'),
   join(SRC_ROOT, 'components', 'TrainingSampleEditor.tsx'),
   join(SRC_ROOT, 'components', 'TrainingView.tsx'),
 ]);

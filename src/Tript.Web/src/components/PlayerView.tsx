@@ -11,6 +11,7 @@ import type {
   ContentItem,
   RecordingState,
   TrainingEventDefinition,
+  TrainingRegionGroup,
   TrainingSampleMessage,
 } from '../ipc/protocol';
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
@@ -338,6 +339,7 @@ export function PlayerView({
   }, [client, currentTime, item, trainingEnabled]);
 
   const [trainingEvents, setTrainingEvents] = useState<TrainingEventDefinition[]>([]);
+  const [trainingRegionGroups, setTrainingRegionGroups] = useState<TrainingRegionGroup[]>([]);
   const [trainingModelAvailable, setTrainingModelAvailable] = useState(false);
   const [labelingSample, setLabelingSample] = useState<TrainingSampleMessage | null>(null);
   const currentGameId = item?.gameId ?? item?.game;
@@ -345,14 +347,20 @@ export function PlayerView({
   useEffect(() => {
     setLabelingSample(null);
     setTrainingModelAvailable(false);
+    setTrainingRegionGroups([]);
   }, [currentGameId]);
 
   useEffect(() => {
     if (!trainingEnabled || !currentGameId) return;
     const removeTraining = client.on('training', (content) => {
-      const message = (content as { training?: { gameId?: string; events?: TrainingEventDefinition[] } }).training;
+      const message = (content as { training?: {
+        gameId?: string;
+        events?: TrainingEventDefinition[];
+        regionGroups?: TrainingRegionGroup[];
+      } }).training;
       if (message?.events && (!message.gameId || message.gameId === currentGameId)) {
         setTrainingEvents(message.events);
+        setTrainingRegionGroups(message.regionGroups ?? []);
       }
       if (message?.gameId === currentGameId) {
         setTrainingModelAvailable(Boolean((message as { model?: unknown }).model));
@@ -903,8 +911,10 @@ export function PlayerView({
           gameId={currentGameId}
           sample={labelingSample}
           events={trainingEvents}
+          regionGroups={trainingRegionGroups}
           hasModel={trainingModelAvailable}
           onEventsChange={(events) => client.send('UpdateTrainingEvents', { gameId: currentGameId, events })}
+          onRegionGroupsChange={(regionGroups) => client.send('UpdateTrainingRegionGroups', { gameId: currentGameId, regionGroups })}
           onClose={() => setLabelingSample(null)}
         />
       )}

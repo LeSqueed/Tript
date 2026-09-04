@@ -9,6 +9,16 @@ using Tript.Detection;
 
 namespace Tript.App.Training;
 
+// The last training settings used for a game. A local convenience: it lives in the per-game
+// workspace, is never installed with the model, and is restored into the training form when the
+// game's workspace is opened again.
+internal sealed class TrainingPreferences
+{
+    public int Epochs { get; init; } = 100;
+    public string Device { get; init; } = "auto";
+    public int AugmentCopies { get; init; }
+}
+
 internal sealed class TrainingWorkspace
 {
     private TrainingWorkspace(string gameId, string rootPath)
@@ -23,7 +33,11 @@ internal sealed class TrainingWorkspace
 
     internal string EventsPath => Path.Combine(RootPath, "events.json");
 
+    internal string RegionGroupsPath => Path.Combine(RootPath, "regionGroups.json");
+
     internal string ModelPath => Path.Combine(RootPath, "model.onnx");
+
+    internal string PreferencesPath => Path.Combine(RootPath, "preferences.json");
 
     internal string SamplesPath => Path.Combine(RootPath, "samples");
 
@@ -38,6 +52,50 @@ internal sealed class TrainingWorkspace
 
         return JsonSerializer.Deserialize<List<EventDefinition>>(File.ReadAllText(EventsPath),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? [];
+    }
+
+    internal List<TrainingRegionGroup> LoadRegionGroups()
+    {
+        if (!File.Exists(RegionGroupsPath))
+            return [];
+
+        return JsonSerializer.Deserialize<List<TrainingRegionGroup>>(
+            File.ReadAllText(RegionGroupsPath), TrainingRegionResolver.JsonOptions) ?? [];
+    }
+
+    internal void SaveRegionGroups(IReadOnlyList<TrainingRegionGroup> groups)
+    {
+        EnsureDirectories();
+        TrainingSampleStore.WriteAtomically(RegionGroupsPath,
+            JsonSerializer.SerializeToUtf8Bytes(groups, TrainingRegionResolver.WriteJsonOptions));
+    }
+
+    internal TrainingPreferences? LoadPreferences()
+    {
+        if (!File.Exists(PreferencesPath))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<TrainingPreferences>(File.ReadAllText(PreferencesPath),
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        }
+        catch (JsonException)
+        {
+            // A corrupted local preference must never block opening the workspace.
+            return null;
+        }
+    }
+
+    internal void SavePreferences(TrainingPreferences preferences)
+    {
+        EnsureDirectories();
+        TrainingSampleStore.WriteAtomically(PreferencesPath, JsonSerializer.SerializeToUtf8Bytes(
+            preferences, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            }));
     }
 
     // Runtime event definitions are installed beside the model. The training workspace keeps its
@@ -85,7 +143,10 @@ internal sealed class TrainingWorkspace
         if (!Directory.Exists(RootPath))
             return string.Empty;
 
+        // Preferences are local form state, not workspace data: remembering the last epochs never
+        // counts as the workspace having changed under an import's conflict guard.
         return string.Join("|", Directory.EnumerateFiles(RootPath, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(path, PreferencesPath, StringComparison.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(path => $"{Path.GetRelativePath(RootPath, path)}:{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}"));
     }

@@ -10,24 +10,64 @@ internal static class TrainingEventValidator
     {
         foreach (var eventDefinition in events)
         {
+            ValidateRegion($"Training event '{eventDefinition.Name}'", eventDefinition.ScreenRegionX,
+                eventDefinition.ScreenRegionY, eventDefinition.ScreenRegionW, eventDefinition.ScreenRegionH);
+        }
+    }
+
+    internal static void ValidateRegionGroups(IReadOnlyList<TrainingRegionGroup> groups)
+    {
+        if (groups.Select(group => group.Id).Distinct().Count() != groups.Count)
+            throw new InvalidDataException("Training region group ids must be unique.");
+        foreach (var group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.Name))
+                throw new InvalidDataException("Every training region group requires a name.");
+            ValidateRegion($"Training region group '{group.Name}'", group.ScreenRegionX,
+                group.ScreenRegionY, group.ScreenRegionW, group.ScreenRegionH);
+        }
+    }
+
+    internal static void ValidateRegionGroupReferences(IReadOnlyList<EventDefinition> events,
+        IReadOnlyList<TrainingRegionGroup> groups)
+    {
+        var ids = groups.Select(group => group.Id).ToHashSet();
+        var invalid = events.FirstOrDefault(eventDefinition =>
+            eventDefinition.RegionGroupId is int id && !ids.Contains(id));
+        if (invalid is not null)
+            throw new InvalidDataException(
+                $"Training event '{invalid.Name}' references a missing region group.");
+    }
+
+    // The fixed position is allowed to sit outside the event's crop region; like any out-of-crop
+    // label it is then counted invalid and skipped by training/export. Only structural errors are
+    // fatal here.
+    internal static void ValidateFixedPositions(IReadOnlyList<EventDefinition> events)
+    {
+        foreach (var eventDefinition in events.Where(eventDefinition => eventDefinition.FixedPosition))
+        {
             var values = new[]
             {
-                eventDefinition.ScreenRegionX,
-                eventDefinition.ScreenRegionY,
-                eventDefinition.ScreenRegionW,
-                eventDefinition.ScreenRegionH,
+                eventDefinition.FixedLabelCenterX, eventDefinition.FixedLabelCenterY,
+                eventDefinition.FixedLabelWidth, eventDefinition.FixedLabelHeight,
             };
             var present = values.Count(value => value.HasValue);
             if (present == 0) continue;
-            if (present != values.Length || values.Any(value => !float.IsFinite(value!.Value)))
-                throw new InvalidDataException($"Training event '{eventDefinition.Name}' has an incomplete screen region.");
-
-            var x = eventDefinition.ScreenRegionX!.Value;
-            var y = eventDefinition.ScreenRegionY!.Value;
-            var w = eventDefinition.ScreenRegionW!.Value;
-            var h = eventDefinition.ScreenRegionH!.Value;
-            if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1)
-                throw new InvalidDataException($"Training event '{eventDefinition.Name}' has an out-of-bounds screen region.");
+            if (present != values.Length || values.Any(value => !double.IsFinite(value!.Value)))
+                throw new InvalidDataException(
+                    $"Training event '{eventDefinition.Name}' has an incomplete fixed label position.");
+            var error = TrainingLabelValidator.FindBlockingError(
+                [new TrainingLabel
+                {
+                    ClassId = eventDefinition.ClassId,
+                    CenterX = eventDefinition.FixedLabelCenterX!.Value,
+                    CenterY = eventDefinition.FixedLabelCenterY!.Value,
+                    Width = eventDefinition.FixedLabelWidth!.Value,
+                    Height = eventDefinition.FixedLabelHeight!.Value,
+                }], events);
+            if (error is not null)
+                throw new InvalidDataException(
+                    $"Training event '{eventDefinition.Name}' has an invalid fixed label position: {error}.");
         }
     }
 
@@ -51,6 +91,17 @@ internal static class TrainingEventValidator
                 throw new InvalidDataException(
                     $"Training subtractor '{eventDefinition.Name}' must reference a trigger event.");
         }
+    }
+
+    private static void ValidateRegion(string subject, float? x, float? y, float? width, float? height)
+    {
+        var values = new[] { x, y, width, height };
+        var present = values.Count(value => value.HasValue);
+        if (present == 0) return;
+        if (present != values.Length || values.Any(value => !float.IsFinite(value!.Value)))
+            throw new InvalidDataException($"{subject} has an incomplete screen region.");
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1 || y + height > 1)
+            throw new InvalidDataException($"{subject} has an out-of-bounds screen region.");
     }
 }
 

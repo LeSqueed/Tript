@@ -83,7 +83,7 @@ export function LibraryToolbar({
   );
 }
 
-function LibrarySelectFilters({
+export function LibrarySelectFilters({
   query,
   gameOptions,
   dateOptions,

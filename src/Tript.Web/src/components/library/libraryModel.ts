@@ -250,6 +250,45 @@ export function sessionPlaylist(recording: ContentItem, candidates: readonly Con
 }
 
 /**
+ * True for a session with no main video: the backend lists it as a synthetic placeholder —
+ * `videoMissing` when the source file is gone, `highlightsOnly` when the session is made only of
+ * its linked highlights. Its clips and highlights are still real items; the session itself cannot
+ * be opened in the player.
+ */
+export function lacksMainVideo(item: ContentItem): boolean {
+  return !isClipContent(item) && (item.videoMissing === true || item.highlightsOnly === true);
+}
+
+/**
+ * The clip/highlight counts a session card badges. One pass over the whole list so the badge is
+ * stable whether the card sits in a group, a flat grid or the sessions page.
+ */
+export function recordingChildCounts(items: readonly ContentItem[]): Map<string, { clips: number; highlights: number }> {
+  const counts = new Map<string, { clips: number; highlights: number }>();
+  for (const group of groupByRecording(items)) {
+    if (!group.recording) continue;
+    counts.set(group.recording.filePath, {
+      clips: group.clips.length,
+      highlights: group.clips.filter((clip) => clip.automated).length,
+    });
+  }
+  return counts;
+}
+
+/**
+ * The linked highlights a session card previews in place of its own video: no main video at all,
+ * or a session still being written.
+ */
+export function sessionPreviewHighlights(
+  item: ContentItem,
+  items: readonly ContentItem[],
+): ContentItem[] | undefined {
+  return item.videoMissing === true || item.highlightsOnly === true || item.recording === true
+    ? linkedAutomaticHighlights(item, items)
+    : undefined;
+}
+
+/**
  * The content list as recordings with their clips, **in the order they arrived**.
  *
  * Ordering is the caller's: `deriveGroupedLibrary` hands in an already-sorted list, so the sort
@@ -401,6 +440,10 @@ export function filterItems(
   return items.filter(
     (item) =>
       matchesType(item, query.type) &&
+      // The library's item views list actual playable items: a placeholder session has no video
+      // to open, so it stays out of the library's Sessions list. The top-level sessions page and
+      // the trash (a separate filter path) still show it.
+      (query.type !== 'sessions' || !lacksMainVideo(item)) &&
       matchesGame(item, query.game) &&
       matchesDate(item, query.range, nowSeconds) &&
       (!query.favoriteOnly || item.favorite === true) &&
@@ -623,5 +666,65 @@ export function deriveLibrary(
     firstIndex: pageItems.length === 0 ? 0 : start + 1,
     lastIndex: pageItems.length === 0 ? 0 : start + pageItems.length,
     filtered: isFiltered(query),
+  };
+}
+
+/** The date options the filter rows offer, shared by the library and the sessions page. */
+export const DATE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'any', label: 'Any time' },
+  { value: 'day', label: 'Last 24 hours' },
+  { value: 'week', label: 'Last 7 days' },
+  { value: 'month', label: 'Last 30 days' },
+  { value: 'year', label: 'Last year' },
+];
+
+/** The sort options the filter rows offer, shared by the library and the sessions page. */
+export const SORT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'game', label: 'Game (A–Z)' },
+];
+
+/**
+ * The top-level sessions page: every session — including the main-video-less placeholders the
+ * library's item views hide, and the session still being written — through the same filter, sort
+ * and pagination pipeline. The type dimension is the page itself, so it takes no part in
+ * `filtered`: with every other filter cleared, an empty page means "no sessions", not "filtered out".
+ */
+export function deriveSessions(
+  items: readonly ContentItem[],
+  query: LibraryQuery,
+  nowSeconds: number,
+): LibraryPage {
+  const sessions = items.filter((item) => !isClipContent(item));
+  const matched = sortItems(
+    sessions.filter(
+      (item) =>
+        matchesGame(item, query.game) &&
+        matchesDate(item, query.range, nowSeconds) &&
+        (!query.favoriteOnly || item.favorite === true) &&
+        matchesSearch(item, query.search),
+    ),
+    query.sort,
+  );
+  const pageSize = normalizePageSize(query.pageSize);
+  const pageCount = pageCountFor(matched.length, pageSize);
+  const page = clampPage(query.page, pageCount);
+  const start = (page - 1) * pageSize;
+  const pageItems = matched.slice(start, start + pageSize);
+  return {
+    items: pageItems,
+    resultItems: matched,
+    matchCount: matched.length,
+    totalCount: sessions.length,
+    page,
+    pageCount,
+    firstIndex: pageItems.length === 0 ? 0 : start + 1,
+    lastIndex: pageItems.length === 0 ? 0 : start + pageItems.length,
+    filtered:
+      query.game !== ANY_GAME ||
+      query.range !== 'any' ||
+      query.search.trim().length > 0 ||
+      query.favoriteOnly,
   };
 }

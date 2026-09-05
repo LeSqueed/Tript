@@ -229,7 +229,7 @@ describe('LibraryView grid', () => {
     const onOpen = vi.fn();
     renderLibrary([session, clip], onOpen);
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
-    expect(onOpen).toHaveBeenCalledWith(clip, [session, clip]);
+    expect(onOpen).toHaveBeenCalledWith(clip, [session, clip], 'library');
   });
 });
 
@@ -849,7 +849,7 @@ describe('LibraryView recent sessions and groups', () => {
     const onOpen = vi.fn();
     renderLibrary([newest], onOpen);
     fireEvent.click(within(screen.getByTestId('library-recent')).getByRole('button', { name: 'Open Recording 2' }));
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'ow-2.mp4' }), expect.anything());
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'ow-2.mp4' }), expect.anything(), 'session');
   });
 
   it('withdraws the recent shelf once the user is filtering', () => {
@@ -866,5 +866,30 @@ describe('LibraryView recent sessions and groups', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     expect(screen.getByTestId('library-grid')).toBeTruthy();
     expect(screen.queryByTestId('library-hero')).toBeNull();
+  });
+});
+
+describe('LibraryView sessions surface', () => {
+  it('keeps placeholder sessions off the item grids, where the library lists playable items', () => {
+    renderLibrary([
+      item({ fileName: 'a.mp4', title: 'Session A', startTime: NOW - 1 * HOUR }),
+      item({ fileName: 'b.mp4', title: 'Session B', startTime: NOW - 2 * HOUR }),
+      item({ fileName: 'c.mp4', title: 'Session C', startTime: NOW - 3 * HOUR }),
+      item({ fileName: 'd.mp4', title: 'Session D', startTime: NOW - 4 * HOUR, videoMissing: true }),
+    ]);
+    // The shelf is a sessions surface: it keeps its placeholders, in place.
+    const recent = screen.getByTestId('library-recent');
+    expect(within(recent).getByRole('button', { name: 'Open Session A' })).toBeTruthy();
+    expect(within(recent).queryByRole('button', { name: 'Open Session D' })).toBeNull();
+    // Session D is fourth, so the shelf does not explain its absence from the Latest grid: the
+    // placeholder filter does.
+    expect(screen.queryByTestId('library-latest')).toBeNull();
+  });
+
+  it('keeps placeholders out of the Sessions list', () => {
+    const placeholder = item({ fileName: 'gone.mp4', title: 'Gone session', videoMissing: true });
+    renderLibrary([placeholder, session]);
+    fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
+    expect(cardTitles()).toEqual(['Ranked win']);
   });
 });

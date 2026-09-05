@@ -12,7 +12,9 @@ import {
   clampPage,
   DEFAULT_LIBRARY_QUERY,
   deriveLibrary,
+  deriveSessions,
   filterItems,
+  lacksMainVideo,
   formatDateChip,
   formatDurationChip,
   formatSizeChip,
@@ -568,5 +570,61 @@ describe('deriveGroupedLibrary', () => {
     const page = deriveGroupedLibrary([recording('a', NOW)], query({ page: 9 }), NOW);
     expect(page.page).toBe(1);
     expect(page.groups).toHaveLength(1);
+  });
+});
+
+describe('lacksMainVideo', () => {
+  it('flags only sessions with no playable main video', () => {
+    expect(lacksMainVideo(item({ fileName: 'gone.mp4', videoMissing: true }))).toBe(true);
+    expect(lacksMainVideo(item({ fileName: 'poor-signal.mp4', highlightsOnly: true }))).toBe(true);
+    expect(lacksMainVideo(item({ fileName: 'fine.mp4' }))).toBe(false);
+    expect(lacksMainVideo(item({ fileName: 'live.mp4', recording: true }))).toBe(false);
+    expect(lacksMainVideo(item({
+      fileName: 'clip.mp4',
+      contentType: 'clip',
+      filePath: 'clips/clip.mp4',
+      videoMissing: true,
+    }))).toBe(false);
+  });
+
+  it('keeps the library\'s sessions list playable without touching other types', () => {
+    const gone = item({ fileName: 'gone.mp4', videoMissing: true });
+    expect(filterItems([gone, recentSession], query({ type: 'sessions' }), NOW))
+      .toEqual([recentSession]);
+    expect(filterItems([gone, recentSession], query({ type: 'all' }), NOW))
+      .toEqual([gone, recentSession]);
+  });
+});
+
+describe('deriveSessions', () => {
+  const gone = item({ fileName: 'gone.mp4', title: 'Gone session', videoMissing: true, startTime: NOW - HOUR });
+  const live = item({ fileName: 'live.mp4', title: 'Live session', recording: true, startTime: NOW });
+
+  it('lists every session, placeholders and the live one included, never a clip', () => {
+    const page = deriveSessions([recentSession, clip, gone, live, bareSession], query(), NOW);
+    expect(page.resultItems.map((i) => i.fileName)).toEqual([
+      'live.mp4',
+      'gone.mp4',
+      'cs2-today.mp4',
+      'session-bare.mp4',
+    ]);
+    expect(page.totalCount).toBe(4);
+  });
+
+  it('applies the game, date, favourite and search dimensions', () => {
+    const items = [recentSession, clip, gone, oldSession];
+    expect(deriveSessions(items, query({ game: 'Counter-Strike 2' }), NOW).resultItems)
+      .toEqual([recentSession]);
+    expect(deriveSessions(items, query({ range: 'day' }), NOW).resultItems)
+      .toEqual([gone, recentSession]);
+    expect(deriveSessions(items, query({ search: 'ranked win' }), NOW).resultItems)
+      .toEqual([recentSession]);
+    expect(deriveSessions(items, query({ favoriteOnly: true }), NOW).resultItems)
+      .toEqual([]);
+  });
+
+  it('does not count the page itself as a filter', () => {
+    expect(deriveSessions(ALL, query(), NOW).filtered).toBe(false);
+    expect(deriveSessions(ALL, query({ game: 'Overwatch' }), NOW).filtered).toBe(true);
   });
 });

@@ -32,15 +32,19 @@ import {
   ANY_GAME,
   availableGames,
   cascadableLinkedHighlights,
+  DATE_OPTIONS,
   DEFAULT_LIBRARY_QUERY,
   deriveGroupedLibrary,
   deriveLibrary,
   clampPage,
   groupByRecording,
   itemLabel,
-  linkedAutomaticHighlights,
+  lacksMainVideo,
   NO_GAME,
   pageCountFor,
+  recordingChildCounts,
+  sessionPreviewHighlights,
+  SORT_OPTIONS,
   UNKNOWN_GAME_LABEL,
   type ContentTypeFilter,
   type LibraryQuery,
@@ -65,20 +69,6 @@ function typeFilters(trashCount: number): { value: ContentTypeFilter; label: str
   ];
 }
 
-const DATE_OPTIONS: SelectOption[] = [
-  { value: 'any', label: 'Any time' },
-  { value: 'day', label: 'Last 24 hours' },
-  { value: 'week', label: 'Last 7 days' },
-  { value: 'month', label: 'Last 30 days' },
-  { value: 'year', label: 'Last year' },
-];
-
-const SORT_OPTIONS: SelectOption[] = [
-  { value: 'newest', label: 'Newest first' },
-  { value: 'oldest', label: 'Oldest first' },
-  { value: 'game', label: 'Game (A–Z)' },
-];
-
 export interface LibraryViewProps {
   client: IpcClient;
   /** Everything the backend has, in its own order (newest-first), reactive via the shell's source. */
@@ -87,8 +77,12 @@ export interface LibraryViewProps {
   thumbnailLoadingActive?: boolean;
   connectionState?: ConnectionState;
   contentLoaded?: boolean;
-  /** The shell's player seam: called with the item the user opened. */
-  onOpen?: (item: ContentItem, resultItems: ContentItem[]) => void;
+  /**
+   * The shell's player seam. `origin` says what the player's playlist is built from: a session
+   * entry point (the recent shelf) plays the session's own list; a library card plays the result
+   * list the card came from, even when the card is a session.
+   */
+  onOpen?: (item: ContentItem, resultItems: ContentItem[], origin: 'library' | 'session') => void;
   /**
    * The clock the date filter measures its trailing window against, in epoch seconds. Injectable so
    * a test can put "now" somewhere fixed relative to its fixtures instead of racing the real clock.
@@ -294,7 +288,7 @@ export function LibraryView({
 
   const groupActions: GroupActions = useMemo(
     () => ({
-      onOpen: (item: ContentItem) => onOpen?.(item, groupView?.resultItems ?? []),
+      onOpen: (item: ContentItem) => onOpen?.(item, groupView?.resultItems ?? [], 'session'),
       onDelete: requestDelete,
       onToggleFavorite: toggleFavorite,
       selectable: selectionMode,
@@ -328,24 +322,17 @@ export function LibraryView({
   const allGroups = groupView && !groupView.filtered ? groupByRecording(groupView.resultItems) : [];
   // The flat grids (the Latest shelf and the ungrouped view) show a recording next to its clips like
   // groupings do, so their cards need the same clips/highlights counts the recording groups carry.
-  // Built from the whole list so the badge is stable whether it sits in a group or a flat grid.
-  const recordingCounts = useMemo(() => {
-    const counts = new Map<string, { clips: number; highlights: number }>();
-    for (const group of groupByRecording(items)) {
-      if (!group.recording) continue;
-      counts.set(group.recording.filePath, {
-        clips: group.clips.length,
-        highlights: group.clips.filter((clip) => clip.automated).length,
-      });
-    }
-    return counts;
-  }, [items]);
+  const recordingCounts = useMemo(() => recordingChildCounts(items), [items]);
   const recentGroups = groupView && !groupView.filtered
     ? allGroups.filter((group) => group.recording !== null).slice(0, 3)
     : [];
   const recentRecordingPaths = new Set(recentGroups.map((group) => group.recording!.filePath));
+  // The Recent shelf is a sessions surface and keeps its placeholder sessions; the item grid below
+  // it lists actual playable items, so placeholders do not repeat there.
   const allLatestItems = groupView
-    ? groupView.resultItems.filter((item) => !recentRecordingPaths.has(item.filePath))
+    ? groupView.resultItems.filter(
+        (item) => !recentRecordingPaths.has(item.filePath) && !lacksMainVideo(item),
+      )
     : [];
   const latestPageCount = groupView && !groupView.filtered
     ? pageCountFor(allLatestItems.length, query.pageSize)
@@ -534,13 +521,13 @@ export function LibraryView({
                 <ul className="library-grid" data-testid="library-latest-grid">
                  {latestItems.map((item) => (
                    <li key={selectionKey(item)}>
-                       <ContentCard
-                        item={item}
-                        clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                        highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                        previewHighlights={item.videoMissing || item.highlightsOnly || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
-                        thumbnailLoadingActive={thumbnailLoadingActive}
-                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
+                        <ContentCard
+                         item={item}
+                         clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                         highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                         previewHighlights={sessionPreviewHighlights(item, items)}
+                         thumbnailLoadingActive={thumbnailLoadingActive}
+                         onOpen={(item) => onOpen?.(item, groupView.resultItems, 'library')}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
                        selectable={selectionMode}
@@ -561,9 +548,9 @@ export function LibraryView({
                   item={item}
                   clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
                   highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                  previewHighlights={item.videoMissing || item.highlightsOnly || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                  previewHighlights={sessionPreviewHighlights(item, items)}
                   thumbnailLoadingActive={thumbnailLoadingActive}
-                  onOpen={(item) => onOpen?.(item, view.resultItems)}
+                  onOpen={(item) => onOpen?.(item, view.resultItems, 'library')}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}
                 selectable={selectionMode}

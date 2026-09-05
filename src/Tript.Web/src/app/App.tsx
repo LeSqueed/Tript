@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The app shell: recorder bar on top, nav + content below, and a live connection status. Three
-// routes, not five.
+// The app shell: recorder bar on top, nav + content below, and a live connection status. Top-level
+// pages (library, sessions, settings, training) plus the player and session-review overlays.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useIpcClient } from './useConnection';
@@ -14,6 +14,7 @@ import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToast
 import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
+import { SessionsView } from '../components/SessionsView';
 import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
@@ -21,6 +22,7 @@ import { useTrash } from '../components/trash/useTrash';
 import {
   cascadableLinkedHighlights,
   itemLabel,
+  lacksMainVideo,
   sessionPlaylist,
   sourceSession,
 } from '../components/library/libraryModel';
@@ -36,7 +38,7 @@ import { trainingEnabled } from '../buildFeatures';
 import { TrainingView } from '../components/TrainingView';
 import './app.css';
 
-export type Route = 'library' | 'session' | 'settings' | 'player' | 'training';
+export type Route = 'library' | 'sessions' | 'session' | 'settings' | 'player' | 'training';
 
 const FALLBACK_BUILT_IN_GAME_IDS = ['Overwatch'] as const;
 
@@ -103,7 +105,7 @@ function AppShell({
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
-  const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'session'>('library');
+  const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'sessions' | 'session'>('library');
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
   const [sessionPlayerOrigin, setSessionPlayerOrigin] = useState<{
     recording: ContentItem;
@@ -219,10 +221,23 @@ function AppShell({
     setRoute('session');
   }, [items, playerItem, playerNavigation]);
 
+  // The player's playlist depends on what the user opened, not just what they opened it from: a
+  // session entry point (the recent shelf, the sessions page) plays that session's own list — main
+  // video plus its highlights in order — while a library card plays the result list it sits in, even
+  // when the card is a session. `returnRoute` is where back lands; the sessions page keeps its own
+  // tab, the library's review overlay does not.
   const openInPlayer = useCallback(
-    (item: ContentItem, resultItems: ContentItem[]) => {
+    (
+      item: ContentItem,
+      resultItems: ContentItem[],
+      origin: 'library' | 'session' = 'library',
+      returnRoute: 'library' | 'sessions' = 'library',
+    ) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
-      const recording = sourceSession(item, items);
+      const isSession = item.contentType === 'recording' || item.contentType === 'buffer';
+      // A placeholder card has no main video to open, so even a library entry falls back to the
+      // session's own list: the first playable child, or the review when there is none.
+      const recording = isSession && (origin === 'session' || lacksMainVideo(item)) ? item : null;
       const navigation = recording ? sessionPlaylist(recording, items) : resultItems;
       const requested = navigation.find((candidate) => candidate.filePath === item.filePath) ?? navigation[0];
       if (!requested) {
@@ -232,11 +247,15 @@ function AppShell({
       setPlayerItem(requested);
       setPlayerTitle(itemLabel(requested));
       setPlayerNavigation(navigation);
-      setPlayerReturnRoute('library');
+      setPlayerReturnRoute(returnRoute);
       setRoute('player');
     },
     [items, openSessionReview],
   );
+
+  const openFromSessions = useCallback((item: ContentItem, resultItems: ContentItem[]) => {
+    openInPlayer(item, resultItems, 'session', 'sessions');
+  }, [openInPlayer]);
 
   const closePlayer = useCallback(() => {
     setPlayerItem(null);
@@ -586,6 +605,10 @@ function AppShell({
     replaceRouteHash('library');
     leaveFor('library');
   }, [leaveFor]);
+  const showSessions = useCallback(() => {
+    replaceRouteHash('sessions');
+    leaveFor('sessions');
+  }, [leaveFor]);
   const showSettings = useCallback(() => {
     replaceRouteHash('settings');
     leaveFor('settings');
@@ -599,8 +622,12 @@ function AppShell({
       setRoute('session');
       return;
     }
+    if (playerReturnRoute === 'sessions') {
+      showSessions();
+      return;
+    }
     showLibrary();
-  }, [playerReturnRoute, showLibrary]);
+  }, [playerReturnRoute, showLibrary, showSessions]);
   const backFromSession = useCallback(() => {
     if (sessionReturnRoute === 'player' && sessionPlayerOrigin) {
       setPlayerItem(sessionPlayerOrigin.item);
@@ -626,12 +653,21 @@ function AppShell({
         <nav className="app-nav" aria-label="Primary">
           <button
             type="button"
-            className={route === 'library' || route === 'player' || route === 'session' ? 'nav-item active' : 'nav-item'}
-            aria-current={route === 'library' || route === 'player' || route === 'session' ? 'page' : undefined}
+            className={route === 'library' || route === 'session' || (route === 'player' && playerReturnRoute !== 'sessions') ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'library' || route === 'session' || (route === 'player' && playerReturnRoute !== 'sessions') ? 'page' : undefined}
             onClick={showLibrary}
           >
             <Icon name="library" className="nav-glyph" />
             <span>Library</span>
+          </button>
+          <button
+            type="button"
+            className={route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions') ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions') ? 'page' : undefined}
+            onClick={showSessions}
+          >
+            <Icon name="monitor" className="nav-glyph" />
+            <span>Sessions</span>
           </button>
           <button
             type="button"
@@ -722,6 +758,20 @@ function AppShell({
               onDelete={requestSessionDelete}
             />
           )}
+          {(route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions')) && (
+            <div hidden={route === 'player'}>
+              <SessionsView
+                client={client}
+                items={items}
+                thumbnailLoadingActive={route === 'sessions'}
+                connectionState={connectionState}
+                contentLoaded={loaded}
+                onOpen={openFromSessions}
+                retentionHours={trash.retentionHours}
+                deleteLinkedHighlightsByDefault={deleteLinkedHighlightsByDefault}
+              />
+            </div>
+          )}
           {route === 'settings' && <SettingsView client={client} builtInGameIds={builtInGameIds} />}
           {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}
         </div>
@@ -742,10 +792,13 @@ function readStartupRoute(): Route {
   if (hash === 'settings' || hash.startsWith('settings-')) {
       return 'settings';
   }
+  if (hash === 'sessions') {
+    return 'sessions';
+  }
   return 'library';
 }
 
-function replaceRouteHash(route: 'library' | 'settings'): void {
+function replaceRouteHash(route: 'library' | 'sessions' | 'settings'): void {
   const hash = `#${route}`;
   if (window.location.hash === hash) {
     return;

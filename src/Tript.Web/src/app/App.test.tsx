@@ -347,6 +347,65 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Review highlights (1)' })).toBeTruthy();
   });
 
+  it('switches to the sessions page, which keeps placeholder sessions the library item views hide', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [CLIP_1, SESSION_2, { ...SESSION_1, videoMissing: true }] },
+      }));
+    });
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: 'Sessions' }));
+    expect(within(nav).getByRole('button', { name: 'Sessions' }).getAttribute('aria-current')).toBe('page');
+    const grid = screen.getByTestId('sessions-grid');
+    expect(within(grid).getByRole('button', { name: 'Open Session 2' })).toBeTruthy();
+    expect(within(grid).getByRole('button', { name: 'Open Session 1' })).toBeTruthy();
+    expect(within(grid).queryByRole('button', { name: 'Open Nice shot' })).toBeNull();
+    expect(screen.queryByTestId('library-groups')).toBeNull();
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
+    expect(screen.getByTestId('library-groups')).toBeTruthy();
+  });
+
+  it('plays the session list from the sessions page and the result list from a library list', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, HIGHLIGHT_2, SESSION_1, SESSION_2, CLIP_1] },
+      }));
+    });
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+
+    // From the sessions page: the player's playlist is that session's own list.
+    fireEvent.click(within(nav).getByRole('button', { name: 'Sessions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play First highlight' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play Second highlight' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Play Session 2' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Play Nice shot' })).toBeNull();
+
+    // Back lands on the sessions page, which kept its place.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(document.querySelector('.player-view')).toBeNull();
+    expect(screen.getByTestId('sessions-view')).toBeTruthy();
+
+    // From a library list: the same card plays the result list it sits in.
+    fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play Session 2' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Play First highlight' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Play Second highlight' })).toBeNull();
+  });
+
   it('refreshes the open player item when content metadata changes', () => {
     renderApp();
     connect();

@@ -242,10 +242,20 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
   });
 
+  it('keeps the recording mode default when an older settings push omits it', () => {
+    const { ws } = renderSettings();
+    const older = makeSettings();
+    delete (older.recording as Partial<typeof older.recording>).mode;
+    pushSettings(ws, older, 'older-backend');
+    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
+
+    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
+  });
+
   it('describes the replay buffer on the highlights page', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Highlights' }));
-    expect(screen.getByText(/runs when the recording mode is Session \+ replay buffer/i)).toBeTruthy();
+    expect(screen.getByText(/runs in Session \+ replay buffer and Replay buffer only modes/i)).toBeTruthy();
   });
 
   // Settings keeps its technical vocabulary on purpose: the people who open these pages are the

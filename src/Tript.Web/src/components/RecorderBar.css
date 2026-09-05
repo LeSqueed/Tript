@@ -28,6 +28,11 @@
   background: var(--color-accent);
 }
 
+.rec-dot.buffering {
+  background: var(--color-accent);
+  animation: rec-pulse 1.4s ease-in-out infinite;
+}
+
 @keyframes rec-pulse {
   0%,
   100% {

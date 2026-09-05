@@ -47,7 +47,7 @@ const DEFAULT_SETTINGS: SettingsModel = {
   buffer: { enabled: false, duration: 30, maxSizeBytes: 4 * 1024 * 1024 * 1024 },
   audio: { outputMode: 'Normal', tracks: [], devices: [], mic: null, desktop: null },
   capture: { method: 'Auto', display: null, displayLabel: null },
-  game: { gameCaptureTimeout: 10, gameList: [] },
+  game: { gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] },
   general: {
     startWithWindows: false,
     startupVisibility: 'Window',

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// The recording page: the session recording itself. Mode, resolution, frame rate, the quality or
-// bitrate the chosen mode reads, HDR, and the output folder form the main section; the encoder and
-// its rate-control surface, plus the replay buffer's size cap, sit in the advanced disclosure.
+// Recording mode, resolution, frame rate, quality, HDR, and output location form the main section;
+// the encoder and its rate-control surface, plus the replay buffer's size cap, are advanced.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
@@ -19,6 +18,7 @@ import { ConfirmDialog } from '../../components/ui/confirmDialog';
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
   { value: 'Session', label: 'Session (one continuous recording)' },
   { value: 'SessionWithReplayBuffer', label: 'Session + replay buffer (records and live highlights)' },
+  { value: 'ReplayBufferOnly', label: 'Replay buffer only (highlights without session recordings)' },
 ];
 
 /**
@@ -385,7 +385,7 @@ export function RecordingPage({
     <div className="settings-page" data-page="recording">
       <Field
         label="Recording mode"
-        hint="Every mode records the full session. The replay mode also keeps recent footage in memory so highlights can start before the moment happens."
+        hint="Record full sessions, keep recent footage available for highlights, or do both."
       >
         <SelectField
           value={settings.mode}
@@ -447,7 +447,7 @@ export function RecordingPage({
         />
       </Field>
 
-      <Field label="Output directory" hint={`Where recordings are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
+      <Field label="Output directory" hint={`Where recordings and highlights are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
         <span className="settings-row">
           {/* Explicit aria-label: this is the only field sharing its <label> with a second
               control, so its derived name would otherwise absorb the Browse button's text. */}

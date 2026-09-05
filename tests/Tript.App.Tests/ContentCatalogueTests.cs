@@ -343,6 +343,61 @@ public sealed class ContentCatalogueTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task ListContent_HighlightsOnlySession_EmitsIntentionalSessionContainer()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/buffer-session.mp4", 10, 20,
+            sourceSessionHighlightsOnly: true));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var session = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "recording");
+
+        Assert.Equal("sessions/buffer-session.mp4", session.GetProperty("filePath").GetString());
+        Assert.True(session.GetProperty("highlightsOnly").GetBoolean());
+        Assert.False(session.TryGetProperty("videoMissing", out var videoMissing));
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
+    public async Task ListContent_MixedSessionMarkers_RemainMissingVideo()
+    {
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-2.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/session.mp4", 10, 20,
+            sourceSessionHighlightsOnly: true));
+        Assert.True(clipTitles.SaveAutomatic("highlight-2.mp4", "sessions/session.mp4", 30, 40));
+
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var session = content.GetProperty("content").EnumerateArray()
+            .Single(item => item.GetProperty("contentType").GetString() == "recording");
+
+        Assert.True(session.GetProperty("videoMissing").GetBoolean());
+        Assert.False(session.TryGetProperty("highlightsOnly", out var highlightsOnly));
+
+        await host.ShutdownAsync();
+    }
+
+    [SkippableFact]
     public async Task ListContent_MultipleHighlightsForMissingSource_EmitOneRecording()
     {
         var highlights = Path.Combine(_contentRoot, "highlights");

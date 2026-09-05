@@ -51,4 +51,17 @@ public sealed class ClipTitleStoreTests : IDisposable
 
         Assert.Empty(store.EnumerateRecords());
     }
+
+    [Fact]
+    public void SaveAutomatic_PersistsHighlightsOnlySessionOwnership()
+    {
+        var store = new ClipTitleStore(_root);
+
+        Assert.True(store.SaveAutomatic("highlight-a.mp4", "sessions/session-a.mp4", 10, 20,
+            sourceSessionHighlightsOnly: true));
+
+        var record = Assert.Single(store.EnumerateRecords()).Record;
+        Assert.True(record.SourceSessionHighlightsOnly);
+        Assert.Equal("sessions/session-a.mp4", record.SourceSessionPath);
+    }
 }

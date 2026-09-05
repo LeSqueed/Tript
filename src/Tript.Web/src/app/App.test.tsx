@@ -320,6 +320,32 @@ describe('App shell', () => {
     expect(within(screen.getByRole('button', { name: 'Open Session 1' })).getAllByRole('presentation')).toHaveLength(2);
   });
 
+  it('opens a highlights-only parent directly in review and counts only its cascade on deletion', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, { ...SESSION_1, highlightsOnly: true, favorite: true }] },
+      }));
+    });
+
+    const card = screen.getByRole('button', { name: 'Open Session 1' });
+    expect(within(card).getAllByText('Highlights-only session')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /Session 1 .*favorites/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Session 1' }));
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('0 items');
+    fireEvent.click(screen.getByRole('checkbox', { name: /delete linked highlights/i }));
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('1 item');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    fireEvent.click(card);
+
+    expect(screen.getByText('1 highlight')).toBeTruthy();
+    expect(document.querySelector('.player-view')).toBeNull();
+  });
+
   it('refreshes the open player item when content metadata changes', () => {
     renderApp();
     connect();

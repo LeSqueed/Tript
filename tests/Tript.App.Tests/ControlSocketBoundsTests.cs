@@ -4,6 +4,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using Tript.App.Ipc;
+using Tript.Settings;
 using Xunit;
 
 namespace Tript.App.Tests;
@@ -113,6 +114,30 @@ public sealed class ControlSocketBoundsTests
         var (stopped, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", stopped);
 
+        await host.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task ReplayBufferOnly_StartStateReportsItsActiveMode()
+    {
+        var settings = new SettingsStore(new SettingsFileProvider(_settingsPath));
+        settings.Load().Recording.Mode = RecordingMode.ReplayBufferOnly;
+        settings.Save();
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"StartRecording"}""");
+        var (method, content) = await host.ReceiveAsyncParsed();
+
+        Assert.Equal("state", method);
+        var state = content.GetProperty("state");
+        Assert.True(state.GetProperty("recording").GetBoolean());
+        Assert.Equal("ReplayBufferOnly", state.GetProperty("activeRecordingMode").GetString());
+
+        await host.SendAsync("""{"method":"StopRecording"}""");
+        await host.ReceiveAsyncParsed();
         await host.ShutdownAsync();
     }
 

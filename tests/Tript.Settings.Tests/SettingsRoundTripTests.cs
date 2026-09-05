@@ -50,6 +50,7 @@ public class SettingsRoundTripTests : IDisposable
         settings.Capture.Display = "DP-1";
         settings.Capture.DisplayLabel = "Screen DP-1";
         settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
+        settings.Game.IgnoredApplications.Add(@"C:\Tools\overlay.exe");
         _store.Save();
 
         var reloaded = new SettingsStore(_provider).Load();
@@ -67,6 +68,7 @@ public class SettingsRoundTripTests : IDisposable
         // means it has to outlive the monitor being unplugged.
         Assert.Equal("Screen DP-1", reloaded.Capture.DisplayLabel);
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
+        Assert.Equal([@"C:\Tools\overlay.exe"], reloaded.Game.IgnoredApplications);
     }
 
     // The game-capture timeout crosses the JSON boundary as whole seconds: the settings UI sends a

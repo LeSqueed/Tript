@@ -73,6 +73,49 @@ public sealed class AutomaticClipStopGateTests : IDisposable
     }
 
     [Fact]
+    public void ReplayBufferOnly_CreatesNoSessionOutputOrFallbackClips()
+    {
+        _store.Load().Recording.Mode = RecordingMode.ReplayBufferOnly;
+        _store.Save();
+
+        Assert.True(_host.StartRecording(gameId: null));
+        Assert.Null(typeof(AppHost).GetField("_activeOutputPath", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(_host));
+        Assert.NotNull(typeof(AppHost).GetField("_activeSessionPath", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(_host));
+
+        var bookmarks = (List<Bookmark>)typeof(AppHost).GetField("_automaticClipBookmarks",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
+        bookmarks.Add(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
+
+        Assert.True(_host.StopRecording());
+        Assert.Equal(0, _clipEngine.CreateClipsCalls);
+        Assert.False(Directory.Exists(Path.Combine(_root, "sessions")));
+    }
+
+    [Fact]
+    public void ReplayBufferOnly_LiveHighlightBelongsToAHighlightsOnlySession()
+    {
+        _store.Load().Recording.Mode = RecordingMode.ReplayBufferOnly;
+        _store.Save();
+        Assert.True(_host.StartRecording(gameId: null));
+
+        typeof(AppHost).GetMethod("RememberAutomaticClipBookmark",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(_host,
+            [new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) }]);
+
+        Assert.True(_host.StopRecording());
+
+        var clipTitles = (Tript.App.Content.ClipTitleStore)typeof(AppHost)
+            .GetField("_clipTitles", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
+        var record = Assert.Single(clipTitles.EnumerateRecords()).Record;
+        Assert.True(record.IsAutomatic);
+        Assert.True(record.SourceSessionHighlightsOnly);
+        Assert.Contains("sessions/", record.SourceSessionPath, StringComparison.Ordinal);
+        Assert.Equal(1, _clipEngine.CreateClipsCalls);
+    }
+
+    [Fact]
     public void FailedRecordingAttempt_ClearsAStaleSessionStartGate()
     {
         var gate = typeof(AppHost).GetField("_liveHighlightsEnabledAtSessionStart",
@@ -131,7 +174,10 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         public IReadOnlyList<string> CreateClips(ClipRequest request)
         {
             Interlocked.Increment(ref _createClipsCalls);
-            return [];
+            var outputPath = request.OutputPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(outputPath, string.Empty);
+            return [outputPath];
         }
     }
 }

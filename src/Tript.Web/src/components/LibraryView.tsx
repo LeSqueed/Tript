@@ -214,6 +214,9 @@ export function LibraryView({
   }, [items, selection]);
 
   const toggleFavorite = useCallback((item: ContentItem) => {
+    if (item.highlightsOnly === true) {
+      return;
+    }
     client.send('ToggleFavorite', {
       contentType: item.contentType,
       filePath: item.filePath,
@@ -260,7 +263,9 @@ export function LibraryView({
     // session names itself but deletes nothing on its own; checked cascades add the non-favourited
     // highlights the listing would otherwise hide.
     const physicalTargets = pendingDelete.reduce(
-      (count, item) => count + (item.contentType === 'recording' && item.videoMissing === true ? 0 : 1),
+      (count, item) => count + (
+        item.contentType === 'recording' && (item.videoMissing === true || item.highlightsOnly === true) ? 0 : 1
+      ),
       0,
     );
     const cascadable = pendingDelete.reduce(
@@ -529,12 +534,12 @@ export function LibraryView({
                  {latestItems.map((item) => (
                    <li key={selectionKey(item)}>
                        <ContentCard
-                         item={item}
-                         clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                          highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                          previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
-                          thumbnailLoadingActive={thumbnailLoadingActive}
-                         onOpen={(item) => onOpen?.(item, groupView.resultItems)}
+                        item={item}
+                        clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
+                        highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                        previewHighlights={item.videoMissing || item.highlightsOnly || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                        thumbnailLoadingActive={thumbnailLoadingActive}
+                        onOpen={(item) => onOpen?.(item, groupView.resultItems)}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
                        selectable={selectionMode}
@@ -554,9 +559,9 @@ export function LibraryView({
                 <ContentCard
                   item={item}
                   clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
-                   highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
-                   previewHighlights={item.videoMissing || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
-                   thumbnailLoadingActive={thumbnailLoadingActive}
+                  highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                  previewHighlights={item.videoMissing || item.highlightsOnly || item.recording ? linkedAutomaticHighlights(item, items) : undefined}
+                  thumbnailLoadingActive={thumbnailLoadingActive}
                   onOpen={(item) => onOpen?.(item, view.resultItems)}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}

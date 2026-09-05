@@ -38,7 +38,7 @@ public sealed class SettingsResolver
 
             // Recording mode is the only authority for whether the replay output runs. The legacy
             // buffer checkbox is retained for settings-file compatibility but cannot enable it.
-             BufferEnabled = mode is RecordingMode.SessionWithReplayBuffer,
+            BufferEnabled = mode is RecordingMode.SessionWithReplayBuffer or RecordingMode.ReplayBufferOnly,
             BufferDuration = settings.Buffer.Duration,
             BufferMaxSizeBytes = settings.Buffer.MaxSizeBytes,
 

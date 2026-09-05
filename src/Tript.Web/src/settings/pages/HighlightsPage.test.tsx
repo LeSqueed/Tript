@@ -24,6 +24,7 @@ const BUFFER_MODE: RecordingSettings = {
 };
 
 const SESSION_MODE: RecordingSettings = { ...BUFFER_MODE, mode: 'Session' };
+const BUFFER_ONLY_MODE: RecordingSettings = { ...BUFFER_MODE, mode: 'ReplayBufferOnly' };
 
 function renderPage(recording: RecordingSettings = BUFFER_MODE, buffer: BufferSettings = BUFFER) {
   const update = vi.fn();
@@ -82,9 +83,12 @@ describe('highlights page in buffer mode', () => {
     });
   });
 
-  it('explains that a longer before window can fall back to the completed session', () => {
-    renderPage();
-    expect(screen.getByText(/completed session can supply the remaining history/i)).toBeTruthy();
+  it('enables replay and automatic-highlight controls in replay-buffer-only mode', () => {
+    renderPage(BUFFER_ONLY_MODE);
+
+    expect((screen.getByLabelText(/^Automatic highlights/) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText(/^Seconds before each highlight/) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText(/^Seconds after each highlight/) as HTMLInputElement).disabled).toBe(false);
   });
 });
 
@@ -95,7 +99,7 @@ describe('highlights page outside buffer mode', () => {
     expect((screen.getByLabelText(/^Automatic highlights/) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText(/^Seconds before each highlight/) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText(/^Seconds after each highlight/) as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/Needs the Session \+ replay buffer/i)).toBeTruthy();
+    expect(screen.getByText(/Needs a replay buffer recording mode/i)).toBeTruthy();
   });
 
   it('lets the user clear a stale enabled setting while explaining that it is inactive', () => {
@@ -104,7 +108,7 @@ describe('highlights page outside buffer mode', () => {
 
     expect(toggle.checked).toBe(true);
     expect(toggle.disabled).toBe(false);
-    expect(screen.getByText(/Inactive without the Session \+ replay buffer/i)).toBeTruthy();
+    expect(screen.getByText(/Inactive without a replay buffer recording mode/i)).toBeTruthy();
     fireEvent.click(toggle);
     expect(update).toHaveBeenCalledWith('recording', { automaticClipsEnabled: false });
   });

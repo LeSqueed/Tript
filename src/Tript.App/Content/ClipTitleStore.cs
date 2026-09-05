@@ -213,6 +213,7 @@ internal sealed class ClipTitleStore
                 DurationSeconds = source.DurationSeconds,
                 IsAutomatic = source.IsAutomatic,
                 SourceSessionPath = source.SourceSessionPath,
+                SourceSessionHighlightsOnly = source.SourceSessionHighlightsOnly,
                 ClipStartTime = source.ClipStartTime,
                 ClipEndTime = source.ClipEndTime,
                 Game = source.Game,
@@ -226,7 +227,7 @@ internal sealed class ClipTitleStore
     // Persists the relationship and timeline bounds for a generated highlight. Manual clips do not
     // receive these fields, which keeps them out of the session-specific highlight view.
     internal bool SaveAutomatic(string clipFileName, string sourceSessionPath,
-        double startSeconds, double endSeconds)
+        double startSeconds, double endSeconds, bool sourceSessionHighlightsOnly = false)
     {
         lock (_writeGate)
         {
@@ -237,6 +238,7 @@ internal sealed class ClipTitleStore
             var record = existing.Record ?? new ClipTitleRecord();
             record.IsAutomatic = true;
             record.SourceSessionPath = sourceSessionPath;
+            record.SourceSessionHighlightsOnly = sourceSessionHighlightsOnly ? true : null;
             record.ClipStartTime = startSeconds;
             record.ClipEndTime = endSeconds;
             return Write(clipFileName, record);
@@ -315,6 +317,8 @@ internal sealed class ClipTitleRecord
     public bool IsAutomatic { get; set; }
 
     public string? SourceSessionPath { get; set; }
+
+    public bool? SourceSessionHighlightsOnly { get; set; }
 
     // The game attribution, copied at creation so deleting the source session no longer erases the
     // tag. Older records omit both and fall back to inheritance / backfill at list time.

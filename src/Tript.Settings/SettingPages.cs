@@ -170,6 +170,8 @@ public sealed class GameSettings
     // a game on first launch; a user who edits the list keeps exactly what they saved, because
     // this default only applies when a settings file is absent or has no gameList key.
     public List<GameSetting> GameList { get; set; } = [new() { Id = "Overwatch", Name = "Overwatch" }];
+
+    public List<string> IgnoredApplications { get; set; } = [];
 }
 
 // The general page owns desktop-shell preferences rather than recorder configuration. The headless

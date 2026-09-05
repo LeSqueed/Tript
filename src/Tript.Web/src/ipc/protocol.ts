@@ -7,6 +7,8 @@
 //   - Backend → frontend messages: lowercase method names.
 // This is a greenfield contract, so the convention is applied everywhere uniformly.
 
+import type { RecordingMode } from '../settings/settingsModel';
+
 // ---------------------------------------------------------------------------
 // Envelope
 // ---------------------------------------------------------------------------
@@ -98,6 +100,8 @@ export interface ContentItem {
   automaticClipsTotal?: number;
   /** True when this recording is synthetic because its source video no longer exists. */
   videoMissing?: boolean;
+  /** True when this synthetic recording represents a session made only from linked highlights. */
+  highlightsOnly?: boolean;
   /** True only for the session the active recording is writing right now. */
   recording?: boolean;
   /** True for PQ/HLG video; absent means HDR status is not established. */
@@ -172,6 +176,7 @@ export interface DisplayFallbackWarning {
 
 export interface RecordingState {
   recording: boolean;
+  activeRecordingMode?: RecordingMode | null;
   game?: GameInfo | null;
   activeModelGameId?: string | null;
   /**

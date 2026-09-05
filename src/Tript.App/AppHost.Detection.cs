@@ -199,11 +199,8 @@ internal sealed partial class AppHost
         if (normalized is null)
             return;
 
-        lock (_ignoredCandidateGate)
-        {
-            if (_ignoredCandidatePaths.Contains(normalized))
-                return;
-        }
+        if (_settingsStore.Load().Game.IgnoredApplications?.Contains(normalized, FilePaths.Comparer) == true)
+            return;
 
         _ipc.Broadcast("gameCandidate", JsonSerializer.SerializeToElement(new
         {
@@ -235,8 +232,26 @@ internal sealed partial class AppHost
             return;
         }
 
-        lock (_ignoredCandidateGate)
-            _ignoredCandidatePaths.Add(normalized);
+        lock (_settingsUpdateGate)
+        {
+            var saved = _settingsStore.TryUpdate(settings =>
+            {
+                settings.Game.IgnoredApplications ??= [];
+                if (!settings.Game.IgnoredApplications.Contains(normalized, FilePaths.Comparer))
+                    settings.Game.IgnoredApplications.Add(normalized);
+                return null;
+            }, out _, out var failure);
+
+            if (!saved)
+            {
+                var error = $"That application was not ignored: {failure ?? "the settings file could not be written."}";
+                PushError(error);
+                PushGameCandidateActionResult(requestId, normalized, "ignore", false, error);
+                return;
+            }
+        }
+
+        PushSettings();
         PushGameCandidateActionResult(requestId, normalized, "ignore", true, null);
     }
 
@@ -287,8 +302,6 @@ internal sealed partial class AppHost
         RebuildDetectionTargets();
         PushGameList();
         PushSettings();
-        lock (_ignoredCandidateGate)
-            _ignoredCandidatePaths.Add(normalized);
         PushGameCandidateActionResult(requestId, normalized, "add", true, null);
     }
 
@@ -453,8 +466,8 @@ internal sealed partial class AppHost
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(_activeOutputPath)
-            && string.Equals(Path.GetFileName(_activeOutputPath), sessionFile,
+        if (!string.IsNullOrWhiteSpace(_activeSessionPath)
+            && string.Equals(Path.GetFileName(_activeSessionPath), sessionFile,
                 StringComparison.OrdinalIgnoreCase)
             && _pendingMetadata is not null)
         {
@@ -651,7 +664,7 @@ internal sealed partial class AppHost
                 }
 
                 var recorder = _recorder;
-                var sourcePath = _activeOutputPath;
+                var sourcePath = _activeSessionPath;
                 if (recorder is null || sourcePath is null)
                     return;
 
@@ -763,10 +776,11 @@ internal sealed partial class AppHost
             }
 
             var metadataSaved = true;
+            var highlightsOnlySession = _activeRecordingMode is RecordingMode.ReplayBufferOnly;
             foreach (var result in results)
             {
                 metadataSaved &= _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
-                    region.Start.TotalSeconds, region.End.TotalSeconds);
+                    region.Start.TotalSeconds, region.End.TotalSeconds, highlightsOnlySession);
             }
             AttachGameToClips(results, sourceSessionPath);
             if (!metadataSaved)
@@ -847,7 +861,7 @@ internal sealed partial class AppHost
     private void SavePendingLiveHighlightsAtStop()
     {
         var recorder = _recorder;
-        var sourcePath = _activeOutputPath;
+        var sourcePath = _activeSessionPath;
         if (recorder is null || sourcePath is null)
             return;
 

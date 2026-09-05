@@ -46,7 +46,7 @@ internal sealed class FakeRecorderSession : IRecorderSession
 
     internal void CompleteStop() => _output.CompleteStop();
 
-    internal sealed class FakeOutput : IRecorderOutput
+    internal sealed class FakeOutput : IRecorderOutput, IReplayBufferOutput
     {
         public ResolvedRecorderSettings? LastSettings { get; set; }
 
@@ -78,6 +78,17 @@ internal sealed class FakeRecorderSession : IRecorderSession
         }
 
         public bool WaitForStop(TimeSpan timeout) => !IsActive;
+
+        public bool SaveReplay(string directory, string format, Action<string> onSaved)
+        {
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, $"fake-replay-{Guid.NewGuid():N}.mp4");
+            File.WriteAllText(path, string.Empty);
+            onSaved(path);
+            return true;
+        }
+
+        public bool WaitForReplaySave(TimeSpan timeout) => true;
 
         internal void CompleteStop()
         {

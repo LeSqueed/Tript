@@ -3,15 +3,13 @@
 // Which of the things the recorder can be doing it is actually doing. Pure, so each state is
 // testable without a socket or a clock, and so the ordering between them is stated once rather than
 // scattered through JSX.
-//
-// There is deliberately no "instant replay ready" state. The rolling buffer is not implemented —
-// `RecordingModeExtensions.IsAlphaSupported` accepts Session only, and Buffer mode "writes nothing
-// by design" — so a UI state for it would be showing the user something that cannot be true. Add it
-// when the buffer exists, not before.
+
+import type { RecordingMode } from '../../settings/settingsModel';
 
 export type RecorderState =
   | { kind: 'disconnected' }
   | { kind: 'recording'; game: string | null; startedAt: number | null }
+  | { kind: 'buffering'; game: string | null; startedAt: number | null }
   | { kind: 'detected'; game: string }
   | { kind: 'idle' };
 
@@ -22,6 +20,7 @@ export interface RecorderInputs {
   detected: boolean;
   /** Unix seconds, from the state push. Null when the backend did not report one. */
   startedAt: number | null;
+  activeRecordingMode: RecordingMode | null;
 }
 
 export function deriveRecorderState(inputs: RecorderInputs): RecorderState {
@@ -31,7 +30,11 @@ export function deriveRecorderState(inputs: RecorderInputs): RecorderState {
     return { kind: 'disconnected' };
   }
   if (inputs.recording) {
-    return { kind: 'recording', game: inputs.game, startedAt: inputs.startedAt };
+    return {
+      kind: inputs.activeRecordingMode === 'ReplayBufferOnly' ? 'buffering' : 'recording',
+      game: inputs.game,
+      startedAt: inputs.startedAt,
+    };
   }
   if (inputs.detected && inputs.game) {
     return { kind: 'detected', game: inputs.game };

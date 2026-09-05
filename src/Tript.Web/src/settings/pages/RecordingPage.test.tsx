@@ -86,6 +86,17 @@ describe('recording page layout', () => {
 });
 
 describe('recording mode change', () => {
+  it('offers replay-buffer-only mode and sends it unchanged', () => {
+    const update = renderPage();
+    const mode = screen.getByLabelText(/^Recording mode/) as HTMLSelectElement;
+
+    expect(Array.from(mode.options).map((option) => option.text)).toContain(
+      'Replay buffer only (highlights without session recordings)',
+    );
+    fireEvent.change(mode, { target: { value: 'ReplayBufferOnly' } });
+    expect(update).toHaveBeenCalledWith('recording', { mode: 'ReplayBufferOnly' });
+  });
+
   it('sends just the mode when switching to Session with automatic highlights off', () => {
     const update = renderPage({ ...SETTINGS, mode: 'SessionWithReplayBuffer' });
     fireEvent.change(screen.getByLabelText(/^Recording mode/), { target: { value: 'Session' } });

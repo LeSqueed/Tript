@@ -4,7 +4,7 @@
 // setting (including the game-capture timeout); this page only says which games depart from it.
 // Per-game overrides are collapsed behind a disclosure per row, marked "modified" when set.
 
-import { useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
@@ -43,6 +43,7 @@ const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
   { value: '', label: 'Inherit global setting' },
   { value: 'Session', label: 'Session' },
   { value: 'SessionWithReplayBuffer', label: 'Session + Replay Buffer' },
+  { value: 'ReplayBufferOnly', label: 'Replay buffer only' },
 ];
 
 /** The default highlight window the backend applies when a settings push carries no value. */
@@ -94,9 +95,15 @@ export function GamePage({
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [pendingSaveRequest, setPendingSaveRequest] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [ignoredApplicationFilter, setIgnoredApplicationFilter] = useState('');
+  const deferredIgnoredApplicationFilter = useDeferredValue(ignoredApplicationFilter.trim().toLowerCase());
   const pendingBrowseRequest = useRef<string | null>(null);
 
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
+  const ignoredApplications = Array.isArray(settings.ignoredApplications) ? settings.ignoredApplications : [];
+  const visibleIgnoredApplications = ignoredApplications
+    .map((executablePath, index) => ({ executablePath, index }))
+    .filter(({ executablePath }) => executablePath.toLowerCase().includes(deferredIgnoredApplicationFilter));
   const builtInIds = new Set(builtInGameIds.map((id) => id.toLowerCase()));
 
   useEffect(() => {
@@ -127,6 +134,10 @@ export function GamePage({
   function removeGame(index: number) {
     const next = gameList.filter((_, i) => i !== index);
     update(page, { gameList: next });
+  }
+
+  function removeIgnoredApplication(index: number) {
+    update(page, { ignoredApplications: ignoredApplications.filter((_, i) => i !== index) });
   }
 
   function patchGame(index: number, patch: Partial<GameSetting>) {
@@ -275,10 +286,10 @@ export function GamePage({
           const modified = hasOverrides(game);
           const effectiveMode = game.recordingModeOverride?.mode ?? globalRecordingMode;
           const automaticClipOverridesDisabled = !automaticClipsEnabled
-            || effectiveMode !== 'SessionWithReplayBuffer';
+            || (effectiveMode !== 'SessionWithReplayBuffer' && effectiveMode !== 'ReplayBufferOnly');
           const automaticClipDisabledReason = !automaticClipsEnabled
             ? 'Automatic highlights are off in global settings.'
-            : 'Automatic highlights need the Session + replay buffer recording mode.';
+            : 'Automatic highlights need a replay buffer recording mode.';
           return (
           <div className="game-row" key={game.id ?? index}>
             <div className="game-row-main">
@@ -444,10 +455,59 @@ export function GamePage({
           );
         })}
       </div>
+
+      <details className="settings-advanced ignored-applications">
+        <summary>
+          Ignored applications
+          <span className="settings-advanced-marker">{ignoredApplications.length}</span>
+        </summary>
+        <div className="settings-advanced-body">
+          <p className="muted small">These applications will not be suggested as custom games.</p>
+          {ignoredApplications.length === 0 ? (
+            <p className="muted small">No ignored applications.</p>
+          ) : (
+            <>
+              <label className="field ignored-application-filter">
+                <span className="field-label">Filter ignored applications</span>
+                <TextField
+                  value={ignoredApplicationFilter}
+                  onChange={setIgnoredApplicationFilter}
+                  placeholder="Name or executable path"
+                />
+              </label>
+              {visibleIgnoredApplications.length === 0 ? (
+                <p className="muted small">No ignored applications match this filter.</p>
+              ) : (
+                <div className="ignored-application-list">
+                  {visibleIgnoredApplications.map(({ executablePath, index }) => (
+                    <div className="ignored-application-row" key={`${executablePath}:${index}`}>
+                      <div className="ignored-application-details">
+                        <strong>{applicationName(executablePath)}</strong>
+                        <code>{executablePath}</code>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        onClick={() => removeIgnoredApplication(index)}
+                        aria-label={`Remove ${applicationName(executablePath)} from ignored applications`}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
 
 function isAbsoluteExecutablePath(path: string): boolean {
   return /^(?:[a-zA-Z]:[\\/]|\\\\|\/).+[^\\/]$/.test(path);
+}
+
+function applicationName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }

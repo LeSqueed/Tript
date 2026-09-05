@@ -74,6 +74,8 @@ internal sealed class ContentItem
     // Present only for a synthetic recording whose source video is no longer on disk.
     public bool? VideoMissing { get; set; }
 
+    public bool? HighlightsOnly { get; set; }
+
     // Present only for the session the active recording is writing right now. The library renders it
     // as a live capture: recording in progress, non-interactive until it has highlights.
     public bool? Recording { get; set; }

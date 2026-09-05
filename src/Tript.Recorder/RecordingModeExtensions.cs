@@ -9,11 +9,11 @@ namespace Tript.Recorder;
 // ResolvedRecorderSettings) and decides which explicitly selected outputs to run.
 public static class RecordingModeExtensions
 {
-    public static bool RecordsSession(this RecordingMode mode) => true;
+    public static bool RecordsSession(this RecordingMode mode) => mode is not RecordingMode.ReplayBufferOnly;
 
     public static bool UsesReplayBuffer(this RecordingMode mode) =>
-        mode is RecordingMode.SessionWithReplayBuffer;
+        mode is RecordingMode.SessionWithReplayBuffer or RecordingMode.ReplayBufferOnly;
 
     public static bool IsAlphaSupported(this RecordingMode mode) =>
-        mode is RecordingMode.Session or RecordingMode.SessionWithReplayBuffer;
+        mode is RecordingMode.Session or RecordingMode.SessionWithReplayBuffer or RecordingMode.ReplayBufferOnly;
 }

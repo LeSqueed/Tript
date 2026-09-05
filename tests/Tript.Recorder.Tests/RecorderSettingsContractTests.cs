@@ -58,14 +58,15 @@ public class RecorderSettingsContractTests
         Assert.Equal(1, session.PlaceSourceCalls);
     }
 
-    [Fact]
-    public void RecordingMode_SessionIsAlphaSupported()
+    [Theory]
+    [InlineData(RecordingMode.Session, true, false)]
+    [InlineData(RecordingMode.SessionWithReplayBuffer, true, true)]
+    [InlineData(RecordingMode.ReplayBufferOnly, false, true)]
+    public void RecordingMode_PublicModesHaveExpectedOutputs(RecordingMode mode, bool recordsSession,
+        bool usesReplayBuffer)
     {
-        Assert.True(RecordingMode.Session.IsAlphaSupported());
-        Assert.True(RecordingMode.Session.RecordsSession());
-        // Buffer is a legacy enum alias for the combined mode and is normalized when loaded.
-        Assert.True(RecordingMode.Buffer.IsAlphaSupported());
-        Assert.True(RecordingMode.SessionWithReplayBuffer.IsAlphaSupported());
-        Assert.True(RecordingMode.SessionWithReplayBuffer.RecordsSession());
+        Assert.True(mode.IsAlphaSupported());
+        Assert.Equal(recordsSession, mode.RecordsSession());
+        Assert.Equal(usesReplayBuffer, mode.UsesReplayBuffer());
     }
 }

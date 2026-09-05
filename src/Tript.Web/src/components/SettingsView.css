@@ -327,6 +327,49 @@
   min-width: 96px;
 }
 
+.ignored-application-list,
+.ignored-application-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.ignored-applications {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line);
+}
+
+.ignored-applications p {
+  margin: 0;
+}
+
+.ignored-application-filter {
+  max-width: none;
+}
+
+.ignored-application-list {
+  gap: var(--space-2);
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.ignored-application-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-base-200);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.ignored-application-details {
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 700px) {
   .game-draft-fields {
     grid-template-columns: 1fr;

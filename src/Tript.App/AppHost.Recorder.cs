@@ -120,7 +120,10 @@ internal sealed partial class AppHost
         if (!resolved.Mode.IsAlphaSupported())
             return StartRecordingResult.UnsupportedMode;
 
-        resolved.OutputPath = BuildOutputPath(effectiveGameId);
+        var sessionPath = BuildSessionPath(effectiveGameId, resolved.Mode.RecordsSession());
+        resolved.OutputPath = resolved.Mode.RecordsSession()
+            ? sessionPath
+            : BuildReplayBufferPath();
 
         EnsureRecorderBuilt(resolved);
 
@@ -170,7 +173,9 @@ internal sealed partial class AppHost
                 return StartRecordingResult.RecorderRefused;
             recordingStarted = true;
 
-            _activeOutputPath = resolved.OutputPath;
+            _activeOutputPath = resolved.Mode.RecordsSession() ? resolved.OutputPath : null;
+            _activeSessionPath = sessionPath;
+            _activeRecordingMode = resolved.Mode;
             _currentGameId = effectiveGameId;
             _pendingMetadata = new RecordingMetadata
             {
@@ -203,8 +208,16 @@ internal sealed partial class AppHost
                 StopDetection();
 
             PushState(recording: true, effectiveGameId);
-            RequestNotification(NotificationKind.RecordingStarted, "Recording started",
-                string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
+            if (resolved.Mode is RecordingMode.ReplayBufferOnly)
+            {
+                RequestNotification(NotificationKind.RecordingStarted, "Buffering started",
+                    string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is buffering." : $"Tript is buffering {effectiveGameId}.");
+            }
+            else
+            {
+                RequestNotification(NotificationKind.RecordingStarted, "Recording started",
+                    string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
+            }
             return StartRecordingResult.Started;
         }
         finally
@@ -291,6 +304,7 @@ internal sealed partial class AppHost
         SetBackgroundWorkSuspendedForRecording(false);
 
         var sourcePath = _activeOutputPath;
+        var recordsSession = _activeRecordingMode?.RecordsSession() == true;
         List<Bookmark> automaticBookmarks;
         HashSet<Guid> liveBookmarkIds;
         bool automaticClipsWereLive;
@@ -307,7 +321,7 @@ internal sealed partial class AppHost
         }
 
         var session = _sessionTracker.Stop();
-        if (session is not null && _pendingMetadata is not null)
+        if (session is not null && _pendingMetadata is not null && recordsSession)
         {
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
             WriteMetadataRecord(_pendingMetadata);
@@ -330,11 +344,17 @@ internal sealed partial class AppHost
 
         _pendingMetadata = null;
         _activeOutputPath = null;
+        _activeSessionPath = null;
+        var stoppedMode = _activeRecordingMode;
+        _activeRecordingMode = null;
         _currentGameId = null;
         Volatile.Write(ref _recordingProcessOwner, null);
 
         PushState(recording: false, null);
-        RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
+        if (stoppedMode is RecordingMode.ReplayBufferOnly)
+            RequestNotification(NotificationKind.RecordingStopped, "Buffering stopped", "The replay buffer has stopped.");
+        else
+            RequestNotification(NotificationKind.RecordingStopped, "Recording stopped", "The recording is ready in your library.");
     }
 
     private static void DisposeRecorderResources(RecorderStateMachine? recorder,
@@ -453,16 +473,24 @@ internal sealed partial class AppHost
 
     // New recordings are scoped under <effectiveRoot>/<game>/sessions/. Existing legacy recordings
     // remain readable because catalogue classification accepts both layouts.
-    private string BuildOutputPath(string? gameId)
+    private string BuildSessionPath(string? gameId, bool createDirectory = true)
     {
         var directory = string.IsNullOrWhiteSpace(gameId)
             ? Path.Combine(EffectiveRoot, "sessions")
             : Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
-        Directory.CreateDirectory(directory);
+        if (createDirectory)
+            Directory.CreateDirectory(directory);
         // Millisecond resolution keeps two sessions started in the same second from colliding on one file
         // name, which would overwrite the recording and its metadata record.
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmssfff}.mp4";
         return Path.Combine(directory, name);
+    }
+
+    private static string BuildReplayBufferPath()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
+        Directory.CreateDirectory(directory);
+        return Path.Combine(directory, "replay-buffer.mp4");
     }
 
     private string ClipDirectoryForSource(string sourcePath)

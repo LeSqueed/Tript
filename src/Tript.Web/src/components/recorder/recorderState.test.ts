@@ -9,6 +9,7 @@ const inputs = (overrides: Partial<Parameters<typeof deriveRecorderState>[0]> = 
   game: null,
   detected: false,
   startedAt: null,
+  activeRecordingMode: null,
   ...overrides,
 });
 
@@ -33,6 +34,15 @@ describe('deriveRecorderState', () => {
 
   it('stays neutral when configured auto-detection is idle', () => {
     expect(deriveRecorderState(inputs())).toEqual({ kind: 'idle' });
+  });
+
+  it('reports buffer-only activity distinctly while preserving its game and start time', () => {
+    expect(deriveRecorderState(inputs({
+      recording: true,
+      activeRecordingMode: 'ReplayBufferOnly',
+      game: 'Overwatch',
+      startedAt: 1_700_000_000,
+    }))).toEqual({ kind: 'buffering', game: 'Overwatch', startedAt: 1_700_000_000 });
   });
 
   it('reports a running detected game while recording is idle', () => {

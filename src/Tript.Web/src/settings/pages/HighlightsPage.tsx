@@ -32,8 +32,8 @@ export function HighlightsPage({
   page: SettingsPageName;
   externalPushCount: number;
 }) {
-  // The buffer only runs under the combined mode; the automatic-clip surface needs it to be on.
-  const bufferModeOff = recording.mode !== 'SessionWithReplayBuffer';
+  const bufferModeOff = recording.mode !== 'SessionWithReplayBuffer'
+    && recording.mode !== 'ReplayBufferOnly';
   const [durationSeconds, setDurationSeconds] = useState<string>(String(settings.duration));
   const [beforeSeconds, setBeforeSeconds] = useState<string>(
     String(recording.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS),
@@ -105,14 +105,13 @@ export function HighlightsPage({
   return (
     <div className="settings-page" data-page="buffer">
       <p className="settings-page-note">
-        The replay buffer keeps recent footage in memory while Tript records, so an automatic
-        highlight can start before the moment happens. It runs when the recording mode is Session +
-        replay buffer.
+        The replay buffer keeps recent footage available so an automatic highlight can start before
+        the moment happens. It runs in Session + replay buffer and Replay buffer only modes.
       </p>
 
       <Field
         label="Buffer length"
-        hint="How much recent footage is available for a live highlight, in seconds. If its before window is longer, the completed session can supply the remaining history after recording stops."
+        hint="How much recent footage is available for a live highlight, in seconds."
       >
         <TextField
           type="number"
@@ -134,8 +133,8 @@ export function HighlightsPage({
         hint={
           bufferModeOff
             ? recording.automaticClipsEnabled === true
-              ? 'Inactive without the Session + replay buffer recording mode. Turn this off to clear the saved setting, or change mode on the Recording tab.'
-              : 'Needs the Session + replay buffer recording mode (see the Recording tab).'
+              ? 'Inactive without a replay buffer recording mode. Turn this off to clear the saved setting, or change mode on the Recording tab.'
+              : 'Needs a replay buffer recording mode (see the Recording tab).'
             : 'Saves a clip when Tript detects a positive moment in the game, using the seconds before and after below. You can always create them manually from a session in the player.'
         }
       >

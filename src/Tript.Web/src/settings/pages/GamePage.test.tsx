@@ -4,11 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { GamePage } from './GamePage';
 import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
-import type { GameSettings } from '../settingsModel';
+import type { GameSettings, RecordingMode } from '../settingsModel';
 
 const PACKAGED_ID = 'Overwatch';
 const SETTINGS: GameSettings = {
   gameCaptureTimeout: 10,
+  ignoredApplications: [],
   gameList: [
     {
       id: PACKAGED_ID,
@@ -31,7 +32,7 @@ function renderPage(
   selectedGameExecutable: SelectedGameExecutableMessage | null = null,
   globalClipBeforeSeconds = 5,
   globalClipAfterSeconds = 8,
-  globalRecordingMode: 'Session' | 'SessionWithReplayBuffer' = 'SessionWithReplayBuffer',
+  globalRecordingMode: RecordingMode = 'SessionWithReplayBuffer',
   automaticClipsEnabled = true,
 ) {
   const update = vi.fn((_page: string, _patch: Partial<Record<string, unknown>>) => 'settings-request-1');
@@ -63,6 +64,7 @@ function renderPage(
 function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverride']) {
   return {
     gameCaptureTimeout: 10,
+    ignoredApplications: [],
     gameList: [
       {
         id: PACKAGED_ID,
@@ -82,7 +84,7 @@ afterEach(cleanup);
 
 describe('custom games', () => {
   it('adds a custom game with a stable custom UUID in one gameList update', () => {
-    const { update } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { update } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'My Game' } });
     fireEvent.change(screen.getByLabelText('Executable path'), {
@@ -104,7 +106,7 @@ describe('custom games', () => {
   });
 
   it('requires a name and an absolute executable path before saving', () => {
-    const { update } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { update } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.change(screen.getByLabelText('Executable path'), { target: { value: 'game.exe' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -139,7 +141,7 @@ describe('custom games', () => {
   });
 
   it('applies only the executable picker result correlated to the active request', () => {
-    const { onBrowseExecutable, rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { onBrowseExecutable, rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
     const requestId = onBrowseExecutable.mock.calls[0][0] as string;
@@ -155,7 +157,7 @@ describe('custom games', () => {
   });
 
   it('treats picker cancellation as the correlated completion and ignores a later stale result', () => {
-    const { onBrowseExecutable, rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { onBrowseExecutable, rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
     const requestId = onBrowseExecutable.mock.calls[0][0] as string;
@@ -168,7 +170,7 @@ describe('custom games', () => {
   });
 
   it('retains a valid draft and backend validation error when its update is rejected', () => {
-    const { rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
     fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Rejected game' } });
     fireEvent.change(screen.getByLabelText('Executable path'), { target: { value: 'C:\\Games\\Rejected\\game.exe' } });
@@ -348,6 +350,52 @@ describe('automatic clip overrides', () => {
     expect((screen.getByLabelText('Before (s)') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText('After (s)') as HTMLInputElement).disabled).toBe(true);
   });
+
+  it('enables overrides when the game resolves to Replay buffer only mode', () => {
+    renderPage({
+      ...oneGame(),
+      gameList: [{
+        ...oneGame().gameList[0],
+        recordingModeOverride: { mode: 'ReplayBufferOnly' },
+      }],
+    });
+
+    expect((screen.getByLabelText('Before (s)') as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText('After (s)') as HTMLInputElement).disabled).toBe(false);
+  });
+});
+
+describe('ignored applications', () => {
+  const ignoredSettings: GameSettings = {
+    gameCaptureTimeout: 10,
+    gameList: [],
+    ignoredApplications: [
+      'C:\\Tools\\overlay.exe',
+      'D:\\Utilities\\metrics.exe',
+    ],
+  };
+
+  it('keeps the list collapsed and reports its size', () => {
+    renderPage(ignoredSettings);
+
+    const disclosure = screen.getByText('Ignored applications').closest('details');
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.textContent).toContain('2');
+  });
+
+  it('filters a large ignored list and removes the original entry', () => {
+    const { update } = renderPage(ignoredSettings);
+    fireEvent.click(screen.getByText('Ignored applications'));
+    fireEvent.change(screen.getByLabelText('Filter ignored applications'), { target: { value: 'metrics' } });
+
+    expect(screen.queryByText('overlay.exe')).toBeNull();
+    expect(screen.getByText('metrics.exe')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove metrics.exe from ignored applications' }));
+
+    expect(update).toHaveBeenLastCalledWith('game', {
+      ignoredApplications: ['C:\\Tools\\overlay.exe'],
+    });
+  });
 });
 
 describe('per-game override disclosure', () => {
@@ -403,5 +451,12 @@ describe('per-game override disclosure', () => {
       integrations: { enabled: false },
       recordingModeOverride: { mode: 'SessionWithReplayBuffer' },
     });
+  });
+
+  it('offers and sends the Replay buffer only per-game override', () => {
+    const { update } = renderPage(oneGame());
+    fireEvent.change(screen.getByLabelText('Recording mode'), { target: { value: 'ReplayBufferOnly' } });
+
+    expect(gameListFrom(update)[0].recordingModeOverride).toEqual({ mode: 'ReplayBufferOnly' });
   });
 });

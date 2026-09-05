@@ -175,9 +175,14 @@ export function RecorderBar({
     game: recordingState?.game?.name ?? recordingState?.game?.id ?? null,
     detected: recordingState?.game?.detected === true,
     startedAt: typeof recordingState?.startedAt === 'number' ? recordingState.startedAt : null,
+    activeRecordingMode: recordingState?.activeRecordingMode ?? null,
   });
 
   const detected = recordingState?.game?.detected === true;
+  const detectedGameMode = detected
+    ? settings.game.gameList.find((game) => game.id === recordingState?.game?.id)?.recordingModeOverride?.mode
+    : undefined;
+  const nextRecordingMode = detectedGameMode ?? settings.recording.mode;
   const method = settings.capture.method;
   const displayCaptureActive = !detected && method !== 'Game';
   const showDisplaySelector = displayCaptureActive && displayFieldMode(availableDisplays) === 'picker';
@@ -212,11 +217,12 @@ export function RecorderBar({
     );
   }
 
-  if (state.kind === 'recording') {
+  if (state.kind === 'recording' || state.kind === 'buffering') {
     const now = nowSeconds ?? tick;
     return (
       <div className="recorder-bar" data-testid="recorder-bar">
-        <span className="rec-dot recording" aria-hidden="true" />
+        <span className={`rec-dot ${state.kind}`} aria-hidden="true" />
+        {state.kind === 'buffering' && <span className="rec-activity">Buffering</span>}
         <span className="rec-elapsed" data-testid="recording-elapsed">
           {state.startedAt === null ? '--:--' : formatElapsed(now - state.startedAt)}
         </span>
@@ -290,7 +296,7 @@ export function RecorderBar({
           client.send('StartRecording', Object.keys(params).length > 0 ? params : undefined);
         }}
       >
-        Record
+        {nextRecordingMode === 'ReplayBufferOnly' ? 'Start buffer' : 'Record'}
       </Button>
     </div>
   );

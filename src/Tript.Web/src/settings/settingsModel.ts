@@ -4,8 +4,7 @@
 // camelCase-serialized). The `settings` message carries this whole object; `UpdateSettings` carries
 // a partial.
 
-/** Every mode records a session; the combined mode additionally runs the replay buffer. */
-export type RecordingMode = 'Session' | 'SessionWithReplayBuffer';
+export type RecordingMode = 'Session' | 'SessionWithReplayBuffer' | 'ReplayBufferOnly';
 
 /**
  * How the encoder is told to spend its bits. The four members are the modes the encoder families
@@ -230,6 +229,8 @@ export interface GameSettings {
   /** How long game capture waits for the game's window before falling back, in seconds. */
   gameCaptureTimeout: number;
   gameList: GameSetting[];
+  /** Exact executable paths whose custom-game suggestions the user dismissed. */
+  ignoredApplications?: string[];
   [key: string]: unknown;
 }
 

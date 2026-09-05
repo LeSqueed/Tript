@@ -177,12 +177,25 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 
     [Fact]
-    public void IgnoreGameCandidate_AndMissingExactPaths_DoNotBreakDetectionTargets()
+    public void IgnoreGameCandidate_PersistsTheApplicationPath()
     {
-        // Unknown fullscreen candidates are suggestions only: they must never create detection
-        // targets that would start a recording.
-        _host.IgnoreGameCandidate(@"C:\Tools\some.bin");
+        var path = @"C:\Tools\some.bin";
+
+        _host.IgnoreGameCandidate(path);
+
+        Assert.Contains(path, _store.Load().Game.IgnoredApplications, FilePaths.Comparer);
+        Assert.Contains(path, new SettingsStore(new SettingsFileProvider(_store.FilePath))
+            .Load().Game.IgnoredApplications, FilePaths.Comparer);
         Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
+    }
+
+    [Fact]
+    public void IgnoreGameCandidate_DoesNotDuplicateTheSamePath()
+    {
+        _host.IgnoreGameCandidate(@"C:\Tools\some.bin");
+        _host.IgnoreGameCandidate(@"c:\tools\SOME.bin");
+
+        Assert.Single(_store.Load().Game.IgnoredApplications);
     }
 
     [Fact]

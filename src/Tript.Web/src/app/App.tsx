@@ -216,7 +216,7 @@ function AppShell({
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
       // A pending-video or live-capture session has no playable video, so the player is not the
       // destination: it is the review of the session's highlights (which only exist if it has any).
-      if (item.videoMissing === true || item.recording === true) {
+      if (item.videoMissing === true || item.highlightsOnly === true || item.recording === true) {
         openSessionReview(item, 'library');
         return;
       }
@@ -245,6 +245,9 @@ function AppShell({
   }, []);
 
   const toggleFavorite = useCallback((item: ContentItem) => {
+    if (item.highlightsOnly === true) {
+      return;
+    }
     client.send('ToggleFavorite', {
       contentType: item.contentType,
       filePath: item.filePath,
@@ -421,7 +424,7 @@ function AppShell({
       confirmLabel: 'Move to trash',
       // A missing-video placeholder names itself but has no session file to move; only its cascaded
       // highlights (if any) actually go to the trash, so the sentence must not count the session.
-      affectedCount: isRecording && item.videoMissing === true ? 0 : 1,
+      affectedCount: isRecording && (item.videoMissing === true || item.highlightsOnly === true) ? 0 : 1,
       ...(isRecording ? { cascadeCount: cascadable } : {}),
       ...(isRecording
         ? {

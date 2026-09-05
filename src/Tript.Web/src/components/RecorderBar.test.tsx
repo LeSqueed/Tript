@@ -38,10 +38,14 @@ function emitSettings(
   client: ReturnType<typeof mockClient>,
   method: 'Auto' | 'Game' | 'Display',
   displays: unknown[] | null,
+  recordingMode: 'Session' | 'SessionWithReplayBuffer' | 'ReplayBufferOnly' = 'SessionWithReplayBuffer',
 ): void {
   act(() => {
     client.emit('settings', {
-      settings: { capture: { method, display: null, displayLabel: null } },
+      settings: {
+        capture: { method, display: null, displayLabel: null },
+        recording: { mode: recordingMode },
+      },
       availableDisplays: displays,
     });
   });
@@ -197,6 +201,67 @@ describe('RecorderBar', () => {
       method: 'StartRecording',
       parameters: { applyDisplay: true, displayId: null },
     });
+  });
+
+  it('labels the idle manual action from the configured global buffer-only mode', () => {
+    const client = mockClient();
+    render(<RecorderBar client={client} connectionState="connected" />);
+    emitSettings(client, 'Auto', DISPLAYS, 'ReplayBufferOnly');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start buffer' }));
+    expect(client.sent.at(-1)).toEqual({
+      method: 'StartRecording',
+      parameters: { applyDisplay: true, displayId: null },
+    });
+  });
+
+  it('labels the detected-game action from its buffer-only override', () => {
+    const client = mockClient();
+    render(<RecorderBar client={client} connectionState="connected" />);
+    act(() => {
+      client.emit('settings', {
+        settings: {
+          game: {
+            gameCaptureTimeout: 10,
+            gameList: [{
+              id: 'cs2',
+              name: 'Counter-Strike 2',
+              recordingModeOverride: { mode: 'ReplayBufferOnly' },
+              integrations: { enabled: false },
+            }],
+          },
+        },
+      });
+      client.emit('state', {
+        state: {
+          recording: false,
+          game: { id: 'cs2', name: 'Counter-Strike 2', detected: true },
+        },
+      });
+    });
+
+    expect(screen.getByRole('button', { name: 'Start buffer' })).toBeTruthy();
+  });
+
+  it('renders active buffer-only state with its activity context and stop action', () => {
+    const client = mockClient();
+    render(<RecorderBar client={client} connectionState="connected" nowSeconds={1_700_000_065} />);
+
+    act(() => client.emit('state', {
+      state: {
+        recording: true,
+        activeRecordingMode: 'ReplayBufferOnly',
+        startedAt: 1_700_000_000,
+        game: { id: 'cs2', name: 'Counter-Strike 2', detected: true },
+      },
+    }));
+
+    const bar = within(screen.getByTestId('recorder-bar'));
+    expect(bar.getByText('Buffering')).toBeTruthy();
+    expect(bar.getByTestId('recording-elapsed').textContent).toBe('1:05');
+    expect(bar.getByText('Counter-Strike 2')).toBeTruthy();
+    fireEvent.click(bar.getByRole('button', { name: 'Stop' }));
+    expect(client.sent.at(-1)).toEqual({ method: 'StopRecording', parameters: undefined });
   });
 
   it('keeps a one-off monitor choice across unrelated settings pushes', () => {

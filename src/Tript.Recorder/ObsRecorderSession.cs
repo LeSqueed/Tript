@@ -127,6 +127,11 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (settings.Mode is RecordingMode.ReplayBufferOnly)
+            return CreateEncodedOutput(settings, ReplayBufferId, "replay buffer");
+
         var session = CreateEncodedOutput(settings, FfmpegMuxerId, "recorder output");
         if (!settings.Mode.UsesReplayBuffer())
             return session;

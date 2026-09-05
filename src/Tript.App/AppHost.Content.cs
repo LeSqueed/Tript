@@ -99,8 +99,8 @@ internal sealed partial class AppHost
         // The session the active recording is appending to right now, as a wire path. Its metadata
         // record is only written when the recording stops, so the item it describes would otherwise
         // render as an attribution-less "unknown game" session the whole time it is being captured.
-        var activeRecordingPath = IsRecording && _activeOutputPath is { Length: > 0 }
-            ? Path.GetRelativePath(EffectiveRoot, _activeOutputPath).Replace(Path.DirectorySeparatorChar, '/')
+        var activeRecordingPath = IsRecording && _activeSessionPath is { Length: > 0 }
+            ? Path.GetRelativePath(EffectiveRoot, _activeSessionPath).Replace(Path.DirectorySeparatorChar, '/')
             : null;
 
         var gamesByRecording = new Dictionary<string, string>(pathComparer);
@@ -111,6 +111,7 @@ internal sealed partial class AppHost
         var tracksByRecordingPath = new Dictionary<string, List<AudioTrackInfo>>(pathComparer);
         var clips = new List<ContentItem>();
         var linkedAutomaticSources = new HashSet<string>(pathComparer);
+        var highlightsOnlySources = new Dictionary<string, bool>(pathComparer);
         var earliestLinkedHighlightStart = new Dictionary<string, double>(pathComparer);
         var recordingPaths = new HashSet<string>(pathComparer);
         var probeBudget = DurationProbeBudget;
@@ -214,7 +215,14 @@ internal sealed partial class AppHost
                     item.ClipStartTime = record.ClipStartTime;
                     item.ClipEndTime = record.ClipEndTime;
                     if (item.SourceSessionPath is not null)
+                    {
                         linkedAutomaticSources.Add(item.SourceSessionPath);
+                        var sourceIsHighlightsOnly = record.SourceSessionHighlightsOnly == true;
+                        highlightsOnlySources[item.SourceSessionPath] = highlightsOnlySources.TryGetValue(
+                            item.SourceSessionPath, out var current)
+                            ? current && sourceIsHighlightsOnly
+                            : sourceIsHighlightsOnly;
+                    }
                 }
                 if (!string.IsNullOrWhiteSpace(record?.Title))
                     item.Title = record.Title;
@@ -284,8 +292,22 @@ internal sealed partial class AppHost
                 FileSizeBytes = 0,
                 Bookmarks = [],
                 Favorite = false,
-                VideoMissing = true,
             };
+            var highlightsOnly = highlightsOnlySources.TryGetValue(sourcePath, out var marked) && marked;
+            item.HighlightsOnly = highlightsOnly ? true : null;
+            item.VideoMissing = highlightsOnly ? null : true;
+            if (activeRecordingPath is not null
+                && string.Equals(sourcePath, activeRecordingPath, ContentPathComparison))
+            {
+                item.Recording = true;
+                if (_pendingMetadata is not null)
+                {
+                    item.Game = string.IsNullOrWhiteSpace(_pendingMetadata.Game) ? null : _pendingMetadata.Game;
+                    item.GameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
+                        ? ResolveLegacyGameId(item.Game)
+                        : _pendingMetadata.GameId;
+                }
+            }
             var metadata = _metadata.Load(fileName);
             if (metadata is not null)
             {

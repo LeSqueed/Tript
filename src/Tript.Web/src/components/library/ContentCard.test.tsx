@@ -31,6 +31,15 @@ const live: ContentItem = {
   recording: true,
 };
 
+const highlightsOnly: ContentItem = {
+  contentType: 'recording',
+  fileName: 'highlights-only.mp4',
+  filePath: 'sessions/highlights-only.mp4',
+  title: 'Highlights session',
+  favorite: true,
+  highlightsOnly: true,
+};
+
 function highlight(index: number): ContentItem {
   return {
     contentType: 'clip',
@@ -184,6 +193,33 @@ describe('ContentCard missing-video placeholder', () => {
     expect(onOpen).toHaveBeenCalledWith(missing);
     expect(onDelete).toHaveBeenCalledWith(missing);
     expect(onToggleSelected).toHaveBeenCalledWith(missing);
+    expect(onToggleFavorite).not.toHaveBeenCalled();
+  });
+});
+
+describe('ContentCard highlights-only session', () => {
+  it('uses intentional wording and linked previews without offering favorite', () => {
+    const onOpen = vi.fn();
+    const onToggleFavorite = vi.fn();
+    render(
+      <ContentCard
+        item={highlightsOnly}
+        previewHighlights={[highlight(1)]}
+        onOpen={onOpen}
+        onToggleFavorite={onToggleFavorite}
+      />,
+    );
+
+    const preview = screen.getByTestId('content-card-highlights-only-preview');
+    expect(within(preview).getByText('Highlights-only session')).toBeTruthy();
+    expect(within(preview).queryByText('Source video unavailable')).toBeNull();
+    expect(within(preview).getByRole('presentation').getAttribute('src')).toBe(
+      'http://localhost:8893/api/thumbnail/clips/highlight-1.mp4',
+    );
+    expect(screen.queryByRole('button', { name: /favorites/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Highlights session' }));
+    expect(onOpen).toHaveBeenCalledWith(highlightsOnly);
     expect(onToggleFavorite).not.toHaveBeenCalled();
   });
 });

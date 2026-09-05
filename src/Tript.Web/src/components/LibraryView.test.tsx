@@ -192,6 +192,31 @@ describe('LibraryView grid', () => {
     expect(within(card).queryByRole('presentation')).toBeNull();
   });
 
+  it('renders a highlights-only parent with exact linked previews and no favorite action', () => {
+    const parent = item({
+      fileName: 'highlights-only.mp4',
+      title: 'Highlights session',
+      highlightsOnly: true,
+      favorite: true,
+    });
+    const linked = item({
+      contentType: 'clip',
+      fileName: 'linked.mp4',
+      filePath: 'clips/linked.mp4',
+      automated: true,
+      sourceSessionPath: parent.filePath,
+    });
+    renderLibrary([parent, linked]);
+
+    const card = screen.getByRole('button', { name: 'Open Highlights session' });
+    expect(within(card).getAllByText('Highlights-only session')).toHaveLength(2);
+    expect(within(card).queryByText('Source video unavailable')).toBeNull();
+    expect(within(card).getByRole('presentation').getAttribute('src')).toBe(
+      'http://localhost:8893/api/thumbnail/clips/linked.mp4',
+    );
+    expect(screen.queryByRole('button', { name: /Highlights session .*favorites/i })).toBeNull();
+  });
+
   it('opens the item through the shell seam when a card is activated', () => {
     const onOpen = vi.fn();
     renderLibrary([session, clip], onOpen);
@@ -583,6 +608,27 @@ describe('LibraryView delete and selection', () => {
     const linked = screen.getByRole('checkbox', { name: /delete linked highlights/i });
     fireEvent.click(linked);
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('2 items');
+  });
+
+  it('counts a highlights-only parent as zero files while retaining its highlight cascade', () => {
+    const parent = {
+      ...session,
+      fileName: 'highlights-only.mp4',
+      filePath: 'sessions/highlights-only.mp4',
+      title: 'Highlights session',
+      highlightsOnly: true,
+    };
+    const highlight = {
+      ...clip,
+      automated: true,
+      sourceSessionPath: parent.filePath,
+    };
+    renderWith([parent, highlight], 24, undefined, false);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Highlights session' }));
+
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('0 items');
+    fireEvent.click(screen.getByRole('checkbox', { name: /delete linked highlights/i }));
+    expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('1 item');
   });
 
   it('does not offer or send the linked-highlight choice for clip-only deletion', () => {

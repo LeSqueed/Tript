@@ -99,6 +99,18 @@ public class SettingsResolverTests
         Assert.Equal("Game audio", source.Name);
     }
 
+    [Theory]
+    [InlineData(RecordingMode.SessionWithReplayBuffer, true)]
+    [InlineData(RecordingMode.ReplayBufferOnly, true)]
+    [InlineData(RecordingMode.Session, false)]
+    public void Resolve_BufferEnabledTracksReplayModes(RecordingMode mode, bool expected)
+    {
+        var settings = new Settings();
+        settings.Recording.Mode = mode;
+
+        Assert.Equal(expected, SettingsResolver.Resolve(settings).BufferEnabled);
+    }
+
     // The codec-and-quality choices reach the recorder through the same resolved shape as the encoder
     // id and the quality profile. They have no per-game override — the schema's per-game quality
     // override is resolution, fps, encoder and quality, and growing it is a separate decision — so the

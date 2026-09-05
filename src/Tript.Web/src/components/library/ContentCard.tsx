@@ -82,11 +82,12 @@ export function ContentCard({
   const duration = formatDurationChip(item);
   const size = formatSizeChip(item);
   const missingVideo = item.videoMissing === true;
+  const highlightsOnly = item.highlightsOnly === true;
   const liveRecording = item.recording === true;
   // An item with no path has nothing to ask the content server for — straight to the placeholder,
   // rather than a request that is guaranteed to fail. A live recording's file is still growing, so
   // its frame would be a mid-write half-shot; the card advertises the capture instead.
-  const showThumbnail = thumbnailLoadingActive && !missingVideo && !liveRecording && item.filePath.length > 0;
+  const showThumbnail = thumbnailLoadingActive && !missingVideo && !highlightsOnly && !liveRecording && item.filePath.length > 0;
   const preview = previewHighlights.slice(0, 3);
   // A live capture is not playable yet. It opens only to its own highlights — and only when it
   // actually has some, so the card itself does the "cannot interact" part of the contract.
@@ -97,7 +98,7 @@ export function ContentCard({
       className={[
         'content-card-shell',
         variant === 'wide' ? 'content-card-shell--wide' : '',
-        missingVideo ? 'content-card-shell--missing' : '',
+        missingVideo || highlightsOnly ? 'content-card-shell--missing' : '',
         liveRecording ? 'content-card-shell--recording' : '',
         selected ? 'selected' : '',
       ]
@@ -111,7 +112,7 @@ export function ContentCard({
         onClick={() => {
           if (canOpen) onOpen?.(item);
         }}
-        aria-label={canOpen ? `Open ${label}` : `Recording in progress: ${label}`}
+        aria-label={canOpen ? `Open ${label}` : `${highlightsOnly ? 'Buffering' : 'Recording'} in progress: ${label}`}
       >
         <span className="content-card-thumb">
           {liveRecording ? (
@@ -119,6 +120,14 @@ export function ContentCard({
               key={preview.map((highlight) => highlight.filePath).join('|')}
               highlights={preview}
               thumbnailLoadingActive={thumbnailLoadingActive}
+            />
+          ) : highlightsOnly ? (
+            <MissingVideoPreview
+              key={preview.map((highlight) => highlight.filePath).join('|')}
+              highlights={preview}
+              thumbnailLoadingActive={thumbnailLoadingActive}
+              message="Highlights-only session"
+              testId="content-card-highlights-only"
             />
           ) : missingVideo ? (
             <MissingVideoPreview
@@ -150,7 +159,8 @@ export function ContentCard({
             </span>
             <span className="content-card-chips">
               <span className="pill content-card-type">{typeLabel(item)}</span>
-              {liveRecording && <span className="pill content-card-recording-chip">Recording</span>}
+              {liveRecording && <span className="pill content-card-recording-chip">{highlightsOnly ? 'Buffering' : 'Recording'}</span>}
+              {highlightsOnly && !liveRecording && <span className="pill content-card-missing-chip">Highlights-only session</span>}
               {missingVideo && <span className="pill content-card-missing-chip">Highlights only</span>}
               <span className="pill pill-muted">{game}</span>
               <span className="pill pill-muted">{formatDateChip(item)}</span>
@@ -203,7 +213,7 @@ export function ContentCard({
         </button>
       )}
 
-      {onToggleFavorite && !missingVideo && !liveRecording && (
+      {onToggleFavorite && !missingVideo && !highlightsOnly && !liveRecording && (
         <button
           type="button"
           className={item.favorite ? 'content-card-favorite active' : 'content-card-favorite'}
@@ -221,17 +231,21 @@ export function ContentCard({
 function MissingVideoPreview({
   highlights,
   thumbnailLoadingActive,
+  message = 'Source video unavailable',
+  testId = 'content-card-missing',
 }: {
   highlights: ContentItem[];
   thumbnailLoadingActive: boolean;
+  message?: string;
+  testId?: string;
 }) {
   const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
 
   return (
-    <span className="content-card-missing-preview" data-testid="content-card-missing-preview">
-      <span className="content-card-missing-fallback" data-testid="content-card-missing-fallback">
+    <span className="content-card-missing-preview" data-testid={`${testId}-preview`}>
+      <span className="content-card-missing-fallback" data-testid={`${testId}-fallback`}>
         <Icon name="clip" size={22} />
-        <span>Source video unavailable</span>
+        <span>{message}</span>
       </span>
       {thumbnailLoadingActive && highlights.length > 0 && (
         <span

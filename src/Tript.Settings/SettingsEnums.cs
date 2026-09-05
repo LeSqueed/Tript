@@ -17,6 +17,8 @@ public enum RecordingMode
     // Legacy persisted values. These are not exposed by the settings UI.
     Buffer = SessionWithReplayBuffer,
     Hybrid = 2,
+
+    ReplayBufferOnly = 3,
 }
 
 // How the video encoder is told to spend its bits. The four members are the modes the encoder

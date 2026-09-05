@@ -110,11 +110,11 @@ internal sealed partial class AppHost : IDisposable
     private readonly SemaphoreSlim _discoveryScanSemaphore = new(1, 1);
     private readonly CancellationTokenSource _discoveryCancellation = new();
     private Task _discoveryTask = Task.CompletedTask;
-    private readonly object _ignoredCandidateGate = new();
-    private readonly HashSet<string> _ignoredCandidatePaths = new(StringComparer.OrdinalIgnoreCase);
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
+    private string? _activeSessionPath;
+    private RecordingMode? _activeRecordingMode;
     private readonly object _automaticClipGate = new();
     private readonly List<Bookmark> _automaticClipBookmarks = [];
     private AutomaticClipJob? _automaticClipJob;
@@ -900,6 +900,7 @@ internal sealed partial class AppHost : IDisposable
             state = new
             {
                 recording,
+                activeRecordingMode = recording ? _activeRecordingMode?.ToString() : null,
                 game,
                 activeModelGameId = _activeDetectionGameId,
                 // When the current recording started, in unix seconds like every other time on this

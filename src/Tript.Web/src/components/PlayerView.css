@@ -54,6 +54,23 @@
   border-bottom: 1px solid var(--color-line);
 }
 
+/* The counter doubles as the re-centre: in a long list the scrollbar thumb is a sliver, so this is
+ * the practical way back to the playing item. */
+.player-playlist-jump {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.player-playlist-jump:hover,
+.player-playlist-jump:focus-visible {
+  color: var(--color-accent, #a8e6cf);
+  opacity: 1;
+}
+
 .player-playlist-scroll {
   min-height: 0;
   flex: 1 1 auto;

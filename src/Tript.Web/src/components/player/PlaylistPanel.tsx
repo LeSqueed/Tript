@@ -42,6 +42,9 @@ export function PlaylistPanel({
     height: DEFAULT_HEIGHT,
   }));
   const window = playlistWindow(items.length, viewport.scrollTop, viewport.height);
+  // A nonce, not a scroll target: the effect below owns the math, and the button only asks it to
+  // run again — the same re-center the panel already does whenever the current item changes.
+  const [recenterToken, setRecenterToken] = useState(0);
 
   useLayoutEffect(() => {
     const element = viewportRef.current;
@@ -51,13 +54,21 @@ export function PlaylistPanel({
     const scrollTop = centeredScrollTop(items.length, currentIndex, height);
     element.scrollTop = scrollTop;
     setViewport({ scrollTop, height });
-  }, [currentIndex, items.length]);
+  }, [currentIndex, items.length, recenterToken]);
 
   return (
     <aside className="player-playlist" aria-label="Playlist">
       <div className="player-playlist-header">
         <strong>Playlist</strong>
-        <span className="muted small">{currentIndex + 1} of {items.length}</span>
+        <button
+          type="button"
+          className="player-playlist-jump muted small"
+          onClick={() => setRecenterToken((token) => token + 1)}
+          aria-label="Jump to current item"
+          title="Jump to current item"
+        >
+          {currentIndex + 1} of {items.length}
+        </button>
       </div>
       <div
         ref={viewportRef}

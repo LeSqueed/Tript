@@ -439,6 +439,32 @@ describe('App shell', () => {
     expect(document.querySelector('video')?.getAttribute('aria-label')).toBe(selected);
   });
 
+  it('drops a playlist entry when a later content push removes it', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, HIGHLIGHT_2, SESSION_1, SESSION_2, CLIP_1] },
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play Second highlight' })).toBeTruthy();
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, SESSION_1, SESSION_2, CLIP_1] },
+      }));
+    });
+
+    expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play First highlight' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Play Second highlight' })).toBeNull();
+  });
+
   it('confirms trash from a normal player entry', () => {
     renderApp();
     connect();

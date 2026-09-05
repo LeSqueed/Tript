@@ -481,11 +481,19 @@ function AppShell({
     }
   }, [playerItem]);
 
+  // One map per push, not a `find` per playlist entry: a whole-library playlist against a
+  // whole-library content list is the 9k × 9k case this effect must not make.
   useEffect(() => {
     if (!playerItem) {
       return;
     }
-    const currentItem = items.find((candidate) => candidate.filePath === playerItem.filePath);
+    const byPath = new Map<string, ContentItem>();
+    for (const entry of items) {
+      if (!byPath.has(entry.filePath)) {
+        byPath.set(entry.filePath, entry);
+      }
+    }
+    const currentItem = byPath.get(playerItem.filePath);
     if (!currentItem) {
       closePlayer();
       return;
@@ -493,10 +501,9 @@ function AppShell({
     setPlayerItem(currentItem);
     setPlayerTitle(itemLabel(currentItem));
     setPlayerNavigation((previous) =>
-      previous.flatMap((candidate) => {
-        const current = items.find((item) => item.filePath === candidate.filePath);
-        return current ? [current] : [];
-      }),
+      previous
+        .map((candidate) => byPath.get(candidate.filePath))
+        .filter((entry): entry is ContentItem => entry !== undefined),
     );
   }, [items, playerItem, closePlayer]);
 

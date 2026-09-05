@@ -197,11 +197,6 @@ export interface GameAutomaticClipOverride {
   afterSeconds?: number | null;
 }
 
-export interface GameIntegrationSettings {
-  enabled: boolean;
-  [key: string]: unknown;
-}
-
 export interface GameSetting {
   id: string;
   name: string;
@@ -221,7 +216,6 @@ export interface GameSetting {
    * within the override, a null/undefined side likewise inherits the global value for that side.
    */
   automaticClipOverride?: GameAutomaticClipOverride | null;
-  integrations: GameIntegrationSettings;
   [key: string]: unknown;
 }
 

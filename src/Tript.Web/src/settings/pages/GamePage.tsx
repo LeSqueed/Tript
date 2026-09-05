@@ -8,7 +8,7 @@ import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
-import { Button, Checkbox, SelectField, TextField } from '../../components/ui/controls';
+import { Button, SelectField, TextField } from '../../components/ui/controls';
 
 /** True when a game departs from the global settings in any way its row exposes. */
 function hasOverrides(game: GameSetting): boolean {
@@ -27,7 +27,6 @@ function hasOverrides(game: GameSetting): boolean {
     if (clip.beforeSeconds !== null && clip.beforeSeconds !== undefined) return true;
     if (clip.afterSeconds !== null && clip.afterSeconds !== undefined) return true;
   }
-  if (game.integrations?.enabled === true) return true;
   return false;
 }
 
@@ -150,7 +149,6 @@ export function GamePage({
     const reset: GameSetting = {
       id: game.id,
       name: game.name,
-      integrations: { enabled: false },
     };
     update(page, { gameList: gameList.map((candidate, i) => i === index ? reset : candidate) });
   }
@@ -200,7 +198,6 @@ export function GamePage({
           id: `custom-${crypto.randomUUID()}`,
           name,
           executablePath,
-          integrations: { enabled: false },
         }
       : { ...gameList[draft.index], name, executablePath };
     const next = draft.index === null
@@ -402,15 +399,6 @@ export function GamePage({
                       },
                     });
                   }}
-                />
-              </label>
-
-              <label className="settings-inline-field">
-                <span className="muted small">Integrations</span>
-                <Checkbox
-                  checked={game.integrations?.enabled ?? false}
-                  title="Currently has no effect. Reserved for future per-game integrations."
-                  onChange={(enabled) => patchGame(index, { integrations: { enabled } })}
                 />
               </label>
 

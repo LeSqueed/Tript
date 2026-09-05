@@ -59,10 +59,6 @@ public sealed class GameSetting
     public GameCaptureMethodOverride? CaptureMethodOverride { get; set; }
 
     public GameAutomaticClipOverride? AutomaticClipOverride { get; set; }
-
-    // Per-game telemetry integration toggles. Game telemetry is externally dictated — ports,
-    // config formats — and each integration is gated by a per-game Enabled toggle.
-    public GameIntegrationSettings Integrations { get; set; } = new();
 }
 
 public sealed class GameCaptureMethodOverride
@@ -97,9 +93,4 @@ public sealed class GameAutomaticClipOverride
     public int? BeforeSeconds { get; set; }
 
     public int? AfterSeconds { get; set; }
-}
-
-public sealed class GameIntegrationSettings
-{
-    public bool Enabled { get; set; }
 }

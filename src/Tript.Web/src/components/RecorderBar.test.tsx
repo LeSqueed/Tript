@@ -227,7 +227,8 @@ describe('RecorderBar', () => {
               id: 'cs2',
               name: 'Counter-Strike 2',
               recordingModeOverride: { mode: 'ReplayBufferOnly' },
-              integrations: { enabled: false },
+
+
             }],
           },
         },

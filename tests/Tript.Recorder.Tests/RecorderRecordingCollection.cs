@@ -7,9 +7,8 @@ using Xunit;
 namespace Tript.Recorder.Tests;
 
 // The recorder tests that install an active recording (process-wide state via
-// RecordingSessionRegistry) run one at a time. The resolver is shared with the detection suite's
-// RecordingStateCollection, but xunit runs assemblies in separate processes, so each suite needs
-// its own collection — a cross-assembly collection would couple the two test projects.
+// RecordingSessionRegistry) run one at a time, so two tests cannot each count the other's
+// bookmarks.
 [CollectionDefinition(Name)]
 public sealed class RecorderRecordingCollection
 {

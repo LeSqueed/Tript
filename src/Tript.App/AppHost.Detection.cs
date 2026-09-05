@@ -282,7 +282,6 @@ internal sealed partial class AppHost
                 Id = $"custom-{Guid.NewGuid():N}",
                 Name = displayName,
                 ExecutablePath = normalized,
-                Integrations = new GameIntegrationSettings { Enabled = false },
             });
             return ValidateGameList(settings.Game.GameList, out var validationError)
                 ? null

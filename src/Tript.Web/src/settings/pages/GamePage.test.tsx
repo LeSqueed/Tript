@@ -16,13 +16,13 @@ const SETTINGS: GameSettings = {
       name: 'Overwatch',
       executablePath: 'C:\\Program Files\\Overwatch\\Overwatch.exe',
       captureMethodOverride: { method: 'Game' },
-      integrations: { enabled: false },
+
     },
     {
       id: 'custom-existing',
       name: 'Existing game',
       executablePath: 'D:\\Games\\Existing\\game.exe',
-      integrations: { enabled: false },
+
     },
   ],
 };
@@ -69,7 +69,7 @@ function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverr
       {
         id: PACKAGED_ID,
         name: 'Overwatch',
-        integrations: { enabled: false } as const,
+
         ...(override !== undefined ? { automaticClipOverride: override } : {}),
       },
     ],
@@ -99,7 +99,7 @@ describe('custom games', () => {
         id: expect.stringMatching(/^custom-[0-9a-f-]{36}$/),
         name: 'My Game',
         executablePath: 'C:\\Games\\My Game\\game.exe',
-        integrations: { enabled: false },
+
       },
     ]);
     expect(screen.getByTestId('custom-game-draft')).toBeTruthy();
@@ -130,7 +130,7 @@ describe('custom games', () => {
       id: 'custom-existing',
       name: 'Renamed game',
       executablePath: 'E:\\Renamed\\renamed.exe',
-      integrations: { enabled: false },
+
     });
   });
 
@@ -212,7 +212,7 @@ describe('packaged games', () => {
     const { update } = renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Reset overrides' }));
     expect(gameListFrom(update)).toEqual([
-      { id: PACKAGED_ID, name: 'Overwatch', integrations: { enabled: false } },
+      { id: PACKAGED_ID, name: 'Overwatch' },
       SETTINGS.gameList[1],
     ]);
   });
@@ -244,7 +244,7 @@ describe('automatic clip overrides', () => {
     expect(gameListFrom(update)[0]).toEqual({
       id: PACKAGED_ID,
       name: 'Overwatch',
-      integrations: { enabled: false },
+
       automaticClipOverride: { beforeSeconds: 3, afterSeconds: null },
     });
   });
@@ -276,7 +276,7 @@ describe('automatic clip overrides', () => {
     expect(gameListFrom(update)[0]).toEqual({
       id: PACKAGED_ID,
       name: 'Overwatch',
-      integrations: { enabled: false },
+
     });
   });
 
@@ -418,7 +418,7 @@ describe('per-game override disclosure', () => {
         {
           id: PACKAGED_ID,
           name: 'Overwatch',
-          integrations: { enabled: false },
+
           qualityOverride: { fps: 144 },
         },
       ],
@@ -448,7 +448,7 @@ describe('per-game override disclosure', () => {
     expect(gameListFrom(update)[0]).toEqual({
       id: PACKAGED_ID,
       name: 'Overwatch',
-      integrations: { enabled: false },
+
       recordingModeOverride: { mode: 'SessionWithReplayBuffer' },
     });
   });

@@ -59,6 +59,14 @@ const clip = item({
   fileSizeBytes: 33338,
 });
 
+const highlight = item({
+  contentType: 'highlight',
+  fileName: 'highlight-1.mp4',
+  filePath: 'clips/highlight-1.mp4',
+  title: 'Best moment',
+  favorite: true,
+});
+
 /** No metadata record at all: the shape an un-post-processed recording arrives in. */
 const bare = item({ fileName: 'session-bare.mp4' });
 
@@ -227,16 +235,22 @@ describe('LibraryView grid', () => {
 
 describe('LibraryView filters and sorting', () => {
   it('filters by type', () => {
-    renderLibrary([session, clip]);
+    renderLibrary([session, clip, highlight]);
     fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     expect(cardTitles()).toEqual(['Nice shot']);
     expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Highlights' }));
+    expect(cardTitles()).toEqual(['Best moment']);
+    fireEvent.click(screen.getByLabelText('Favourites only'));
+    expect(cardTitles()).toEqual(['Best moment']);
+    fireEvent.click(screen.getByLabelText('Favourites only'));
 
     fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
     expect(cardTitles()).toEqual(['Ranked win']);
 
     fireEvent.click(screen.getByRole('radio', { name: 'All' }));
-    expect(cardTitles()).toHaveLength(2);
+    expect(cardTitles()).toHaveLength(3);
   });
 
   it('offers only the games that are present, plus an unknown option when something lacks one', () => {

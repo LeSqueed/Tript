@@ -16,12 +16,14 @@ import {
   formatRetention,
   formatTrashDuration,
   formatTrashSize,
+  filterTrashEntries,
   parseTrashMessage,
   retentionNotice,
   sortTrashEntries,
   trashEntryLabel,
   trashTypeLabel,
 } from './trashModel';
+import { DEFAULT_LIBRARY_QUERY } from '../library/libraryModel';
 
 /** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
@@ -102,6 +104,16 @@ describe('reading an entry', () => {
     expect(formatTrashSize(entry({ id: 'a', fileSizeBytes: 33338 }))).toBe('33 KB');
     expect(formatTrashDuration(entry({ id: 'a' }))).toBeNull();
     expect(formatTrashDuration(entry({ id: 'a', durationSeconds: 1830 }))).toBe('30:30');
+  });
+});
+
+describe('type filtering', () => {
+  const clip = entry({ id: 'clip', contentType: 'clip' });
+  const highlight = entry({ id: 'highlight', contentType: 'highlight' });
+
+  it('keeps clips and highlights in separate filters', () => {
+    expect(filterTrashEntries([clip, highlight], { ...DEFAULT_LIBRARY_QUERY, type: 'clips' }, NOW)).toEqual([clip]);
+    expect(filterTrashEntries([clip, highlight], { ...DEFAULT_LIBRARY_QUERY, type: 'highlights' }, NOW)).toEqual([highlight]);
   });
 });
 

@@ -13,12 +13,11 @@
 //     component ever has to remember that.
 
 import type { TrashEntry } from '../../ipc/protocol';
+import { contentTypeLabel, formatContentDuration, formatContentSize } from '../contentPresentation';
 import {
   DATE_RANGE_SECONDS,
-  formatBytes,
   type LibraryQuery,
 } from '../library/libraryModel';
-import { formatTime } from '../player/timelineModel';
 
 /** What the backend defaults to, used until the first `trash` push says otherwise. */
 export const DEFAULT_RETENTION_HOURS = 24;
@@ -84,9 +83,10 @@ export function filterTrashEntries(
   const search = query.search.trim().toLowerCase();
   return [...entries]
     .filter((entry) => {
-      const isClip = entry.contentType === 'clip' || entry.contentType === 'highlight';
-      if (query.type === 'clips' && !isClip) return false;
-      if (query.type === 'sessions' && isClip) return false;
+      const isClipContent = entry.contentType === 'clip' || entry.contentType === 'highlight';
+      if (query.type === 'clips' && entry.contentType !== 'clip') return false;
+      if (query.type === 'highlights' && entry.contentType !== 'highlight') return false;
+      if (query.type === 'sessions' && isClipContent) return false;
       if (query.game !== '__any_game__') {
         const game = typeof entry.game === 'string' && entry.game.trim().length > 0 ? entry.game.trim() : null;
         if (query.game === '__no_game__' ? game !== null : game?.toLowerCase() !== query.game.toLowerCase()) {
@@ -118,27 +118,15 @@ export function trashEntryLabel(entry: TrashEntry): string {
 
 /** The human label for what the entry was. Mirrors the library's type chip. */
 export function trashTypeLabel(entry: TrashEntry): string {
-  switch (entry.contentType) {
-    case 'clip':
-      return 'Clip';
-    case 'highlight':
-      return 'Highlight';
-    case 'buffer':
-      return 'Buffer';
-    default:
-      return 'Recording';
-  }
+  return contentTypeLabel(entry.contentType);
 }
 
 export function formatTrashSize(entry: TrashEntry): string | null {
-  return formatBytes(entry.fileSizeBytes);
+  return formatContentSize(entry.fileSizeBytes);
 }
 
 export function formatTrashDuration(entry: TrashEntry): string | null {
-  const seconds = entry.durationSeconds;
-  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
-    ? formatTime(seconds)
-    : null;
+  return formatContentDuration(entry.durationSeconds);
 }
 
 // ---------------------------------------------------------------------------

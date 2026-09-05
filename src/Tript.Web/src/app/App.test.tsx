@@ -281,7 +281,7 @@ describe('App shell', () => {
     expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
   });
 
-  it('opens a missing-video recording directly in its exact automatic highlights', () => {
+  it('opens a missing-video recording on its first playable child with the full session playlist', () => {
     renderApp();
     connect();
     act(() => {
@@ -290,7 +290,7 @@ describe('App shell', () => {
         content: {
           content: [
             HIGHLIGHT_2,
-            { ...HIGHLIGHT_1, automated: false, fileName: 'manual.mp4', filePath: 'clips/manual.mp4' },
+            { ...HIGHLIGHT_1, automated: false, fileName: 'manual.mp4', filePath: 'clips/manual.mp4', title: 'Manual clip' },
             { ...HIGHLIGHT_1, sourceSessionPath: SESSION_2.filePath, fileName: 'other.mp4', filePath: 'clips/other.mp4' },
             HIGHLIGHT_1,
             { ...SESSION_1, videoMissing: true },
@@ -304,23 +304,23 @@ describe('App shell', () => {
     expect(within(missingCard).getAllByRole('presentation')).toHaveLength(2);
     fireEvent.click(missingCard);
 
-    expect(screen.getByRole('heading', { name: 'Session 1' })).toBeTruthy();
-    expect(screen.getByText('2 highlights')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /Open (First|Second) highlight/ }).map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Open First highlight',
-      'Open Second highlight',
-    ]);
-    expect(screen.queryByRole('button', { name: 'Open manual.mp4' })).toBeNull();
-    expect(document.querySelector('.player-view')).toBeNull();
+    expect(document.querySelector('.player-view')).not.toBeNull();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
+    expect(screen.getByRole('complementary', { name: 'Playlist' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Playing First highlight' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play Manual clip' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play Second highlight' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Play other.mp4' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Review highlights (2)' })).toBeTruthy();
     expect(library.closest('[hidden]')).not.toBeNull();
     expect(library.querySelectorAll('img')).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to library' }));
-    expect(library.closest('[hidden]')).toBeNull();
-    expect(within(screen.getByRole('button', { name: 'Open Session 1' })).getAllByRole('presentation')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
+    expect(screen.getByText('2 highlights')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open manual.mp4' })).toBeNull();
   });
 
-  it('opens a highlights-only parent directly in review and counts only its cascade on deletion', () => {
+  it('opens a highlights-only parent on its first highlight and counts only its cascade on deletion', () => {
     renderApp();
     connect();
     act(() => {
@@ -342,8 +342,9 @@ describe('App shell', () => {
 
     fireEvent.click(card);
 
-    expect(screen.getByText('1 highlight')).toBeTruthy();
-    expect(document.querySelector('.player-view')).toBeNull();
+    expect(document.querySelector('.player-view')).not.toBeNull();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
+    expect(screen.getByRole('button', { name: 'Review highlights (1)' })).toBeTruthy();
   });
 
   it('refreshes the open player item when content metadata changes', () => {
@@ -449,7 +450,7 @@ describe('App shell', () => {
       }));
     });
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
@@ -472,7 +473,7 @@ describe('App shell', () => {
       }));
     });
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
 
@@ -590,7 +591,7 @@ describe('App shell', () => {
       }));
     });
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
     expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
 
@@ -616,7 +617,7 @@ describe('App shell', () => {
       }));
     });
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
 
     act(() => {
@@ -653,7 +654,7 @@ describe('App shell', () => {
       }));
     });
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'View highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
 
     act(() => {
       activeSocket().serverMessage(JSON.stringify({

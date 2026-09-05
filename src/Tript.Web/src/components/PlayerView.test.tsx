@@ -200,6 +200,23 @@ describe('PlayerView', () => {
     expect(onToggleFavorite).toHaveBeenCalledWith(current);
   });
 
+  it('shows the navigation list as a playlist and selects an item from it', () => {
+    const current = session(1, 'sessions/a.mp4');
+    render(
+      <PlayerView
+        client={mockClient()}
+        source={source}
+        item={current}
+        navigationItems={[current, session(2, 'sessions/b.mp4')]}
+      />,
+    );
+
+    expect(screen.getByRole('complementary', { name: 'Playlist' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Play Session 2' }));
+    expect(playingItem()).toBe('Session 2');
+  });
+
   it('toggles favorite with F while player shortcuts are active', () => {
     const onToggleFavorite = vi.fn();
     const current = session(1, 'sessions/a.mp4');

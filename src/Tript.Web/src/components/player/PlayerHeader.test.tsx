@@ -36,6 +36,26 @@ describe('PlayerHeader automatic highlights', () => {
     view.rerender(header(item('recording'), false, true));
     expect((screen.getByRole('button', { name: 'Create highlights' }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('reviews the owning session while one of its children is playing', () => {
+    const recording = item('recording');
+    const onReviewSession = vi.fn();
+    render(
+      <PlayerHeader
+        item={item('clip')}
+        reviewRecording={recording}
+        creatingHighlights={false}
+        highlightsPaused={false}
+        highlightCount={2}
+        canCreateHighlights={false}
+        onAutomaticClips={() => {}}
+        onReviewSession={onReviewSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
+    expect(onReviewSession).toHaveBeenCalledWith(recording);
+  });
 });
 
 describe('PlayerHeader SDR action', () => {

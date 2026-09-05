@@ -9,9 +9,8 @@
 // wrapper, not its children: a button inside a button is invalid markup and browsers disagree about
 // which one a click activates.
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
-import { thumbnailUrl } from '../../ipc/endpoints';
 import {
   formatDateChip,
   formatDurationChip,
@@ -23,10 +22,7 @@ import {
 } from './libraryModel';
 import { Icon } from '../ui/Icon';
 import { Checkbox } from '../../components/ui/controls';
-
-const THUMBNAIL_RETRY_BASE_MS = 250;
-const THUMBNAIL_RETRY_MAX_MS = 5_000;
-const THUMBNAIL_RETRY_STAGGER_MS = 100;
+import { ContentThumbnail } from './ContentThumbnail';
 
 export function ContentCard({
   item,
@@ -136,7 +132,7 @@ export function ContentCard({
               thumbnailLoadingActive={thumbnailLoadingActive}
             />
           ) : showThumbnail ? (
-            <RetryingThumbnail
+            <ContentThumbnail
               key={item.filePath}
               filePath={item.filePath}
               className="content-card-image"
@@ -253,7 +249,7 @@ function MissingVideoPreview({
           style={{ '--preview-count': highlights.length } as CSSProperties}
         >
           {highlights.map((highlight) => (
-            <RetryingThumbnail
+            <ContentThumbnail
               key={highlight.filePath}
               filePath={highlight.filePath}
               className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
@@ -289,7 +285,7 @@ function LiveRecordingPreview({
           style={{ '--preview-count': highlights.length } as CSSProperties}
         >
           {highlights.map((highlight) => (
-            <RetryingThumbnail
+            <ContentThumbnail
               key={highlight.filePath}
               filePath={highlight.filePath}
               className={loaded.has(highlight.filePath) ? 'content-card-preview-image loaded' : 'content-card-preview-image'}
@@ -302,72 +298,4 @@ function LiveRecordingPreview({
       )}
     </span>
   );
-}
-
-function RetryingThumbnail({
-  filePath,
-  className,
-  loading,
-  fetchPriority,
-  fallback = null,
-  onLoad,
-}: {
-  filePath: string;
-  className: string;
-  loading: 'eager' | 'lazy';
-  fetchPriority: 'high' | 'low';
-  fallback?: ReactNode;
-  onLoad?: () => void;
-}) {
-  const [attempt, setAttempt] = useState(0);
-  const [waiting, setWaiting] = useState(false);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setAttempt(0);
-    setWaiting(false);
-    return () => {
-      if (retryTimer.current !== null) clearTimeout(retryTimer.current);
-    };
-  }, [filePath]);
-
-  if (waiting) return fallback;
-
-  const source = new URL(thumbnailUrl(filePath));
-  if (attempt > 0) source.searchParams.set('thumbnailRetry', String(attempt));
-
-  return (
-    <img
-      className={className}
-      src={source.toString()}
-      // Decorative: the title sits beside every thumbnail, so repeating it adds no information.
-      alt=""
-      loading={loading}
-      fetchPriority={fetchPriority}
-      decoding="async"
-      width={480}
-      height={270}
-      onLoad={onLoad}
-      onError={() => {
-        if (retryTimer.current !== null) return;
-
-        setWaiting(true);
-        const delay = Math.min(THUMBNAIL_RETRY_BASE_MS * 2 ** attempt, THUMBNAIL_RETRY_MAX_MS)
-          + thumbnailRetryOffset(filePath);
-        retryTimer.current = setTimeout(() => {
-          retryTimer.current = null;
-          setAttempt((current) => current + 1);
-          setWaiting(false);
-        }, delay);
-      }}
-    />
-  );
-}
-
-function thumbnailRetryOffset(filePath: string): number {
-  let hash = 0;
-  for (let index = 0; index < filePath.length; index += 1) {
-    hash = (hash * 31 + filePath.charCodeAt(index)) >>> 0;
-  }
-  return hash % THUMBNAIL_RETRY_STAGGER_MS;
 }

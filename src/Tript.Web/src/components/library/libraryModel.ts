@@ -22,14 +22,14 @@
 // fresh install and a broken backend.
 
 import type { ContentItem } from '../../ipc/protocol';
-import { formatTime } from '../player/timelineModel';
+import { contentTypeLabel, formatContentDuration, formatContentSize } from '../contentPresentation';
 
 // ---------------------------------------------------------------------------
 // The query
 // ---------------------------------------------------------------------------
 
 /** The type dimension. `sessions` is everything that is not a clip — see `matchesType`. */
-export type ContentTypeFilter = 'all' | 'sessions' | 'clips' | 'trash';
+export type ContentTypeFilter = 'all' | 'sessions' | 'clips' | 'highlights' | 'trash';
 
 /** The date dimension: a trailing window, or everything. */
 export type DateRangeFilter = 'any' | 'day' | 'week' | 'month' | 'year';
@@ -140,16 +140,7 @@ export function itemLabel(item: ContentItem): string {
 
 /** The human label for an item's content type, for the type chip on a card. */
 export function typeLabel(item: ContentItem): string {
-  switch (item.contentType) {
-    case 'clip':
-      return 'Clip';
-    case 'highlight':
-      return 'Highlight';
-    case 'buffer':
-      return 'Buffer';
-    default:
-      return 'Recording';
-  }
+  return contentTypeLabel(item.contentType);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +225,30 @@ function sourceOf(clip: ContentItem, recordings: readonly ContentItem[]): Conten
   return source;
 }
 
+export function sourceSession(item: ContentItem, candidates: readonly ContentItem[]): ContentItem | null {
+  if (item.contentType === 'recording') {
+    return item;
+  }
+  if (!isClipContent(item)) {
+    return null;
+  }
+  return sourceOf(item, candidates.filter((candidate) => candidate.contentType === 'recording'));
+}
+
+export function sessionPlaylist(recording: ContentItem, candidates: readonly ContentItem[]): ContentItem[] {
+  const children = candidates
+    .filter((item) => isClipContent(item) && sourceOf(item, [recording]) !== null)
+    .sort((left, right) => {
+      const byTimeline = (left.clipStartTime ?? Number.POSITIVE_INFINITY)
+        - (right.clipStartTime ?? Number.POSITIVE_INFINITY);
+      return byTimeline !== 0 ? byTimeline : itemLabel(left).localeCompare(itemLabel(right));
+    });
+  const playableMain = recording.videoMissing !== true
+    && recording.highlightsOnly !== true
+    && recording.recording !== true;
+  return playableMain ? [recording, ...children] : children;
+}
+
 /**
  * The content list as recordings with their clips, **in the order they arrived**.
  *
@@ -280,7 +295,7 @@ export function groupByRecording(items: readonly ContentItem[]): RecordingGroup[
 /** The duration chip, or null when no length is declared (the chip is then not rendered). */
 export function formatDurationChip(item: ContentItem): string | null {
   const seconds = itemDuration(item);
-  return seconds === undefined ? null : formatTime(seconds);
+  return formatContentDuration(seconds);
 }
 
 /**
@@ -301,24 +316,12 @@ export function formatDateChip(item: ContentItem): string {
 
 /** The file-size chip, or null when the backend does not report a size. Binary units (1 KB = 1024 B). */
 export function formatSizeChip(item: ContentItem): string | null {
-  return formatBytes(item.fileSizeBytes);
+  return formatContentSize(item.fileSizeBytes);
 }
 
 /** A byte count as a size chip, or null when there is no usable number. Shared with the trash list. */
 export function formatBytes(bytes: number | undefined): string | null {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) {
-    return null;
-  }
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  // Sub-10 values keep a decimal ("1.2 GB"); above that the decimal is noise ("335 MB").
-  const rounded = unit === 0 || value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${rounded} ${units[unit]}`;
+  return formatContentSize(bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +336,13 @@ export function matchesType(item: ContentItem, filter: ContentTypeFilter): boole
   if (filter === 'all') {
     return true;
   }
-  const isClip = isClipContent(item);
-  return filter === 'clips' ? isClip : !isClip;
+  if (filter === 'clips') {
+    return item.contentType === 'clip';
+  }
+  if (filter === 'highlights') {
+    return item.contentType === 'highlight';
+  }
+  return !isClipContent(item);
 }
 
 /** The game dimension. `NO_GAME` selects the items whose game is unknown. */

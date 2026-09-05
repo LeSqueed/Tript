@@ -60,6 +60,7 @@ function typeFilters(trashCount: number): { value: ContentTypeFilter; label: str
     { value: 'all', label: 'All' },
     { value: 'sessions', label: 'Sessions' },
     { value: 'clips', label: 'Clips' },
+    { value: 'highlights', label: 'Highlights' },
     { value: 'trash', label: trashCount > 0 ? `Trash (${trashCount})` : 'Trash' },
   ];
 }

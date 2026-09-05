@@ -6,6 +6,7 @@ import { Button, TextField } from '../ui/controls';
 
 interface PlayerHeaderProps {
   item: ContentItem;
+  reviewRecording?: ContentItem;
   creatingHighlights: boolean;
   highlightsPaused: boolean;
   highlightCount: number;
@@ -29,6 +30,7 @@ interface PlayerHeaderProps {
 
 export function PlayerHeader({
   item,
+  reviewRecording,
   creatingHighlights,
   highlightsPaused,
   highlightCount,
@@ -143,9 +145,9 @@ export function PlayerHeader({
           {creatingHighlights ? (highlightsPaused ? 'Resume highlights' : 'Pause highlights') : 'Create highlights'}
         </Button>
       )}
-      {item.contentType === 'recording' && highlightCount > 0 && onReviewSession && (
-        <Button variant="ghost" size="small" onClick={() => onReviewSession(item)}>
-          View highlights ({highlightCount})
+      {reviewRecording && highlightCount > 0 && onReviewSession && (
+        <Button variant="ghost" size="small" onClick={() => onReviewSession(reviewRecording)}>
+          Review highlights ({highlightCount})
         </Button>
       )}
     </div>

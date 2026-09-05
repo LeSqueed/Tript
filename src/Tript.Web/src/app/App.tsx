@@ -18,7 +18,12 @@ import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
-import { cascadableLinkedHighlights, itemLabel } from '../components/library/libraryModel';
+import {
+  cascadableLinkedHighlights,
+  itemLabel,
+  sessionPlaylist,
+  sourceSession,
+} from '../components/library/libraryModel';
 import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem, CreateClipParameters, GameInfo, ImportProgressMessage, RecordingState } from '../ipc/protocol';
@@ -102,6 +107,7 @@ function AppShell({
   const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
   const [sessionPlayerOrigin, setSessionPlayerOrigin] = useState<{
     recording: ContentItem;
+    item: ContentItem;
     navigation: ContentItem[];
   } | null>(null);
   const [sessionReturnRoute, setSessionReturnRoute] = useState<'library' | 'player'>('library');
@@ -207,26 +213,29 @@ function AppShell({
     const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
     setSessionReview({ recording, clips });
     setSessionReturnRoute(returnRoute);
-    setSessionPlayerOrigin(returnRoute === 'player' ? { recording, navigation: playerNavigation } : null);
+    setSessionPlayerOrigin(returnRoute === 'player'
+      ? { recording, item: playerItem ?? recording, navigation: playerNavigation }
+      : null);
     setRoute('session');
-  }, [items, playerNavigation]);
+  }, [items, playerItem, playerNavigation]);
 
   const openInPlayer = useCallback(
     (item: ContentItem, resultItems: ContentItem[]) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
-      // A pending-video or live-capture session has no playable video, so the player is not the
-      // destination: it is the review of the session's highlights (which only exist if it has any).
-      if (item.videoMissing === true || item.highlightsOnly === true || item.recording === true) {
-        openSessionReview(item, 'library');
+      const recording = sourceSession(item, items);
+      const navigation = recording ? sessionPlaylist(recording, items) : resultItems;
+      const requested = navigation.find((candidate) => candidate.filePath === item.filePath) ?? navigation[0];
+      if (!requested) {
+        if (recording) openSessionReview(recording, 'library');
         return;
       }
-      setPlayerItem(item);
-      setPlayerTitle(itemLabel(item));
-      setPlayerNavigation(resultItems);
+      setPlayerItem(requested);
+      setPlayerTitle(itemLabel(requested));
+      setPlayerNavigation(navigation);
       setPlayerReturnRoute('library');
       setRoute('player');
     },
-    [openSessionReview],
+    [items, openSessionReview],
   );
 
   const closePlayer = useCallback(() => {
@@ -594,8 +603,8 @@ function AppShell({
   }, [playerReturnRoute, showLibrary]);
   const backFromSession = useCallback(() => {
     if (sessionReturnRoute === 'player' && sessionPlayerOrigin) {
-      setPlayerItem(sessionPlayerOrigin.recording);
-      setPlayerTitle(itemLabel(sessionPlayerOrigin.recording));
+      setPlayerItem(sessionPlayerOrigin.item);
+      setPlayerTitle(itemLabel(sessionPlayerOrigin.item));
       setPlayerNavigation(sessionPlayerOrigin.navigation);
       setSessionReview(null);
       setSessionPlayerOrigin(null);
@@ -604,6 +613,7 @@ function AppShell({
     }
     showLibrary();
   }, [sessionPlayerOrigin, sessionReturnRoute, showLibrary]);
+  const playerSession = playerItem ? sourceSession(playerItem, items) : null;
 
   return (
     <div className="app-shell">
@@ -692,9 +702,10 @@ function AppShell({
               onReviewSession={openSessionReview}
               convertHdrClipsToSdr={convertHdrClipsToSdr}
               recording={recording}
-              highlightCount={items.filter(
-                (candidate) => candidate.automated && candidate.sourceSessionPath === playerItem.filePath,
-              ).length}
+              reviewRecording={playerSession ?? undefined}
+              highlightCount={playerSession
+                ? items.filter((candidate) => candidate.automated && candidate.sourceSessionPath === playerSession.filePath).length
+                : 0}
                onItemChange={adoptPlayerItem}
                onCreateClip={enqueueClip}
              />

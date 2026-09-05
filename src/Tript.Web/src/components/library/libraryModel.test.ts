@@ -27,7 +27,9 @@ import {
   matchesType,
   NO_GAME,
   pageCountFor,
+  sessionPlaylist,
   sortItems,
+  sourceSession,
   typeLabel,
   UNKNOWN_DATE_LABEL,
   UNKNOWN_GAME_LABEL,
@@ -73,6 +75,14 @@ const clip = item({
   startTime: NOW - 3 * DAY,
   durationSeconds: 3.083333,
   fileSizeBytes: 33338,
+});
+
+const highlight = item({
+  contentType: 'highlight',
+  fileName: 'highlight-1.mp4',
+  filePath: 'clips/highlight-1.mp4',
+  sourceSessionPath: recentSession.filePath,
+  clipStartTime: 20,
 });
 
 /** The shape of an item with no metadata record: a file name, and nothing else. */
@@ -146,22 +156,41 @@ describe('chip formatting', () => {
 });
 
 describe('the type filter', () => {
-  it('selects clips, and everything else as sessions', () => {
+  it('keeps clips and highlights disjoint', () => {
     expect(matchesType(clip, 'clips')).toBe(true);
+    expect(matchesType(highlight, 'clips')).toBe(false);
+    expect(matchesType(highlight, 'highlights')).toBe(true);
+    expect(matchesType(clip, 'highlights')).toBe(false);
     expect(matchesType(recentSession, 'clips')).toBe(false);
     expect(matchesType(recentSession, 'sessions')).toBe(true);
     expect(matchesType(clip, 'sessions')).toBe(false);
   });
 
-  it('leaves no content type invisible: All is exactly Sessions ∪ Clips', () => {
-    // highlight and buffer are on the wire but named by neither filter. Defining sessions as "not a
-    // clip" is what stops them falling through both.
+  it('leaves no content type invisible across Sessions, Clips and Highlights', () => {
     for (const contentType of ['recording', 'clip', 'highlight', 'buffer'] as const) {
       const candidate = item({ fileName: `${contentType}.mp4`, contentType });
+      const matches = ['sessions', 'clips', 'highlights'].filter((filter) =>
+        matchesType(candidate, filter as LibraryQuery['type']));
       expect(matchesType(candidate, 'all')).toBe(true);
-      expect(matchesType(candidate, 'sessions') || matchesType(candidate, 'clips')).toBe(true);
-      expect(matchesType(candidate, 'sessions') && matchesType(candidate, 'clips')).toBe(false);
+      expect(matches).toHaveLength(1);
     }
+  });
+});
+
+describe('session playlists', () => {
+  it('puts the playable session first and its children in timeline order', () => {
+    const earlyClip = { ...clip, sourceSessionPath: recentSession.filePath, clipStartTime: 5 };
+    expect(sessionPlaylist(recentSession, [highlight, oldSession, earlyClip, recentSession])).toEqual([
+      recentSession,
+      earlyClip,
+      highlight,
+    ]);
+    expect(sourceSession(highlight, [recentSession, highlight])).toBe(recentSession);
+  });
+
+  it('omits an unavailable main video and falls through to its first child', () => {
+    const missing = { ...recentSession, videoMissing: true };
+    expect(sessionPlaylist(missing, [highlight, missing])).toEqual([highlight]);
   });
 });
 

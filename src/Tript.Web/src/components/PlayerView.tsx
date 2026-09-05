@@ -24,6 +24,7 @@ import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
 import { TransportBar } from './player/TransportBar';
 import { PlayerHeader } from './player/PlayerHeader';
+import { PlaylistPanel } from './player/PlaylistPanel';
 import { PlaybackSurface } from './player/PlaybackSurface';
 import { useClipDialog } from './player/useClipDialog';
 import { ClipDialog } from './player/clipDialog';
@@ -62,6 +63,7 @@ export interface PlayerViewProps {
   onDelete?(item: ContentItem): void;
   onToggleFavorite?(item: ContentItem): void;
   onReviewSession?(recording: ContentItem): void;
+  reviewRecording?: ContentItem;
   highlightCount?: number;
   onBack?(): void;
   /**
@@ -86,6 +88,7 @@ export function PlayerView({
   onDelete,
   onToggleFavorite,
   onReviewSession,
+  reviewRecording,
   highlightCount = 0,
   onBack,
   regions: externalRegions,
@@ -326,6 +329,12 @@ export function PlayerView({
     },
     [navigation.length, playback, playing],
   );
+
+  const selectNavigationItem = useCallback((index: number) => {
+    if (index === itemIndex || !navigation[index]) return;
+    playback.prepareItemChange(playing);
+    setItemIndex(index);
+  }, [itemIndex, navigation, playback, playing]);
 
   const captureTrainingFrame = useCallback(() => {
     const video = videoRef.current;
@@ -695,6 +704,7 @@ export function PlayerView({
     <section ref={playerRootRef} className={isFullscreen ? 'player-view player-view-fullscreen' : 'player-view'}>
       <PlayerHeader
         item={item}
+        reviewRecording={reviewRecording}
         creatingHighlights={creatingHighlights}
         highlightsPaused={highlightsPaused}
         highlightCount={highlightCount}
@@ -891,6 +901,10 @@ export function PlayerView({
         }
         </div>
       </div>
+
+      {!isFullscreen && navigation.length > 1 && (
+        <PlaylistPanel items={navigation} currentIndex={itemIndex} onSelect={selectNavigationItem} />
+      )}
 
       <ClipDialog dialog={dialog} currentTime={currentTime} />
       {labelingSample && currentGameId && (

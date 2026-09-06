@@ -316,7 +316,7 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void IgnoreGameCandidate_PersistsTheApplicationPath()
     {
         var path = @"C:\Tools\some.bin";
@@ -326,6 +326,17 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.Contains(path, _store.Load().Game.IgnoredApplications, FilePaths.Comparer);
         Assert.Contains(path, new SettingsStore(new SettingsFileProvider(_store.FilePath))
             .Load().Game.IgnoredApplications, FilePaths.Comparer);
+        Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
+    }
+
+    [LinuxFact]
+    public void IgnoreGameCandidate_PersistsTheApplicationPath_OnLinux()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "tript-ignore-app-test.bin");
+
+        _host.IgnoreGameCandidate(path);
+
+        Assert.Contains(path, _store.Load().Game.IgnoredApplications, FilePaths.Comparer);
         Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
     }
 
@@ -349,11 +360,22 @@ public sealed class GameCustomSettingsTests : IDisposable
         }
     }
 
-    [Fact]
+    [WindowsFact]
     public void IgnoreGameCandidate_DoesNotDuplicateTheSamePath()
     {
         _host.IgnoreGameCandidate(@"C:\Tools\some.bin");
         _host.IgnoreGameCandidate(@"c:\tools\SOME.bin");
+
+        Assert.Single(_store.Load().Game.IgnoredApplications);
+    }
+
+    [LinuxFact]
+    public void IgnoreGameCandidate_DoesNotDuplicateTheSamePath_OnLinux()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "tript-ignore-app-dedupe-test.bin");
+
+        _host.IgnoreGameCandidate(path);
+        _host.IgnoreGameCandidate(path);
 
         Assert.Single(_store.Load().Game.IgnoredApplications);
     }

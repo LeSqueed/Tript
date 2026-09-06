@@ -110,6 +110,7 @@ internal sealed partial class AppHost : IDisposable
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
     private string? _activeSessionPath;
+    private PendingSessionReassignment? _pendingSessionReassignment;
     private RecordingMode? _activeRecordingMode;
     private readonly object _automaticClipGate = new();
     private readonly List<Bookmark> _automaticClipBookmarks = [];
@@ -160,6 +161,12 @@ internal sealed partial class AppHost : IDisposable
 
         internal bool PausedByUser { get; set; }
     }
+
+    private sealed record PendingSessionReassignment(
+        string? OriginalGame,
+        string? OriginalGameId,
+        string TargetGame,
+        string TargetGameId);
 
     private sealed class LiveHighlightRegion
     {

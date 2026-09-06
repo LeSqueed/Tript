@@ -380,6 +380,31 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(deviceId, reloadedSource.DeviceId);
     }
 
+    [Fact]
+    public void SaveThenLoad_AllowsOneAudioDeviceOnMultipleTracks()
+    {
+        const string deviceId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}";
+        var settings = _store.Load();
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Mic",
+            Sources = { new AudioSource { Name = "Headset Mic", Kind = AudioSourceKind.Input, DeviceId = deviceId, Volume = 1.0f } },
+        });
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Mixed",
+            Sources = { new AudioSource { Name = "Headset Mic", Kind = AudioSourceKind.Input, DeviceId = deviceId, Volume = 0.5f } },
+        });
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load();
+
+        Assert.Equal(2, reloaded.Audio.Tracks.Count);
+        Assert.All(reloaded.Audio.Tracks, track => Assert.Equal(deviceId, Assert.Single(track.Sources).DeviceId));
+        Assert.Equal(1.0f, reloaded.Audio.Tracks[0].Sources[0].Volume);
+        Assert.Equal(0.5f, reloaded.Audio.Tracks[1].Sources[0].Volume);
+    }
+
     // A source without a device selection reads back with a null DeviceId rather than a stale or
     // empty value, so a config that never chose a device keeps meaning "the platform default".
     [Fact]

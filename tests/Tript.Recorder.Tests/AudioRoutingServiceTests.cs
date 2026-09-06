@@ -71,6 +71,25 @@ public sealed class AudioRoutingServiceTests
     }
 
     [Fact]
+    public void TheService_CreatesIndependentCapturesForOneDeviceOnMultipleTracks()
+    {
+        const string micId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{11111111-2222-3333-4444-555555555555}";
+        var sink = new FakeSink();
+        var plan = AudioRoutingPlanner.Plan(new List<AudioTrack>
+        {
+            new() { Name = "Mic", Sources = { new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, DeviceId = micId, Volume = 1.0f } } },
+            new() { Name = "Mixed", Sources = { new AudioSource { Name = "Mic", Kind = AudioSourceKind.Input, DeviceId = micId, Volume = 0.5f } } },
+        });
+
+        using var routing = new AudioRoutingService(sink).Wire(plan);
+
+        Assert.Equal(2, sink.CreatedSources.Count);
+        Assert.All(sink.CreatedSources, source => Assert.Equal(micId, source.DeviceId));
+        Assert.Equal([0, 1], sink.Routed.Select(source => source.MixerIndex));
+        Assert.Equal([1.0f, 0.5f], sink.Volumes.Select(source => source.Volume));
+    }
+
+    [Fact]
     public void TheService_CreatesOneEncoderPerTrackBoundToThatMixerAndAssignedToThatSlot()
     {
         var sink = new FakeSink();

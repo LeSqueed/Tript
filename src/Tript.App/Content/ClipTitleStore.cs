@@ -259,6 +259,23 @@ internal sealed class ClipTitleStore
         }
     }
 
+    internal bool SaveAutomaticAssignment(string clipFileName, string sourceSessionPath,
+        string? game, string? gameId)
+    {
+        lock (_writeGate)
+        {
+            var existing = Read(clipFileName);
+            if (existing.MustNotBeOverwritten || existing.Record?.IsAutomatic != true)
+                return false;
+
+            var record = existing.Record;
+            record.SourceSessionPath = sourceSessionPath;
+            record.Game = string.IsNullOrWhiteSpace(game) ? null : game;
+            record.GameId = string.IsNullOrWhiteSpace(gameId) ? null : gameId;
+            return Write(clipFileName, record);
+        }
+    }
+
     private bool Write(string clipFileName, ClipTitleRecord record)
     {
         try

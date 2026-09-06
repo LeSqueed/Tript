@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { AudioPage } from './AudioPage';
+import { AudioPage, buildSourceOptions } from './AudioPage';
 import type { AudioDeviceSetting, AudioSettings, AudioTrack } from '../settingsModel';
 
 const DEVICES: AudioDeviceSetting[] = [
@@ -90,6 +90,48 @@ describe('source kind pills', () => {
 });
 
 describe('track routing', () => {
+  it('sorts discovered devices by name after the built-in sources', () => {
+    expect(buildSourceOptions([
+      { id: 'z-device', name: 'Zeta speakers', direction: 'Output' },
+      { id: 'a-device', name: 'alpha microphone', direction: 'Input' },
+      { id: 'b-device', name: 'Bravo headset', direction: 'Output' },
+    ]).map((option) => option.label)).toEqual([
+      'Microphone',
+      'System output',
+      'Game audio',
+      'alpha microphone',
+      'Bravo headset',
+      'Zeta speakers',
+    ]);
+  });
+
+  it('offers the same device on another track but not twice on its current track', () => {
+    const assigned = { name: 'Headset Mic', kind: 'Input' as const, deviceId: 'dev-mic', volume: 0.8 };
+    renderPage(makeSettings({
+      tracks: [
+        { id: 't1', name: 'Mic', sources: [assigned] },
+        { id: 't2', name: 'Mixed', sources: [] },
+      ],
+    }));
+
+    const selects = screen.getAllByLabelText('Source to add to this track') as HTMLSelectElement[];
+    expect(Array.from(selects[0].options).map((option) => option.value)).not.toContain('dev-mic');
+    expect(Array.from(selects[1].options).map((option) => option.value)).toContain('dev-mic');
+  });
+
+  it('recognizes a persisted built-in source without frontend-only identity fields', () => {
+    renderPage(makeSettings({
+      tracks: [{
+        id: 't1',
+        name: 'Mic',
+        sources: [{ name: 'Microphone', kind: 'Input', volume: 1 }],
+      }],
+    }));
+
+    const select = screen.getByLabelText('Source to add to this track') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).not.toContain('mic');
+  });
+
   it('sends the full tracks array when a track is added', () => {
     const track: AudioTrack = { id: 't1', name: 'Track 1', sources: [] };
     const update = renderPage(makeSettings({ tracks: [track] }));

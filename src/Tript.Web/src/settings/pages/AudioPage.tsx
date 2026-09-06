@@ -42,13 +42,14 @@ export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[
     { id: 'system', label: 'System output', kind: 'Output' },
     { id: 'game', label: 'Game audio', kind: 'Output' },
   ];
+  const deviceOptions: SourceOption[] = [];
   for (const device of devices) {
     if (!device?.id || !device?.name) {
       continue;
     }
-    const exists = options.some((option) => option.deviceId === device.id || option.id === device.id);
+    const exists = deviceOptions.some((option) => option.deviceId === device.id || option.id === device.id);
     if (!exists) {
-      options.push({
+      deviceOptions.push({
         id: device.id,
         label: device.name,
         // A device's direction decides the capture type it routes to: an output endpoint is a
@@ -59,7 +60,11 @@ export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[
       });
     }
   }
-  return options;
+  deviceOptions.sort((left, right) =>
+    left.label.localeCompare(right.label, undefined, { sensitivity: 'base' })
+      || left.id.localeCompare(right.id),
+  );
+  return [...options, ...deviceOptions];
 }
 
 /** The device behind a source, if any — resolved by id against the device list. */
@@ -80,7 +85,7 @@ function makeSource(option: SourceOption): AudioSource {
     label: option.label,
     volume: 1,
     // The stable routing key: the device id when this is a device selection, else the built-in
-    // source id (mic/system/game). Used to prevent a source being routed twice.
+    // source id (mic/system/game). Used to prevent a source being routed twice in one track.
     sourceKey: option.deviceId ?? option.id,
   };
   if (option.deviceId) {
@@ -106,16 +111,10 @@ export function AudioPage({
   const devices = Array.isArray(settings.devices) ? settings.devices : [];
   const sourceOptions = buildSourceOptions(devices);
 
-  /**
-   * The source options not already routed anywhere — the current track's own sources are
-   * excluded too, so a source cannot be assigned twice.
-   */
-  function addableSources(): SourceOption[] {
+  function addableSources(track: AudioTrack): SourceOption[] {
     const taken = new Set<string>();
-    for (const track of tracks) {
-      for (const source of track.sources) {
-        taken.add(source.sourceKey ?? source.deviceId ?? source.name);
-      }
+    for (const source of track.sources) {
+      taken.add(sourceIdentity(source));
     }
     return sourceOptions.filter((option) => {
       const key = option.deviceId ?? option.id;
@@ -191,7 +190,7 @@ export function AudioPage({
       )}
 
       {tracks.map((track, trackIndex) => {
-        const addable = addableSources();
+        const addable = addableSources(track);
         return (
           <div className="audio-track" key={track.id}>
             <div className="audio-track-header">
@@ -304,6 +303,15 @@ export function AudioPage({
       </details>
     </div>
   );
+}
+
+function sourceIdentity(source: AudioSource): string {
+  if (source.deviceId) return source.deviceId;
+  if (source.sourceKey) return source.sourceKey;
+  if (source.kind === 'Input' && source.name === 'Microphone') return 'mic';
+  if (source.kind === 'Output' && source.name === 'System output') return 'system';
+  if (source.kind === 'Output' && source.name === 'Game audio') return 'game';
+  return `${source.kind}:${source.name}`;
 }
 
 function clampVolume(value: number): number {

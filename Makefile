@@ -5,9 +5,10 @@
 #   dev        build + run the app (Debug, --fake-recorder by default for a no-hardware dev session)
 #   release    build the current OS in Release
 #   linux      publish a framework-dependent Linux build into dist/<config>
-#   windows    publish a Windows build with the pinned OBS bundle into dist/<config>-win
+#   windows    publish a Windows build with Tript.exe at dist/<config>-win and its runtime under App/
 #   shell      build the frontend + publish the desktop shell (Tript.Shell, Photino window)
-#   publish-shell-win  publish the Windows desktop shell (Tript.Shell, Photino window) into dist/<config>-win
+#   publish-shell-win  publish the Windows desktop shell (Tript.Shell, Photino window) into App/
+#   launcher-windows   build the native Windows Tript.exe launcher (requires mingw-w64)
 #   obs-fetch  download the pinned OBS Studio Windows portable zip into third_party/
 #   test       run the .NET test suite + the frontend Vitest suite
 #   run        run the assembled binary — prefers the desktop shell, falls back to the headless host
@@ -20,13 +21,15 @@
 #   SELF_CONTAINED=false          self-contained .NET publish (Windows bundle defaults true)
 #   DIST_DIR=dist                 output directory for assembled builds
 #   FAKE_RECORDER=true|false      pass --fake-recorder to `run` (default true for dev)
-  #   TRAINING=true|false           include the model-training feature set (default false)
-  #   OBS_URL=<url>                 override the OBS zip download URL
+#   TRAINING=true|false           include the model-training feature set (default false)
+#   OBS_URL=<url>                 override the OBS zip download URL
+#   WIN_LAUNCHER_CC=<compiler>    mingw-w64 C compiler (default x86_64-w64-mingw32-gcc)
+#   WIN_LAUNCHER_WINDRES=<tool>   mingw-w64 resource compiler (default x86_64-w64-mingw32-windres)
 #
 # The Linux build is framework-dependent and expects OBS as a system dependency (the app
 # discovers it at runtime). The Windows build bundles a pinned OBS Studio portable zip.
-# Both assemble the built frontend (src/Tript.Web/dist) into the publish folder as ./dist so the
-# app host serves its own UI from next to the binary.
+# Linux places the frontend beside the host as ./dist. Windows packages place the host and frontend
+# under App/ so the package root contains only the user-facing launcher.
 #
 # The desktop shell (shell/publish-shell) publishes src/Tript.Shell next to the app host. The shell
 # reuses the app host's construction seam and points a native Photino window at the same UI. On
@@ -48,14 +51,17 @@ WEB_SRC := src/Tript.Web
 APP_CS := src/Tript.App
 PUBLISH_DIR := $(DIST_DIR)/$(CONFIG)
 WIN_PUBLISH_DIR := $(DIST_DIR)/$(CONFIG)-win
+WIN_APP_DIR := $(WIN_PUBLISH_DIR)/App
 SHELL_BIN := $(PUBLISH_DIR)/Tript.Shell
 OBS_ARCHIVE := third_party/obs-studio-$(OBS_VERSION).zip
 OBS_DIR := third_party/obs-studio-$(OBS_VERSION)
 OBS_EXTRACTED := third_party/obs-studio-$(OBS_VERSION)-x64
+WIN_LAUNCHER_CC ?= x86_64-w64-mingw32-gcc
+WIN_LAUNCHER_WINDRES ?= x86_64-w64-mingw32-windres
 
 .PHONY: all dev release linux windows obs-fetch restore-windows test test-dotnet test-web test-integration test-all
 .PHONY: run clean shell publish-shell
-.PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows
+.PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows launcher-windows
 
 all: linux
 
@@ -79,12 +85,11 @@ publish-linux: web
 publish-windows: restore-windows
 	$(MAKE) web
 	$(MAKE) obs-fetch
-	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r win-x64 --self-contained true \
-		-p:EnableTraining=$(TRAINING) -p:RestoreLockedMode=true \
-		-o $(WIN_PUBLISH_DIR)
-	# Publish the desktop shell (Photino window) next to the app host so the folder is a launchable app.
+	rm -rf $(WIN_PUBLISH_DIR)
+	mkdir -p $(WIN_APP_DIR)
 	$(MAKE) publish-shell-win
 	$(MAKE) assemble-windows
+	$(MAKE) launcher-windows
 
 # ---- windows assembly ----
 # The OBS runtime is curated here to match exactly what the app's SafeModules allowlist loads
@@ -105,45 +110,45 @@ OBS_BIN_CORE := obs.dll libobs-d3d11.dll libobs-winrt.dll libobs-opengl.dll \
 
 assemble-windows: obs-fetch
 	# Copy the built frontend as ./dist (the app host serves it from next to the binary).
-	mkdir -p $(WIN_PUBLISH_DIR)/dist
-	cp -r $(WEB_SRC)/dist/* $(WIN_PUBLISH_DIR)/dist/
+	mkdir -p $(WIN_APP_DIR)/dist
+	cp -r $(WEB_SRC)/dist/* $(WIN_APP_DIR)/dist/
 	# Optional offline fallback. Thin releases download only models for detected games.
 	@if [ "$(BUNDLE_MODELS)" = "true" ]; then \
-		mkdir -p $(WIN_PUBLISH_DIR)/data/models; \
-		cp -r data/models/* $(WIN_PUBLISH_DIR)/data/models/; \
+		mkdir -p $(WIN_APP_DIR)/data/models; \
+		cp -r data/models/* $(WIN_APP_DIR)/data/models/; \
 	fi
 
 	# Curated libobs runtime, mirroring the portable zip layout (bin/64bit + obs-plugins/64bit +
 	# data/...) so the app's ObsRuntimeLocator finds it unchanged.
-	mkdir -p $(WIN_PUBLISH_DIR)/bin/64bit
+	mkdir -p $(WIN_APP_DIR)/bin/64bit
 	for dll in $(OBS_BIN_CORE); do \
-		cp $(OBS_EXTRACTED)/bin/64bit/$$dll $(WIN_PUBLISH_DIR)/bin/64bit/; done
-	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/av*.dll) $(WIN_PUBLISH_DIR)/bin/64bit/
-	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/sw*.dll) $(WIN_PUBLISH_DIR)/bin/64bit/
+		cp $(OBS_EXTRACTED)/bin/64bit/$$dll $(WIN_APP_DIR)/bin/64bit/; done
+	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/av*.dll) $(WIN_APP_DIR)/bin/64bit/
+	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/sw*.dll) $(WIN_APP_DIR)/bin/64bit/
 
 	# The allowlisted module binaries only — browser/CEF, Qt plugins, filters, outputs, vst,
 	# decklink/aja and the like never load and are not shipped.
-	mkdir -p $(WIN_PUBLISH_DIR)/obs-plugins/64bit
+	mkdir -p $(WIN_APP_DIR)/obs-plugins/64bit
 	for module in $(OBS_MODULES); do \
-		cp $(OBS_EXTRACTED)/obs-plugins/64bit/$$module.dll $(WIN_PUBLISH_DIR)/obs-plugins/64bit/; done
+		cp $(OBS_EXTRACTED)/obs-plugins/64bit/$$module.dll $(WIN_APP_DIR)/obs-plugins/64bit/; done
 
 	# Module data: only the shipped modules' dirs. win-capture's carries the graphics hooks
 	# (graphics-hook*.dll, inject-helper*.exe) game capture needs, so it ships whole; the others
 	# are locale/schema and are fine to keep or drop. data/libobs (effects) and data/obs-studio
 	# are search roots the locator registers unevaluated, so both ship.
-	mkdir -p $(WIN_PUBLISH_DIR)/data
-	cp -r $(OBS_EXTRACTED)/data/libobs $(WIN_PUBLISH_DIR)/data/
-	cp -r $(OBS_EXTRACTED)/data/obs-studio $(WIN_PUBLISH_DIR)/data/
-	mkdir -p $(WIN_PUBLISH_DIR)/data/obs-plugins
+	mkdir -p $(WIN_APP_DIR)/data
+	cp -r $(OBS_EXTRACTED)/data/libobs $(WIN_APP_DIR)/data/
+	cp -r $(OBS_EXTRACTED)/data/obs-studio $(WIN_APP_DIR)/data/
+	mkdir -p $(WIN_APP_DIR)/data/obs-plugins
 	for module in $(OBS_MODULES); do \
-		cp -r $(OBS_EXTRACTED)/data/obs-plugins/$$module $(WIN_PUBLISH_DIR)/data/obs-plugins/ \
+		cp -r $(OBS_EXTRACTED)/data/obs-plugins/$$module $(WIN_APP_DIR)/data/obs-plugins/ \
 			2>/dev/null || true; done
 	# win-capture resolves its injection helpers beside the application executable, not from the
 	# module data directory. Without these files the source repeatedly reports "init_pipe" failures.
-	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_PUBLISH_DIR)/
-	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_PUBLISH_DIR)/
-	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_PUBLISH_DIR)/obs-plugins/64bit/
-	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_PUBLISH_DIR)/obs-plugins/64bit/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_APP_DIR)/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_APP_DIR)/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/graphics-hook*.dll $(WIN_APP_DIR)/obs-plugins/64bit/
+	cp $(OBS_EXTRACTED)/data/obs-plugins/win-capture/inject-helper*.exe $(WIN_APP_DIR)/obs-plugins/64bit/
 
 	# The subprocess helpers the plugins spawn, resolved from the app process exe path: the muxer
 	# (obs-ffmpeg) and the encoder capability probes (obs-amf-test, obs-nvenc-test, obs-qsv-test).
@@ -155,7 +160,7 @@ assemble-windows: obs-fetch
 	# all. And no "|| true" on either: both failures are silent and neither is survivable. Without
 	# the muxer there is no recording; without a probe the machine quietly falls back to software
 	# encoding, which is the difference between a playable capture and a slideshow.
-	cp $(OBS_EXTRACTED)/bin/64bit/obs-ffmpeg-mux.exe $(WIN_PUBLISH_DIR)/
+	cp $(OBS_EXTRACTED)/bin/64bit/obs-ffmpeg-mux.exe $(WIN_APP_DIR)/
 	@probes="$$(ls $(OBS_EXTRACTED)/bin/64bit/obs-*-test.exe 2>/dev/null)"; \
 	if [ -z "$$probes" ]; then \
 		echo "assemble-windows: no obs-*-test.exe encoder probes in $(OBS_EXTRACTED)/bin/64bit."; \
@@ -165,8 +170,17 @@ assemble-windows: obs-fetch
 	fi; \
 	for probe in $$probes; do \
 		echo "  encoder probe: $$(basename $$probe)"; \
-		cp "$$probe" $(WIN_PUBLISH_DIR)/; \
+		cp "$$probe" $(WIN_APP_DIR)/; \
 	done
+
+launcher-windows:
+	mkdir -p $(WIN_PUBLISH_DIR)/.launcher
+	$(WIN_LAUNCHER_WINDRES) -I src/Tript.Web/public -O coff \
+		src/Tript.Launcher/launcher.rc $(WIN_PUBLISH_DIR)/.launcher/launcher.res
+	$(WIN_LAUNCHER_CC) -O2 -Wall -Wextra -Werror -municode -mwindows -static \
+		src/Tript.Launcher/launcher.c $(WIN_PUBLISH_DIR)/.launcher/launcher.res \
+		-o $(WIN_PUBLISH_DIR)/Tript.exe -luser32
+	rm -rf $(WIN_PUBLISH_DIR)/.launcher
 
 # ---- shell (desktop window) ----
 # Publish the desktop shell (Photino webview) next to the app host. The shell reuses the app host's
@@ -181,17 +195,19 @@ publish-shell:
 	mkdir -p $(PUBLISH_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(PUBLISH_DIR)/dist/
 
-# Windows variant of publish-shell: publish the desktop shell into the Windows publish folder (with
-# the app host) so dist/<config>-win is a complete desktop app. Photino.Native 4.0.22 ships its
+# Windows variant of publish-shell: publish the desktop shell under App/ so the package root exposes
+# only the native Tript.exe launcher. Photino.Native 4.0.22 ships its
 # win-x64 payload (Photino.Native.dll + WebView2Loader.dll) via runtimes/win-x64/native, which
 # self-contained win-x64 publish lands automatically.
 publish-shell-win: restore-windows
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r win-x64 \
 		--self-contained true -p:EnableTraining=$(TRAINING) \
-		-p:RestoreLockedMode=true -o $(WIN_PUBLISH_DIR)
+		-p:RestoreLockedMode=true -o $(WIN_APP_DIR)
+	rm -f $(WIN_APP_DIR)/Tript.App.exe $(WIN_APP_DIR)/Tript.App.deps.json \
+		$(WIN_APP_DIR)/Tript.App.runtimeconfig.json
 	# Keep the Windows publish self-contained too; dotnet publish does not build or copy the Vite UI.
-	mkdir -p $(WIN_PUBLISH_DIR)/dist
-	cp -r $(WEB_SRC)/dist/* $(WIN_PUBLISH_DIR)/dist/
+	mkdir -p $(WIN_APP_DIR)/dist
+	cp -r $(WEB_SRC)/dist/* $(WIN_APP_DIR)/dist/
 
 # The per-project lock files carry the ordinary framework graph in source control. Windows publishing
 # needs the additional RID graph for Photino.Native and OBS assets, so materialize it deliberately before

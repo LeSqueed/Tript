@@ -64,4 +64,32 @@ public sealed class ClipTitleStoreTests : IDisposable
         Assert.True(record.SourceSessionHighlightsOnly);
         Assert.Equal("sessions/session-a.mp4", record.SourceSessionPath);
     }
+
+    [Fact]
+    public void SaveAutomaticAssignment_ChangesOwnershipWithoutDroppingClipMetadata()
+    {
+        var store = new ClipTitleStore(_root);
+        Assert.True(store.Save("highlight-a.mp4", "Clutch"));
+        Assert.True(store.SaveFavorite("highlight-a.mp4", true));
+        Assert.True(store.SaveDuration("highlight-a.mp4", 12.5));
+        Assert.True(store.SaveHdrStatus("highlight-a.mp4", true));
+        Assert.True(store.SaveAutomatic("highlight-a.mp4", "Old Game/sessions/session-a.mp4", 10, 20));
+        Assert.True(store.SaveGame("highlight-a.mp4", "Old Game", "old-game"));
+
+        Assert.True(store.SaveAutomaticAssignment("highlight-a.mp4",
+            "New Game/sessions/session-a.mp4", "New Game", "new-game"));
+
+        var record = store.LoadRecord("highlight-a.mp4");
+        Assert.NotNull(record);
+        Assert.Equal("Clutch", record.Title);
+        Assert.True(record.Favorite);
+        Assert.Equal(12.5, record.DurationSeconds);
+        Assert.True(record.IsHdr);
+        Assert.True(record.IsAutomatic);
+        Assert.Equal(10, record.ClipStartTime);
+        Assert.Equal(20, record.ClipEndTime);
+        Assert.Equal("New Game/sessions/session-a.mp4", record.SourceSessionPath);
+        Assert.Equal("New Game", record.Game);
+        Assert.Equal("new-game", record.GameId);
+    }
 }

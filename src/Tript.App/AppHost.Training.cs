@@ -784,19 +784,24 @@ internal sealed partial class AppHost
                 return;
             }
             if (string.Equals(_activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase))
+            {
+                AssignActiveRecordingToGame(gameId);
+                PushState(true, _currentGameId);
                 return;
+            }
 
             var previousGameId = _activeDetectionGameId;
             // StartDetection owns a destructive detector swap. It must remain under _recorderGate
             // so recording teardown cannot race the synchronous ONNX load and publish a stale host.
             ActivateRecordingModelCore(gameId, previousGameId, StartDetection,
+                () => AssignActiveRecordingToGame(gameId),
                 () => PushError($"The model for {gameId} could not be loaded."),
                 () => PushState(true, _currentGameId));
         }
     }
 
     internal static void ActivateRecordingModelCore(string gameId, string? previousGameId,
-        Func<string, bool> startDetection, Action pushError, Action pushState)
+        Func<string, bool> startDetection, Action onActivated, Action pushError, Action pushState)
     {
         var activated = false;
         try
@@ -819,7 +824,37 @@ internal sealed partial class AppHost
             }
             pushError();
         }
+        else
+        {
+            onActivated();
+        }
         pushState();
+    }
+
+    private void AssignActiveRecordingToGame(string gameId)
+    {
+        if (_pendingMetadata is null)
+            return;
+
+        var game = GameList.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, gameId, StringComparison.OrdinalIgnoreCase))?.Name ?? gameId;
+        var originalGame = _pendingSessionReassignment?.OriginalGame ?? _pendingMetadata.Game;
+        var originalGameId = _pendingSessionReassignment?.OriginalGameId ?? _pendingMetadata.GameId;
+
+        if (string.Equals(originalGameId, gameId, StringComparison.OrdinalIgnoreCase))
+        {
+            _pendingSessionReassignment = null;
+            _pendingMetadata.Game = originalGame;
+            _pendingMetadata.GameId = originalGameId;
+            _currentGameId = originalGameId;
+            return;
+        }
+
+        _pendingSessionReassignment = new PendingSessionReassignment(
+            originalGame, originalGameId, game, gameId);
+        _pendingMetadata.Game = game;
+        _pendingMetadata.GameId = gameId;
+        _currentGameId = gameId;
     }
 
     internal async Task InstallTrainingModelCommand(TrainingGameParameters? parameters)

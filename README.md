@@ -80,8 +80,8 @@ Training's Python dependencies are not bundled in the Windows release. Set up th
 virtual environment once before starting a training run:
 
 ```powershell
-py -3.12 -m venv dist\Release-win\.venv
-dist\Release-win\.venv\Scripts\python.exe -m pip install -r dist\Release-win\Training\Scripts\requirements.txt
+py -3.12 -m venv dist\Release-win\App\.venv
+dist\Release-win\App\.venv\Scripts\python.exe -m pip install -r dist\Release-win\App\Training\Scripts\requirements.txt
 ```
 
 The runner prefers this `.venv` automatically. If it is absent, it falls back to `TRIPT_PYTHON` and
@@ -91,7 +91,7 @@ For AMD GPUs on Windows, prefer the standard ROCm PyTorch backend. Install the m
 set in the same environment:
 
 ```powershell
-dist\Release-win\.venv\Scripts\python.exe -m pip install --no-deps -r dist\Release-win\Training\Scripts\requirements-rocm.txt
+dist\Release-win\App\.venv\Scripts\python.exe -m pip install --no-deps -r dist\Release-win\App\Training\Scripts\requirements-rocm.txt
 ```
 
 Select **ROCm / AMD GPU** in the training view. This uses PyTorch's normal `torch.cuda` path,
@@ -100,7 +100,7 @@ which is the path supported by Ultralytics and ROCm.
 DirectML remains available as an explicit fallback for Windows systems without ROCm:
 
 ```powershell
-dist\Release-win\.venv\Scripts\python.exe -m pip install -r dist\Release-win\Training\Scripts\requirements-directml.txt
+dist\Release-win\App\.venv\Scripts\python.exe -m pip install -r dist\Release-win\App\Training\Scripts\requirements-directml.txt
 ```
 
 Select **DirectML / AMD GPU** in the training view. DirectML is a preview backend, supports one GPU,
@@ -110,6 +110,8 @@ against the Tript event contract. If `Auto GPU / CPU` is selected, DirectML is u
 unavailable and the optional package is installed.
 
 `make dev` / `make run` / `make release` use `dist/<config>` under the repo root.
+Windows packages expose only `Tript.exe` at the package root. The self-contained application and its
+native dependencies live under `App/`; users should launch `Tript.exe`.
 
 ## Run
 
@@ -132,7 +134,8 @@ Resolver settings live in `resolver.json` beside the application executables:
 ```
 
 The resolver integration is disabled when the file is absent. Set `apiKey` to a string when the
-resolver requires one; no resolver environment variables are read.
+resolver requires one; no resolver environment variables are read. Builds publish the values from
+`config/resolver.json`, so development and deployment use the same explicit configuration.
 
 ### The launch key
 
@@ -170,6 +173,7 @@ Linux, `%AppData%\Tript` on Windows) or wherever you point `--settings-path`.
 ## Project layout
 
 - `src/Tript.App` — headless host: UI server, recorder wiring, CLI entry point.
+- `src/Tript.Launcher` — zero-dependency Windows launcher for the self-contained app under `App/`.
 - `src/Tript.Shell` — desktop window: Photino webview over the app host's UI.
 - `src/Tript.Web` — React front end.
 - `src/Tript.Obs` — OBS binding (libobs + obs-ffmpeg-mux).

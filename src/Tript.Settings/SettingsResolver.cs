@@ -14,7 +14,8 @@ public sealed class SettingsResolver
 
         GameSetting? game = null;
         if (!string.IsNullOrEmpty(gameId))
-            game = settings.Game.GameList.FirstOrDefault(g => g.Id == gameId);
+            game = settings.Game.GameList.FirstOrDefault(g =>
+                string.Equals(g.Id, gameId, StringComparison.OrdinalIgnoreCase));
 
         var mode = ResolveMode(settings.Recording.Mode, game?.RecordingModeOverride?.Mode);
 
@@ -64,7 +65,8 @@ public sealed class SettingsResolver
 
         GameSetting? game = null;
         if (!string.IsNullOrEmpty(gameId))
-            game = settings.Game.GameList.FirstOrDefault(g => g.Id == gameId);
+            game = settings.Game.GameList.FirstOrDefault(g =>
+                string.Equals(g.Id, gameId, StringComparison.OrdinalIgnoreCase));
 
         var beforeSeconds = game?.AutomaticClipOverride?.BeforeSeconds
             ?? settings.Recording.AutomaticClipBeforeSeconds;

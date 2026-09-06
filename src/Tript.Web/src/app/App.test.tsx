@@ -690,6 +690,11 @@ describe('App shell', () => {
     expect(screen.queryByText('2 highlights')).toBeNull();
     expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
     expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Session 1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(document.querySelector('.player-view')).toBeNull();
+    expect(document.querySelector('.library-view')?.closest('[hidden]')).toBeNull();
   });
 
   it('returns to the library when the source recording vanishes while viewing a highlight', () => {

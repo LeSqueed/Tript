@@ -196,9 +196,7 @@ internal sealed partial class AppHost
                         item.Game = string.IsNullOrWhiteSpace(_pendingMetadata.Game)
                             ? null
                             : _pendingMetadata.Game;
-                        item.GameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
-                            ? ResolveLegacyGameId(item.Game)
-                            : _pendingMetadata.GameId;
+                        item.GameId = ResolveStoredGameId(_pendingMetadata.GameId, item.Game);
                     }
                 }
             }
@@ -233,9 +231,7 @@ internal sealed partial class AppHost
                 {
                     // The record's own attribution wins — it survives the source session being gone.
                     item.Game = string.IsNullOrWhiteSpace(record.Game) ? null : record.Game;
-                    item.GameId = string.IsNullOrWhiteSpace(record.GameId)
-                        ? ResolveLegacyGameId(item.Game)
-                        : record.GameId;
+                    item.GameId = ResolveStoredGameId(record.GameId, item.Game);
                 }
                 clips.Add(item);
             }
@@ -303,9 +299,7 @@ internal sealed partial class AppHost
                 if (_pendingMetadata is not null)
                 {
                     item.Game = string.IsNullOrWhiteSpace(_pendingMetadata.Game) ? null : _pendingMetadata.Game;
-                    item.GameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
-                        ? ResolveLegacyGameId(item.Game)
-                        : _pendingMetadata.GameId;
+                    item.GameId = ResolveStoredGameId(_pendingMetadata.GameId, item.Game);
                 }
             }
             var metadata = _metadata.Load(fileName);
@@ -344,8 +338,9 @@ internal sealed partial class AppHost
             if (item.Game is null && item.GameId is null
                 && GameSegmentFromPath(sourcePath) is { } sessionSegment)
             {
-                var known = GameList.FirstOrDefault(candidate => string.Equals(candidate.Id,
-                    sessionSegment, StringComparison.OrdinalIgnoreCase));
+                var known = GameList.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, sessionSegment, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.Name, sessionSegment, StringComparison.OrdinalIgnoreCase));
                 if (known is not null)
                 {
                     item.GameId = known.Id;
@@ -471,7 +466,8 @@ internal sealed partial class AppHost
             if (segment is not null)
             {
                 var known = GameList.FirstOrDefault(candidate =>
-                    string.Equals(candidate.Id, segment, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(candidate.Id, segment, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.Name, segment, StringComparison.OrdinalIgnoreCase));
                 if (known is not null)
                 {
                     gameId = known.Id;
@@ -512,9 +508,7 @@ internal sealed partial class AppHost
         item.Favorite = metadata.Favorite;
         item.StartTime = DateTimeToUnixSeconds(metadata.StartTime);
         item.Game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
-        item.GameId = string.IsNullOrWhiteSpace(metadata.GameId)
-            ? ResolveLegacyGameId(item.Game)
-            : metadata.GameId;
+        item.GameId = ResolveStoredGameId(metadata.GameId, item.Game);
         item.DurationSeconds = metadata.DurationSeconds;
         item.AudioTracks = ToAudioTrackInfo(metadata);
     }

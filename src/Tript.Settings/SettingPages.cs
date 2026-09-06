@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tript.Core;
 
 namespace Tript.Settings;
 
@@ -169,7 +170,9 @@ public sealed class GameSettings
     // The known games. A fresh install ships with Overwatch so the auto-start detection watches
     // a game on first launch; a user who edits the list keeps exactly what they saved, because
     // this default only applies when a settings file is absent or has no gameList key.
-    public List<GameSetting> GameList { get; set; } = [new() { Id = "Overwatch", Name = "Overwatch" }];
+    public List<GameSetting> GameList { get; set; } = [new() { Id = Ulid.Derive("builtin:Overwatch"), Name = "Overwatch" }];
+
+    public bool AutoRecordDetectedGames { get; set; } = true;
 
     public List<string> IgnoredApplications { get; set; } = [];
 }

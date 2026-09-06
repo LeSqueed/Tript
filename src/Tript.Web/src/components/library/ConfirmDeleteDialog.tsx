@@ -47,6 +47,70 @@ export interface DeleteConfirmation {
   cascadeCount?: number;
 }
 
+/** The one sentence the cascade checkbox is always about, wherever a delete offers it. */
+const CASCADE_CHECKBOX_LABEL = 'Delete linked highlights (favourited highlights are kept)';
+
+export interface DeleteConfirmationInput {
+  /** Display names of the affected items, in list order. */
+  names: string[];
+  retentionHours: number;
+  /**
+   * How many items actually move, when that is not `names.length` — a placeholder session names
+   * itself but deletes nothing on its own.
+   */
+  affectedCount?: number;
+  /** Offer the "delete linked highlights" checkbox and fold its cascade into the count. */
+  hasCascade?: boolean;
+  /** How many linked non-favourited highlights a checked cascade adds. Read only when `hasCascade`. */
+  cascadeCount?: number;
+  deleteLinkedHighlightsDefault?: boolean;
+  /** The item is already in the trash: there is no trash path left, so confirm always sends permanent. */
+  permanentOnly?: boolean;
+  /** Override the derived heading; otherwise it is "Delete …?" from the names. */
+  title?: string;
+  /** Override the destructive button's label; otherwise it is "Move to trash" / "Delete permanently". */
+  confirmLabel?: string;
+}
+
+/**
+ * Builds the confirmation every delete dialog reads, in one place. The library, the sessions page,
+ * the shell's player delete and the trash all confirm a delete; keeping the title, the button label,
+ * the "how many actually move" count and the cascade-checkbox decision here means they cannot drift.
+ */
+export function makeDeleteConfirmation(input: DeleteConfirmationInput): DeleteConfirmation {
+  const {
+    names,
+    retentionHours,
+    affectedCount,
+    hasCascade = false,
+    cascadeCount,
+    deleteLinkedHighlightsDefault,
+    permanentOnly = false,
+    title,
+    confirmLabel,
+  } = input;
+  const single = names.length === 1;
+  const suffix = permanentOnly ? ' for good' : '';
+  return {
+    title: title ?? (single
+      ? `Delete "${names[0]}"${suffix}?`
+      : `Delete ${names.length} items${suffix}?`),
+    names,
+    confirmLabel: confirmLabel ?? (permanentOnly
+      ? 'Delete permanently'
+      : single ? 'Move to trash' : `Move ${names.length} to trash`),
+    affectedCount: affectedCount ?? names.length,
+    ...(hasCascade
+      ? {
+          cascadeCount,
+          checkbox: { label: CASCADE_CHECKBOX_LABEL, defaultChecked: deleteLinkedHighlightsDefault },
+        }
+      : {}),
+    ...(permanentOnly ? { permanentOnly: true } : {}),
+    retentionHours,
+  };
+}
+
 export function ConfirmDeleteDialog({
   confirmation,
   onCancel,

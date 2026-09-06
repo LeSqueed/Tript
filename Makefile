@@ -20,9 +20,8 @@
 #   SELF_CONTAINED=false          self-contained .NET publish (Windows bundle defaults true)
 #   DIST_DIR=dist                 output directory for assembled builds
 #   FAKE_RECORDER=true|false      pass --fake-recorder to `run` (default true for dev)
-#   TRAINING=true|false           include the model-training feature set (default false)
-#   BUNDLE_MODELS=true|false      include offline model fallbacks (default true during migration)
-#   OBS_URL=<url>                 override the OBS zip download URL
+  #   TRAINING=true|false           include the model-training feature set (default false)
+  #   OBS_URL=<url>                 override the OBS zip download URL
 #
 # The Linux build is framework-dependent and expects OBS as a system dependency (the app
 # discovers it at runtime). The Windows build bundles a pinned OBS Studio portable zip.
@@ -42,7 +41,6 @@ SELF_CONTAINED ?= false
 DIST_DIR ?= dist
 FAKE_RECORDER ?= true
 TRAINING ?= false
-BUNDLE_MODELS ?= true
 OBS_URL ?= https://github.com/obsproject/obs-studio/releases/download/$(OBS_VERSION)/OBS-Studio-$(OBS_VERSION)-Windows-x64.zip
 
 # ---- derived paths ----
@@ -72,16 +70,10 @@ publish: publish-linux
 publish-linux: web
 	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r $(RID) --self-contained $(SELF_CONTAINED) \
 		-p:EnableTraining=$(TRAINING) \
-		-p:BundleDetectionModels=$(BUNDLE_MODELS) \
 		-o $(PUBLISH_DIR)
 	# The app host serves the built frontend from ./dist next to the binary.
 	mkdir -p $(PUBLISH_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(PUBLISH_DIR)/dist/
-	# Optional offline fallback. Thin releases download only models for detected games.
-	@if [ "$(BUNDLE_MODELS)" = "true" ]; then \
-		mkdir -p $(PUBLISH_DIR)/data/models; \
-		cp -r data/models/* $(PUBLISH_DIR)/data/models/; \
-	fi
 
 # Windows: self-contained publish + bundled OBS.
 publish-windows: restore-windows
@@ -89,7 +81,6 @@ publish-windows: restore-windows
 	$(MAKE) obs-fetch
 	dotnet publish $(APP_CS)/Tript.App.csproj -f net10.0 -c $(CONFIG) -r win-x64 --self-contained true \
 		-p:EnableTraining=$(TRAINING) -p:RestoreLockedMode=true \
-		-p:BundleDetectionModels=$(BUNDLE_MODELS) \
 		-o $(WIN_PUBLISH_DIR)
 	# Publish the desktop shell (Photino window) next to the app host so the folder is a launchable app.
 	$(MAKE) publish-shell-win
@@ -183,7 +174,7 @@ assemble-windows: obs-fetch
 publish-shell:
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r $(RID) \
 		--self-contained $(SELF_CONTAINED) -p:EnableTraining=$(TRAINING) \
-		-p:BundleDetectionModels=$(BUNDLE_MODELS) -o $(PUBLISH_DIR)
+		-o $(PUBLISH_DIR)
 	# The shell resolves its UI root from ./dist next to the binary (DefaultWebRoot prefers the
 	# published layout), so the built frontend must ship into the publish folder here — a shell
 	# build must not depend on a prior publish-linux having populated it.
@@ -196,7 +187,7 @@ publish-shell:
 # self-contained win-x64 publish lands automatically.
 publish-shell-win: restore-windows
 	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r win-x64 \
-		--self-contained true -p:EnableTraining=$(TRAINING) -p:BundleDetectionModels=$(BUNDLE_MODELS) \
+		--self-contained true -p:EnableTraining=$(TRAINING) \
 		-p:RestoreLockedMode=true -o $(WIN_PUBLISH_DIR)
 	# Keep the Windows publish self-contained too; dotnet publish does not build or copy the Vite UI.
 	mkdir -p $(WIN_PUBLISH_DIR)/dist

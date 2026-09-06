@@ -13,7 +13,7 @@ import {
 } from '../components/ui/controls';
 import { ContentCard } from './library/ContentCard';
 import { RecordingGroup, type GroupActions } from './library/RecordingGroup';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
+import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
 import { LibraryPagination } from './library/LibraryPagination';
 import { LibraryToolbar } from './library/LibraryToolbar';
 import {
@@ -27,7 +27,7 @@ import {
   type SelectionKey,
 } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
-import { EmptyState } from './ui/Ui';
+import { ActionBar, EmptyState, FilterMismatchEmptyState } from './ui/Ui';
 import {
   ANY_GAME,
   availableGames,
@@ -268,22 +268,14 @@ export function LibraryView({
         count + (item.contentType === 'recording' ? cascadableLinkedHighlights(item, items).length : 0),
       0,
     );
-    return {
-      title: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items?`,
+    return makeDeleteConfirmation({
       names,
-      confirmLabel: names.length === 1 ? 'Move to trash' : `Move ${names.length} to trash`,
-      affectedCount: physicalTargets,
-      ...(pendingDelete.some((item) => item.contentType === 'recording')
-        ? {
-            cascadeCount: cascadable,
-            checkbox: {
-              label: 'Delete linked highlights (favourited highlights are kept)',
-              defaultChecked: deleteLinkedHighlightsByDefault,
-            },
-          }
-        : {}),
       retentionHours,
-    };
+      affectedCount: physicalTargets,
+      hasCascade: pendingDelete.some((item) => item.contentType === 'recording'),
+      cascadeCount: cascadable,
+      deleteLinkedHighlightsDefault: deleteLinkedHighlightsByDefault,
+    });
   }, [deleteLinkedHighlightsByDefault, items, pendingDelete, retentionHours]);
 
   const groupActions: GroupActions = useMemo(
@@ -389,50 +381,47 @@ export function LibraryView({
       />
 
       {view.totalCount > 0 && (
-        <div className="library-selection" data-testid="library-selection">
-          {selectionMode ? (
-            <>
-              {/* A live region: the count is the only feedback a checkbox click gives, and a user who
-                  cannot see the highlighted cards has nothing else to go on. */}
-              <span className="library-selection-count" data-testid="library-selection-count" aria-live="polite">
+        selectionMode ? (
+          <ActionBar
+            data-testid="library-selection"
+            leading={
+              // A live region: the count is the only feedback a checkbox click gives, and a user who
+              // cannot see the highlighted cards has nothing else to go on.
+              <span className="action-bar-count" data-testid="library-selection-count" aria-live="polite">
                 {selectedCount} selected
               </span>
-              <Button variant="ghost"  onClick={toggleAllOnPage} disabled={pageKeys.length === 0}>
-                {pageAllSelected ? 'Deselect page' : 'Select page'}
-              </Button>
-              <Button variant="ghost"  onClick={clearSelection} disabled={selectedCount === 0}>
-                Clear selection
-              </Button>
-              <Button variant="danger"
-                
-                onClick={requestBulkDelete}
-                disabled={selectedCount === 0}>
-                Delete {selectedCount > 0 ? selectedCount : ''}
-              </Button>
-              <Button variant="ghost" className="library-selection-done"  onClick={toggleSelectionMode}>
-                Done
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={toggleSelectionMode}>
-                Select
-              </Button>
-              {view.matchCount > 0 && (
-                <span className="library-range muted small" data-testid="library-range">
-                  {/* A grouped page holds a variable number of items — pagination is over groups so
-                      that a session is never split from its clips — so it counts sessions. */}
-                  {groupView
-                    ? `${groupView.groupCount} session${groupView.groupCount === 1 ? '' : 's'} · ${groupView.matchCount} item${groupView.matchCount === 1 ? '' : 's'}`
-                    : `Showing ${view.firstIndex}–${view.lastIndex} of ${view.matchCount}`}
-                  {view.filtered && view.totalCount !== view.matchCount
-                    ? ` · ${view.totalCount} total`
-                    : ''}
-                </span>
-              )}
-            </>
-          )}
-        </div>
+            }
+            trailing={<Button variant="ghost" onClick={toggleSelectionMode}>Done</Button>}
+          >
+            <Button variant="ghost" onClick={toggleAllOnPage} disabled={pageKeys.length === 0}>
+              {pageAllSelected ? 'Deselect page' : 'Select page'}
+            </Button>
+            <Button variant="ghost" onClick={clearSelection} disabled={selectedCount === 0}>
+              Clear selection
+            </Button>
+            <Button variant="danger" onClick={requestBulkDelete} disabled={selectedCount === 0}>
+              Delete {selectedCount > 0 ? selectedCount : ''}
+            </Button>
+          </ActionBar>
+        ) : (
+          <div className="library-selection" data-testid="library-selection">
+            <Button variant="ghost" onClick={toggleSelectionMode}>
+              Select
+            </Button>
+            {view.matchCount > 0 && (
+              <span className="library-range muted small" data-testid="library-range">
+                {/* A grouped page holds a variable number of items — pagination is over groups so
+                    that a session is never split from its clips — so it counts sessions. */}
+                {groupView
+                  ? `${groupView.groupCount} session${groupView.groupCount === 1 ? '' : 's'} · ${groupView.matchCount} item${groupView.matchCount === 1 ? '' : 's'}`
+                  : `Showing ${view.firstIndex}–${view.lastIndex} of ${view.matchCount}`}
+                {view.filtered && view.totalCount !== view.matchCount
+                  ? ` · ${view.totalCount} total`
+                  : ''}
+              </span>
+            )}
+          </div>
+        )
       )}
 
       {view.totalCount === 0 && connectionState === 'disconnected' ? (
@@ -478,15 +467,7 @@ export function LibraryView({
         // from the one above: without the distinction, a too-narrow filter is indistinguishable from a
         // broken backend, and the user's next move (clear the filters) is invisible.
         <div data-testid="library-empty-filtered">
-          <EmptyState
-            title="Nothing fits this view"
-            description={`None of your ${view.totalCount} item${view.totalCount === 1 ? '' : 's'} matches these filters.`}
-            action={
-              <Button variant="primary"  onClick={clearFilters}>
-                Clear filters
-              </Button>
-            }
-          />
+          <FilterMismatchEmptyState total={view.totalCount} onClearFilters={clearFilters} />
         </div>
        ) : groupView ? (
          <div className="library-groups" data-testid="library-groups">

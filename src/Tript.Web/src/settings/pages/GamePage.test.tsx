@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { GamePage } from './GamePage';
-import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import type { GameSettings, RecordingMode } from '../settingsModel';
 
 const PACKAGED_ID = 'Overwatch';
@@ -37,9 +37,13 @@ function renderPage(
 ) {
   const update = vi.fn((_page: string, _patch: Partial<Record<string, unknown>>) => 'settings-request-1');
   const onBrowseExecutable = vi.fn();
+  const onSearchGames = vi.fn();
+  const onResolveGameSearch = vi.fn();
   const view = (
     selected = selectedGameExecutable,
     settingsUpdateResult: SettingsUpdateResultMessage | null = null,
+    gameSearchResults: GameSearchResultsMessage | null = null,
+    resolvedGameSearch: ResolvedGameSearchMessage | null = null,
   ) => (
     <GamePage
       settings={settings}
@@ -50,6 +54,10 @@ function renderPage(
       selectedGameExecutable={selected}
       settingsUpdateResult={settingsUpdateResult}
       onBrowseExecutable={onBrowseExecutable}
+      gameSearchResults={gameSearchResults}
+      onSearchGames={onSearchGames}
+      resolvedGameSearch={resolvedGameSearch}
+      onResolveGameSearch={onResolveGameSearch}
       globalClipBeforeSeconds={globalClipBeforeSeconds}
       globalClipAfterSeconds={globalClipAfterSeconds}
       globalRecordingMode={globalRecordingMode}
@@ -57,7 +65,7 @@ function renderPage(
     />
   );
   const result = render(view());
-  return { ...result, update, onBrowseExecutable, view };
+  return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, view };
 }
 
 /** A single packaged game, so the Before/After fields of its one row are unambiguous. */
@@ -80,13 +88,29 @@ function gameListFrom(update: ReturnType<typeof vi.fn>) {
   return (update.mock.calls.at(-1)?.[1] as { gameList: GameSettings['gameList'] }).gameList;
 }
 
+function selectResolvedGame(
+  view: ReturnType<typeof renderPage>['view'],
+  rerender: ReturnType<typeof renderPage>['rerender'],
+  onSearchGames: ReturnType<typeof vi.fn>,
+  name: string,
+) {
+  fireEvent.change(screen.getByLabelText('Find game'), { target: { value: name } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  const requestId = onSearchGames.mock.calls.at(-1)?.[0] as string;
+  rerender(view(null, null, {
+    requestId,
+    results: [{ gameId: '01HRESOLVEDGAME000000000000', name, source: 'igdb' }],
+  }));
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(name) }));
+}
+
 afterEach(cleanup);
 
 describe('custom games', () => {
-  it('adds a custom game with a stable custom UUID in one gameList update', () => {
-    const { update } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
+  it('adds a searched game with its canonical identity in one gameList update', () => {
+    const { update, rerender, view, onSearchGames } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
-    fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'My Game' } });
+    selectResolvedGame(view, rerender, onSearchGames, 'My Game');
     fireEvent.change(screen.getByLabelText('Executable path'), {
       target: { value: 'C:\\Games\\My Game\\game.exe' },
     });
@@ -96,7 +120,7 @@ describe('custom games', () => {
     expect(update.mock.calls[0][0]).toBe('game');
     expect(gameListFrom(update)).toEqual([
       {
-        id: expect.stringMatching(/^custom-[0-9a-f-]{36}$/),
+        id: '01HRESOLVEDGAME000000000000',
         name: 'My Game',
         executablePath: 'C:\\Games\\My Game\\game.exe',
 
@@ -170,23 +194,23 @@ describe('custom games', () => {
   });
 
   it('retains a valid draft and backend validation error when its update is rejected', () => {
-    const { rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
+    const { rerender, view, onSearchGames } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
-    fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Rejected game' } });
+    selectResolvedGame(view, rerender, onSearchGames, 'Rejected game');
     fireEvent.change(screen.getByLabelText('Executable path'), { target: { value: 'C:\\Games\\Rejected\\game.exe' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     rerender(view(null, { requestId: 'settings-request-1', success: false, error: 'That executable is already configured.' }));
 
-    expect((screen.getByLabelText('Game name') as HTMLInputElement).value).toBe('Rejected game');
+    expect(screen.getByRole('option', { name: /Rejected game/ }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('alert').textContent).toBe('That executable is already configured.');
     expect(screen.getByLabelText('Executable path').getAttribute('aria-describedby')).toBe('custom-game-save-error');
   });
 
   it('closes a custom draft only after its correlated update succeeds', () => {
-    const { rerender, view } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
+    const { rerender, view, onSearchGames } = renderPage({ gameCaptureTimeout: 10, gameList: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
-    fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Accepted game' } });
+    selectResolvedGame(view, rerender, onSearchGames, 'Accepted game');
     fireEvent.change(screen.getByLabelText('Executable path'), { target: { value: 'C:\\Games\\Accepted\\game.exe' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -329,6 +353,34 @@ describe('automatic clip overrides', () => {
       beforeSeconds: 10,
       afterSeconds: 10,
     });
+  });
+
+  it('resolves a selected external search result before saving its canonical identity', () => {
+    const { update, rerender, view, onSearchGames, onResolveGameSearch } = renderPage({
+      gameCaptureTimeout: 10,
+      gameList: [],
+      ignoredApplications: [],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
+    fireEvent.change(screen.getByLabelText('Find game'), { target: { value: 'External Game' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    const searchRequestId = onSearchGames.mock.calls[0][0] as string;
+    rerender(view(null, null, {
+      requestId: searchRequestId,
+      results: [{ name: 'External Game', source: 'igdb', igdbId: 456 }],
+    }));
+    fireEvent.click(screen.getByRole('option', { name: /External Game/ }));
+    expect(onResolveGameSearch).toHaveBeenCalledWith(expect.any(String), 'igdb:456');
+    const resolveRequestId = onResolveGameSearch.mock.calls[0][0] as string;
+    rerender(view(null, null, null, {
+      requestId: resolveRequestId,
+      game: { gameId: '01HEXTERNALGAME0000000000000', name: 'External Game' },
+    }));
+    fireEvent.change(screen.getByLabelText('Executable path'), {
+      target: { value: 'C:\\Games\\External\\game.exe' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(gameListFrom(update)[0].id).toBe('01HEXTERNALGAME0000000000000');
   });
 
   it('disables overrides when automatic highlights are globally off', () => {

@@ -22,28 +22,39 @@
 // fresh install and a broken backend.
 
 import type { ContentItem } from '../../ipc/protocol';
-import { contentTypeLabel, formatContentDuration, formatContentSize } from '../contentPresentation';
+import {
+  contentTypeLabel,
+  contentLabel,
+  formatContentDuration,
+  formatContentSize,
+} from '../contentPresentation';
+import {
+  ANY_GAME,
+  NO_GAME,
+  DATE_RANGE_SECONDS,
+  cleanGame,
+  typeMatches,
+  gameMatches,
+  dateMatches,
+  searchMatches,
+  filterCatalogue,
+  sortCatalogue,
+  type CatalogueRecord,
+  type ContentTypeFilter,
+  type DateRangeFilter,
+  type LibrarySort,
+} from '../catalogueModel';
 
-// ---------------------------------------------------------------------------
-// The query
-// ---------------------------------------------------------------------------
-
-/** The type dimension. `sessions` is everything that is not a clip — see `matchesType`. */
-export type ContentTypeFilter = 'all' | 'sessions' | 'clips' | 'highlights' | 'trash';
-
-/** The date dimension: a trailing window, or everything. */
-export type DateRangeFilter = 'any' | 'day' | 'week' | 'month' | 'year';
-
-/** The sort dimension. The backend already returns newest-first; this is a client-side reorder. */
-export type LibrarySort = 'newest' | 'oldest' | 'game';
-
-/**
- * Sentinels for the game select. They are deliberately not plausible game names (a game called
- * `__any_game__` would collide, and no game is called that) so the select's value can stay a plain
- * string — which is what a `<select>` deals in — without a parallel "is this a real game" flag.
- */
-export const ANY_GAME = '__any_game__';
-export const NO_GAME = '__no_game__';
+// The type / date / sort dimensions and the game sentinels are shared with the trash, so they are
+// defined in catalogueModel and re-exported here for the library's existing importers.
+export {
+  ANY_GAME,
+  NO_GAME,
+  DATE_RANGE_SECONDS,
+  type ContentTypeFilter,
+  type DateRangeFilter,
+  type LibrarySort,
+};
 
 /** What a card shows where the game would be, when the item has none. */
 export const UNKNOWN_GAME_LABEL = 'Unknown game';
@@ -82,15 +93,6 @@ export const DEFAULT_LIBRARY_QUERY: LibraryQuery = {
   favoriteOnly: false,
 };
 
-/** The trailing window each date filter means, in seconds. `null` is "no window at all". */
-export const DATE_RANGE_SECONDS: Record<DateRangeFilter, number | null> = {
-  any: null,
-  day: 24 * 60 * 60,
-  week: 7 * 24 * 60 * 60,
-  month: 30 * 24 * 60 * 60,
-  year: 365 * 24 * 60 * 60,
-};
-
 // ---------------------------------------------------------------------------
 // Reading the optional fields off an item
 // ---------------------------------------------------------------------------
@@ -101,12 +103,7 @@ export const DATE_RANGE_SECONDS: Record<DateRangeFilter, number | null> = {
  * no game), and empty/whitespace (a metadata record with a blank field).
  */
 export function itemGame(item: ContentItem): string | null {
-  const game = item.game;
-  if (typeof game !== 'string') {
-    return null;
-  }
-  const trimmed = game.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return cleanGame(item.game);
 }
 
 /**
@@ -134,8 +131,19 @@ export function itemDuration(item: ContentItem): number | undefined {
 
 /** The item's display name: its title, or the file name it was saved under. */
 export function itemLabel(item: ContentItem): string {
-  const title = item.title?.trim();
-  return title && title.length > 0 ? title : item.fileName;
+  return contentLabel(item.title, item.fileName);
+}
+
+/** The shared projection a filter or sort reads, built from a live content item. */
+export function toContentRecord(item: ContentItem): CatalogueRecord {
+  return {
+    contentType: item.contentType,
+    game: itemGame(item),
+    title: item.title ?? '',
+    fileName: item.fileName,
+    date: itemDate(item),
+    label: itemLabel(item),
+  };
 }
 
 /** The human label for an item's content type, for the type chip on a card. */
@@ -372,28 +380,12 @@ export function formatBytes(bytes: number | undefined): string | null {
  * deliberately.
  */
 export function matchesType(item: ContentItem, filter: ContentTypeFilter): boolean {
-  if (filter === 'all') {
-    return true;
-  }
-  if (filter === 'clips') {
-    return item.contentType === 'clip';
-  }
-  if (filter === 'highlights') {
-    return item.contentType === 'highlight';
-  }
-  return !isClipContent(item);
+  return typeMatches(toContentRecord(item), filter);
 }
 
 /** The game dimension. `NO_GAME` selects the items whose game is unknown. */
 export function matchesGame(item: ContentItem, game: string): boolean {
-  if (game === ANY_GAME) {
-    return true;
-  }
-  const itsGame = itemGame(item);
-  if (game === NO_GAME) {
-    return itsGame === null;
-  }
-  return itsGame !== null && itsGame.toLowerCase() === game.toLowerCase();
+  return gameMatches(toContentRecord(item), game);
 }
 
 /**
@@ -402,15 +394,7 @@ export function matchesGame(item: ContentItem, game: string): boolean {
  * about when something happened, and an undated item cannot support it.
  */
 export function matchesDate(item: ContentItem, range: DateRangeFilter, nowSeconds: number): boolean {
-  const window = DATE_RANGE_SECONDS[range];
-  if (window === null || window === undefined) {
-    return true;
-  }
-  const date = itemDate(item);
-  if (date === undefined) {
-    return false;
-  }
-  return date >= nowSeconds - window;
+  return dateMatches(toContentRecord(item), range, nowSeconds);
 }
 
 /**
@@ -420,15 +404,7 @@ export function matchesDate(item: ContentItem, range: DateRangeFilter, nowSecond
  * hardest to find.
  */
 export function matchesSearch(item: ContentItem, search: string): boolean {
-  const needle = search.trim().toLowerCase();
-  if (needle.length === 0) {
-    return true;
-  }
-  const haystack = [item.title, item.fileName, itemGame(item)]
-    .filter((part): part is string => typeof part === 'string')
-    .join(' ')
-    .toLowerCase();
-  return haystack.includes(needle);
+  return searchMatches(toContentRecord(item), search);
 }
 
 /** Every dimension at once, in the order that rejects cheapest-first. */
@@ -437,17 +413,17 @@ export function filterItems(
   query: LibraryQuery,
   nowSeconds: number,
 ): ContentItem[] {
-  return items.filter(
+  return filterCatalogue(
+    items,
+    query,
+    nowSeconds,
+    toContentRecord,
     (item) =>
-      matchesType(item, query.type) &&
       // The library's item views list actual playable items: a placeholder session has no video
       // to open, so it stays out of the library's Sessions list. The top-level sessions page and
       // the trash (a separate filter path) still show it.
       (query.type !== 'sessions' || !lacksMainVideo(item)) &&
-      matchesGame(item, query.game) &&
-      matchesDate(item, query.range, nowSeconds) &&
-      (!query.favoriteOnly || item.favorite === true) &&
-      matchesSearch(item, query.search),
+      (!query.favoriteOnly || item.favorite === true),
   );
 }
 
@@ -501,51 +477,7 @@ export function availableGames(items: readonly ContentItem[]): {
 
 /** Reorder the list. Never mutates the input (a `content` push's array is shared with the source). */
 export function sortItems(items: readonly ContentItem[], sort: LibrarySort): ContentItem[] {
-  const byLabel = (a: ContentItem, b: ContentItem) =>
-    itemLabel(a).localeCompare(itemLabel(b), undefined, { sensitivity: 'base' });
-
-  const byDate = (a: ContentItem, b: ContentItem, direction: 1 | -1) => {
-    const da = itemDate(a);
-    const db = itemDate(b);
-    if (da === undefined && db === undefined) {
-      return byLabel(a, b);
-    }
-    if (da === undefined) {
-      return 1;
-    }
-    if (db === undefined) {
-      return -1;
-    }
-    return da === db ? byLabel(a, b) : (da - db) * direction;
-  };
-
-  const compare = (a: ContentItem, b: ContentItem): number => {
-    if (sort === 'oldest') {
-      return byDate(a, b, 1);
-    }
-    if (sort === 'game') {
-      const ga = itemGame(a);
-      const gb = itemGame(b);
-      if (ga !== gb) {
-        // Unknown-game items go last, for the same reason undated ones do.
-        if (ga === null) {
-          return 1;
-        }
-        if (gb === null) {
-          return -1;
-        }
-        const byGame = ga.localeCompare(gb, undefined, { sensitivity: 'base' });
-        if (byGame !== 0) {
-          return byGame;
-        }
-      }
-      // Within one game, newest first — the same default the date sort uses.
-      return byDate(a, b, -1);
-    }
-    return byDate(a, b, -1);
-  };
-
-  return [...items].sort(compare);
+  return sortCatalogue(items, sort, toContentRecord);
 }
 
 // ---------------------------------------------------------------------------

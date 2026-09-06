@@ -9,6 +9,7 @@ using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.App.Models;
+using Tript.App.Resolver;
 using Tript.Core;
 using Tript.Detection;
 using Tript.GameDiscovery;
@@ -63,6 +64,9 @@ internal sealed partial class AppHost : IDisposable
     private readonly TrashStore _trash;
     private readonly GameCatalog _gameCatalog;
     private readonly GameModelManager? _modelManager;
+    private readonly ResolverClient? _resolverClient;
+    private readonly bool _ownsResolverClient;
+    private readonly Timer? _modelCheckTimer;
 
     // Located at most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on
     // both binaries, which is four processes, and the answer cannot change while the host runs.
@@ -85,14 +89,6 @@ internal sealed partial class AppHost : IDisposable
     // Files whose duration could not be read, so a broken file is probed at most once per process.
     private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
 
-    // Every transition of the recorder's own state runs under this. Three threads reach these
-    // methods — the IPC dispatch pool, the game detector's timer, and the hook probe's timer — and
-    // StartRecording is a check-then-act with EnsureRecorderBuilt (which disposes and nulls
-    // _recorder) in the middle. Without the gate the losing thread drives a DISPOSED session into
-    // libobs, or two starts cross their metadata sidecars over one file.
-    //
-    // A stop can hold this for up to its 10s settle, and a start that waits behind it is correct:
-    // there is one recorder.
     private readonly object _recorderGate = new();
     private readonly TimeSpan _recorderStopTimeout;
     private bool _shuttingDown;
@@ -186,21 +182,39 @@ internal sealed partial class AppHost : IDisposable
     // primaryDisplay is optional: a host built without one just pushes no display resolution.
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
-        TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false)
+        TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false,
+        ResolverClient? resolverClient = null)
     {
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
+        _resolverClient = resolverClient;
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
+#if TRIPT_TRAINING
+        MigrateLegacyTrainingFolders(_gameCatalog, TrainingPaths.RootPath,
+            TrainingPaths.InstalledModelsPath);
+#endif
         _discovery = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
             ? GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider())
             : null;
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
 
+        if (_resolverClient is null)
+        {
+            var resolverConfig = ResolverConfig.FromFile();
+            if (resolverConfig is not null)
+            {
+                _resolverClient = new ResolverClient(resolverConfig,
+                    registry: new ResolverGameRegistry());
+                _ownsResolverClient = true;
+            }
+        }
+
         if (enableModelDelivery)
         {
+            MigrateModelFolders();
 #if TRIPT_TRAINING
             var customRoot = TrainingPaths.InstalledModelsPath;
             bool HasCustomModel(string gameId)
@@ -214,6 +228,7 @@ internal sealed partial class AppHost : IDisposable
 #endif
             _modelManager = new GameModelManager(ActivateDownloadedModelAsync,
                 bundledManifestPath: Path.Combine(AppContext.BaseDirectory, "data", "model-manifest.json"),
+                manifestUri: _resolverClient?.ManifestUri,
                 hasCustomModel: HasCustomModel);
             _modelManager.StatusChanged += OnModelStatusChanged;
         }
@@ -231,6 +246,9 @@ internal sealed partial class AppHost : IDisposable
 
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
+        if (_modelManager is not null)
+            _modelCheckTimer = new Timer(_ => EnsureModelsForGameList(), null, TimeSpan.FromHours(24),
+                TimeSpan.FromHours(24));
     }
 
     internal AppOptions Options => _options;
@@ -435,6 +453,7 @@ internal sealed partial class AppHost : IDisposable
         }
 
         _trashPurgeTimer?.Dispose();
+        _modelCheckTimer?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
@@ -444,6 +463,8 @@ internal sealed partial class AppHost : IDisposable
             _modelManager.StatusChanged -= OnModelStatusChanged;
             _modelManager.Dispose();
         }
+        if (_ownsResolverClient)
+            _resolverClient?.Dispose();
 
         // Preserve recording metadata when possible, but never let a dead recorder block shutdown.
         try
@@ -511,6 +532,47 @@ internal sealed partial class AppHost : IDisposable
     internal void MigrateContent()
     {
         // No migration needed for a fresh install.
+    }
+
+    private void MigrateModelFolders()
+    {
+        var modelsRoot = GameModelPaths.ModelsRoot;
+        if (!Directory.Exists(modelsRoot))
+            return;
+
+        foreach (var entry in _gameCatalog.Entries)
+        {
+            foreach (var legacy in entry.LegacyGameIds ?? Array.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(legacy))
+                    continue;
+
+                var from = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(legacy));
+                var to = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(entry.GameId));
+                if (Directory.Exists(from) && !Directory.Exists(to))
+                {
+                    try
+                    {
+                        Directory.Move(from, to);
+                        var installedPath = Path.Combine(to, "installed.json");
+                        if (File.Exists(installedPath)
+                            && JsonNode.Parse(File.ReadAllText(installedPath)) is JsonObject installed)
+                        {
+                            installed["gameId"] = entry.GameId;
+                            var temporaryPath = installedPath + ".tmp";
+                            File.WriteAllText(temporaryPath, installed.ToJsonString(Wire.Options));
+                            File.Move(temporaryPath, installedPath, true);
+                        }
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                        or JsonException)
+                    {
+                        Log.Warning("could not migrate model folder {From} to {To}: {Reason}",
+                            from, to, exception.Message);
+                    }
+                }
+            }
+        }
     }
 
     // ---- native folder picker ----

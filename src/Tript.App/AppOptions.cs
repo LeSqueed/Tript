@@ -138,8 +138,10 @@ internal sealed class AppOptions
     // settings; custom entries are the settings entries whose IDs are not packaged, and they carry an
     // exact executable path when the user chose one.
     internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
-        string? overrideJson)
+        string? overrideJson, out bool settingsMigrated)
     {
+        settingsMigrated = MigrateLegacyGameIds(settings.Game.GameList, catalog);
+
         var games = new List<GameInfo>();
         var packagedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -151,7 +153,9 @@ internal sealed class AppOptions
             games.Add(new GameInfo
             {
                 Id = entry.GameId,
-                Name = string.IsNullOrWhiteSpace(setting?.Name) ? entry.GameId : setting.Name,
+                Name = string.IsNullOrWhiteSpace(setting?.Name)
+                    ? string.IsNullOrWhiteSpace(entry.Name) ? entry.GameId : entry.Name
+                    : setting.Name,
                 Executable = entry.Executable,
                 BuiltIn = true,
                 Detected = false,
@@ -191,5 +195,23 @@ internal sealed class AppOptions
         }
 
         return games;
+    }
+
+    private static bool MigrateLegacyGameIds(List<Settings.GameSetting> gameList, GameCatalog catalog)
+    {
+        var migrated = false;
+        foreach (var game in gameList)
+        {
+            var current = catalog.ResolveLegacyGameId(game.Id);
+            if (current is not null && !string.Equals(current, game.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                game.Id = current;
+                migrated = true;
+            }
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        migrated |= gameList.RemoveAll(game => !string.IsNullOrWhiteSpace(game.Id) && !seen.Add(game.Id)) > 0;
+        return migrated;
     }
 }

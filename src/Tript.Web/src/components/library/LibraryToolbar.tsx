@@ -26,33 +26,12 @@ export function LibraryToolbar({
   onQueryChange,
   onClearFilters,
 }: LibraryToolbarProps) {
-  if (showingTrash) {
-    return (
-      <div className="library-toolbar library-toolbar--trash">
-        <SegmentedControl
-          label="Show"
-          value={query.type}
-          segments={typeSegments}
-          onChange={(value) => onQueryChange({ type: value })}
-        />
-        <div className="library-trash-filters">
-          <LibrarySelectFilters
-            query={query}
-            gameOptions={gameOptions}
-            dateOptions={dateOptions}
-            sortOptions={sortOptions}
-            onQueryChange={onQueryChange}
-          />
-          {filtered && <Button variant="ghost" className="library-clear" onClick={onClearFilters}>Clear filters</Button>}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="library-toolbar">
       {/* Content type is one-of-N. Favourites is an independent boolean and lives with the other
-          filters — inside this group it read, and was announced, as a fourth exclusive type. */}
+          filters — inside this group it read, and was announced, as a fourth exclusive type. The
+          trash offers no favourites toggle: a deleted item's favourite flag is frozen, so the filter
+          would only ever hide things it cannot bring back. */}
       <SegmentedControl
         label="Show"
         value={query.type}
@@ -68,11 +47,13 @@ export function LibraryToolbar({
           sortOptions={sortOptions}
           onQueryChange={onQueryChange}
         />
-        <Toggle
-          checked={query.favoriteOnly}
-          onChange={(checked) => onQueryChange({ favoriteOnly: checked })}
-          label="Favourites only"
-        />
+        {!showingTrash && (
+          <Toggle
+            checked={query.favoriteOnly}
+            onChange={(checked) => onQueryChange({ favoriteOnly: checked })}
+            label="Favourites only"
+          />
+        )}
         {filtered && (
           <Button variant="ghost" className="library-clear" onClick={onClearFilters}>
             Clear filters

@@ -18,7 +18,7 @@ namespace Tript.Detection.Tests;
 [Collection(ModelSessionCollection.Name)]
 public class InputTensorReuseTests
 {
-    private const string GameId = "Overwatch";
+    private const string GameId = "57ZZVAZ0PJK8VQGPKB728QE57C";
     private const int ModelInput = 640;
 
     private static byte[] SyntheticGray(int seed)

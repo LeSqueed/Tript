@@ -12,6 +12,7 @@ import { WarningToasts } from '../components/toasts/WarningToasts';
 import { ConnectionToasts } from '../components/toasts/ConnectionToasts';
 import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToasts';
 import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
+import { GameRecordingToasts } from '../components/toasts/GameRecordingToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionsView } from '../components/SessionsView';
@@ -26,7 +27,7 @@ import {
   sessionPlaylist,
   sourceSession,
 } from '../components/library/libraryModel';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
+import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
 import type { ContentItem, CreateClipParameters, GameInfo, ImportProgressMessage, RecordingState } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
@@ -40,7 +41,7 @@ import './app.css';
 
 export type Route = 'library' | 'sessions' | 'session' | 'settings' | 'player' | 'training';
 
-const FALLBACK_BUILT_IN_GAME_IDS = ['Overwatch'] as const;
+const FALLBACK_BUILT_IN_GAME_IDS = ['57ZZVAZ0PJK8VQGPKB728QE57C'] as const;
 
 type PhotinoShellWindow = Window & {
   external?: {
@@ -111,6 +112,7 @@ function AppShell({
     recording: ContentItem;
     item: ContentItem;
     navigation: ContentItem[];
+    returnRoute: 'library' | 'sessions' | 'session';
   } | null>(null);
   const [sessionReturnRoute, setSessionReturnRoute] = useState<'library' | 'player'>('library');
   const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
@@ -216,10 +218,10 @@ function AppShell({
     setSessionReview({ recording, clips });
     setSessionReturnRoute(returnRoute);
     setSessionPlayerOrigin(returnRoute === 'player'
-      ? { recording, item: playerItem ?? recording, navigation: playerNavigation }
+      ? { recording, item: playerItem ?? recording, navigation: playerNavigation, returnRoute: playerReturnRoute }
       : null);
     setRoute('session');
-  }, [items, playerItem, playerNavigation]);
+  }, [items, playerItem, playerNavigation, playerReturnRoute]);
 
   // The player's playlist depends on what the user opened, not just what they opened it from: a
   // session entry point (the recent shelf, the sessions page) plays that session's own list — main
@@ -445,25 +447,19 @@ function AppShell({
   const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? (() => {
     const item = pendingDelete.item;
     const isRecording = item.contentType === 'recording';
-    const cascadable = isRecording ? cascadableLinkedHighlights(item, items).length : 0;
-    return {
-      title: `Delete ${itemLabel(item)}?`,
+    // A missing-video placeholder names itself but has no session file to move; only its cascaded
+    // highlights (if any) actually go to the trash, so the sentence must not count the session.
+    const placeholder = isRecording && (item.videoMissing === true || item.highlightsOnly === true);
+    return makeDeleteConfirmation({
       names: [itemLabel(item)],
-      confirmLabel: 'Move to trash',
-      // A missing-video placeholder names itself but has no session file to move; only its cascaded
-      // highlights (if any) actually go to the trash, so the sentence must not count the session.
-      affectedCount: isRecording && (item.videoMissing === true || item.highlightsOnly === true) ? 0 : 1,
-      ...(isRecording ? { cascadeCount: cascadable } : {}),
-      ...(isRecording
-        ? {
-            checkbox: {
-              label: 'Delete linked highlights (favourited highlights are kept)',
-              defaultChecked: deleteLinkedHighlightsByDefault,
-            },
-          }
-        : {}),
       retentionHours: trash.retentionHours,
-    };
+      affectedCount: placeholder ? 0 : 1,
+      hasCascade: isRecording,
+      cascadeCount: isRecording ? cascadableLinkedHighlights(item, items).length : 0,
+      deleteLinkedHighlightsDefault: deleteLinkedHighlightsByDefault,
+      // The shell's player / session review phrases the heading without quotes, unlike the library.
+      title: `Delete ${itemLabel(item)}?`,
+    });
   })() : null;
 
   useLayoutEffect(() => {
@@ -640,6 +636,7 @@ function AppShell({
       setPlayerItem(sessionPlayerOrigin.item);
       setPlayerTitle(itemLabel(sessionPlayerOrigin.item));
       setPlayerNavigation(sessionPlayerOrigin.navigation);
+      setPlayerReturnRoute(sessionPlayerOrigin.returnRoute);
       setSessionReview(null);
       setSessionPlayerOrigin(null);
       setRoute('player');
@@ -711,6 +708,7 @@ function AppShell({
         <WarningToasts client={client} />
         <DisplayFallbackToasts client={client} />
         <GameCandidateToasts client={client} />
+        <GameRecordingToasts client={client} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}

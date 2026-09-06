@@ -54,3 +54,26 @@
 .empty-state-action {
   margin-top: 22px;
 }
+
+/* A selection is live: the count, the actions that apply to it, and one action set apart on the
+ * trailing edge. The library's select mode and the trash's toolbar are the same surface. */
+
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-panel);
+  border: var(--border);
+  border-radius: var(--radius-panel);
+}
+
+.action-bar-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.action-bar-trailing {
+  margin-left: auto;
+}

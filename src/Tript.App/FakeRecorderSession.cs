@@ -40,6 +40,15 @@ internal sealed class FakeRecorderSession : IRecorderSession
     {
     }
 
+    public CapturePolicy Policy => CapturePolicy.Default;
+
+    public bool HasGameCaptureSource => false;
+
+    public bool HasDisplayFallback => true;
+
+    public bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
+        Action clearWarning, CancellationToken cancellationToken) => true;
+
     public void Dispose()
     {
     }

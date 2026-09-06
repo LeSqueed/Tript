@@ -16,6 +16,19 @@ namespace Tript.App.Tests;
 public sealed class TrainingModelActivationTests
 {
     [Fact]
+    public void Successful_activation_publishes_the_active_model()
+    {
+        var errors = 0;
+        var statePushes = 0;
+
+        AppHost.ActivateRecordingModelCore("requested", null, _ => true,
+            () => errors++, () => statePushes++);
+
+        Assert.Equal(0, errors);
+        Assert.Equal(1, statePushes);
+    }
+
+    [Fact]
     public void Training_install_restarts_the_manually_active_model_not_the_recording_game()
     {
         Assert.True(AppHost.ShouldRestartDetectionForModelInstall(
@@ -81,7 +94,8 @@ public sealed class TrainingModelActivationTests
         var modelRoot = Path.Combine(root, "models");
         var bundle = Path.Combine(modelRoot, gameId);
         Directory.CreateDirectory(bundle);
-        var shipped = Path.Combine(AppContext.BaseDirectory, "data", "models", "Overwatch");
+        var shipped = Path.Combine(AppContext.BaseDirectory, "data", "models",
+            "57ZZVAZ0PJK8VQGPKB728QE57C");
         Assert.True(File.Exists(Path.Combine(shipped, "model.onnx")), $"Missing test model at {shipped}");
         File.Copy(Path.Combine(shipped, "model.onnx"), Path.Combine(bundle, "model.onnx"));
         File.Copy(Path.Combine(shipped, "events.json"), Path.Combine(bundle, "events.json"));

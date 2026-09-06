@@ -14,6 +14,8 @@ namespace Tript.App.Tests;
 // Executable while the display name stays Name.
 public sealed class GameExecutableRoutingTests : IDisposable
 {
+    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+
     private readonly string _contentRoot;
     private readonly SettingsStore _store;
     private readonly AppHost _host;
@@ -69,7 +71,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
         Catalogue(new GameSetting { Id = "cs2", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
         var games = _host.GameList;
-        var overwatch = Assert.Single(games, game => game.Id == "Overwatch");
+        var overwatch = Assert.Single(games, game => game.Id == OverwatchId);
         Assert.Equal("Overwatch", overwatch.Name);
         Assert.Equal("Overwatch.exe", overwatch.Executable);
 
@@ -136,7 +138,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
     {
         Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch", Executable = executable });
 
-        Assert.Equal("Overwatch", _host.ResolveDetectedGameId("Overwatch"));
+        Assert.Equal(OverwatchId, _host.ResolveDetectedGameId("Overwatch"));
     }
 
     // The catalogue executable is explicit, so this does not depend on the settings entry carrying
@@ -146,7 +148,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
     {
         Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
 
-        Assert.Equal("Overwatch", _host.ResolveDetectedGameId("Overwatch"));
+        Assert.Equal(OverwatchId, _host.ResolveDetectedGameId("Overwatch"));
     }
 
     // Nothing in the catalogue matches: the name is passed through, which is what a manual start for

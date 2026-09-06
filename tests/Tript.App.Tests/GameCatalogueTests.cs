@@ -14,6 +14,8 @@ namespace Tript.App.Tests;
 // enumerating. A user who deleted every game entry turned every read into that.
 public sealed class GameCatalogueTests : IDisposable
 {
+    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+
     private readonly string _contentRoot;
     private readonly SettingsStore _store;
     private readonly AppHost _host;
@@ -48,6 +50,32 @@ public sealed class GameCatalogueTests : IDisposable
     }
 
     [Fact]
+    public void LegacyBuiltinId_IsMigratedAndPersisted()
+    {
+        var root = Path.Combine(_contentRoot, "legacy");
+        Directory.CreateDirectory(root);
+        var settingsPath = Path.Combine(root, "settings.json");
+        var store = new SettingsStore(new SettingsFileProvider(settingsPath));
+        store.Load().Game.GameList =
+        [
+            new GameSetting { Id = "Overwatch", Name = "Overwatch" },
+        ];
+        store.Save();
+
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = settingsPath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker());
+
+        Assert.Equal(OverwatchId, Assert.Single(host.GameList).Id);
+        var persisted = SettingsSerialization.Deserialize(File.ReadAllText(settingsPath));
+        Assert.Equal(OverwatchId, Assert.Single(persisted!.Game.GameList).Id);
+    }
+
+    [Fact]
     public void AnEmptyCatalogue_IsNotRebuiltByReadingIt()
     {
         // Removing settings entries does not remove the project catalogue.
@@ -55,18 +83,18 @@ public sealed class GameCatalogueTests : IDisposable
         {
             game = new { gameList = Array.Empty<object>() },
         })));
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
+        Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
 
         // A game appears in the settings object behind the host's back. Reading the property must not
         // notice: the read is a read, not a reload of the whole catalogue over the top of whatever
         // another thread is holding.
         _store.Load().Game.GameList.Add(new GameSetting { Id = "Doom", Name = "Doom" });
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
+        Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
+        Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
 
         // An explicit reload still replaces the snapshot, and it now reflects the custom entry too.
         _host.ReloadGameList();
-        Assert.Equal(["Overwatch", "Doom"], _host.GameList.Select(game => game.Id));
+        Assert.Equal([OverwatchId, "Doom"], _host.GameList.Select(game => game.Id));
     }
 
     // The reload the property used to do is still done where it belongs: a settings change is the
@@ -74,7 +102,7 @@ public sealed class GameCatalogueTests : IDisposable
     [Fact]
     public void ASettingsChange_ReloadsTheCatalogue()
     {
-        Assert.Equal("Overwatch", Assert.Single(_host.GameList).Id);
+        Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
         var doom = Path.Combine(_contentRoot, "doom.exe");
         var quake = Path.Combine(_contentRoot, "quake.exe");
         File.WriteAllText(doom, "doom");
@@ -92,7 +120,7 @@ public sealed class GameCatalogueTests : IDisposable
             },
         })));
 
-        Assert.Equal(["Overwatch", "custom-doom", "custom-quake"], _host.GameList.Select(game => game.Id));
+        Assert.Equal([OverwatchId, "custom-doom", "custom-quake"], _host.GameList.Select(game => game.Id));
         Assert.Equal("Doom", _host.GameList.First(game => game.Id == "custom-doom").Name);
         Assert.Equal(doom, _host.GameList.First(game => game.Id == "custom-doom").ExecutablePath);
     }

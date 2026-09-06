@@ -43,6 +43,15 @@ internal sealed class FakeRecorderSession : IRecorderSession
 
     public void ClearSourceFromChannel() => ClearSourceCalls++;
 
+    public CapturePolicy Policy => CapturePolicy.Default;
+
+    public bool HasGameCaptureSource => false;
+
+    public bool HasDisplayFallback => true;
+
+    public bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
+        Action clearWarning, CancellationToken cancellationToken) => true;
+
     public bool Disposed { get; private set; }
 
     internal void ResetCalls()

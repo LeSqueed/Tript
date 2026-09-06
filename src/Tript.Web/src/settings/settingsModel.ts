@@ -208,6 +208,7 @@ export interface GameSetting {
    */
   executable?: string | null;
   iconId?: string | null;
+  autoRecordOverride?: boolean | null;
   recordingModeOverride?: GameRecordingModeOverride | null;
   captureMethodOverride?: GameCaptureMethodOverride | null;
   qualityOverride?: GameQualityOverride | null;
@@ -223,6 +224,7 @@ export interface GameSettings {
   /** How long game capture waits for the game's window before falling back, in seconds. */
   gameCaptureTimeout: number;
   gameList: GameSetting[];
+  autoRecordDetectedGames?: boolean;
   /** Exact executable paths whose custom-game suggestions the user dismissed. */
   ignoredApplications?: string[];
   [key: string]: unknown;

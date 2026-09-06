@@ -13,11 +13,19 @@
 //     component ever has to remember that.
 
 import type { TrashEntry } from '../../ipc/protocol';
-import { contentTypeLabel, formatContentDuration, formatContentSize } from '../contentPresentation';
 import {
-  DATE_RANGE_SECONDS,
-  type LibraryQuery,
-} from '../library/libraryModel';
+  contentTypeLabel,
+  contentLabel,
+  formatContentDuration,
+  formatContentSize,
+} from '../contentPresentation';
+import {
+  cleanGame,
+  filterCatalogue,
+  sortCatalogue,
+  type CatalogueRecord,
+} from '../catalogueModel';
+import { type LibraryQuery } from '../library/libraryModel';
 
 /** What the backend defaults to, used until the first `trash` push says otherwise. */
 export const DEFAULT_RETENTION_HOURS = 24;
@@ -73,37 +81,30 @@ export function sortTrashEntries(entries: readonly TrashEntry[]): TrashEntry[] {
   });
 }
 
+/** The shared projection a filter or sort reads, built from a deleted entry. */
+export function toTrashRecord(entry: TrashEntry): CatalogueRecord {
+  return {
+    contentType: entry.contentType,
+    game: cleanGame(entry.game),
+    title: entry.title ?? '',
+    fileName: entry.fileName,
+    // `deletedAt` is the entry's "date" for the date window; 0 (no clock) means undated.
+    date: typeof entry.deletedAt === 'number' && entry.deletedAt > 0 ? entry.deletedAt : undefined,
+    label: trashEntryLabel(entry),
+  };
+}
+
 /** Apply the Library's useful catalogue dimensions to deleted entries too. */
 export function filterTrashEntries(
   entries: readonly TrashEntry[],
   query: LibraryQuery,
   nowSeconds: number,
 ): TrashEntry[] {
-  const window = DATE_RANGE_SECONDS[query.range];
-  const search = query.search.trim().toLowerCase();
-  return [...entries]
-    .filter((entry) => {
-      const isClipContent = entry.contentType === 'clip' || entry.contentType === 'highlight';
-      if (query.type === 'clips' && entry.contentType !== 'clip') return false;
-      if (query.type === 'highlights' && entry.contentType !== 'highlight') return false;
-      if (query.type === 'sessions' && isClipContent) return false;
-      if (query.game !== '__any_game__') {
-        const game = typeof entry.game === 'string' && entry.game.trim().length > 0 ? entry.game.trim() : null;
-        if (query.game === '__no_game__' ? game !== null : game?.toLowerCase() !== query.game.toLowerCase()) {
-          return false;
-        }
-      }
-      if (window !== null && (entry.deletedAt <= 0 || entry.deletedAt < nowSeconds - window)) return false;
-      if (search.length > 0 && ![entry.title, entry.fileName, entry.game].filter(Boolean).join(' ').toLowerCase().includes(search)) {
-        return false;
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (query.sort === 'oldest') return (a.deletedAt ?? 0) - (b.deletedAt ?? 0);
-      if (query.sort === 'game') return (a.game ?? '').localeCompare(b.game ?? '') || (b.deletedAt ?? 0) - (a.deletedAt ?? 0);
-      return (b.deletedAt ?? 0) - (a.deletedAt ?? 0);
-    });
+  return sortCatalogue(
+    filterCatalogue(entries, query, nowSeconds, toTrashRecord),
+    query.sort,
+    toTrashRecord,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +113,7 @@ export function filterTrashEntries(
 
 /** The entry's display name: its title, or the file name it was saved under. */
 export function trashEntryLabel(entry: TrashEntry): string {
-  const title = entry.title?.trim();
-  return title && title.length > 0 ? title : entry.fileName;
+  return contentLabel(entry.title, entry.fileName);
 }
 
 /** The human label for what the entry was. Mirrors the library's type chip. */

@@ -20,6 +20,8 @@ namespace Tript.App.Tests;
 [Collection(AppHostCollection.Name)]
 public sealed class ContentCatalogueTests : IDisposable
 {
+    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+
     private readonly AppHostCollectionFixture _fixture;
     private readonly string _contentRoot;
     private readonly string _settingsPath;
@@ -264,7 +266,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
         Assert.Equal("Overwatch/sessions/missing-session.mp4", recording.GetProperty("filePath").GetString());
         Assert.Equal("Overwatch", recording.GetProperty("game").GetString());
-        Assert.Equal("Overwatch", recording.GetProperty("gameId").GetString());
+        Assert.Equal(OverwatchId, recording.GetProperty("gameId").GetString());
         Assert.Equal(new DateTimeOffset(firstStart).ToUnixTimeSeconds(), recording.GetProperty("startTime").GetInt64());
 
         await host.ShutdownAsync();
@@ -1124,7 +1126,7 @@ public sealed class ContentCatalogueTests : IDisposable
         var record = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"))
             .LoadRecord("session-1-highlight-live-abc.mp4");
         Assert.Equal("Overwatch", record!.Game);
-        Assert.Equal("Overwatch", record.GameId);
+        Assert.Equal(OverwatchId, record.GameId);
 
         await host.ShutdownAsync();
     }

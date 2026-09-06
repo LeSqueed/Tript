@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { TrashEntry } from '../../ipc/protocol';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from '../library/ConfirmDeleteDialog';
+import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from '../library/ConfirmDeleteDialog';
 import {
   addSelection,
   allSelected,
@@ -25,7 +25,7 @@ import {
   trashTypeLabel,
 } from './trashModel';
 import type { TrashController } from './useTrash';
-import { EmptyState } from '../ui/Ui';
+import { ActionBar, EmptyState, FilterMismatchEmptyState } from '../ui/Ui';
 import { Button, Checkbox } from '../ui/controls';
 
 /** What a confirmed action does once the modal says yes. */
@@ -96,22 +96,12 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
       return null;
     }
     const names = pending.entries.map(trashEntryLabel);
-    if (pending.whole) {
-      return {
-        title: 'Empty the trash?',
-        names,
-        confirmLabel: 'Empty trash',
-        permanentOnly: true,
-        retentionHours,
-      };
-    }
-    return {
-      title: names.length === 1 ? `Delete "${names[0]}" for good?` : `Delete ${names.length} items for good?`,
+    return makeDeleteConfirmation({
       names,
-      confirmLabel: 'Delete permanently',
-      permanentOnly: true,
       retentionHours,
-    };
+      permanentOnly: true,
+      ...(pending.whole ? { title: 'Empty the trash?', confirmLabel: 'Empty trash' } : {}),
+    });
   }, [pending, retentionHours]);
 
   return (
@@ -136,11 +126,7 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
         </div>
       ) : entries.length === 0 && filtered ? (
         <div className="trash-empty" data-testid="trash-empty-filtered">
-          <EmptyState
-            title="Nothing fits this view"
-            description={`None of your ${sourceEntries.length} deleted item${sourceEntries.length === 1 ? '' : 's'} matches these filters.`}
-            action={onClearFilters ? <Button variant="primary" onClick={onClearFilters}>Clear filters</Button> : undefined}
-          />
+          <FilterMismatchEmptyState total={sourceEntries.length} noun="deleted item" onClearFilters={onClearFilters} />
         </div>
       ) : entries.length === 0 ? (
         // "Nothing here" is the good state for a trash, so it is worded as reassurance rather than as
@@ -154,35 +140,31 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
         </div>
       ) : (
         <>
-          <div className="trash-toolbar" data-testid="trash-toolbar">
-            <span className="trash-selection-count" data-testid="trash-selection-count" aria-live="polite">
-              {selection.length} selected
-            </span>
-            <Button variant="ghost"  onClick={toggleAll}>
+          <ActionBar
+            data-testid="trash-toolbar"
+            leading={
+              <span className="action-bar-count" data-testid="trash-selection-count" aria-live="polite">
+                {selection.length} selected
+              </span>
+            }
+            // Empty trash is intentionally global; name every entry in the confirmation even when
+            // the list is currently filtered, so hidden items cannot be purged by surprise.
+            trailing={<Button variant="danger" onClick={() => setPending({ entries: sourceEntries, whole: true })}>Empty trash</Button>}
+          >
+            <Button variant="ghost" onClick={toggleAll}>
               {everythingSelected ? 'Deselect all' : 'Select all'}
             </Button>
-            <Button variant="primary"
-              
-              onClick={restoreSelected}
-              disabled={selection.length === 0}>
+            <Button variant="primary" onClick={restoreSelected} disabled={selection.length === 0}>
               Restore
             </Button>
-            <Button variant="danger"
-              
+            <Button
+              variant="danger"
               onClick={() => setPending({ entries: selectedEntries, whole: false })}
               disabled={selection.length === 0}
             >
               Delete permanently
             </Button>
-            <Button variant="danger" className="trash-empty-action"
-              
-              // Empty trash is intentionally global; name every entry in the confirmation even when
-              // the list is currently filtered, so hidden items cannot be purged by surprise.
-              onClick={() => setPending({ entries: sourceEntries, whole: true })}
-            >
-              Empty trash
-            </Button>
-          </div>
+          </ActionBar>
 
           <ul className="trash-list" data-testid="trash-list">
             {entries.map((entry) => {

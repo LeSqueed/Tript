@@ -28,8 +28,6 @@ public sealed class ObsRecorderSession : IRecorderSession
     // costs one call and no new interop. Polled only while the scene is on the recording channel.
     private static readonly TimeSpan HookProbeInterval = TimeSpan.FromSeconds(2);
 
-    // How long a Game capture is allowed to wait before the user sees a warning. The wait itself is
-    // unbounded because the game window may appear well after the process starts.
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ObsSource _source;
@@ -528,10 +526,8 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public bool HasGameCaptureSource => _gameCaptureSource is not null;
 
-    // Shows the scene without starting an output so win-capture can attach before the recording
-    // begins. The wait is intentionally unbounded; cancellation is reserved for host teardown.
-    public bool WaitForGameCapture(TimeSpan warningAfter, Action showWarning, Action clearWarning,
-        CancellationToken cancellationToken = default)
+    public bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
+        Action clearWarning, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(showWarning);
         ArgumentNullException.ThrowIfNull(clearWarning);
@@ -550,11 +546,15 @@ public sealed class ObsRecorderSession : IRecorderSession
                 return true;
             }
 
-            if (!warningShown && DateTime.UtcNow - started >= warningAfter)
+            var elapsed = DateTime.UtcNow - started;
+            if (warningAfter > TimeSpan.Zero && !warningShown && elapsed >= warningAfter)
             {
                 warningShown = true;
                 showWarning();
             }
+
+            if (elapsed >= deadline)
+                return false;
 
             lock (_probeGate)
             {

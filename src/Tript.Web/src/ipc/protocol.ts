@@ -274,6 +274,28 @@ export interface SelectedGameExecutableMessage {
   filePath: string | null;
 }
 
+export interface GameSearchResult {
+  gameId?: string | null;
+  name: string;
+  year?: number | null;
+  platforms?: string | null;
+  source: string;
+  steamAppId?: number | null;
+  igdbId?: number | null;
+}
+
+export interface GameSearchResultsMessage {
+  requestId: string;
+  results: GameSearchResult[];
+  error?: string | null;
+}
+
+export interface ResolvedGameSearchMessage {
+  requestId: string;
+  game?: { gameId: string; name: string } | null;
+  error?: string | null;
+}
+
 export interface SettingsUpdateResultMessage {
   requestId: string;
   success: boolean;
@@ -329,6 +351,13 @@ export interface TrainingEventDefinition {
   fixedLabelCenterY?: number | null;
   fixedLabelWidth?: number | null;
   fixedLabelHeight?: number | null;
+}
+
+export interface GameRecordingPromptMessage {
+  promptId: string;
+  gameId: string;
+  name: string;
+  executablePath: string;
 }
 
 export interface TrainingRegionGroup {
@@ -421,6 +450,13 @@ export interface TrainingProgressMessage {
 export interface TrainingUpdateResultMessage {
   requestId: string;
   success: boolean;
+  error?: string | null;
+}
+
+export interface TrainingPublishResultMessage {
+  requestId: string;
+  success: boolean;
+  revision?: number;
   error?: string | null;
 }
 
@@ -595,6 +631,17 @@ export interface SelectGameExecutableParameters {
   requestId: string;
 }
 
+export interface SearchGamesParameters {
+  requestId: string;
+  query: string;
+  limit?: number;
+}
+
+export interface ResolveGameSearchParameters {
+  requestId: string;
+  input: string;
+}
+
 /** Add a fullscreen-suggested (or manually chosen) executable as a persisted custom game. */
 export interface AddGameCandidateParameters {
   requestId: string;
@@ -666,6 +713,11 @@ export interface UpdateTrainingSampleParameters {
   labels: TrainingLabel[];
 }
 
+export interface GameRecordingConfirmParameters {
+  promptId: string;
+  record: boolean;
+}
+
 export interface UpdateTrainingEventsParameters {
   gameId: string;
   requestId: string;
@@ -701,6 +753,13 @@ export interface StartTrainingParameters {
   augmentCopies?: number;
 }
 
+export interface PublishTrainingModelParameters {
+  requestId: string;
+  gameId: string;
+  username: string;
+  password: string;
+}
+
 /** The protocol version carried on NewConnection. */
 export interface NewConnectionParameters {
   protocolVersion: number;
@@ -724,8 +783,11 @@ export type CommandParameters =
   | ApplyClipPresetParameters
   | UpdateSettingsParameters
   | SelectGameExecutableParameters
+  | SearchGamesParameters
+  | ResolveGameSearchParameters
   | AddGameCandidateParameters
   | IgnoreGameCandidateParameters
+  | GameRecordingConfirmParameters
   | OpenFileLocationParameters
   | CopyFileToClipboardParameters
   | OpenInBrowserParameters
@@ -741,6 +803,7 @@ export type CommandParameters =
   | TrainingSampleParameters
   | SuggestTrainingLabelsParameters
   | StartTrainingParameters
+  | PublishTrainingModelParameters
   | NewConnectionParameters;
 
 // ---------------------------------------------------------------------------
@@ -786,8 +849,11 @@ export type CommandName =
   | 'SetVideoLocation'
   | 'SetCacheLocation'
   | 'SelectGameExecutable'
+  | 'SearchGames'
+  | 'ResolveGameSearch'
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
+  | 'GameRecordingConfirm'
   | 'ApplyVideoPreset'
   | 'ApplyClipPreset'
   // Shell and OS integration
@@ -810,6 +876,7 @@ export type CommandName =
   | 'StartTraining'
   | 'CancelTraining'
   | 'InstallTrainingModel'
+  | 'PublishTrainingModel'
   | 'ListAvailableRecordingModels'
   | 'ActivateRecordingModel';
 
@@ -833,15 +900,20 @@ export type MessageName =
   | 'storageWarning'
   | 'recoveryPrompt'
   | 'selectedGameExecutable'
+  | 'gameSearchResults'
+  | 'gameSearchResolved'
   | 'settingsUpdateResult'
   | 'gameCandidate'
   | 'gameCandidateCleared'
   | 'gameCandidateActionResult'
+  | 'gameRecordingPrompt'
+  | 'gameRecordingPromptCleared'
   | 'gameList'
   | 'error'
   | 'warning'
   | 'training'
   | 'trainingProgress'
+  | 'trainingPublishResult'
   | 'trainingEventsUpdateResult'
   | 'trainingRegionGroupsUpdateResult'
   | 'trainingSampleUpdateResult'

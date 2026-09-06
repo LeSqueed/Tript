@@ -11,6 +11,7 @@ import type {
   TrainingEventDefinition,
   TrainingMessage,
   TrainingProgressMessage,
+  TrainingPublishResultMessage,
   TrainingPushMessage,
   TrainingRegionGroup,
   TrainingSample,
@@ -155,6 +156,10 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [deletePercent, setDeletePercent] = useState<number | null>(null);
   const [preparingDataset, setPreparingDataset] = useState(false);
   const [installedRegionsStale, setInstalledRegionsStale] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('admin');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [publishRequestId, setPublishRequestId] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<string | null>(null);
   const pendingEventsRef = useRef<{ gameId: string; requestId: string; events: TrainingEventDefinition[] } | null>(null);
   const pendingRegionGroupsRef = useRef<{
     gameId: string; requestId: string; regionGroups: TrainingRegionGroup[];
@@ -169,6 +174,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const previewRetryCountRef = useRef(new Map<string, number>());
   const previewRequestCounterRef = useRef(0);
   const selectedSampleRequestRef = useRef<string | null>(null);
+  const publishRequestRef = useRef<string | null>(null);
   activeGameIdRef.current = gameId;
   const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
   const sourcePlaceholder = isWindows
@@ -272,6 +278,16 @@ export function TrainingView({ client }: TrainingViewProps) {
         if (activeGameIdRef.current) client.send('ListTraining', { gameId: activeGameIdRef.current });
       }
     });
+    const removePublishResult = client.on('trainingPublishResult', (content) => {
+      const result = content as Partial<TrainingPublishResultMessage>;
+      if (result.requestId !== publishRequestRef.current) return;
+      publishRequestRef.current = null;
+      setPublishRequestId(null);
+      setAdminPassword('');
+      setPublishResult(result.success
+        ? `Published revision ${result.revision}.`
+        : result.error || 'The trained model could not be published.');
+    });
     const removeEventsResult = client.on('trainingEventsUpdateResult', (content) => {
       const result = content as TrainingUpdateResultMessage;
       if (result.requestId !== latestEventsRequestRef.current) return;
@@ -338,6 +354,7 @@ export function TrainingView({ client }: TrainingViewProps) {
       removeGames();
       removeTraining();
       removeProgress();
+      removePublishResult();
       removeError();
       removeEventsResult();
       removeRegionGroupsResult();
@@ -527,6 +544,20 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const saveEventsFromEditor = (events: TrainingEventDefinition[]) => {
     saveEvents(events);
+  };
+
+  const publishModel = () => {
+    if (!gameId || !adminUsername.trim() || !adminPassword) return;
+    const requestId = crypto.randomUUID();
+    publishRequestRef.current = requestId;
+    setPublishRequestId(requestId);
+    setPublishResult(null);
+    client.send('PublishTrainingModel', {
+      requestId,
+      gameId,
+      username: adminUsername.trim(),
+      password: adminPassword,
+    });
   };
 
   const findRegionPreviewSample = (classIds: Set<number>) => {
@@ -979,6 +1010,25 @@ export function TrainingView({ client }: TrainingViewProps) {
               <strong>{progress.status}</strong> {progress.message}
             </p>
           )}
+
+          <section className="training-panel training-publish">
+            <div>
+              <h2>Publish trained model</h2>
+              <p className="muted small">Credentials are used for this upload only and are not saved.</p>
+            </div>
+            <div className="training-publish-fields">
+              <Field label="Admin username">
+                <TextField value={adminUsername} onChange={setAdminUsername} autoComplete="username" />
+              </Field>
+              <Field label="Admin password">
+                <TextField type="password" value={adminPassword} onChange={setAdminPassword} autoComplete="current-password" />
+              </Field>
+              <Button onClick={publishModel} disabled={!training.model || !adminUsername.trim() || !adminPassword || publishRequestId !== null}>
+                {publishRequestId ? 'Publishing…' : 'Publish model'}
+              </Button>
+            </div>
+            {publishResult && <p className="training-progress" role="status">{publishResult}</p>}
+          </section>
 
       {selectedSample && (
             <TrainingSampleEditor

@@ -37,8 +37,7 @@
 /* A segmented control, styled like the shell's nav so "All / Sessions / Clips" reads as the same kind
  * of choice the nav offers — which is what it is, now that the clips tab is one of these. */
 
-.library-filters,
-.library-trash-filters {
+.library-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -47,30 +46,22 @@
   min-width: 0;
 }
 
-.library-toolbar--trash {
-  align-items: center;
-}
-
 /* The filters reuse the settings form primitives (.field / .input), so a select in
  * the library and a select in settings are the same control. Only the widths are library-specific. */
 
-.library-filters .field,
-.library-trash-filters .field {
+.library-filters .field {
   min-width: 136px;
 }
 
-.library-filters .field:nth-child(4),
-.library-trash-filters .field:nth-child(4) {
+.library-filters .field:nth-child(4) {
   flex: 1 1 190px;
 }
 
-.library-filters .input,
-.library-trash-filters .input {
+.library-filters .input {
   padding: var(--space-1) var(--space-2);
 }
 
-.library-filters .select,
-.library-trash-filters .select {
+.library-filters .select {
   padding-right: var(--space-6);
 }
 
@@ -515,15 +506,13 @@
     align-items: stretch;
   }
 
-  .library-filters,
-  .library-trash-filters {
+  .library-filters {
     flex: 1 1 100%;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .library-filters .field,
-  .library-trash-filters .field {
+  .library-filters .field {
     min-width: 0;
   }
 
@@ -543,8 +532,7 @@
     padding: 12px;
   }
 
-  .library-filters,
-  .library-trash-filters {
+  .library-filters {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -682,19 +670,13 @@
   margin-left: 2px;
 }
 
+/* The mode-less selection row: a "Select" button and the range line. The select-mode bar is the
+ * shared .action-bar (see ui.css), which this view composes rather than restyling. */
+
 .library-selection {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.library-selection-count {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
-}
-
-.library-selection-done {
-  margin-left: auto;
 }
 
 /* ------------------------------------------------------------------ */

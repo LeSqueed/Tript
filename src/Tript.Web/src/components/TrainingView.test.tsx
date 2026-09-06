@@ -42,6 +42,31 @@ function sample(index: number): TrainingSample {
 describe('TrainingView sample gallery', () => {
   afterEach(cleanup);
 
+  it('publishes an installed model with ephemeral admin credentials', () => {
+    const { client, emit } = createClient();
+    render(<TrainingView client={client} />);
+    act(() => emit('gameList', [{ id: 'game-1', name: 'Game' }]));
+    act(() => emit('training', {
+      training: { gameId: 'game-1', events: [], samples: [], model: { inputWidth: 640, inputHeight: 640 } },
+    }));
+    fireEvent.change(screen.getByLabelText('Admin password'), { target: { value: 'password-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
+    const call = client.send.mock.calls.find((entry) => entry[0] === 'PublishTrainingModel');
+    expect(call).toEqual(['PublishTrainingModel', {
+      requestId: expect.any(String),
+      gameId: 'game-1',
+      username: 'admin',
+      password: 'password-123',
+    }]);
+    act(() => emit('trainingPublishResult', {
+      requestId: call?.[1]?.requestId,
+      success: true,
+      revision: 1,
+    }));
+    expect((screen.getByLabelText('Admin password') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('Published revision 1.')).toBeTruthy();
+  });
+
   it('correlates later-page previews and preserves the full image ratio when opening a sample', async () => {
     const { client, emit } = createClient();
     const training: TrainingMessage = {

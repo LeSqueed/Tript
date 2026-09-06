@@ -92,7 +92,7 @@ export function TextField({
 }: {
   value: string | number;
   onChange: (value: string) => void;
-  type?: 'text' | 'number' | 'url';
+  type?: 'text' | 'number' | 'url' | 'password';
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
   return (
     <input

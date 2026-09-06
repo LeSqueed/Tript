@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { SelectedGameExecutableMessage } from '../ipc/protocol';
+import type { GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
 import { HighlightsPage } from '../settings/pages/HighlightsPage';
@@ -28,12 +28,26 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
 export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClient; builtInGameIds?: readonly string[] }) {
   const [page, setPage] = useState<SettingsPageName>('general');
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
+  const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
+  const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
   const controller = useSettings(client);
 
   useEffect(() => client.on('selectedGameExecutable', (content) => {
     const selected = content as Partial<SelectedGameExecutableMessage> | null;
     if (typeof selected?.requestId === 'string' && (typeof selected.filePath === 'string' || selected.filePath === null)) {
       setSelectedGameExecutable(selected as SelectedGameExecutableMessage);
+    }
+  }), [client]);
+
+  useEffect(() => client.on('gameSearchResolved', (content) => {
+    const response = content as Partial<ResolvedGameSearchMessage> | null;
+    if (typeof response?.requestId === 'string') setResolvedGameSearch(response as ResolvedGameSearchMessage);
+  }), [client]);
+
+  useEffect(() => client.on('gameSearchResults', (content) => {
+    const response = content as Partial<GameSearchResultsMessage> | null;
+    if (typeof response?.requestId === 'string' && Array.isArray(response.results)) {
+      setGameSearchResults(response as GameSearchResultsMessage);
     }
   }), [client]);
 
@@ -119,6 +133,10 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
             selectedGameExecutable={selectedGameExecutable}
             settingsUpdateResult={controller.settingsUpdateResult}
             onBrowseExecutable={(requestId) => client.send('SelectGameExecutable', { requestId })}
+            gameSearchResults={gameSearchResults}
+            onSearchGames={(requestId, query) => client.send('SearchGames', { requestId, query, limit: 20 })}
+            resolvedGameSearch={resolvedGameSearch}
+            onResolveGameSearch={(requestId, input) => client.send('ResolveGameSearch', { requestId, input })}
             globalClipBeforeSeconds={controller.settings.recording.automaticClipBeforeSeconds}
             globalClipAfterSeconds={controller.settings.recording.automaticClipAfterSeconds}
             globalRecordingMode={controller.settings.recording.mode}

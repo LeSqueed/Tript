@@ -10,7 +10,7 @@ import type { ConnectionState } from '../ipc/websocketClient';
 import type { ContentItem } from '../ipc/protocol';
 import { Button, Toggle, type SelectOption } from './ui/controls';
 import { ContentCard } from './library/ContentCard';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
+import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
 import { LibraryPagination } from './library/LibraryPagination';
 import { LibrarySelectFilters } from './library/LibraryToolbar';
 import {
@@ -31,7 +31,7 @@ import {
 } from './library/libraryModel';
 import { selectionKey } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
-import { EmptyState } from './ui/Ui';
+import { EmptyState, FilterMismatchEmptyState } from './ui/Ui';
 import { useWatchedGames } from './recorder/useWatchedGames';
 
 const SESSIONS_QUERY: LibraryQuery = { ...DEFAULT_LIBRARY_QUERY, type: 'sessions' };
@@ -126,21 +126,16 @@ export function SessionsView({
     setPendingDelete(null);
   }, [client, pendingDelete]);
 
-  const confirmation: DeleteConfirmation | null = pendingDelete ? (() => {
-    const name = itemLabel(pendingDelete);
-    return {
-      title: `Delete "${name}"?`,
-      names: [name],
-      confirmLabel: 'Move to trash',
-      affectedCount: lacksMainVideo(pendingDelete) ? 0 : 1,
-      cascadeCount: cascadableLinkedHighlights(pendingDelete, items).length,
-      checkbox: {
-        label: 'Delete linked highlights (favourited highlights are kept)',
-        defaultChecked: deleteLinkedHighlightsByDefault,
-      },
-      retentionHours,
-    };
-  })() : null;
+  const confirmation: DeleteConfirmation | null = pendingDelete
+    ? makeDeleteConfirmation({
+        names: [itemLabel(pendingDelete)],
+        retentionHours,
+        affectedCount: lacksMainVideo(pendingDelete) ? 0 : 1,
+        hasCascade: true,
+        cascadeCount: cascadableLinkedHighlights(pendingDelete, items).length,
+        deleteLinkedHighlightsDefault: deleteLinkedHighlightsByDefault,
+      })
+    : null;
 
   return (
     <section className="library-view sessions-view" data-testid="sessions-view">
@@ -211,15 +206,7 @@ export function SessionsView({
         </div>
       ) : view.matchCount === 0 ? (
         <div data-testid="sessions-empty-filtered">
-          <EmptyState
-            title="Nothing fits this view"
-            description={`None of your ${view.totalCount} session${view.totalCount === 1 ? '' : 's'} matches these filters.`}
-            action={
-              <Button variant="primary" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            }
-          />
+          <FilterMismatchEmptyState total={view.totalCount} noun="session" onClearFilters={clearFilters} />
         </div>
       ) : (
         <ul className="library-grid" data-testid="sessions-grid">

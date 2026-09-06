@@ -24,11 +24,11 @@ public sealed class GameModelManagerTests : IDisposable
         var package = BuildOverwatchPackage(revision: 2);
         var packageHash = Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
         var manifest = Manifest("Overwatch", apiVersion: 1, revision: 2,
-            package.Length, packageHash, "https://models.test/overwatch.zip");
+            package.Length, packageHash, "http://127.0.0.1:8895/overwatch.zip");
         var handler = new RouteHandler(new Dictionary<string, byte[]>
         {
             ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
-            ["https://models.test/overwatch.zip"] = package,
+            ["http://127.0.0.1:8895/overwatch.zip"] = package,
         });
         var statuses = new List<IReadOnlyList<GameModelStatus>>();
         using var manager = CreateManager(handler, async (gameId, stagedPath, _) =>
@@ -195,7 +195,8 @@ public sealed class GameModelManagerTests : IDisposable
 
     private static byte[] BuildOverwatchPackage(int revision)
     {
-        var sourceRoot = Path.Combine(AppContext.BaseDirectory, "data", "models", "Overwatch");
+        var sourceRoot = Path.Combine(AppContext.BaseDirectory, "data", "models",
+            "57ZZVAZ0PJK8VQGPKB728QE57C");
         var modelPath = Path.Combine(sourceRoot, "model.onnx");
         var eventsPath = Path.Combine(sourceRoot, "events.json");
         Assert.True(File.Exists(modelPath), $"Missing test model at {modelPath}");

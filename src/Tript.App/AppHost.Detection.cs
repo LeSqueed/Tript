@@ -26,6 +26,11 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
+    private readonly object _gameRecordingPromptGate = new();
+    private readonly Dictionary<string, PendingGameRecording> _gameRecordingPrompts =
+        new(StringComparer.Ordinal);
+    private readonly HashSet<string> _resolvingCandidatePaths = new(FilePaths.Comparer);
+
     // ---- detection ----
 
     private void WireAutoStart()
@@ -193,7 +198,13 @@ internal sealed partial class AppHost
         _fullscreenDetector?.UpdateKnownTargets(targets);
     }
 
-    private void OnFullscreenCandidateFound(FullscreenGameCandidate candidate)
+    internal void SetInventoryForTesting(GameInventory inventory)
+    {
+        lock (_inventoryGate)
+            _inventory = inventory;
+    }
+
+    internal void OnFullscreenCandidateFound(FullscreenGameCandidate candidate)
     {
         var normalized = ProcessNameGameDetector.NormalizePath(candidate.ExecutablePath);
         if (normalized is null)
@@ -202,6 +213,22 @@ internal sealed partial class AppHost
         if (_settingsStore.Load().Game.IgnoredApplications?.Contains(normalized, FilePaths.Comparer) == true)
             return;
 
+        if (_resolverClient is not null)
+        {
+            lock (_gameRecordingPromptGate)
+            {
+                if (!_resolvingCandidatePaths.Add(normalized))
+                    return;
+            }
+            _ = ResolveGameCandidateAsync(candidate, normalized);
+            return;
+        }
+
+        PushGameCandidate(candidate, normalized);
+    }
+
+    private void PushGameCandidate(FullscreenGameCandidate candidate, string normalized)
+    {
         _ipc.Broadcast("gameCandidate", JsonSerializer.SerializeToElement(new
         {
             pid = candidate.ProcessId,
@@ -209,6 +236,159 @@ internal sealed partial class AppHost
             executablePath = normalized,
         }, Wire.Options));
     }
+
+    private async Task ResolveGameCandidateAsync(FullscreenGameCandidate candidate, string normalized)
+    {
+        try
+        {
+            await _discoveryTask.WaitAsync(_discoveryCancellation.Token).ConfigureAwait(false);
+            GameInventory inventory;
+            lock (_inventoryGate)
+                inventory = _inventory;
+            var resolution = CandidateResolverInput(candidate, normalized, inventory);
+            if (!resolution.StoreBacked)
+            {
+                PushGameCandidate(candidate, normalized);
+                return;
+            }
+            var resolved = await _resolverClient!.ResolveAsync(resolution.Input,
+                _discoveryCancellation.Token);
+            if (_disposed || _shuttingDown)
+                return;
+
+            var promptId = Guid.NewGuid().ToString("N");
+            var displayName = string.IsNullOrWhiteSpace(resolved.DisplayName)
+                ? Path.GetFileNameWithoutExtension(candidate.Executable)
+                : resolved.DisplayName;
+            var prompt = new PendingGameRecording(promptId, resolved.GameId, displayName, normalized);
+            lock (_settingsUpdateGate)
+            {
+                var saved = _settingsStore.TryUpdate(settings =>
+                {
+                    var game = settings.Game.GameList.FirstOrDefault(value =>
+                        string.Equals(value.Id, resolved.GameId, StringComparison.OrdinalIgnoreCase));
+                    if (game is null)
+                    {
+                        game = new GameSetting
+                        {
+                            Id = resolved.GameId,
+                            Name = displayName,
+                            ExecutablePath = _gameCatalog.EntryById(resolved.GameId) is null ? normalized : null,
+                        };
+                        settings.Game.GameList.Add(game);
+                    }
+                    return ValidateGameList(settings.Game.GameList, out var validationError)
+                        ? null
+                        : validationError;
+                }, out _, out var failure);
+                if (!saved)
+                {
+                    Log.Warning("AppHost: resolved game candidate was not saved: {Reason}", failure);
+                    PushGameCandidate(candidate, normalized);
+                    return;
+                }
+
+                lock (_gameRecordingPromptGate)
+                    _gameRecordingPrompts[promptId] = prompt;
+                ReloadGameList();
+                RebuildDetectionTargets();
+                PushGameList();
+                PushSettings();
+            }
+            PushGameRecordingPrompt(prompt);
+        }
+        catch (OperationCanceledException) when (_discoveryCancellation.IsCancellationRequested)
+        {
+        }
+        catch (OperationCanceledException exception)
+        {
+            Log.Warning(exception, "AppHost: game candidate resolution timed out for {Executable}",
+                candidate.Executable);
+            PushGameCandidate(candidate, normalized);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
+        {
+            Log.Warning(exception, "AppHost: game candidate resolution failed for {Executable}", candidate.Executable);
+            PushGameCandidate(candidate, normalized);
+        }
+        finally
+        {
+            lock (_gameRecordingPromptGate)
+                _resolvingCandidatePaths.Remove(normalized);
+        }
+    }
+
+    internal sealed record CandidateResolution(string Input, bool StoreBacked);
+
+    internal static CandidateResolution CandidateResolverInput(FullscreenGameCandidate candidate, string normalized,
+        GameInventory inventory)
+    {
+        var installed = inventory.Games
+            .Where(game => game.Store != GameStore.Ubisoft && FilePaths.IsUnder(normalized, game.InstallRoot))
+            .OrderByDescending(game => game.InstallRoot.Length)
+            .FirstOrDefault();
+        return installed is not null
+            ? new CandidateResolution(installed.ProductId.ToString(), true)
+            : new CandidateResolution($"executable:{ExecutableNames.Normalize(candidate.Executable)}", false);
+    }
+
+    internal void ConfirmGameRecording(string promptId, bool record)
+    {
+        PendingGameRecording? prompt;
+        lock (_gameRecordingPromptGate)
+        {
+            if (!_gameRecordingPrompts.TryGetValue(promptId, out prompt))
+                return;
+        }
+
+        lock (_settingsUpdateGate)
+        {
+            var saved = _settingsStore.TryUpdate(settings =>
+            {
+                var game = settings.Game.GameList.FirstOrDefault(value =>
+                    string.Equals(value.Id, prompt.GameId, StringComparison.OrdinalIgnoreCase));
+                if (game is null)
+                    return "the resolved game is no longer in settings.";
+                game.AutoRecordOverride = record == settings.Game.AutoRecordDetectedGames ? null : record;
+                return null;
+            }, out _, out var failure);
+            if (!saved)
+            {
+                PushError($"That recording preference was not saved: {failure}");
+                PushGameRecordingPrompt(prompt);
+                return;
+            }
+        }
+
+        lock (_gameRecordingPromptGate)
+            _gameRecordingPrompts.Remove(promptId);
+        _ipc.Broadcast("gameRecordingPromptCleared", JsonSerializer.SerializeToElement(new { promptId }, Wire.Options));
+        ReloadGameList();
+        PushSettings();
+        if (record && _detectedGames.LatestOwner(prompt.GameId) is { } owner)
+            ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(prompt.GameId, owner));
+    }
+
+    internal void PushPendingGameRecordingPrompts(ClientHandle client)
+    {
+        PendingGameRecording[] prompts;
+        lock (_gameRecordingPromptGate)
+            prompts = _gameRecordingPrompts.Values.ToArray();
+        foreach (var prompt in prompts)
+            client.Push("gameRecordingPrompt", SerializeGameRecordingPrompt(prompt));
+    }
+
+    private void PushGameRecordingPrompt(PendingGameRecording prompt)
+        => _ipc.Broadcast("gameRecordingPrompt", SerializeGameRecordingPrompt(prompt));
+
+    private static JsonElement SerializeGameRecordingPrompt(PendingGameRecording prompt)
+        => JsonSerializer.SerializeToElement(new
+        {
+            prompt.PromptId,
+            prompt.GameId,
+            prompt.Name,
+            prompt.ExecutablePath,
+        }, Wire.Options);
 
     private void OnFullscreenCandidateCleared(FullscreenGameCandidate candidate)
     {
@@ -325,14 +505,32 @@ internal sealed partial class AppHost
         var (owner, gameId) = TrackDetectedGameStarted(process);
         PushState(IsRecording, CurrentGameId);
         EnsureManagedModel(gameId);
-        // The auto-start can block indefinitely while the game-capture hook is awaited, and the
-        // detector reports every lifecycle over one serialized callback thread. Starting the
-        // recording on that thread would stall it, so the GameStopped that clears this process when
-        // it exits could never be processed and the detected badge would stay up after the game
-        // closed. The start runs on the thread pool; the recorder gate still serializes it against
-        // every other start/stop.
+        if (!ShouldAutoRecord(gameId))
+            return;
+        // The start can block on the game-capture hook wait; the detector's callback thread must
+        // not stall behind it.
         ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(gameId, owner));
     }
+
+    internal bool ShouldAutoRecord(string gameId)
+    {
+        lock (_gameRecordingPromptGate)
+        {
+            if (_gameRecordingPrompts.Values.Any(prompt =>
+                string.Equals(prompt.GameId, gameId, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+
+        var settings = _settingsStore.Load();
+        var game = settings.Game.GameList.FirstOrDefault(value =>
+            string.Equals(value.Id, gameId, StringComparison.OrdinalIgnoreCase));
+        return game?.AutoRecordOverride ?? settings.Game.AutoRecordDetectedGames;
+    }
+
+    private sealed record PendingGameRecording(string PromptId, string GameId, string Name,
+        string ExecutablePath);
 
     private void StartDetectedGameRecording(string gameId, string owner)
     {
@@ -343,11 +541,12 @@ internal sealed partial class AppHost
         {
             if (!_detectedGames.Contains(owner))
                 return;
+        }
 
-            _ = StartRecordingLocked(gameId, owner);
-            // The start clears the process owner when it does not become a recording. A process that
-            // is still running never fires GameStopped, so without this the detected badge would
-            // linger for the life of the process even though nothing recorded.
+        _ = StartRecordingInternal(gameId, owner);
+
+        lock (_recorderGate)
+        {
             if (Volatile.Read(ref _recordingProcessOwner) is null)
             {
                 _detectedGames.Remove(owner);
@@ -445,6 +644,11 @@ internal sealed partial class AppHost
         return GameList.FirstOrDefault(game => ExecutableNames.Equal(ExecutableOf(game), gameName))?.Id;
     }
 
+    private string? ResolveStoredGameId(string? storedId, string? gameName)
+        => string.IsNullOrWhiteSpace(storedId)
+            ? ResolveLegacyGameId(gameName)
+            : (ResolveLegacyGameId(storedId) ?? storedId);
+
     // The game a clip cut from this session belongs to. The session's on-disk metadata record is
     // authoritative; for the session being recorded right now the in-memory pending record is used,
     // because the on-disk record is only written when the recording stops.
@@ -457,9 +661,7 @@ internal sealed partial class AppHost
             if (metadata is not null)
             {
                 var game = string.IsNullOrWhiteSpace(metadata.Game) ? null : metadata.Game;
-                var gameId = string.IsNullOrWhiteSpace(metadata.GameId)
-                    ? ResolveLegacyGameId(game)
-                    : metadata.GameId;
+                var gameId = ResolveStoredGameId(metadata.GameId, game);
                 if (game is not null || gameId is not null)
                     return (game, gameId);
             }
@@ -471,9 +673,7 @@ internal sealed partial class AppHost
             && _pendingMetadata is not null)
         {
             var pendingGame = string.IsNullOrWhiteSpace(_pendingMetadata.Game) ? null : _pendingMetadata.Game;
-            var pendingGameId = string.IsNullOrWhiteSpace(_pendingMetadata.GameId)
-                ? ResolveLegacyGameId(pendingGame)
-                : _pendingMetadata.GameId;
+            var pendingGameId = ResolveStoredGameId(_pendingMetadata.GameId, pendingGame);
             if (pendingGame is not null || pendingGameId is not null)
                 return (pendingGame, pendingGameId);
         }

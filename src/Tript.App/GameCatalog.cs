@@ -12,7 +12,8 @@ internal sealed record GameCatalogEntry(
     string GameId,
     string Executable,
     string? Name = null,
-    IReadOnlyList<GameStoreProduct>? StoreProducts = null)
+    IReadOnlyList<GameStoreProduct>? StoreProducts = null,
+    IReadOnlyList<string>? LegacyGameIds = null)
 {
     internal bool HasStoreProduct(GameStore store, string productId)
         => StoreProducts is { } products &&
@@ -24,16 +25,38 @@ internal sealed record GameStoreProduct(string Store, string ProductId);
 
 internal sealed class GameCatalog
 {
+    private readonly Dictionary<string, string> _legacyById;
+
     private GameCatalog(IReadOnlyList<GameCatalogEntry> entries)
     {
         Entries = entries;
+        _legacyById = BuildLegacyMap(entries);
     }
 
     internal IReadOnlyList<GameCatalogEntry> Entries { get; }
 
     internal GameCatalogEntry? EntryById(string gameId)
         => Entries.FirstOrDefault(entry =>
-            string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase)
+            || entry.LegacyGameIds is { } legacy
+                && legacy.Contains(gameId, StringComparer.OrdinalIgnoreCase));
+
+    internal string? ResolveLegacyGameId(string? gameId)
+        => gameId is not null && _legacyById.TryGetValue(gameId, out var current) ? current : null;
+
+    private static Dictionary<string, string> BuildLegacyMap(IReadOnlyList<GameCatalogEntry> entries)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            foreach (var legacy in entry.LegacyGameIds ?? Array.Empty<string>())
+            {
+                if (!string.IsNullOrWhiteSpace(legacy))
+                    map[legacy] = entry.GameId;
+            }
+        }
+        return map;
+    }
 
     internal static GameCatalog Load(string path)
     {

@@ -73,7 +73,7 @@ export function Toast({ item, onDismissSelf, onHover }: ToastProps) {
           </div>
         )}
       </div>
-      <button
+      {item.dismissible !== false && <button
         type="button"
         className="toast-dismiss"
         aria-label="Dismiss notification"
@@ -85,7 +85,7 @@ export function Toast({ item, onDismissSelf, onHover }: ToastProps) {
           </svg>
         )}
         <Icon name="close" size={16} />
-      </button>
+      </button>}
     </div>
   );
 }

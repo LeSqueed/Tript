@@ -97,6 +97,12 @@ internal sealed class AppController
                 var parsed = parameters.Deserialize<GameCandidateParameters>();
                 _host.IgnoreGameCandidate(parsed?.ExecutablePath, parsed?.RequestId);
             },
+            ["GameRecordingConfirm"] = (parameters, _) =>
+            {
+                var parsed = parameters.Deserialize<GameRecordingConfirmParameters>();
+                if (parsed is not null)
+                    _host.ConfirmGameRecording(parsed.PromptId, parsed.Record);
+            },
             ["ApplyVideoPreset"] = (_, _) => { /* No presets in the alpha. */ },
             ["ApplyClipPreset"] = (_, _) => { /* No presets in the alpha. */ },
             ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
@@ -116,6 +122,10 @@ internal sealed class AppController
         // small and answers synchronously.
         _asyncCommands = new Dictionary<string, Func<JsonElement?, ClientHandle, Task>>(StringComparer.Ordinal)
         {
+            ["SearchGames"] = async (parameters, client) =>
+                await _host.SearchGamesAsync(parameters.Deserialize<SearchGamesParameters>(), client),
+            ["ResolveGameSearch"] = async (parameters, client) =>
+                await _host.ResolveGameSearchAsync(parameters.Deserialize<ResolveGameSearchParameters>(), client),
             // The listing walks the whole library and probes durations, so it must not park the
             // receive loop behind it.
             ["ListContent"] = (_, _) => Task.Run(_host.PushContent),
@@ -143,6 +153,8 @@ internal sealed class AppController
                 await _host.StartTraining(parameters.Deserialize<StartTrainingParameters>()),
             ["InstallTrainingModel"] = async (parameters, _) =>
                 await _host.InstallTrainingModelCommand(parameters.Deserialize<TrainingGameParameters>()),
+            ["PublishTrainingModel"] = async (parameters, client) =>
+                await _host.PublishTrainingModel(parameters.Deserialize<PublishTrainingModelParameters>(), client),
             ["ListAvailableRecordingModels"] = (_, _) => Task.Run(_host.PushAvailableRecordingModels),
             ["ActivateRecordingModel"] = (parameters, _) =>
             {
@@ -177,6 +189,7 @@ internal sealed class AppController
         _host.PushSettings();
         _host.PushGameList();
         _host.PushModelStatus();
+        _host.PushPendingGameRecordingPrompts(client);
 
         // The recovery prompt, when there are orphaned files. Run after the state push so the
         // frontend has its content model before the prompt arrives.

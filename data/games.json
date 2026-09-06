@@ -1,6 +1,10 @@
 [
   {
-    "gameId": "Overwatch",
-    "executable": "Overwatch.exe"
+    "gameId": "57ZZVAZ0PJK8VQGPKB728QE57C",
+    "executable": "Overwatch.exe",
+    "name": "Overwatch",
+    "legacyGameIds": [
+      "Overwatch"
+    ]
   }
 ]

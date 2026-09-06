@@ -7,6 +7,7 @@ using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.App.Training;
+using Tript.App.Resolver;
 using Tript.Detection;
 using Tript.Media;
 
@@ -14,6 +15,93 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
+    internal async Task PublishTrainingModel(PublishTrainingModelParameters? parameters, ClientHandle client)
+    {
+        var requestId = parameters?.RequestId?.Trim() ?? string.Empty;
+        try
+        {
+            if (parameters is null || requestId.Length == 0 || string.IsNullOrWhiteSpace(parameters.GameId)
+                || string.IsNullOrWhiteSpace(parameters.Username) || string.IsNullOrEmpty(parameters.Password))
+                throw new InvalidOperationException("Enter the resolver admin username and password.");
+            if (_resolverClient is null)
+                throw new InvalidOperationException("No resolver URL is configured.");
+            var installed = TrainingWorkspace.ForGame(parameters.GameId, TrainingPaths.InstalledModelsPath);
+            using var admin = new ResolverAdminClient(_resolverClient.Config);
+            var revision = await admin.PublishAsync(parameters.GameId, installed.ModelPath, installed.EventsPath,
+                parameters.Username.Trim(), parameters.Password, _discoveryCancellation.Token).ConfigureAwait(false);
+            client.Push("trainingPublishResult", JsonSerializer.SerializeToElement(new
+            {
+                requestId,
+                success = true,
+                revision,
+            }, Wire.Options));
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException
+            or IOException or JsonException or TaskCanceledException)
+        {
+            client.Push("trainingPublishResult", JsonSerializer.SerializeToElement(new
+            {
+                requestId,
+                success = false,
+                error = exception.Message,
+            }, Wire.Options));
+        }
+    }
+
+    internal static void MigrateLegacyTrainingFolders(GameCatalog catalog, string trainingRoot,
+        string installedModelsRoot)
+    {
+        foreach (var entry in catalog.Entries)
+        {
+            foreach (var legacyId in entry.LegacyGameIds ?? [])
+            {
+                try
+                {
+                    MigrateWorkspaceDirectory(Path.Combine(trainingRoot, legacyId),
+                        Path.Combine(trainingRoot, entry.GameId));
+                    MigrateModelDirectory(Path.Combine(installedModelsRoot, legacyId),
+                        Path.Combine(installedModelsRoot, entry.GameId));
+                }
+                catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
+                {
+                    Log.Warning(exception, "Could not migrate training files from {LegacyGameId} to {GameId}",
+                        legacyId, entry.GameId);
+                }
+            }
+        }
+    }
+
+    private static void MigrateWorkspaceDirectory(string source, string destination)
+    {
+        if (!Directory.Exists(source)) return;
+        if (!Directory.Exists(destination))
+        {
+            Directory.Move(source, destination);
+            return;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, path));
+            if (File.Exists(target)) continue;
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Move(path, target);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(path => path.Length))
+        {
+            if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
+        }
+        if (!Directory.EnumerateFileSystemEntries(source).Any()) Directory.Delete(source);
+    }
+
+    private static void MigrateModelDirectory(string source, string destination)
+    {
+        if (!Directory.Exists(source)) return;
+        if (!Directory.Exists(destination)) Directory.Move(source, destination);
+    }
+
     private readonly TrainingRunner _trainingRunner = new();
     private readonly object _trainingGate = new();
     private readonly SemaphoreSlim _trainingWorkspaceGate = new(1, 1);
@@ -710,28 +798,28 @@ internal sealed partial class AppHost
     internal static void ActivateRecordingModelCore(string gameId, string? previousGameId,
         Func<string, bool> startDetection, Action pushError, Action pushState)
     {
+        var activated = false;
         try
         {
-            if (startDetection(gameId))
-                return;
+            activated = startDetection(gameId);
         }
         catch
         {
         }
 
-        try
+        if (!activated)
         {
-            if (!string.IsNullOrWhiteSpace(previousGameId))
-                startDetection(previousGameId);
-        }
-        catch
-        {
-        }
-        finally
-        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(previousGameId))
+                    startDetection(previousGameId);
+            }
+            catch
+            {
+            }
             pushError();
-            pushState();
         }
+        pushState();
     }
 
     internal async Task InstallTrainingModelCommand(TrainingGameParameters? parameters)

@@ -120,6 +120,20 @@ make run FAKE_RECORDER=false    # real recording (needs obs-studio + a display s
 
 `FAKE_RECORDER` defaults to `true`, so a dev session runs without OBS or capture hardware.
 
+### Resolver configuration
+
+Resolver settings live in `resolver.json` beside the application executables:
+
+```json
+{
+  "url": "http://127.0.0.1:18895",
+  "apiKey": null
+}
+```
+
+The resolver integration is disabled when the file is absent. Set `apiKey` to a string when the
+resolver requires one; no resolver environment variables are read.
+
 ### The launch key
 
 The host mints a 256-bit key at startup and refuses every request that does not carry it — the UI

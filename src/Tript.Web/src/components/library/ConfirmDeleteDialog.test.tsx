@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { ConfirmDeleteDialog, type DeleteConfirmation } from './ConfirmDeleteDialog';
+import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from './ConfirmDeleteDialog';
 
 const base: DeleteConfirmation = {
   title: 'Delete "Ranked win"?',
@@ -30,6 +30,81 @@ function renderDialog(
 }
 
 afterEach(cleanup);
+
+describe('makeDeleteConfirmation', () => {
+  it('names a single item with quotes and offers the trash path by default', () => {
+    const confirmation = makeDeleteConfirmation({ names: ['Ranked win'], retentionHours: 24 });
+    expect(confirmation).toMatchObject({
+      title: 'Delete "Ranked win"?',
+      confirmLabel: 'Move to trash',
+      affectedCount: 1,
+    });
+    expect(confirmation.permanentOnly).toBeUndefined();
+    expect(confirmation.checkbox).toBeUndefined();
+  });
+
+  it('pluralises the heading and the button label for a bulk delete', () => {
+    const confirmation = makeDeleteConfirmation({ names: ['a', 'b', 'c'], retentionHours: 24 });
+    expect(confirmation.title).toBe('Delete 3 items?');
+    expect(confirmation.confirmLabel).toBe('Move 3 to trash');
+    expect(confirmation.affectedCount).toBe(3);
+  });
+
+  it('quotes what actually moves when that differs from the names', () => {
+    const confirmation = makeDeleteConfirmation({
+      names: ['a', 'b'],
+      retentionHours: 24,
+      affectedCount: 1,
+    });
+    expect(confirmation.affectedCount).toBe(1);
+  });
+
+  it('offers the cascade checkbox only when asked, and defaults it from the caller', () => {
+    const plain = makeDeleteConfirmation({ names: ['a'], retentionHours: 24 });
+    expect(plain.checkbox).toBeUndefined();
+    expect(plain.cascadeCount).toBeUndefined();
+
+    const cascaded = makeDeleteConfirmation({
+      names: ['a'],
+      retentionHours: 24,
+      hasCascade: true,
+      cascadeCount: 4,
+      deleteLinkedHighlightsDefault: true,
+    });
+    expect(cascaded.cascadeCount).toBe(4);
+    expect(cascaded.checkbox).toEqual({
+      label: 'Delete linked highlights (favourited highlights are kept)',
+      defaultChecked: true,
+    });
+  });
+
+  it('frames an already-deleted item as permanent, with no trash path left', () => {
+    const confirmation = makeDeleteConfirmation({
+      names: ['a', 'b'],
+      retentionHours: 24,
+      permanentOnly: true,
+    });
+    expect(confirmation).toMatchObject({
+      title: 'Delete 2 items for good?',
+      confirmLabel: 'Delete permanently',
+      permanentOnly: true,
+    });
+    expect(confirmation.checkbox).toBeUndefined();
+  });
+
+  it('lets a caller override the heading and label, for the empty-the-trash case', () => {
+    const confirmation = makeDeleteConfirmation({
+      names: ['a', 'b'],
+      retentionHours: 24,
+      permanentOnly: true,
+      title: 'Empty the trash?',
+      confirmLabel: 'Empty trash',
+    });
+    expect(confirmation.title).toBe('Empty the trash?');
+    expect(confirmation.confirmLabel).toBe('Empty trash');
+    expect(confirmation.permanentOnly).toBe(true);
+  });
+});
 
 describe('ConfirmDeleteDialog content', () => {
   it('names what it is about to delete and says where it goes', () => {

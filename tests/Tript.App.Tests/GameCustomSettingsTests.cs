@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Net;
+using System.Text;
 using System.Text.Json;
+using System.Collections.Immutable;
 using Tript.App.Content;
+using Tript.App.Resolver;
 using Tript.Core;
+using Tript.GameDiscovery;
+using Tript.Recorder;
 using Tript.Settings;
 using Xunit;
 using Tript.TestSupport;
@@ -83,6 +89,140 @@ public sealed class GameCustomSettingsTests : IDisposable
         {
             File.Delete(exe);
         }
+    }
+
+    [Fact]
+    public void AutoRecordOverride_OnlyChangesTheGlobalDefaultWhenPresent()
+    {
+        var settings = _store.Load();
+        var game = Assert.Single(settings.Game.GameList);
+
+        Assert.True(_host.ShouldAutoRecord(game.Id));
+        game.AutoRecordOverride = false;
+        Assert.False(_host.ShouldAutoRecord(game.Id));
+
+        settings.Game.AutoRecordDetectedGames = false;
+        game.AutoRecordOverride = null;
+        Assert.False(_host.ShouldAutoRecord(game.Id));
+        game.AutoRecordOverride = true;
+        Assert.True(_host.ShouldAutoRecord(game.Id));
+    }
+
+    [Fact]
+    public void FullscreenCandidate_IsResolvedAndAddedWithItsCanonicalId()
+    {
+        var root = Path.Combine(_contentRoot, "resolved");
+        var installRoot = Path.Combine(root, "steamapps", "common", "ExampleGame");
+        Directory.CreateDirectory(installRoot);
+        var executablePath = Path.Combine(installRoot, "example.exe");
+        File.WriteAllText(executablePath, "exe");
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        host.SetInventoryForTesting(new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
+                "Example Game", installRoot, ImmutableArray<string>.Empty),
+        ], []));
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
+
+        Assert.True(SpinWait.SpinUntil(() => host.GameList.Any(game => game.Id == ResolverHandler.GameId),
+            TimeSpan.FromSeconds(3)));
+        var game = Assert.Single(store.Load().Game.GameList, value => value.Id == ResolverHandler.GameId);
+        Assert.Equal("Example Game", game.Name);
+        Assert.Equal(executablePath, game.ExecutablePath);
+        Assert.Equal("/resolve?input=steam%3A824270", Assert.Single(handler.Requests));
+    }
+
+    [Fact]
+    public void FullscreenCandidate_WithoutStoreEvidence_IsNotAddedAndDoesNotQueryTheResolver()
+    {
+        var root = Path.Combine(_contentRoot, "unresolved");
+        Directory.CreateDirectory(root);
+        var executablePath = Path.Combine(root, "example.exe");
+        File.WriteAllText(executablePath, "exe");
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
+
+        Assert.DoesNotContain(host.GameList, game => game.Id == ResolverHandler.GameId);
+        Assert.DoesNotContain(store.Load().Game.GameList, value => value.Id == ResolverHandler.GameId);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_UsesTheContainingSteamProductIdentity()
+    {
+        var installRoot = Path.Combine(_contentRoot, "steamapps", "common", "FPSAimTrainer");
+        var executablePath = Path.Combine(installRoot, "FPSAimTrainer", "Binaries", "Win64",
+            "FPSAimTrainer-Win64-Shipping.exe");
+        var inventory = new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
+                "KovaaK's", installRoot, ImmutableArray<string>.Empty),
+        ], []);
+        var candidate = new FullscreenGameCandidate(42, "FPSAimTrainer-Win64-Shipping.exe", executablePath);
+
+        var resolution = AppHost.CandidateResolverInput(candidate, executablePath, inventory);
+        Assert.Equal("steam:824270", resolution.Input);
+        Assert.True(resolution.StoreBacked);
+
+        var unrooted = AppHost.CandidateResolverInput(candidate,
+            Path.Combine(_contentRoot, "elsewhere", "example.exe"), new GameInventory([], []));
+        Assert.Equal("executable:FPSAimTrainer-Win64-Shipping", unrooted.Input);
+        Assert.False(unrooted.StoreBacked);
+    }
+
+    [Fact]
+    public async Task GameSearch_SearchesThenResolvesOnlyTheSelectedResult()
+    {
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = _contentRoot,
+            SettingsPath = _store.FilePath,
+            WebRoot = _contentRoot,
+            FakeRecorder = true,
+        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        var messages = new List<(string Method, JsonElement Content)>();
+        var client = new ClientHandle((method, content) => messages.Add((method, content)));
+
+        await host.SearchGamesAsync(new SearchGamesParameters
+        {
+            RequestId = "search-1",
+            Query = "Example",
+        }, client);
+        await host.ResolveGameSearchAsync(new ResolveGameSearchParameters
+        {
+            RequestId = "resolve-1",
+            Input = "igdb:456",
+        }, client);
+
+        Assert.Equal(["/search?q=Example&limit=20", "/resolve?input=igdb%3A456"], handler.Requests);
+        Assert.Equal("gameSearchResults", messages[0].Method);
+        Assert.Equal(456, messages[0].Content.GetProperty("results")[0].GetProperty("igdbId").GetInt64());
+        Assert.Equal("gameSearchResolved", messages[1].Method);
+        Assert.Equal(ResolverHandler.GameId,
+            messages[1].Content.GetProperty("game").GetProperty("gameId").GetString());
     }
 
     [Fact]
@@ -187,6 +327,26 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.Contains(path, new SettingsStore(new SettingsFileProvider(_store.FilePath))
             .Load().Game.IgnoredApplications, FilePaths.Comparer);
         Assert.DoesNotContain(_host.GameList, game => game.Id.StartsWith("custom-"));
+    }
+
+    private sealed class ResolverHandler : HttpMessageHandler
+    {
+        internal const string GameId = "01HRESOLVEDGAME000000000000";
+        internal List<string> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.PathAndQuery;
+            Requests.Add(path);
+            var content = path.StartsWith("/search", StringComparison.Ordinal)
+                ? """{"results":[{"name":"Example Game","source":"igdb","igdbId":456}]}"""
+                : $$"""{"gameId":"{{GameId}}","canonical":true,"source":"store","displayName":"Example Game"}""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     [Fact]

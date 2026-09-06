@@ -75,100 +75,157 @@ internal sealed partial class AppHost
     private StartRecordingResult TryStartRecording(string? gameId, string? displayId = null,
         bool applyDisplay = false)
     {
-        lock (_recorderGate)
-        {
-            var effectiveGameId = gameId ?? CurrentDetectedGameId();
-            var processOwner = effectiveGameId is null ? null : DetectedProcessFor(effectiveGameId);
-            return StartRecordingLocked(effectiveGameId, processOwner, applyDisplay, displayId);
-        }
+        var effectiveGameId = gameId ?? CurrentDetectedGameId();
+        var processOwner = effectiveGameId is null ? null : DetectedProcessFor(effectiveGameId);
+        return StartRecordingInternal(effectiveGameId, processOwner, applyDisplay, displayId);
     }
 
-    private StartRecordingResult StartRecordingLocked(string? gameId, string? processOwner = null,
+    private StartRecordingResult StartRecordingInternal(string? gameId, string? processOwner = null,
         bool applyDisplay = false, string? displayId = null)
     {
-        // The detector is authoritative. A UI state push and its Record click can race a process
-        // exit; an id with no live owner must not select per-game settings, paths, metadata or models.
-        var effectiveGameId = processOwner is null ? null : gameId;
-        if (processOwner is not null && effectiveGameId is not null)
-            EnsureManagedModel(effectiveGameId);
+        IRecorderSession? hookWaitSession = null;
+        CancellationTokenSource? waitCancellation = null;
+        bool hookWaitCancelled = false;
+        SettingsModel settings;
+        ResolvedRecorderSettings resolved;
+        string sessionPath;
+        string? effectiveGameId;
 
-        // Detector teardown owns the callback barrier; do not admit new recording starts while it is
-        // being dismantled.
-        if (_shuttingDown)
-            return StartRecordingResult.ShuttingDown;
-
-        if (_stopFinalizationPending)
-            return StartRecordingResult.AlreadyRunning;
-
-        if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
-            return StartRecordingResult.AlreadyRunning;
-
-        // No previous session decision may survive into an attempt that fails before the recorder
-        // starts. A successful attempt writes its effective value after Start returns true.
-        lock (_automaticClipGate)
-            _liveHighlightsEnabledAtSessionStart = false;
-
-        var settings = _settingsStore.Load();
-        var resolved = SettingsResolver.Resolve(settings, effectiveGameId);
-
-        if (applyDisplay && resolved.CaptureMethod != DisplayCaptureMethod.Game)
-            resolved.Display = displayId;
-
-        if (processOwner is null && resolved.CaptureMethod == DisplayCaptureMethod.Game)
-            return StartRecordingResult.NoDetectedGame;
-
-        if (!resolved.Mode.IsAlphaSupported())
-            return StartRecordingResult.UnsupportedMode;
-
-        var sessionPath = BuildSessionPath(effectiveGameId, resolved.Mode.RecordsSession());
-        resolved.OutputPath = resolved.Mode.RecordsSession()
-            ? sessionPath
-            : BuildReplayBufferPath();
-
-        EnsureRecorderBuilt(resolved);
-
-        // Point the session's game-capture source at the detected game before the recording starts, so
-        // the recording shows the game rather than the background. win-capture keeps retrying the hook
-        // while the source is shown, so a game that appears mid-recording is still picked up.
-        if (effectiveGameId is not null)
-            RetargetGameCapture(effectiveGameId);
-
-        var recordingStarted = false;
-        Volatile.Write(ref _recordingProcessOwner, processOwner);
-        SetBackgroundWorkSuspendedForRecording(true);
-        try
+        lock (_recorderGate)
         {
+            // The detector is authoritative. A UI state push and its Record click can race a process
+            // exit; an id with no live owner must not select per-game settings, paths, metadata or models.
+            effectiveGameId = processOwner is null ? null : gameId;
+            if (processOwner is not null && effectiveGameId is not null)
+                EnsureManagedModel(effectiveGameId);
+
+            // Detector teardown owns the callback barrier; do not admit new recording starts while it is
+            // being dismantled.
+            if (_shuttingDown)
+                return StartRecordingResult.ShuttingDown;
+
+            if (_stopFinalizationPending)
+                return StartRecordingResult.AlreadyRunning;
+
+            if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
+                return StartRecordingResult.AlreadyRunning;
+
+            // No previous session decision may survive into an attempt that fails before the recorder
+            // starts. A successful attempt writes its effective value after Start returns true.
+            lock (_automaticClipGate)
+                _liveHighlightsEnabledAtSessionStart = false;
+
+            settings = _settingsStore.Load();
+            resolved = SettingsResolver.Resolve(settings, effectiveGameId);
+
+            if (applyDisplay && resolved.CaptureMethod != DisplayCaptureMethod.Game)
+                resolved.Display = displayId;
+
+            if (processOwner is null && resolved.CaptureMethod == DisplayCaptureMethod.Game)
+                return StartRecordingResult.NoDetectedGame;
+
+            if (!resolved.Mode.IsAlphaSupported())
+                return StartRecordingResult.UnsupportedMode;
+
+            sessionPath = BuildSessionPath(effectiveGameId, resolved.Mode.RecordsSession());
+            resolved.OutputPath = resolved.Mode.RecordsSession()
+                ? sessionPath
+                : BuildReplayBufferPath();
+
+            EnsureRecorderBuilt(resolved);
+
+            // Point the session's game-capture source at the detected game before the recording starts, so
+            // the recording shows the game rather than the background. win-capture keeps retrying the hook
+            // while the source is shown, so a game that appears mid-recording is still picked up.
+            if (effectiveGameId is not null)
+                RetargetGameCapture(effectiveGameId);
+
+            Volatile.Write(ref _recordingProcessOwner, processOwner);
+            SetBackgroundWorkSuspendedForRecording(true);
+
             if (processOwner is not null &&
-                _recorderSession is ObsRecorderSession capture &&
-                capture.Policy.IncludesGameCapture && capture.HasGameCaptureSource)
+                _recorderSession is { } session &&
+                session.Policy.IncludesGameCapture && session.HasGameCaptureSource)
             {
                 Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
                     effectiveGameId);
-                // StopRecording publishes its intent before taking the recorder gate. Check again after
-                // publishing the source so a stop that arrived during setup cannot miss this wait.
-                var waitCancellation = new CancellationTokenSource();
+                waitCancellation = new CancellationTokenSource();
                 _captureWaitCancellation = waitCancellation;
                 if (Volatile.Read(ref _recordingStopRequested) != 0)
                     waitCancellation.Cancel();
-                capture.PlaceSourceOnChannel();
-                try
+                session.PlaceSourceOnChannel();
+                hookWaitSession = session;
+            }
+        }
+
+        if (hookWaitSession is null)
+            return FinishStartRecording(effectiveGameId, processOwner, settings, resolved, sessionPath);
+
+        try
+        {
+            // The display layer bounds the wait: without one there is nothing to record until the
+            // hook attaches, so that wait is unbounded and only cancellation ends it.
+            var hasFallback = hookWaitSession.HasDisplayFallback;
+            var deadline = hasFallback ? hookWaitSession.Policy.GameCaptureTimeout : Timeout.InfiniteTimeSpan;
+            var warningAfter = hasFallback ? TimeSpan.Zero : hookWaitSession.Policy.GameCaptureTimeout;
+            var hookReady = hookWaitSession.WaitForGameCapture(
+                deadline,
+                warningAfter,
+                () => PushWarning("Still connecting game capture. Recording will start when the hook is ready."),
+                () => PushWarning(null),
+                waitCancellation!.Token);
+            hookWaitCancelled = waitCancellation.IsCancellationRequested;
+            if (!hookReady && !hookWaitCancelled && hasFallback)
+            {
+                Log.Information("AppHost: the {GameId} game-capture hook did not attach within {Timeout}s; " +
+                                "starting the recording on the display layer and keeping the hook retry",
+                    effectiveGameId, deadline.TotalSeconds);
+            }
+        }
+        finally
+        {
+            waitCancellation?.Dispose();
+        }
+
+        lock (_recorderGate)
+        {
+            try
+            {
+                var sessionStillOurs = !_disposed && ReferenceEquals(_recorderSession, hookWaitSession);
+                if (sessionStillOurs)
+                    hookWaitSession.ClearSourceFromChannel();
+                _captureWaitCancellation = null;
+                PushWarning(null);
+
+                if (hookWaitCancelled)
+                    return StartRecordingResult.RecorderRefused;
+                if (_shuttingDown || _disposed)
+                    return StartRecordingResult.ShuttingDown;
+                if (sessionStillOurs && !_stopFinalizationPending &&
+                    _recorder is { Snapshot: { State: RecorderState.Idle } })
                 {
-                    var captureReady = capture.WaitForGameCapture(
-                        capture.Policy.GameCaptureTimeout,
-                        () => PushWarning("Still connecting game capture. Recording will start when the hook is ready."),
-                        () => PushWarning(null), waitCancellation.Token);
-                    if (!captureReady)
-                        return StartRecordingResult.RecorderRefused;
+                    return FinishStartRecording(effectiveGameId, processOwner, settings, resolved, sessionPath);
                 }
-                finally
+
+                return StartRecordingResult.AlreadyRunning;
+            }
+            finally
+            {
+                if (_recorder is null || _recorder.Snapshot.State == RecorderState.Idle)
                 {
-                    _captureWaitCancellation = null;
-                    PushWarning(null);
-                    capture.ClearSourceFromChannel();
-                    waitCancellation.Dispose();
+                    Interlocked.CompareExchange(ref _recordingProcessOwner, null, processOwner);
+                    SetBackgroundWorkSuspendedForRecording(false);
                 }
             }
+        }
+    }
 
+    private StartRecordingResult FinishStartRecording(string? effectiveGameId, string? processOwner,
+        SettingsModel settings, ResolvedRecorderSettings resolved, string sessionPath)
+    {
+        var recordingStarted = false;
+        try
+        {
             if (!_recorder!.Start(resolved))
                 return StartRecordingResult.RecorderRefused;
             recordingStarted = true;
@@ -222,9 +279,10 @@ internal sealed partial class AppHost
         }
         finally
         {
-            if (!recordingStarted)
+            if (!recordingStarted &&
+                (_recorder is null || _recorder.Snapshot.State == RecorderState.Idle))
             {
-                Volatile.Write(ref _recordingProcessOwner, null);
+                Interlocked.CompareExchange(ref _recordingProcessOwner, null, processOwner);
                 SetBackgroundWorkSuspendedForRecording(false);
             }
         }
@@ -232,8 +290,9 @@ internal sealed partial class AppHost
 
     internal bool StopRecording()
     {
-        // StartRecording can be holding the gate while waiting for the game-capture hook. Publish
-        // the stop before taking the gate, and let StartRecording handle the setup race above.
+        // StartRecording's hook wait runs with the recorder gate released, so publish the stop and
+        // cancel the wait before taking the gate: a start that is waiting ends the wait and refuses
+        // in its post-wait re-check instead of starting a recording that must be stopped again.
         Interlocked.Exchange(ref _recordingStopRequested, 1);
         _captureWaitCancellation?.Cancel();
         lock (_recorderGate)

@@ -359,7 +359,19 @@ describe('SettingsView', () => {
     const { ws } = renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Games' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add custom game' }));
-    fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Pending game' } });
+    fireEvent.change(screen.getByLabelText('Find game'), { target: { value: 'Pending game' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    const searchFrame = JSON.parse(ws.sent.at(-1) ?? '{}') as {
+      parameters?: { requestId?: string };
+    };
+    act(() => ws.serverMessage(JSON.stringify({
+      method: 'gameSearchResults',
+      content: {
+        requestId: searchFrame.parameters?.requestId,
+        results: [{ gameId: '01HPENDINGGAME0000000000000', name: 'Pending game', source: 'local' }],
+      },
+    })));
+    fireEvent.click(screen.getByRole('option', { name: /Pending game/ }));
     fireEvent.change(screen.getByLabelText('Executable path'), {
       target: { value: 'C:\\Games\\Pending\\game.exe' },
     });
@@ -384,7 +396,7 @@ describe('SettingsView', () => {
       },
     })));
 
-    expect((screen.getByLabelText('Game name') as HTMLInputElement).value).toBe('Pending game');
+    expect(screen.getByRole('option', { name: /Pending game/ }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('alert').textContent).toBe('Executable already belongs to another game.');
   });
 

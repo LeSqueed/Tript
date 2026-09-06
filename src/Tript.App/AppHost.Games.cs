@@ -9,6 +9,7 @@ using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.App.Models;
+using Tript.App.Resolver;
 using Tript.Core;
 using Tript.Detection;
 using Tript.GameDiscovery;
@@ -26,14 +27,111 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
+    internal async Task SearchGamesAsync(SearchGamesParameters? parameters, ClientHandle client)
+    {
+        var requestId = parameters?.RequestId?.Trim() ?? string.Empty;
+        var query = parameters?.Query?.Trim() ?? string.Empty;
+        if (requestId.Length == 0 || query.Length == 0)
+        {
+            PushGameSearchResult(client, requestId, [], "Enter a game name to search.");
+            return;
+        }
+
+        if (_resolverClient is null)
+        {
+            PushGameSearchResult(client, requestId, [], "Game search is unavailable because no resolver URL is configured.");
+            return;
+        }
+
+        try
+        {
+            var results = await _resolverClient.SearchAsync(query, parameters?.Limit ?? 20,
+                _discoveryCancellation.Token).ConfigureAwait(false);
+            PushGameSearchResult(client, requestId, results, null);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException
+            or JsonException or TaskCanceledException)
+        {
+            PushGameSearchResult(client, requestId, [], "The game search service could not be reached.");
+        }
+    }
+
+    private static void PushGameSearchResult(ClientHandle client, string requestId,
+        IReadOnlyList<ResolverSearchResult> results, string? error)
+    {
+        client.Push("gameSearchResults", JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            results,
+            error,
+        }, Wire.Options));
+    }
+
+    internal async Task ResolveGameSearchAsync(ResolveGameSearchParameters? parameters, ClientHandle client)
+    {
+        var requestId = parameters?.RequestId?.Trim() ?? string.Empty;
+        var input = parameters?.Input?.Trim() ?? string.Empty;
+        if (requestId.Length == 0 || input.Length == 0 || _resolverClient is null)
+        {
+            PushResolvedGameSearch(client, requestId, null, "The selected game could not be resolved.");
+            return;
+        }
+
+        try
+        {
+            var game = await _resolverClient.ResolveAsync(input, _discoveryCancellation.Token)
+                .ConfigureAwait(false);
+            PushResolvedGameSearch(client, requestId, game, null);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException
+            or JsonException or TaskCanceledException)
+        {
+            PushResolvedGameSearch(client, requestId, null, "The selected game could not be resolved.");
+        }
+    }
+
+    private static void PushResolvedGameSearch(ClientHandle client, string requestId,
+        ResolvedGame? game, string? error)
+    {
+        client.Push("gameSearchResolved", JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            game = game is null ? null : new { game.GameId, name = game.DisplayName },
+            error,
+        }, Wire.Options));
+    }
+
     // ---- game list ----
 
     internal void ReloadGameList()
     {
-        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson);
+        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson,
+            out var settingsMigrated);
+        if (settingsMigrated)
+            _settingsStore.Save();
         AttachDiscoveredProcessPaths(games);
         lock (_gameListGate)
             _catalogueGames = games;
+        EnsureModelsForGameList();
+    }
+
+    private void EnsureModelsForGameList()
+    {
+        var manager = _modelManager;
+        if (manager is null || _disposed)
+            return;
+
+        foreach (var game in GameList)
+        {
+            try
+            {
+                _ = manager.EnsureModelAsync(game.Id);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+        }
     }
 
     // The frontend sees where a packaged game is installed once the launcher inventory confirms it:
@@ -61,9 +159,6 @@ internal sealed partial class AppHost
         bool requireExistingExecutables = false)
     {
         failure = null;
-        var packagedIds = _gameCatalog.Entries
-            .Select(entry => entry.GameId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var gameIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var customPaths = new HashSet<string>(FilePaths.Comparer);
 
@@ -81,7 +176,7 @@ internal sealed partial class AppHost
                 return false;
             }
 
-            if (packagedIds.Contains(game.Id))
+            if (_gameCatalog.EntryById(game.Id) is not null)
             {
                 if (!string.IsNullOrWhiteSpace(game.ExecutablePath))
                 {

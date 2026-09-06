@@ -37,7 +37,7 @@ namespace Tript.Detection.Tests;
 // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
 public class YoloOutputStrideTests
 {
-    private const string GameId = "Overwatch";
+    private const string GameId = "57ZZVAZ0PJK8VQGPKB728QE57C";
     private const int ModelInput = 640;
 
     // Mirrors the parser's own arithmetic, so a change to the row layout has to be made here too.

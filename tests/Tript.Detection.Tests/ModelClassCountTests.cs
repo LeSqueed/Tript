@@ -15,7 +15,7 @@ namespace Tript.Detection.Tests;
 // therefore shifted every read and decoded every box to garbage — no exception, no log.
 public class ModelClassCountTests
 {
-    private const string GameId = "Overwatch";
+    private const string GameId = "57ZZVAZ0PJK8VQGPKB728QE57C";
 
     // The literal Ultralytics writes into metadata_props["names"]: a Python dict, not JSON.
     private const string UltralyticsNames =

@@ -172,7 +172,9 @@ internal sealed class GameModelManager : IDisposable
     {
         if (release.ModelApiVersion != SupportedModelApiVersion || release.Revision <= 0 ||
             release.SizeBytes <= 0 || release.SizeBytes > MaximumPackageBytes ||
-            !Uri.TryCreate(release.Url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
+            !Uri.TryCreate(release.Url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps
+                && (uri.Scheme != Uri.UriSchemeHttp || !uri.IsLoopback)) ||
             release.Sha256.Length != 64)
         {
             return false;

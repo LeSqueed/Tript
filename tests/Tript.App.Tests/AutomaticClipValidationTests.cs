@@ -141,6 +141,7 @@ public sealed class AutomaticClipWindowValidationTests
 // window is already inverted, because it cannot have caused it.
 public sealed class AutomaticClipWindowUpdateTests : IDisposable
 {
+    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
     private const string InvertedWindowJson =
         """{"recording":{"automaticClipBeforeSeconds":10,"automaticClipAfterSeconds":5}}""";
 
@@ -218,7 +219,7 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
         using var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath));
         var savedGame = onDisk.RootElement.GetProperty("game").GetProperty("gameList")[0];
         Assert.False(savedGame.TryGetProperty("automaticClipOverride", out _));
-        Assert.Equal("Overwatch", savedGame.GetProperty("id").GetString());
+        Assert.Equal(OverwatchId, savedGame.GetProperty("id").GetString());
     }
 
     [Fact]

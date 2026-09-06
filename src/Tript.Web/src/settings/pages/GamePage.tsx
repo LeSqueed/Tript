@@ -7,7 +7,7 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
-import type { SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameSearchResult, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import { Button, SelectField, TextField } from '../../components/ui/controls';
 
 /** True when a game departs from the global settings in any way its row exposes. */
@@ -53,6 +53,7 @@ interface CustomGameDraft {
   index: number | null;
   name: string;
   executablePath: string;
+  selectedGame: GameSearchResult | null;
 }
 
 export function GamePage({
@@ -65,6 +66,10 @@ export function GamePage({
   selectedGameExecutable,
   settingsUpdateResult,
   onBrowseExecutable,
+  gameSearchResults,
+  onSearchGames,
+  resolvedGameSearch,
+  onResolveGameSearch,
   globalClipBeforeSeconds,
   globalClipAfterSeconds,
   globalRecordingMode,
@@ -78,6 +83,10 @@ export function GamePage({
   selectedGameExecutable: SelectedGameExecutableMessage | null;
   settingsUpdateResult: SettingsUpdateResultMessage | null;
   onBrowseExecutable: (requestId: string) => void;
+  gameSearchResults: GameSearchResultsMessage | null;
+  onSearchGames: (requestId: string, query: string) => void;
+  resolvedGameSearch: ResolvedGameSearchMessage | null;
+  onResolveGameSearch: (requestId: string, input: string) => void;
   /**
    * The recording page's automatic-clip window. Absent means an older backend push carried no
    * value and the backend default is the inherit baseline.
@@ -94,6 +103,11 @@ export function GamePage({
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [pendingSaveRequest, setPendingSaveRequest] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GameSearchResult[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [pendingSearchRequest, setPendingSearchRequest] = useState<string | null>(null);
+  const [pendingResolveRequest, setPendingResolveRequest] = useState<string | null>(null);
   const [ignoredApplicationFilter, setIgnoredApplicationFilter] = useState('');
   const deferredIgnoredApplicationFilter = useDeferredValue(ignoredApplicationFilter.trim().toLowerCase());
   const pendingBrowseRequest = useRef<string | null>(null);
@@ -114,6 +128,28 @@ export function GamePage({
       setDraft((current) => current ? { ...current, executablePath: selectedGameExecutable.filePath ?? '' } : current);
     }
   }, [selectedGameExecutable]);
+
+  useEffect(() => {
+    if (!gameSearchResults || gameSearchResults.requestId !== pendingSearchRequest) return;
+    setPendingSearchRequest(null);
+    setSearchResults(gameSearchResults.results);
+    setSearchError(gameSearchResults.error || (gameSearchResults.results.length === 0 ? 'No games matched that search.' : null));
+  }, [gameSearchResults, pendingSearchRequest]);
+
+  useEffect(() => {
+    if (!resolvedGameSearch || resolvedGameSearch.requestId !== pendingResolveRequest) return;
+    setPendingResolveRequest(null);
+    if (resolvedGameSearch.game) {
+      setDraft((current) => current ? {
+        ...current,
+        name: resolvedGameSearch.game!.name,
+        selectedGame: { ...resolvedGameSearch.game!, source: 'resolver' },
+      } : current);
+      setSearchError(null);
+    } else {
+      setSearchError(resolvedGameSearch.error || 'The selected game could not be resolved.');
+    }
+  }, [pendingResolveRequest, resolvedGameSearch]);
 
   useEffect(() => {
     if (!settingsUpdateResult || settingsUpdateResult.requestId !== pendingSaveRequest) {
@@ -188,14 +224,14 @@ export function GamePage({
     if (!draft) return;
     const name = draft.name.trim();
     const executablePath = draft.executablePath.trim();
-    if (name === '' || !isAbsoluteExecutablePath(executablePath)) {
+    if (name === '' || !isAbsoluteExecutablePath(executablePath) || (draft.index === null && !draft.selectedGame?.gameId)) {
       setValidationAttempted(true);
       return;
     }
 
     const nextGame: GameSetting = draft.index === null
       ? {
-          id: `custom-${crypto.randomUUID()}`,
+          id: draft.selectedGame!.gameId!,
           name,
           executablePath,
         }
@@ -213,6 +249,33 @@ export function GamePage({
     onBrowseExecutable(requestId);
   }
 
+  function searchGames() {
+    const query = searchQuery.trim();
+    if (query === '') {
+      setSearchError('Enter a game name to search.');
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    setPendingSearchRequest(requestId);
+    setSearchResults([]);
+    setSearchError(null);
+    setDraft((current) => current ? { ...current, name: '', selectedGame: null } : current);
+    onSearchGames(requestId, query);
+  }
+
+  function selectSearchResult(result: GameSearchResult) {
+    if (result.gameId) {
+      setDraft((current) => current ? { ...current, name: result.name, selectedGame: result } : current);
+      return;
+    }
+    const input = result.igdbId ? `igdb:${result.igdbId}` : result.steamAppId ? `steam:${result.steamAppId}` : null;
+    if (!input) return;
+    const requestId = crypto.randomUUID();
+    setPendingResolveRequest(requestId);
+    setSearchError(null);
+    onResolveGameSearch(requestId, input);
+  }
+
   return (
     <div className="settings-page" data-page="game">
       <div className="game-list">
@@ -222,7 +285,10 @@ export function GamePage({
             pendingBrowseRequest.current = null;
             setValidationAttempted(false);
             setSubmissionError(null);
-            setDraft({ index: null, name: '', executablePath: '' });
+            setSearchQuery('');
+            setSearchResults([]);
+            setSearchError(null);
+            setDraft({ index: null, name: '', executablePath: '', selectedGame: null });
           }} disabled={draft !== null}>Add custom game</Button>
         </div>
         {gameList.length === 0 ? (
@@ -237,7 +303,42 @@ export function GamePage({
           <div className="game-row game-draft" data-testid="custom-game-draft">
             <h4 className="game-row-title">{draft.index === null ? 'Add custom game' : 'Edit custom game'}</h4>
             <div className="game-draft-fields">
-              <div className="field">
+              {draft.index === null ? <div className="field game-search-field">
+                <label className="field-label" htmlFor="custom-game-search">Find game</label>
+                <div className="game-executable-field">
+                  <TextField
+                    id="custom-game-search"
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    placeholder="Search by game title"
+                    onKeyDown={(event) => { if (event.key === 'Enter') searchGames(); }}
+                  />
+                  <Button variant="ghost" onClick={searchGames} disabled={pendingSearchRequest !== null}>
+                    {pendingSearchRequest ? 'Searching…' : 'Search'}
+                  </Button>
+                </div>
+                {searchError && <p className="game-validation" role="alert">{searchError}</p>}
+                {searchResults.length > 0 && <div className="game-search-results" role="listbox" aria-label="Game search results">
+                  {searchResults.map((result, index) => {
+                    const id = result.gameId?.trim();
+                    const duplicate = id ? gameList.some((game) => game.id.toLowerCase() === id.toLowerCase()) || builtInIds.has(id.toLowerCase()) : false;
+                    const resolvable = Boolean(id || result.igdbId || result.steamAppId);
+                    const disabled = !resolvable || duplicate || pendingResolveRequest !== null;
+                    return <button
+                      type="button"
+                      role="option"
+                      aria-selected={draft.selectedGame === result}
+                      className={draft.selectedGame === result ? 'game-search-result selected' : 'game-search-result'}
+                      disabled={disabled}
+                      key={`${id ?? result.source}-${result.name}-${index}`}
+                      onClick={() => selectSearchResult(result)}
+                    >
+                      <strong>{result.name}{result.year ? ` (${result.year})` : ''}</strong>
+                      <span>{[result.platforms, result.source, duplicate ? 'Already configured' : !resolvable ? 'Cannot resolve' : null].filter(Boolean).join(' · ')}</span>
+                    </button>;
+                  })}
+                </div>}
+              </div> : <div className="field">
                 <label className="field-label" htmlFor="custom-game-name">Game name</label>
                 <TextField
                   id="custom-game-name"
@@ -246,7 +347,7 @@ export function GamePage({
                   aria-invalid={validationAttempted && draft.name.trim() === ''}
                   aria-describedby={validationAttempted && draft.name.trim() === '' ? 'custom-game-name-error' : submissionError ? 'custom-game-save-error' : undefined}
                 />
-              </div>
+              </div>}
               <div className="field">
                 <label className="field-label" htmlFor="custom-game-executable">Executable path</label>
                 <div className="game-executable-field">
@@ -263,6 +364,7 @@ export function GamePage({
               </div>
             </div>
             {validationAttempted && draft.name.trim() === '' && <p id="custom-game-name-error" className="game-validation" role="alert">Enter a game name.</p>}
+            {validationAttempted && draft.index === null && !draft.selectedGame?.gameId && <p className="game-validation" role="alert">Select a game from the search results.</p>}
             {validationAttempted && !isAbsoluteExecutablePath(draft.executablePath.trim()) && <p id="custom-game-executable-error" className="game-validation" role="alert">Enter the exact executable path.</p>}
             {submissionError && <p id="custom-game-save-error" className="game-validation" role="alert">{submissionError}</p>}
             <div className="game-draft-actions">
@@ -273,6 +375,7 @@ export function GamePage({
                 setDraft(null);
                 setValidationAttempted(false);
                 setSubmissionError(null);
+                setPendingSearchRequest(null);
               }}>Cancel</Button>
             </div>
           </div>
@@ -300,7 +403,7 @@ export function GamePage({
                     pendingBrowseRequest.current = null;
                     setValidationAttempted(false);
                     setSubmissionError(null);
-                    setDraft({ index, name: game.name, executablePath: game.executablePath ?? '' });
+                    setDraft({ index, name: game.name, executablePath: game.executablePath ?? '', selectedGame: null });
                   }} disabled={draft !== null}>Edit</Button>
                   <Button variant="danger" onClick={() => removeGame(index)} title="Remove this custom game">Remove</Button>
                 </>

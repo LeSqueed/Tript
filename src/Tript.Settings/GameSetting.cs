@@ -49,6 +49,8 @@ public sealed class GameSetting
 
     public string? IconId { get; set; }
 
+    public bool? AutoRecordOverride { get; set; }
+
     public GameRecordingModeOverride? RecordingModeOverride { get; set; }
 
     public GameQualityOverride? QualityOverride { get; set; }

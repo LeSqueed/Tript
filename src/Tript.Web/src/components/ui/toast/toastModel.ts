@@ -17,6 +17,7 @@ export interface ToastSpec {
   title?: string;
   /** Milliseconds on screen; omitted uses reading time and 0 is permanent. */
   duration?: number;
+  dismissible?: boolean;
   actions?: ToastAction[];
   /** A second line under the message, used for a correlated failure. */
   note?: string;
@@ -37,6 +38,7 @@ export interface ToastItem {
   actions?: ToastAction[];
   /** 0 = permanent. */
   duration: number;
+  dismissible?: boolean;
   state: ToastState;
   /** The time ran out under a hovering pointer, so the toast outlives it until the pointer leaves. */
   held: boolean;
@@ -86,6 +88,7 @@ export function pushToast(items: ToastItem[], spec: ToastSpec, id: number): Toas
     note: spec.note,
     actions: spec.actions,
     duration: spec.duration === undefined ? readingDuration(spec.title, spec.message, spec.note) : spec.duration,
+    dismissible: spec.dismissible !== false,
     state: 'visible',
     held: false,
     onDismiss: spec.onDismiss,

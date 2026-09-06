@@ -316,6 +316,22 @@ internal sealed class SelectGameExecutableParameters
     public string RequestId { get; set; } = string.Empty;
 }
 
+internal sealed class SearchGamesParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string Query { get; set; } = string.Empty;
+
+    public int Limit { get; set; } = 20;
+}
+
+internal sealed class ResolveGameSearchParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string Input { get; set; } = string.Empty;
+}
+
 internal sealed class GameCandidateParameters
 {
     public string RequestId { get; set; } = string.Empty;
@@ -330,6 +346,21 @@ internal sealed class AddGameCandidateParameters
     public string? Name { get; set; }
 
     public string ExecutablePath { get; set; } = string.Empty;
+}
+
+internal sealed class GameRecordingConfirmParameters
+{
+    public string PromptId { get; set; } = string.Empty;
+
+    public bool Record { get; set; }
+}
+
+internal sealed class PublishTrainingModelParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+    public string GameId { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
 }
 
 internal sealed class ToggleFullscreenParameters

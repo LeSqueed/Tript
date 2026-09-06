@@ -22,6 +22,11 @@
          available here. -->
   </ItemGroup>
   <ItemGroup>
+    <!-- The model tests package a real bundle as a fake release; it ships from the repo data tree,
+         not from a copied deployment layout. -->
+    <Content Include="..\..\data\models\**\*" LinkBase="data\models">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <ProjectReference Include="..\Tript.TestSupport\Tript.TestSupport.csproj" />
     <ProjectReference Include="..\..\src\Tript.App\Tript.App.csproj" />
     <!-- The desktop shell is here for its startup preflight only (WebviewAudioSinkTests): pure

@@ -198,7 +198,7 @@
 
 .audio-source {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 0.45fr) auto auto;
   align-items: center;
   gap: var(--space-3);
   background: var(--color-base-300);
@@ -275,6 +275,36 @@
 
 .game-executable-field .input {
   flex: 1;
+}
+
+.audio-source-meter {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 110px;
+}
+
+.audio-source-meter-track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.audio-source-meter-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  background: linear-gradient(90deg, var(--color-success) 0 68%, var(--color-warning) 82%, var(--color-error) 100%);
+  transition: transform 100ms linear;
+}
+
+.audio-source-meter-unavailable {
+  color: var(--color-muted);
+  font-size: 11px;
 }
 
 .game-search-field {
@@ -410,6 +440,16 @@
 }
 
 @media (max-width: 700px) {
+  .audio-source {
+    grid-template-columns: 1fr auto;
+  }
+
+  .audio-source-info,
+  .audio-source-meter,
+  .audio-source-volume {
+    grid-column: 1 / -1;
+  }
+
   .game-draft-fields {
     grid-template-columns: 1fr;
   }

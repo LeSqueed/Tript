@@ -119,6 +119,19 @@ internal sealed class ObsSourceHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_source_release(handle);
 }
 
+internal sealed class ObsVolumeMeterHandle : ObsSafeHandle
+{
+    internal ObsVolumeMeterHandle(nint handle) : base(handle, ownsHandle: true)
+    {
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        ObsNative.obs_volmeter_destroy(handle);
+        return true;
+    }
+}
+
 // A scene, which is a source with one measured difference: obs_scene_create registers the scene
 // with the OBS core, and that registration is a reference of its own. Releasing the caller's
 // reference leaves the scene alive and still findable by name, so a handle for such a scene marks

@@ -53,20 +53,7 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
 
     public IAudioRoutedSource CreateCaptureSource(AudioSourceKind kind, string name, string? deviceId)
     {
-        ObsSource source;
-        if (string.IsNullOrEmpty(deviceId))
-        {
-            source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}");
-        }
-        else
-        {
-            // A device id is the win-wasapi plugin's device selection: its "device_id" property, whose
-            // default is "default" (the system default endpoint). Writing a real endpoint id — the one
-            // WasapiDeviceEnumerator returns — makes the source attach to that device instead.
-            using var settings = new ObsSettings();
-            settings.SetString(DeviceIdKey, deviceId);
-            source = ObsSource.CreatePrivate(_sourceTypeResolver(kind), $"audio:{name}", settings);
-        }
+        var source = CreatePrivateCaptureSource(_sourceTypeResolver(kind), $"audio:{name}", deviceId);
 
         try
         {
@@ -79,6 +66,16 @@ public sealed class ObsAudioRoutingSink : IAudioRoutingSink
             source.Dispose();
             throw;
         }
+    }
+
+    internal static ObsSource CreatePrivateCaptureSource(string sourceType, string name, string? deviceId)
+    {
+        if (string.IsNullOrEmpty(deviceId))
+            return ObsSource.CreatePrivate(sourceType, name);
+
+        using var settings = new ObsSettings();
+        settings.SetString(DeviceIdKey, deviceId);
+        return ObsSource.CreatePrivate(sourceType, name, settings);
     }
 
     public void RouteSourceToMixer(IAudioRoutedSource source, int mixerIndex) =>

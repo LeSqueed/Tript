@@ -67,6 +67,12 @@ internal sealed partial class AppHost : IDisposable
     private readonly ResolverClient? _resolverClient;
     private readonly bool _ownsResolverClient;
     private readonly Timer? _modelCheckTimer;
+    private readonly object _audioLevelGate = new();
+    private Timer? _audioLevelTimer;
+    private readonly ObsAudioLevelMonitor? _audioLevelMonitor;
+    private readonly AudioDeviceInventory _audioDeviceInventory;
+    private readonly object _audioDeviceRefreshGate = new();
+    private Timer? _audioDeviceTimer;
 
     // Located at most once per process: FfmpegLocator.Locate walks PATH and then runs `-version` on
     // both binaries, which is four processes, and the answer cannot change while the host runs.
@@ -190,11 +196,14 @@ internal sealed partial class AppHost : IDisposable
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
         TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false,
-        ResolverClient? resolverClient = null)
+        ResolverClient? resolverClient = null,
+        AudioDeviceInventory? audioDeviceInventory = null)
     {
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
+        _audioLevelMonitor = runtime is null ? null : new ObsAudioLevelMonitor();
+        _audioDeviceInventory = audioDeviceInventory ?? new AudioDeviceInventory();
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _resolverClient = resolverClient;
@@ -387,9 +396,15 @@ internal sealed partial class AppHost : IDisposable
 
         try
         {
+            _audioDeviceInventory.Refresh();
             _ipc.Start();
             _content.Start();
             _ui.Start();
+            if (_audioLevelMonitor is not null)
+                _audioLevelTimer = new Timer(_ => PushAudioLevels(), null, TimeSpan.Zero,
+                    TimeSpan.FromMilliseconds(250));
+            _audioDeviceTimer = new Timer(_ => RefreshAudioDevices(), null, TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(5));
 
             // Anything already past its retention goes now, and hourly after that.
             PurgeExpiredTrash();
@@ -461,6 +476,15 @@ internal sealed partial class AppHost : IDisposable
 
         _trashPurgeTimer?.Dispose();
         _modelCheckTimer?.Dispose();
+        _audioLevelTimer?.Dispose();
+        lock (_audioLevelGate)
+        {
+        }
+        _audioDeviceTimer?.Dispose();
+        lock (_audioDeviceRefreshGate)
+        {
+        }
+        _audioLevelMonitor?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
@@ -990,20 +1014,43 @@ internal sealed partial class AppHost : IDisposable
         StateChanged?.Invoke(recording, representedGameId);
     }
 
-    // The machine's active WASAPI endpoints, inputs first then outputs. Each entry carries its
-    // direction so the routing can pick the matching capture type: an input endpoint becomes a
-    // wasapi_input_capture, an output endpoint a wasapi_output_capture.
-    private static IReadOnlyList<AudioDeviceSetting> EnumerateAudioDevices()
+    private void RefreshAudioDevices()
     {
-        try
+        lock (_audioDeviceRefreshGate)
         {
-            return WasapiDeviceEnumerator.EnumerateInputDevices()
-                .Concat(WasapiDeviceEnumerator.EnumerateOutputDevices())
-                .ToList();
+            if (_disposed || !_audioDeviceInventory.Refresh())
+                return;
+            PushSettings();
         }
-        catch (Exception)
+    }
+
+    private void PushAudioLevels()
+    {
+        lock (_audioLevelGate)
         {
-            return [];
+            if (_disposed)
+                return;
+
+            try
+            {
+                if (_audioLevelMonitor is null)
+                    return;
+
+                var sources = _settingsStore.Load().Audio.Tracks
+                    .SelectMany(track => track.Sources)
+                    .Where(source => !string.IsNullOrWhiteSpace(source.DeviceId))
+                    .Select(source => new AudioLevelSource(source.Kind, source.DeviceId!))
+                    .Distinct()
+                    .ToList();
+                var levels = _audioLevelMonitor.Read(sources);
+                _ipc.Broadcast("audioLevels", JsonSerializer.SerializeToElement(new
+                {
+                    levels = levels.Select(level => new { deviceId = level.Key, peak = level.Value }).ToList(),
+                }, Wire.Options));
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 
@@ -1015,7 +1062,8 @@ internal sealed partial class AppHost : IDisposable
         // unplugged after a save is not stuck in the settings file. Injected into the serialized element
         // only; the live model that Save() would persist is never touched.
         if (settingsNode?["audio"] is JsonObject audioNode)
-            audioNode["devices"] = JsonSerializer.SerializeToNode(EnumerateAudioDevices(), SettingsSerialization.Options);
+            audioNode["devices"] = JsonSerializer.SerializeToNode(_audioDeviceInventory.Snapshot,
+                SettingsSerialization.Options);
         var settingsElement = JsonSerializer.Deserialize<JsonElement>(
             settingsNode?.ToJsonString() ?? "{}", SettingsSerialization.Options);
         var displays = EnumerateDisplays();

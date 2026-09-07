@@ -24,9 +24,9 @@ function makeSettings(overrides?: Partial<AudioSettings>): AudioSettings {
   };
 }
 
-function renderPage(settings: AudioSettings = makeSettings()) {
+function renderPage(settings: AudioSettings = makeSettings(), levels?: Readonly<Record<string, number>>) {
   const update = vi.fn();
-  render(<AudioPage settings={settings} update={update} page="audio" />);
+  render(<AudioPage settings={settings} levels={levels} update={update} page="audio" />);
   return update;
 }
 
@@ -86,6 +86,21 @@ describe('source kind pills', () => {
     const playbackPill = screen.getByText('Playback') as HTMLElement;
     expect(micPill.title).toBe('WASAPI capture endpoint (input)');
     expect(playbackPill.title).toBe('WASAPI render endpoint (output)');
+  });
+});
+
+describe('device levels', () => {
+  it('renders and clamps the live level for a selected endpoint', () => {
+    const track: AudioTrack = {
+      id: 't1',
+      name: 'Playback',
+      sources: [{ name: 'Headphones', kind: 'Output', deviceId: 'dev-out', volume: 1 }],
+    };
+    renderPage(makeSettings({ tracks: [track] }), { 'dev-out': 1.4 });
+
+    const meter = screen.getByRole('meter', { name: 'Audio level for Headphones' });
+    expect(meter.getAttribute('aria-valuenow')).toBe('100');
+    expect(meter.querySelector('.audio-source-meter-fill')?.getAttribute('style')).toContain('scaleX(1)');
   });
 });
 

@@ -225,6 +225,10 @@ export interface ModelStatusMessage {
   models: GameModelStatus[];
 }
 
+export interface AudioLevelsMessage {
+  levels: { deviceId: string; peak: number }[];
+}
+
 export interface AvailableRecordingModel {
   gameId: string;
   name: string;
@@ -888,6 +892,7 @@ export type CommandName =
 export type MessageName =
   | 'settings'
   | 'state'
+  | 'audioLevels'
   | 'modelStatus'
   | 'availableRecordingModels'
   | 'content'

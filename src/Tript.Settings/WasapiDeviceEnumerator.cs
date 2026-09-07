@@ -24,10 +24,32 @@ public static class WasapiDeviceEnumerator
     public static IReadOnlyList<AudioDeviceSetting> Enumerate(AudioSourceKind kind) =>
         Enumerate(kind == AudioSourceKind.Input ? DataFlow.Capture : DataFlow.Render);
 
-    private static IReadOnlyList<AudioDeviceSetting> Enumerate(DataFlow dataFlow)
+    public static bool TryEnumerate(AudioSourceKind kind, out IReadOnlyList<AudioDeviceSetting> devices) =>
+        TryEnumerate(kind == AudioSourceKind.Input ? DataFlow.Capture : DataFlow.Render, out devices);
+
+    public static bool TryEnumerateDevices(out IReadOnlyList<AudioDeviceSetting> devices)
+    {
+        if (!TryEnumerate(DataFlow.Capture, out var inputs) ||
+            !TryEnumerate(DataFlow.Render, out var outputs))
+        {
+            devices = [];
+            return false;
+        }
+
+        devices = inputs.Concat(outputs).ToList();
+        return true;
+    }
+
+    private static IReadOnlyList<AudioDeviceSetting> Enumerate(DataFlow dataFlow) =>
+        TryEnumerate(dataFlow, out var devices) ? devices : [];
+
+    private static bool TryEnumerate(DataFlow dataFlow, out IReadOnlyList<AudioDeviceSetting> result)
     {
         if (!OperatingSystem.IsWindows())
-            return [];
+        {
+            result = [];
+            return true;
+        }
 
         // The CLR initializes COM only on the main thread; the settings push runs on an IPC
         // thread, where CoCreateInstance of the enumerator would otherwise fail with
@@ -91,13 +113,15 @@ public static class WasapiDeviceEnumerator
                 });
             }
 
-            return devices;
+            result = devices;
+            return true;
         }
         catch (COMException)
         {
             // No audio service, no endpoint, a device that vanished mid-enumeration — none of it
             // is worth failing settings over.
-            return [];
+            result = [];
+            return false;
         }
         finally
         {

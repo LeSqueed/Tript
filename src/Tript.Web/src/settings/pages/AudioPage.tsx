@@ -100,10 +100,12 @@ function makeTrack(index: number): AudioTrack {
 
 export function AudioPage({
   settings,
+  levels,
   update,
   page,
 }: {
   settings: AudioSettings;
+  levels?: Readonly<Record<string, number>>;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => void;
   page: SettingsPageName;
 }) {
@@ -213,11 +215,13 @@ export function AudioPage({
               )}
               {track.sources.map((source, sourceIndex) => {
                 const device = deviceForSource(source, devices);
+                const peak = source.deviceId ? clampLevel(levels?.[source.deviceId] ?? 0) : null;
+                const sourceName = device?.name ?? source.label ?? source.name;
                 return (
                   <div className="audio-source" key={sourceIndex}>
                     <div className="audio-source-info">
-                      <span className="audio-source-name" title={device?.name ?? source.label ?? source.name}>
-                        {device?.name ?? source.label ?? source.name}
+                      <span className="audio-source-name" title={sourceName}>
+                        {sourceName}
                       </span>
                       <span className="pill pill-muted" title={SOURCE_KIND_TITLES[source.kind]}>
                         {SOURCE_KIND_LABELS[source.kind] ?? source.kind}
@@ -225,6 +229,23 @@ export function AudioPage({
                       {device && device.name !== (source.label ?? source.name) ? (
                         <span className="muted small">{device.id}</span>
                       ) : null}
+                    </div>
+                    <div className={`audio-source-meter${peak === null ? ' unavailable' : ''}`}>
+                      <span className="muted small">Level</span>
+                      {peak === null ? (
+                        <span className="audio-source-meter-unavailable">Default</span>
+                      ) : (
+                        <div
+                          className="audio-source-meter-track"
+                          role="meter"
+                          aria-label={`Audio level for ${sourceName}`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.round(peak * 100)}
+                        >
+                          <span className="audio-source-meter-fill" style={{ transform: `scaleX(${peak})` }} />
+                        </div>
+                      )}
                     </div>
                     <div className="audio-source-volume">
                       <span className="muted small">Volume</span>
@@ -319,4 +340,8 @@ function clampVolume(value: number): number {
     return 1;
   }
   return Math.min(1, Math.max(0, value));
+}
+
+function clampLevel(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }

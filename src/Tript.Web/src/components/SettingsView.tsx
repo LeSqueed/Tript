@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
+import type { AudioLevelsMessage, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
 import { HighlightsPage } from '../settings/pages/HighlightsPage';
@@ -30,6 +30,7 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
+  const [audioLevels, setAudioLevels] = useState<Record<string, number>>({});
   const controller = useSettings(client);
 
   useEffect(() => client.on('selectedGameExecutable', (content) => {
@@ -49,6 +50,18 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
     if (typeof response?.requestId === 'string' && Array.isArray(response.results)) {
       setGameSearchResults(response as GameSearchResultsMessage);
     }
+  }), [client]);
+
+  useEffect(() => client.on('audioLevels', (content) => {
+    const message = content as Partial<AudioLevelsMessage> | null;
+    if (!Array.isArray(message?.levels)) return;
+
+    const next: Record<string, number> = {};
+    for (const level of message.levels) {
+      if (typeof level?.deviceId !== 'string' || typeof level.peak !== 'number') continue;
+      next[level.deviceId] = Math.min(1, Math.max(0, Number.isFinite(level.peak) ? level.peak : 0));
+    }
+    setAudioLevels(next);
   }), [client]);
 
   return (
@@ -111,7 +124,7 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
           />
           )}
           {page === 'audio' && (
-          <AudioPage settings={controller.settings.audio} update={controller.update} page={page} />
+          <AudioPage settings={controller.settings.audio} levels={audioLevels} update={controller.update} page={page} />
           )}
           {page === 'capture' && (
           <CapturePage

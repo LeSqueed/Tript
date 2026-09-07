@@ -405,6 +405,27 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_source_dec_active(nint source);
 
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial nint obs_volmeter_create(int faderType);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_volmeter_destroy(nint volmeter);
+
+    [LibraryImport(ObsLibrary.Name)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool obs_volmeter_attach_source(nint volmeter, nint source);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_volmeter_detach_source(nint volmeter);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_volmeter_add_callback(nint volmeter,
+        delegate* unmanaged[Cdecl]<nint, float*, float*, float*, void> callback, nint parameter);
+
+    [LibraryImport(ObsLibrary.Name)]
+    internal static partial void obs_volmeter_remove_callback(nint volmeter,
+        delegate* unmanaged[Cdecl]<nint, float*, float*, float*, void> callback, nint parameter);
+
     // ---- obs.h: weak source references ----
     //
     // The weak control block is bmem's and outlives obs_shutdown, so it is released like an

@@ -831,6 +831,27 @@ describe('SettingsView', () => {
     expect((tracks[0] as { sources: unknown[] }).sources).toEqual([]);
   });
 
+  it('audio page: applies live endpoint level messages', () => {
+    const { ws } = renderSettings();
+    const settings = makeSettings();
+    settings.audio.tracks = [{
+      id: 'playback',
+      name: 'Playback',
+      sources: [{ name: 'Speakers', kind: 'Output', deviceId: 'speaker-1', volume: 1 }],
+    }];
+    pushSettings(ws, settings);
+    fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));
+
+    act(() => {
+      ws.serverMessage(JSON.stringify({
+        method: 'audioLevels',
+        content: { levels: [{ deviceId: 'speaker-1', peak: 0.37 }] },
+      }));
+    });
+
+    expect(screen.getByRole('meter', { name: 'Audio level for Speakers' }).getAttribute('aria-valuenow')).toBe('37');
+  });
+
   it('audio page: assigning a source to a track routes it with default volume 1', () => {
     const { ws } = renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));

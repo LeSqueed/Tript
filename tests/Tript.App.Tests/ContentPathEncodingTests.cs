@@ -110,6 +110,7 @@ public sealed class ContentPathEncodingTests
     [InlineData("/api/content/sessions/../../sentinel/secret.txt")]
     [InlineData("/api/thumbnail/%2e%2e/sentinel/secret.txt")]
     [InlineData("/api/thumbnail/../sentinel/secret.txt")]
+    [InlineData("/api/thumbnail/sessions/../../../sentinel/secret.txt")]
     public async Task AnEncodedTraversal_IsStillRefused(string rawPath)
     {
         var outside = Path.Combine(Path.GetTempPath(), "tript-app-tests", "sentinel", "secret.txt");

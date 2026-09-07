@@ -3,8 +3,6 @@
 
 using System.Diagnostics;
 using System.Net;
-using System.Net.Sockets;
-using System.Text;
 using Tript.App.Content;
 using Tript.Media;
 using Xunit;
@@ -327,37 +325,6 @@ public sealed class ThumbnailRouteTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    [SkippableFact]
-    public async Task Thumbnail_route_refuses_a_path_that_escapes_the_recording_root()
-    {
-        var outside = Path.Combine(Path.GetTempPath(), "tript-app-tests", "sentinel", "secret.mp4");
-        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
-        await File.WriteAllTextAsync(outside, "TOP SECRET");
-
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-
-        // Raw sockets: HttpClient normalizes ".." before the request leaves, which would never reach
-        // the guard.
-        using (var raw = await SendRawAsync(host, "/api/thumbnail/../sentinel/secret.mp4"))
-            Assert.Equal(HttpStatusCode.Forbidden, raw.StatusCode);
-
-        using (var encoded = await SendRawAsync(host, "/api/thumbnail/%2e%2e/sentinel/secret.mp4"))
-            Assert.Equal(HttpStatusCode.Forbidden, encoded.StatusCode);
-
-        using (var mid = await SendRawAsync(host, "/api/thumbnail/sessions/../../../sentinel/secret.mp4"))
-            Assert.Equal(HttpStatusCode.Forbidden, mid.StatusCode);
-
-        // The guard itself, at its choke point: the thumbnail route resolves through the same
-        // ResolveWithinRoot every content request does.
-        Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, "../sentinel/secret.mp4"));
-        Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, outside));
-
-        Assert.Equal("TOP SECRET", await File.ReadAllTextAsync(outside));
-
-        await host.ShutdownAsync();
-    }
-
     // The cascade-delete contract extended to the cache: a deleted recording must not leave its
     // thumbnail behind, or the image would outlive the video it was taken from (and a new recording
     // reusing the name would inherit it).
@@ -417,28 +384,6 @@ public sealed class ThumbnailRouteTests : IDisposable
     {
         using var client = new HttpClient();
         return await client.SendAsync(request);
-    }
-
-    // Sends a raw HTTP/1.1 GET with the literal request path, bypassing HttpClient's URI
-    // normalization, so the path-traversal guard is actually exercised.
-    private static async Task<HttpResponseMessage> SendRawAsync(AppHostDriver host, string rawPath)
-    {
-        rawPath = host.WithToken(rawPath);
-        using var client = new TcpClient();
-        await client.ConnectAsync("localhost", host.ContentPort);
-        await using var stream = client.GetStream();
-        var request = $"GET {rawPath} HTTP/1.1\r\nHost: localhost:{host.ContentPort}\r\nConnection: close\r\n\r\n";
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
-
-        using var buffered = new MemoryStream();
-        var buffer = new byte[4096];
-        int read;
-        while ((read = await stream.ReadAsync(buffer)) > 0)
-            buffered.Write(buffer, 0, read);
-
-        var responseText = Encoding.ASCII.GetString(buffered.ToArray());
-        var statusLine = responseText.Split('\r', '\n').First();
-        return new HttpResponseMessage((HttpStatusCode)int.Parse(statusLine.Split(' ')[1]));
     }
 
     private static bool TryLocateFfmpeg(out string ffmpeg, out string reason)

@@ -63,22 +63,6 @@ public sealed class RenameContentTests : IDisposable
         Assert.Equal("The clutch", item.Title);
     }
 
-    [Fact]
-    public void RenamingAClip_WritesTheRecordTheLibraryReads()
-    {
-        WriteFile("clips/session-1-clip-a.mp4");
-
-        _host.RenameContent(new RenameContentParameters
-        {
-            ContentType = "clip",
-            FileName = "clips/session-1-clip-a.mp4",
-            Title = "The clutch",
-        });
-
-        Assert.Equal("The clutch",
-            new ClipTitleStore(Path.Combine(_contentRoot, "metadata")).Load("session-1-clip-a.mp4"));
-    }
-
     // The wire's contentType is advisory — it defaults to "recording" whether or not the caller meant
     // it, and the read side classifies by path. Where the title lands has to follow the read side.
     [Fact]

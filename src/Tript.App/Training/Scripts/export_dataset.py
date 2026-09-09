@@ -252,6 +252,10 @@ def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, 
             for label in labels
             if (error := label_error(label, events_by_class)) is not None
         ]
+        ocr_regions = sample.get("ocrRegions")
+        if not labels and isinstance(ocr_regions, list) and ocr_regions:
+            # OCR-only sample: it feeds the recogniser export, not the object detector.
+            continue
         if not labels or errors:
             skipped_samples += 1
             invalid_labels += len(errors)

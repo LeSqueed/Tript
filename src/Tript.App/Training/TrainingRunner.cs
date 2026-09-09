@@ -143,6 +143,12 @@ internal sealed class TrainingRunner
     {
         ValidateEpochs(epochs);
         var (python, _, trainScript) = ResolveOcrTrainingEnvironment();
+        var (paddleRoot, config, pretrained, dict) = ResolveOcrFinetuneInputs();
+        if (!File.Exists(Path.Combine(paddleRoot, "tools", "train.py")))
+            throw new FileNotFoundException("The PaddleOCR checkout is not installed next to the app.", paddleRoot);
+        if (!File.Exists(pretrained + ".pdparams"))
+            throw new FileNotFoundException("The PP-OCRv3-en fine-tune base checkpoint is not installed.",
+                pretrained + ".pdparams");
         var progressPath = workspace.TrainingProgressPath;
         try { if (File.Exists(progressPath)) File.Delete(progressPath); }
         catch (IOException) { }
@@ -151,6 +157,10 @@ internal sealed class TrainingRunner
         {
             "--epochs", epochs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "--device", device,
+            "--paddle-root", paddleRoot,
+            "--config", config,
+            "--pretrained", pretrained,
+            "--dict", dict,
         };
         using var pollerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var poller = PollTrainingProgressAsync(progressPath, progress, pollerCancellation.Token);
@@ -265,23 +275,38 @@ internal sealed class TrainingRunner
     {
         var scriptsPath = Path.Combine(AppContext.BaseDirectory, "Training", "Scripts");
         var exportScript = Path.Combine(scriptsPath, "export_ocr_dataset.py");
-        var trainScript = Path.Combine(scriptsPath, "train_ocr_model.py");
+        var trainScript = Path.Combine(scriptsPath, "finetune_ocr.py");
         if (!File.Exists(exportScript) || !File.Exists(trainScript))
             throw new FileNotFoundException("The OCR training scripts were not included in this build.", scriptsPath);
         return (FindOcrPython(), exportScript, trainScript);
     }
 
-    // The OCR fine-tune needs torch, which the object-training venv may not carry. Prefer a
-    // dedicated .venv-ocr, then TRIPT_OCR_PYTHON, then fall back to the object interpreter.
+    // The OCR fine-tune drives the vendored PaddleOCR from an isolated .venv-paddle (paddlepaddle
+    // conflicts with the object venv's stack). Prefer TRIPT_OCR_PYTHON, then .venv-paddle, then the
+    // object interpreter as a last resort so the export step still has Pillow.
     internal static PythonCommand FindOcrPython()
     {
         var configured = Environment.GetEnvironmentVariable("TRIPT_OCR_PYTHON");
         if (!string.IsNullOrWhiteSpace(configured))
             return new PythonCommand(configured, []);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
         var venv = OperatingSystem.IsWindows()
-            ? Path.Combine(AppContext.BaseDirectory, ".venv-ocr", "Scripts", "python.exe")
-            : Path.Combine(AppContext.BaseDirectory, ".venv-ocr", "bin", "python");
+            ? Path.Combine(root, ".venv-paddle", "Scripts", "python.exe")
+            : Path.Combine(root, ".venv-paddle", "bin", "python");
         return File.Exists(venv) ? new PythonCommand(venv, []) : FindPython();
+    }
+
+    // Fine-tune inputs resolved by convention next to the install: the vendored PaddleOCR checkout,
+    // the shipped config, the pretrained PP-OCRv3-en checkpoint (runtime infra, provisioned like the
+    // venvs), and the character dict the pretrained classifier was trained with.
+    internal static (string PaddleRoot, string Config, string Pretrained, string Dict) ResolveOcrFinetuneInputs()
+    {
+        var appDir = AppContext.BaseDirectory;
+        return (
+            Path.GetFullPath(Path.Combine(appDir, "..", "paddleocr")),
+            Path.Combine(appDir, "Training", "Scripts", "en_PP-OCRv3_rec_finetune.yml"),
+            Path.Combine(appDir, "data", "ocr", "finetune-base", "en_PP-OCRv3_rec_train", "best_accuracy"),
+            Path.Combine(appDir, "data", "ocr", "ocr_dict.txt"));
     }
 
     // Forwards the script's dataset/progress.json heartbeat to the UI about once a second. The

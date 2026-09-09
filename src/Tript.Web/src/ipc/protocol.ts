@@ -457,7 +457,7 @@ export interface TrainingMessage {
   /** Last training settings used for this game (local to the machine, absent until the first run). */
   preferences?: {
     epochs: number; device: string; augmentCopies: number;
-    ocrEpochs?: number; ocrDevice?: string;
+    ocrEpochs?: number;
   } | null;
 }
 
@@ -802,7 +802,6 @@ export interface StartTrainingParameters {
   scope?: 'all' | 'object' | 'ocr';
   /** Override epochs/device for the OCR recogniser step; fall back to epochs/device when unset. */
   ocrEpochs?: number;
-  ocrDevice?: string;
 }
 
 export interface PublishTrainingModelParameters {

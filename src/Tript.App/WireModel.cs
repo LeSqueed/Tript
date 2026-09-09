@@ -530,7 +530,6 @@ internal sealed class StartTrainingParameters
     // override Epochs/Device for the OCR step and fall back to them when unset.
     public int? OcrEpochs { get; set; }
 
-    public string? OcrDevice { get; set; }
 }
 
 #endif

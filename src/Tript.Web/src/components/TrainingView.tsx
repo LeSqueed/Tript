@@ -143,7 +143,6 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [device, setDevice] = useState('auto');
   const [augmentCopies, setAugmentCopies] = useState(0);
   const [ocrEpochs, setOcrEpochs] = useState(50);
-  const [ocrDevice, setOcrDevice] = useState('auto');
   const [trainingScope, setTrainingScope] = useState<'all' | 'object' | 'ocr'>('all');
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
   const [epochHistory, setEpochHistory] = useState<TrainingEpochPoint[]>([]);
@@ -228,7 +227,6 @@ export function TrainingView({ client }: TrainingViewProps) {
             setDevice(message.preferences?.device ?? 'auto');
             setAugmentCopies(message.preferences?.augmentCopies ?? 0);
             setOcrEpochs(message.preferences?.ocrEpochs ?? 50);
-            setOcrDevice(message.preferences?.ocrDevice ?? 'auto');
           }
         }
       }
@@ -434,7 +432,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const willTrainObject = hasObjectEvents && effectiveScope !== 'ocr';
   const willTrainOcr = hasOcrEvents && effectiveScope !== 'object';
   const displayEpochs = willTrainObject ? epochs : ocrEpochs;
-  const displayDevice = willTrainObject ? device : ocrDevice;
+  const displayDevice = willTrainObject ? device : 'cpu';
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
@@ -505,7 +503,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const startTraining = () => {
     if (gameId) {
       client.send('StartTraining', {
-        gameId, epochs, device, augmentCopies, ocrEpochs, ocrDevice,
+        gameId, epochs, device, augmentCopies, ocrEpochs,
         scope: canPickScope ? trainingScope : 'all',
       });
     }
@@ -1031,18 +1029,12 @@ export function TrainingView({ client }: TrainingViewProps) {
               </>
             )}
             {hasOcrEvents && (
-              <>
-                <div className="training-field compact">
-                  <Field label={hasObjectEvents ? 'OCR epochs' : 'Epochs'}>
-                    <TextField type="number" value={ocrEpochs} min={1} onChange={(value) => setOcrEpochs(Number(value))} />
-                  </Field>
-                </div>
-                <div className="training-field compact">
-                  <Field label={hasObjectEvents ? 'OCR device' : 'Device'}>
-                    <SelectField value={ocrDevice} onChange={setOcrDevice} options={DEVICE_OPTIONS} />
-                  </Field>
-                </div>
-              </>
+              <div className="training-field compact">
+                <Field label={hasObjectEvents ? 'OCR epochs' : 'Epochs'}
+                  hint="The OCR recogniser fine-tunes from the pretrained PP-OCRv3 model on CPU.">
+                  <TextField type="number" value={ocrEpochs} min={1} onChange={(value) => setOcrEpochs(Number(value))} />
+                </Field>
+              </div>
             )}
             {canPickScope && (
               <div className="training-field compact">

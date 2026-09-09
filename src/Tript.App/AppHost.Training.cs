@@ -775,8 +775,6 @@ internal sealed partial class AppHost
                 Device = parameters.Device,
                 AugmentCopies = augmentCopies,
                 OcrEpochs = ocrEpochs,
-                OcrDevice = string.IsNullOrWhiteSpace(parameters.OcrDevice)
-                    ? parameters.Device : parameters.OcrDevice,
             });
             _trainingCancellation = new CancellationTokenSource();
             _trainingGameId = parameters.GameId;
@@ -1027,8 +1025,7 @@ internal sealed partial class AppHost
                 try
                 {
                     ocrModelPath = await _trainingRunner.TrainOcrModelAsync(workspace,
-                        parameters.OcrEpochs ?? parameters.Epochs,
-                        string.IsNullOrWhiteSpace(parameters.OcrDevice) ? parameters.Device : parameters.OcrDevice,
+                        parameters.OcrEpochs ?? parameters.Epochs, "cpu",
                         (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
                             details is null || details.Epochs == 0 ? null
                                 : (int)Math.Round(100.0 * details.Epoch / details.Epochs),

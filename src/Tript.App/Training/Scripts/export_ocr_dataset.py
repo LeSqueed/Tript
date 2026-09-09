@@ -39,8 +39,8 @@ OVERWATCH_ABILITY_NAMES = {
 }
 
 CROP_HEIGHT = 48
-CROP_WIDTH = 512
-PAD_VALUE = 127
+CROP_WIDTH = 320  # PP-OCRv3 rec input width; matches PaddleOcrRecognizer's default
+PAD_VALUE = 127  # normalises to ~0 under both PP-OCR's (x/255-0.5)/0.5 and the runtime's x/127.5-1
 WINDOWS_FONTS = Path("C:/Windows/Fonts")
 FONT_CANDIDATES = ["impact.ttf", "bahnschrift.ttf", "arialbd.ttf"]
 

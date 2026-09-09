@@ -147,7 +147,7 @@ internal sealed class TrainingRunner
         if (!File.Exists(Path.Combine(paddleRoot, "tools", "train.py")))
             throw new FileNotFoundException("The PaddleOCR checkout is not installed next to the app.", paddleRoot);
         if (!File.Exists(pretrained + ".pdparams"))
-            throw new FileNotFoundException("The PP-OCRv3-en fine-tune base checkpoint is not installed.",
+            throw new FileNotFoundException("The PP-OCRv4-en fine-tune base checkpoint is not installed.",
                 pretrained + ".pdparams");
         var progressPath = workspace.TrainingProgressPath;
         try { if (File.Exists(progressPath)) File.Delete(progressPath); }
@@ -297,15 +297,15 @@ internal sealed class TrainingRunner
     }
 
     // Fine-tune inputs resolved by convention next to the install: the vendored PaddleOCR checkout,
-    // the shipped config, the pretrained PP-OCRv3-en checkpoint (runtime infra, provisioned like the
+    // the shipped config, the pretrained PP-OCRv4-en checkpoint (runtime infra, provisioned like the
     // venvs), and the character dict the pretrained classifier was trained with.
     internal static (string PaddleRoot, string Config, string Pretrained, string Dict) ResolveOcrFinetuneInputs()
     {
         var appDir = AppContext.BaseDirectory;
         return (
             Path.GetFullPath(Path.Combine(appDir, "..", "paddleocr")),
-            Path.Combine(appDir, "Training", "Scripts", "en_PP-OCRv3_rec_finetune.yml"),
-            Path.Combine(appDir, "data", "ocr", "finetune-base", "en_PP-OCRv3_rec_train", "best_accuracy"),
+            Path.Combine(appDir, "Training", "Scripts", "en_PP-OCRv4_rec_finetune.yml"),
+            Path.Combine(appDir, "data", "ocr", "finetune-base", "en_PP-OCRv4_rec_train", "best_accuracy"),
             Path.Combine(appDir, "data", "ocr", "ocr_dict.txt"));
     }
 

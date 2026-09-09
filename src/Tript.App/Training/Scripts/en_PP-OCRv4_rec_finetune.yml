@@ -1,13 +1,15 @@
-# Fine-tune PP-OCRv3-English (SVTR_LCNet / MobileNetV1) from its pretrained checkpoint on a game's
-# OCR crops. Lighter than v4 for CPU training. Machine-specific paths (pretrained_model,
-# character_dict_path, data_dir, label_file_list, save_model_dir) are overridden with -o by
-# finetune_ocr.py, which also rewrites max_text_length (below) per game from the longest label.
+# Fine-tune PP-OCRv4-English (SVTR_LCNet / PPLCNetV3) from its pretrained checkpoint on a game's
+# OCR crops. Keeps the NRTR aux head - PaddleOCR's tools/train.py assumes a second MultiLoss entry
+# for a MultiHead model, and only the CTC branch is exported anyway. Machine-specific paths
+# (pretrained_model, character_dict_path, data_dir, label_file_list, save_model_dir) are overridden
+# with -o by finetune_ocr.py, which also rewrites max_text_length (below) per game from the longest
+# label. CPU only - PaddlePaddle has no Windows GPU and finetune_ocr.py caps the synthetic set.
 Global:
   debug: false
   use_gpu: false
-  epoch_num: 30
+  epoch_num: 20
   log_smooth_window: 20
-  print_batch_step: 50
+  print_batch_step: 20
   save_model_dir: ./output/rec_finetune
   save_epoch_step: 100
   eval_batch_step: [0, 100]
@@ -31,7 +33,7 @@ Optimizer:
   lr:
     name: Cosine
     learning_rate: 0.0001
-    warmup_epoch: 2
+    warmup_epoch: 1
   regularizer:
     name: L2
     factor: 3.0e-05
@@ -41,32 +43,30 @@ Architecture:
   algorithm: SVTR_LCNet
   Transform: null
   Backbone:
-    name: MobileNetV1Enhance
-    scale: 0.5
-    last_conv_stride: [1, 2]
-    last_pool_type: avg
-    last_pool_kernel_size: [2, 2]
+    name: PPLCNetV3
+    scale: 0.95
   Head:
     name: MultiHead
     head_list:
     - CTCHead:
         Neck:
           name: svtr
-          dims: 64
+          dims: 120
           depth: 2
           hidden_dims: 120
+          kernel_size: [1, 3]
           use_guide: true
         Head:
-          fc_decay: 0.00001
-    - SARHead:
-        enc_dim: 512
+          fc_decay: 1.0e-05
+    - NRTRHead:
+        nrtr_dim: 384
         max_text_length: *max_text_length
 
 Loss:
   name: MultiLoss
   loss_config_list:
   - CTCLoss: null
-  - SARLoss: null
+  - NRTRLoss: null
 
 PostProcess:
   name: CTCLabelDecode
@@ -85,12 +85,20 @@ Train:
     - DecodeImage:
         img_mode: BGR
         channel_first: false
-    - RecAug: null
-    - MultiLabelEncode: null
+    - RecAug:
+        tia_prob: 0.2
+        crop_prob: 0.2
+        reverse_prob: 0.0
+        noise_prob: 0.2
+        jitter_prob: 0.3
+        blur_prob: 0.2
+        hsv_aug_prob: 0.5
+    - MultiLabelEncode:
+        gtc_encode: NRTRLabelEncode
     - RecResizeImg:
         image_shape: [3, 48, 320]
     - KeepKeys:
-        keep_keys: [image, label_ctc, label_sar, length, valid_ratio]
+        keep_keys: [image, label_ctc, label_gtc, length, valid_ratio]
   loader:
     shuffle: true
     batch_size_per_card: 16
@@ -106,13 +114,14 @@ Eval:
     - DecodeImage:
         img_mode: BGR
         channel_first: false
-    - MultiLabelEncode: null
+    - MultiLabelEncode:
+        gtc_encode: NRTRLabelEncode
     - RecResizeImg:
         image_shape: [3, 48, 320]
     - KeepKeys:
-        keep_keys: [image, label_ctc, label_sar, length, valid_ratio]
+        keep_keys: [image, label_ctc, label_gtc, length, valid_ratio]
   loader:
     shuffle: false
     drop_last: false
-    batch_size_per_card: 32
+    batch_size_per_card: 8
     num_workers: 0

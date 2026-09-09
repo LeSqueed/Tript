@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fine-tune PP-OCRv3-English on a workspace's OCR crops and export the result to ONNX.
+"""Fine-tune PP-OCRv4-English on a workspace's OCR crops and export the result to ONNX.
 
 Reads ``dataset/ocr/{images,labels.tsv}`` built by export_ocr_dataset.py, drives the vendored
 PaddleOCR ``tools/train.py`` + ``tools/export_model.py`` from the pretrained checkpoint, converts
@@ -14,11 +14,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Fine-tuning from a pretrained recogniser does not need the full synthetic set - the model already
+# reads glyphs. Keeping it small keeps a CPU epoch to minutes.
+MAX_SYNTHETIC = 200
 
 EPOCH_LINE = re.compile(r"epoch:\s*\[\s*(\d+)\s*/\s*(\d+)\s*\].*?loss:\s*([0-9.eE+-]+)")
 EVAL_ACC = re.compile(r"cur metric.*?\bacc:\s*([0-9.eE+-]+)")
@@ -39,12 +44,22 @@ def write_progress(path: Path, status: str, epoch: int, epochs: int,
 def build_label_files(ocr_dir: Path, staging: Path) -> tuple[Path, Path, int]:
     rows = [ln.split("\t", 2) for ln in (ocr_dir / "labels.tsv").read_text(encoding="utf-8").splitlines()
             if ln.strip()]
-    train = [f"{rel}\t{label}" for split, rel, label in rows if split == "train"]
+    real = [f"{rel}\t{label}" for split, rel, label in rows
+            if split == "train" and "/synth_" not in rel]
+    synthetic = [f"{rel}\t{label}" for split, rel, label in rows
+                 if split == "train" and "/synth_" in rel]
+    if len(synthetic) > MAX_SYNTHETIC:
+        synthetic = random.Random(0).sample(synthetic, MAX_SYNTHETIC)
+    train = real + synthetic
     val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val"]
     if not train:
         raise SystemExit("the OCR dataset has no training crops")
     if not val:
         val = train[: max(1, len(train) // 20)]
+    # PaddleOCR's eval divides by an accumulated timer that rounds to 0 on a one-batch set;
+    # repeat the held-out crops until eval runs a few batches.
+    if len(val) < 64:
+        val = (val * (64 // len(val) + 1))[:64]
     (staging / "train_list.txt").write_text("\n".join(train) + "\n", encoding="utf-8")
     (staging / "val_list.txt").write_text("\n".join(val) + "\n", encoding="utf-8")
     longest = max(len(r.split("\t", 1)[1]) for r in train + val)

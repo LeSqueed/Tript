@@ -136,13 +136,18 @@ def main() -> int:
         charset = sorted({ch for _, label, _ in records for ch in label if ch != " "})
         (staging / "character_dict.txt").write_text("\n".join(charset) + "\n", encoding="utf-8")
 
+        # Split real and synthetic crops independently so the fine-tune always trains on the
+        # human-labelled crops - holding all of them out for validation would train the model on
+        # synthetic text alone and then score it on text it never saw.
         rng.shuffle(records)
-        records.sort(key=lambda r: 0 if r[2] == "real" else 1)  # real first for validation
-        val_target = max(1, min(len(records) - 1, round(len(records) * args.validation)))
-        lines = [
-            f"{'val' if i < val_target else 'train'}\t{rel}\t{label}"
-            for i, (rel, label, _) in enumerate(records)
-        ]
+        lines = []
+        val_target = 0
+        for group in ([r for r in records if r[2] == "real"],
+                      [r for r in records if r[2] != "real"]):
+            val_n = min(len(group) - 1, max(1, round(len(group) * args.validation))) if group else 0
+            val_target += val_n
+            for i, (rel, label, _) in enumerate(group):
+                lines.append(f"{'val' if i < val_n else 'train'}\t{rel}\t{label}")
         rng.shuffle(lines)
         (staging / "labels.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

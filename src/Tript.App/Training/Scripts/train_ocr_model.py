@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 from pathlib import Path
 
@@ -57,7 +58,7 @@ def main() -> int:
     # Real crops are a small fraction of the set; weight them up so synthetic does not dominate.
     real = [r for r in train_records
             if "/real_" in r[1] or "/trans_" in r[1] or "/region_" in r[1]]
-    train = OcrDataset(train_records + real * 4, ocr_dir, char_to_index)
+    train = OcrDataset(train_records + real * 4, ocr_dir, char_to_index, augment=True)
     val = OcrDataset([r for r in records if r[0] == "val"], ocr_dir, char_to_index)
     if len(train) == 0:
         raise ValueError("the OCR dataset has no training crops")
@@ -129,11 +130,28 @@ class Crnn(nn.Module):
         return self.head(f)                   # [B, W', num_classes]
 
 
+# Training crops are mostly the red elimination banner; real feeds are also blue, purple, orange
+# and the colour-blind palettes. Randomise hue/saturation/brightness so the recogniser keys on
+# glyph shape, not background colour. Applied to training crops only.
+def augment_colour(rgb: np.ndarray) -> np.ndarray:
+    out = rgb * np.array([random.uniform(0.55, 1.5) for _ in range(3)], dtype=np.float32)
+    if random.random() < 0.4:
+        out = out[:, :, random.choice([[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])]
+    if random.random() < 0.5:
+        grey = out.mean(axis=2, keepdims=True)
+        out += (grey - out) * random.uniform(0.3, 1.0)
+    out *= random.uniform(0.75, 1.2)
+    mean = out.mean()
+    out = (out - mean) * random.uniform(0.85, 1.2) + mean
+    return np.clip(out, 0.0, 255.0)
+
+
 class OcrDataset(Dataset):
-    def __init__(self, records, root: Path, char_to_index: dict[str, int]):
+    def __init__(self, records, root: Path, char_to_index: dict[str, int], augment: bool = False):
         self.records = records
         self.root = root
         self.char_to_index = char_to_index
+        self.augment = augment
 
     def __len__(self):
         return len(self.records)
@@ -141,8 +159,11 @@ class OcrDataset(Dataset):
     def __getitem__(self, i):
         _, rel, label = self.records[i]
         image = Image.open(self.root / rel).convert("RGB").resize((CROP_W, CROP_H))
+        rgb = np.asarray(image, dtype=np.float32)  # HWC, RGB, 0-255
+        if self.augment:
+            rgb = augment_colour(rgb)
         # Runtime PrepareInput reads BGRA channel 0/1/2 = B/G/R into planes 0/1/2; match that order.
-        array = (np.asarray(image, dtype=np.float32)[:, :, ::-1].copy() / 127.5) - 1.0  # HWC, BGR
+        array = (rgb[:, :, ::-1].copy() / 127.5) - 1.0  # HWC, BGR
         tensor = torch.from_numpy(array).permute(2, 0, 1)             # CHW
         target = torch.tensor([self.char_to_index[c] for c in label if c in self.char_to_index],
                               dtype=torch.long)

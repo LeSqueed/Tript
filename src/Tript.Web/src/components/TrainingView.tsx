@@ -161,7 +161,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [samplePreviews, setSamplePreviews] = useState<Record<string, string>>({});
   const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({});
   const [sampleFilter, setSampleFilter] = useState('');
-  const [sampleValidity, setSampleValidity] = useState<'all' | 'invalid' | 'valid'>('all');
+  const [sampleValidity, setSampleValidity] = useState<'all' | 'invalid' | 'valid' | 'ocr' | 'object'>('all');
   const [newGroupName, setNewGroupName] = useState('');
   const [samplePage, setSamplePage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
@@ -448,11 +448,15 @@ export function TrainingView({ client }: TrainingViewProps) {
   const hasMap50 = epochHistory.some((point) => point.map50 != null);
   // The OCR run reuses the mAP50 slot for exact-match validation accuracy.
   const accuracyLabel = willTrainObject ? 'mAP50' : 'exact match';
+  const ocrSampleCount = training.samples.filter((sample) => (sample.ocrRegions?.length ?? 0) > 0).length;
+  const objectSampleCount = training.samples.filter((sample) => sample.labels.length > 0).length;
   const normalizedSampleFilter = sampleFilter.trim().toLowerCase();
   const filteredSamples = training.samples.filter((sample) => {
     const isInvalid = invalidById.has(sample.id);
     if (sampleValidity === 'invalid' && !isInvalid) return false;
     if (sampleValidity === 'valid' && isInvalid) return false;
+    if (sampleValidity === 'ocr' && (sample.ocrRegions?.length ?? 0) === 0) return false;
+    if (sampleValidity === 'object' && sample.labels.length === 0) return false;
     if (!normalizedSampleFilter) return true;
     const labelNames = sample.labels.map((label) => training.events.find((event) => event.classId === label.classId)?.name ?? String(label.classId));
     const ocrText = (sample.ocrRegions ?? []).map((region) => region.text);
@@ -874,15 +878,18 @@ export function TrainingView({ client }: TrainingViewProps) {
                       aria-label="Filter samples"
                     />
                   </Field>
-                  <Field label="Validity">
+                  <Field label="Filter">
                     <SelectField
                       value={sampleValidity}
                       onChange={(value) => { setSampleValidity(value as typeof sampleValidity); setSamplePage(1); }}
-                      aria-label="Sample validity"
+                      aria-label="Filter samples by kind"
                       options={[
                         { value: 'all', label: 'All samples' },
                         { value: 'invalid', label: `Invalid (${invalidSamples.length})` },
                         { value: 'valid', label: `Valid (${training.samples.length - invalidSamples.length})` },
+                        ...(hasOcrEvents ? [{ value: 'ocr', label: `OCR regions (${ocrSampleCount})` }] : []),
+                        ...(hasOcrEvents && hasObjectEvents
+                          ? [{ value: 'object', label: `Object labels (${objectSampleCount})` }] : []),
                       ]}
                     />
                   </Field>

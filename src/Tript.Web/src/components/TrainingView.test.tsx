@@ -193,7 +193,7 @@ describe('TrainingView sample gallery', () => {
 
     expect(screen.getByText(/1 invalid sample will be skipped/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Start training' }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.change(screen.getByLabelText('Sample validity'), { target: { value: 'invalid' } });
+    fireEvent.change(screen.getByLabelText('Filter samples by kind'), { target: { value: 'invalid' } });
     expect(screen.queryByRole('button', { name: /sample-1/ })).toBeNull();
     expect(screen.getByRole('button', { name: /sample-2/ }).textContent).toContain('outside its region');
     fireEvent.change(screen.getByLabelText('Filter samples'), { target: { value: 'sample-1' } });

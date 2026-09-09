@@ -44,18 +44,19 @@ def write_progress(path: Path, status: str, epoch: int, epochs: int,
 def build_label_files(ocr_dir: Path, staging: Path) -> tuple[Path, Path, int]:
     rows = [ln.split("\t", 2) for ln in (ocr_dir / "labels.tsv").read_text(encoding="utf-8").splitlines()
             if ln.strip()]
-    real = [f"{rel}\t{label}" for split, rel, label in rows
-            if split == "train" and "/synth_" not in rel]
-    synthetic = [f"{rel}\t{label}" for split, rel, label in rows
-                 if split == "train" and "/synth_" in rel]
+    is_real = lambda rel: "/synth_" not in rel
+    real_train = [f"{rel}\t{label}" for split, rel, label in rows if split == "train" and is_real(rel)]
+    synthetic = [f"{rel}\t{label}" for split, rel, label in rows if split == "train" and not is_real(rel)]
     if len(synthetic) > MAX_SYNTHETIC:
         synthetic = random.Random(0).sample(synthetic, MAX_SYNTHETIC)
-    train = real + synthetic
-    val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val"]
+    train = real_train + synthetic
+    # Validate on the held-out hand-labelled crops only. Synthetic is read near-perfectly, so a
+    # synthetic-heavy eval set makes "best accuracy" track synthetic, not the game text that matters.
+    val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val" and is_real(rel)]
     if not train:
         raise SystemExit("the OCR dataset has no training crops")
     if not val:
-        val = train[: max(1, len(train) // 20)]
+        val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val"][:16] or train[:8]
     # PaddleOCR's eval divides by an accumulated timer that rounds to 0 on a one-batch set;
     # repeat the held-out crops until eval runs a few batches.
     if len(val) < 64:

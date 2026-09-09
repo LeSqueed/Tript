@@ -39,6 +39,38 @@ internal static class DetectionFramePreprocessor
         }
     }
 
+    internal static void FilterDetectionsToEventRegions(List<DetectionResult> detections,
+        IReadOnlyList<EventDefinition> definitions)
+    {
+        var definitionsByClass = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .GroupBy(definition => definition.ClassId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        detections.RemoveAll(detection => !definitionsByClass.TryGetValue(detection.ClassId, out var definition)
+            || !ContainsCenter(definition, detection));
+    }
+
+    // The model sees a padded crop, so it can centre a box just past the region edge.
+    private const float RegionContainmentToleranceFraction = 0.02f;
+
+    private static bool ContainsCenter(EventDefinition definition, DetectionResult detection)
+    {
+        if (definition.ScreenRegionW is not > 0 || definition.ScreenRegionH is not > 0)
+            return true;
+
+        var centerX = detection.X + detection.Width / 2;
+        var centerY = detection.Y + detection.Height / 2;
+        var regionX = (definition.ScreenRegionX ?? 0) - RegionContainmentToleranceFraction;
+        var regionY = (definition.ScreenRegionY ?? 0) - RegionContainmentToleranceFraction;
+        var regionRight = (definition.ScreenRegionX ?? 0) + definition.ScreenRegionW.Value
+            + RegionContainmentToleranceFraction;
+        var regionBottom = (definition.ScreenRegionY ?? 0) + definition.ScreenRegionH.Value
+            + RegionContainmentToleranceFraction;
+        return centerX >= regionX && centerX <= regionRight
+            && centerY >= regionY && centerY <= regionBottom;
+    }
+
     internal static List<RegionGroup> BuildRegionGroups(List<EventDefinition> definitions)
     {
         var groups = new List<RegionGroup>();

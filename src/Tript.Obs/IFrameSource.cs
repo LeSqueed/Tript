@@ -6,7 +6,8 @@ namespace Tript.Obs;
 // Kept as a fraction all the way to the consumer. The video pipeline runs at rates that are not
 // whole numbers — 59.94 fps is 60000/1001 — so a numerator on its own says nothing, and an
 // interface exposing a single integer fps would have to round before the caller can decide how.
-public readonly record struct VideoTiming(uint FpsNumerator, uint FpsDenominator);
+public readonly record struct VideoTiming(
+    uint FpsNumerator, uint FpsDenominator, uint Width = 0, uint Height = 0);
 
 // Disposing unsubscribes. Nothing else: a subscription is a lifetime, not a handle to poll.
 public interface IFrameSubscription : IDisposable

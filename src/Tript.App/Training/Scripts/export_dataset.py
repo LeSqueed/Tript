@@ -167,7 +167,12 @@ def load_events(path: Path) -> list[dict]:
     if not isinstance(events, list) or not events:
         raise ValueError("events.json must contain at least one event")
 
-    ordered = sorted(events, key=lambda event: event["classId"])
+    ordered = sorted(
+        (event for event in events if event.get("detectionKind", "Object") == "Object"),
+        key=lambda event: event["classId"],
+    )
+    if not ordered:
+        raise ValueError("events.json contains no object detection events")
     expected = list(range(len(ordered)))
     actual = [event["classId"] for event in ordered]
     if actual != expected:

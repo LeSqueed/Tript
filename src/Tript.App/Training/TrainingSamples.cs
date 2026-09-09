@@ -24,6 +24,14 @@ internal sealed class TrainingLabel
     public double Height { get; set; }
 }
 
+internal sealed class TrainingOcrTranscription
+{
+    public int EventId { get; set; }
+    public string SegmentId { get; set; } = "default";
+    public string LanguageTag { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
+}
+
 internal sealed class TrainingLabelSuggestion
 {
     public TrainingLabel Label { get; init; } = new();
@@ -41,7 +49,9 @@ internal static class TrainingLabelSuggestionFilter
         IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
     {
         var regions = TrainingRegionResolver.ResolveByClassId(definitions, regionGroups ?? []);
-        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var definitionsByClass = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToDictionary(definition => definition.ClassId);
         var accepted = existing.Select(ToBox).ToList();
         var suggestions = new List<TrainingLabelSuggestion>();
         foreach (var detection in detections.OrderByDescending(detection => detection.Confidence))
@@ -157,6 +167,8 @@ internal sealed class TrainingSampleRecord
 
     public List<TrainingLabel> Labels { get; set; } = [];
 
+    public List<TrainingOcrTranscription> OcrTranscriptions { get; set; } = [];
+
     // Imported dataset images are already cropped to the model input. Keep them in the imported
     // dataset instead of sending them through the full-frame crop exporter a second time.
     public string? DatasetImagePath { get; set; }
@@ -171,7 +183,9 @@ internal static class TrainingLabelValidator
         if (requireLabel && labels.Count == 0)
             return "a sample must contain at least one label";
 
-        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var definitionsByClass = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToDictionary(definition => definition.ClassId);
         var groups = regionGroups ?? [];
         var regions = TrainingRegionResolver.ResolveByClassId(definitions, groups);
         for (var index = 0; index < labels.Count; index++)
@@ -217,7 +231,9 @@ internal static class TrainingLabelValidator
     internal static string? FindBlockingError(IReadOnlyList<TrainingLabel> labels,
         IReadOnlyList<EventDefinition> definitions)
     {
-        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var definitionsByClass = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToDictionary(definition => definition.ClassId);
         for (var index = 0; index < labels.Count; index++)
         {
             var label = labels[index];
@@ -236,6 +252,40 @@ internal static class TrainingLabelValidator
             var bottom = label.CenterY + label.Height / 2;
             if (left < 0 || top < 0 || right > 1 || bottom > 1)
                 return $"label {index} lies outside the image bounds";
+        }
+        return null;
+    }
+}
+
+internal static class TrainingOcrTranscriptionValidator
+{
+    internal static string? FindError(IReadOnlyList<TrainingOcrTranscription> transcriptions,
+        IReadOnlyList<EventDefinition> definitions)
+    {
+        var definitionsById = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Ocr)
+            .ToDictionary(definition => definition.Id);
+        for (var index = 0; index < transcriptions.Count; index++)
+        {
+            var transcription = transcriptions[index];
+            if (!definitionsById.TryGetValue(transcription.EventId, out var definition))
+                return $"OCR transcription {index} references unknown eventId {transcription.EventId}";
+            if (string.IsNullOrWhiteSpace(transcription.Text))
+                return $"OCR transcription {index} is empty";
+            var segments = definition.Ocr?.Segments ?? [];
+            var segmentExists = segments.Count == 0
+                ? string.Equals(transcription.SegmentId, "default", StringComparison.OrdinalIgnoreCase)
+                : segments.Any(segment => string.Equals(segment.Id, transcription.SegmentId,
+                    StringComparison.OrdinalIgnoreCase));
+            if (!segmentExists)
+                return $"OCR transcription {index} references an unknown segment for '{definition.Name}'";
+            if (string.IsNullOrWhiteSpace(transcription.LanguageTag)
+                || definition.Ocr is null
+                || !definition.Ocr.Patterns.Any(pattern => string.Equals(pattern.LanguageTag,
+                    transcription.LanguageTag, StringComparison.OrdinalIgnoreCase)))
+            {
+                return $"OCR transcription {index} uses an unsupported language for '{definition.Name}'";
+            }
         }
         return null;
     }
@@ -345,12 +395,15 @@ internal sealed class TrainingSampleStore
 
     internal TrainingSampleRecord UpdateLabels(string id, IReadOnlyList<TrainingLabel> labels,
         IReadOnlyList<EventDefinition> definitions,
-        IReadOnlyList<TrainingRegionGroup>? regionGroups = null)
+        IReadOnlyList<TrainingRegionGroup>? regionGroups = null,
+        IReadOnlyList<TrainingOcrTranscription>? ocrTranscriptions = null)
     {
         var records = List().ToList();
         var record = records.FirstOrDefault(candidate => candidate.Id == id)
             ?? throw new FileNotFoundException("Training sample not found.", MetadataPath(id));
-        var definitionsByClass = definitions.ToDictionary(definition => definition.ClassId);
+        var definitionsByClass = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToDictionary(definition => definition.ClassId);
         var fixedUpdates = new Dictionary<int, TrainingLabel>();
         foreach (var group in labels.GroupBy(label => label.ClassId))
         {
@@ -368,6 +421,8 @@ internal sealed class TrainingSampleStore
         }
 
         record.Labels = labels.Select(Clone).ToList();
+        if (ocrTranscriptions is not null)
+            record.OcrTranscriptions = ocrTranscriptions.Select(Clone).ToList();
         foreach (var other in records.Where(candidate => candidate.Id != id))
         {
             foreach (var label in other.Labels)
@@ -387,6 +442,10 @@ internal sealed class TrainingSampleStore
             var labelError = TrainingLabelValidator.FindBlockingError(candidate.Labels, definitions);
             if (labelError is not null)
                 throw new InvalidDataException($"Invalid training sample: {labelError}.");
+            var transcriptionError = TrainingOcrTranscriptionValidator.FindError(
+                candidate.OcrTranscriptions, definitions);
+            if (transcriptionError is not null)
+                throw new InvalidDataException($"Invalid training sample: {transcriptionError}.");
         }
         TrainingEventValidator.ValidateFixedPositions(definitions);
 
@@ -425,7 +484,8 @@ internal sealed class TrainingSampleStore
 
     internal sealed record RemapClassIdsResult(
         IReadOnlyDictionary<string, byte[]?> Originals,
-        int RemovedLabelCount);
+        int RemovedLabelCount,
+        int RemovedTranscriptionCount);
 
     // Remaps surviving event class ids and, when an event is being deleted (its class is missing
     // from the mapping), strips those labels from every sample in the same transaction instead of
@@ -433,12 +493,15 @@ internal sealed class TrainingSampleStore
     // reports progress so the UI can show a meaningful loading indicator on large workspaces.
     internal RemapClassIdsResult RemapClassIds(IReadOnlyDictionary<int, int> mapping,
         IReadOnlyDictionary<int, TrainingLabel>? fixedPositions = null,
-        Action<int, int>? progress = null)
+        Action<int, int>? progress = null,
+        IReadOnlySet<int>? survivingOcrEventIds = null,
+        IReadOnlyList<EventDefinition>? survivingOcrDefinitions = null)
     {
         var records = List().ToList();
         var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
         var updates = new List<(string Path, byte[] Contents)>();
         var removedLabelCount = 0;
+        var removedTranscriptionCount = 0;
         for (var recordIndex = 0; recordIndex < records.Count; recordIndex++)
         {
             progress?.Invoke(recordIndex + 1, records.Count);
@@ -471,6 +534,20 @@ internal sealed class TrainingSampleStore
                 }
             }
             record.Labels = nextLabels;
+            if (survivingOcrEventIds is not null || survivingOcrDefinitions is not null)
+            {
+                var survivingIds = survivingOcrEventIds
+                    ?? survivingOcrDefinitions!.Select(definition => definition.Id).ToHashSet();
+                var nextTranscriptions = record.OcrTranscriptions
+                    .Where(transcription => survivingIds.Contains(transcription.EventId)
+                        && (survivingOcrDefinitions is null
+                            || TrainingOcrTranscriptionValidator.FindError([transcription],
+                                survivingOcrDefinitions) is null))
+                    .ToList();
+                removedTranscriptionCount += record.OcrTranscriptions.Count - nextTranscriptions.Count;
+                changed |= nextTranscriptions.Count != record.OcrTranscriptions.Count;
+                record.OcrTranscriptions = nextTranscriptions;
+            }
             if (!changed) continue;
 
             var path = MetadataPath(record.Id);
@@ -496,7 +573,7 @@ internal sealed class TrainingSampleStore
             throw;
         }
 
-        return new RemapClassIdsResult(originals, removedLabelCount);
+        return new RemapClassIdsResult(originals, removedLabelCount, removedTranscriptionCount);
     }
 
     internal void RestoreMetadata(IReadOnlyDictionary<string, byte[]?> originals)
@@ -544,6 +621,14 @@ internal sealed class TrainingSampleStore
         CenterY = label.CenterY,
         Width = label.Width,
         Height = label.Height,
+    };
+
+    private static TrainingOcrTranscription Clone(TrainingOcrTranscription transcription) => new()
+    {
+        EventId = transcription.EventId,
+        SegmentId = transcription.SegmentId,
+        LanguageTag = transcription.LanguageTag,
+        Text = transcription.Text,
     };
 
     private TrainingSampleRecord Load(string path) =>

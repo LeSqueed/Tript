@@ -121,6 +121,56 @@ internal sealed class TrainingRunner
         progress(exportSummary.ProgressMessage(), null);
     }
 
+    // OCR phase one: build the recogniser fine-tune crops. Reads samples/ (and an optional
+    // pre-conversion object-labelled sample dir), so the caller holds the workspace gate.
+    internal async Task PrepareOcrDatasetAsync(TrainingWorkspace workspace, string? objectSamplesPath,
+        Action<string> progress, CancellationToken cancellationToken)
+    {
+        var (python, exportScript, _) = ResolveOcrTrainingEnvironment();
+        var arguments = new List<string>();
+        if (!string.IsNullOrWhiteSpace(objectSamplesPath) && Directory.Exists(objectSamplesPath))
+            arguments.AddRange(["--object-samples", objectSamplesPath]);
+        await RunProcessAsync(python, exportScript, workspace.RootPath, arguments, progress,
+            cancellationToken).ConfigureAwait(false);
+        if (!Directory.Exists(Path.Combine(workspace.DatasetPath, "ocr")))
+            throw new InvalidDataException("OCR dataset export produced no dataset/ocr directory.");
+    }
+
+    // OCR phase two: fine-tune the recogniser. Reads dataset/ocr/ only, so the caller releases the
+    // gate. Produces dataset/ocr_model.onnx + dataset/ocr_dict.txt.
+    internal async Task<string> TrainOcrModelAsync(TrainingWorkspace workspace, int epochs,
+        string device, Action<string, TrainingProgressUpdate?> progress, CancellationToken cancellationToken)
+    {
+        ValidateEpochs(epochs);
+        var (python, _, trainScript) = ResolveOcrTrainingEnvironment();
+        var progressPath = workspace.TrainingProgressPath;
+        try { if (File.Exists(progressPath)) File.Delete(progressPath); }
+        catch (IOException) { }
+
+        var arguments = new List<string>
+        {
+            "--epochs", epochs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--device", device,
+        };
+        using var pollerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var poller = PollTrainingProgressAsync(progressPath, progress, pollerCancellation.Token);
+        try
+        {
+            await RunProcessAsync(python, trainScript, workspace.RootPath, arguments,
+                message => progress(message, null), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            pollerCancellation.Cancel();
+            await poller.ConfigureAwait(false);
+        }
+
+        var modelPath = Path.Combine(workspace.DatasetPath, "ocr_model.onnx");
+        if (!File.Exists(modelPath) || !File.Exists(Path.Combine(workspace.DatasetPath, "ocr_dict.txt")))
+            throw new InvalidDataException("OCR training did not produce ocr_model.onnx and ocr_dict.txt.");
+        return modelPath;
+    }
+
     // Phase two: train the model. The script only reads dataset/ and writes runs/, never the
     // editable samples, so the caller releases the workspace gate for this phase — sample
     // navigation and pushes keep working while the (possibly long) training runs.
@@ -211,6 +261,29 @@ internal sealed class TrainingRunner
         return (FindPython(), exportScript, trainScript);
     }
 
+    private static (PythonCommand Python, string ExportScript, string TrainScript) ResolveOcrTrainingEnvironment()
+    {
+        var scriptsPath = Path.Combine(AppContext.BaseDirectory, "Training", "Scripts");
+        var exportScript = Path.Combine(scriptsPath, "export_ocr_dataset.py");
+        var trainScript = Path.Combine(scriptsPath, "train_ocr_model.py");
+        if (!File.Exists(exportScript) || !File.Exists(trainScript))
+            throw new FileNotFoundException("The OCR training scripts were not included in this build.", scriptsPath);
+        return (FindOcrPython(), exportScript, trainScript);
+    }
+
+    // The OCR fine-tune needs torch, which the object-training venv may not carry. Prefer a
+    // dedicated .venv-ocr, then TRIPT_OCR_PYTHON, then fall back to the object interpreter.
+    internal static PythonCommand FindOcrPython()
+    {
+        var configured = Environment.GetEnvironmentVariable("TRIPT_OCR_PYTHON");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return new PythonCommand(configured, []);
+        var venv = OperatingSystem.IsWindows()
+            ? Path.Combine(AppContext.BaseDirectory, ".venv-ocr", "Scripts", "python.exe")
+            : Path.Combine(AppContext.BaseDirectory, ".venv-ocr", "bin", "python");
+        return File.Exists(venv) ? new PythonCommand(venv, []) : FindPython();
+    }
+
     // Forwards the script's dataset/progress.json heartbeat to the UI about once a second. The
     // raw text is compared so a rewrite with unchanged content does not re-report.
     private static async Task PollTrainingProgressAsync(string progressPath,
@@ -286,8 +359,11 @@ internal sealed class TrainingRunner
         var effectiveDefinitions = TrainingRegionResolver.MaterializeEffectiveRegions(definitions,
             regionGroups);
         var required = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
             .Where(definition => definition.BookmarkType is not null)
-            .Append(definitions.MaxBy(definition => definition.ClassId)!)
+            .Append(definitions.Where(definition => definition.DetectionKind == DetectionKind.Object)
+                .MaxBy(definition => definition.ClassId)!)
+            .Where(definition => definition is not null)
             .DistinctBy(definition => definition.ClassId);
 
         foreach (var definition in required)

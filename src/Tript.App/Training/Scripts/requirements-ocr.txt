@@ -1,0 +1,8 @@
+# OCR recogniser fine-tune. Needs a Python the current torch wheels support (3.10-3.12).
+# Create the venv the runner looks for:  python3.12 -m venv .venv-ocr && .venv-ocr/.../pip install -r requirements-ocr.txt
+torch>=2.2,<3.0
+Pillow>=10.0.0
+numpy>=1.26
+onnx>=1.16,<2.0
+onnxscript>=0.5   # torch>=2.9's onnx exporter imports it
+

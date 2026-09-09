@@ -341,7 +341,9 @@ export interface TrainingEventDefinition {
   id: number;
   name: string;
   type: 'Trigger' | 'Exclusion' | 'Subtractor';
+  detectionKind?: 'Object' | 'Ocr';
   classId: number;
+  ocr?: TrainingOcrEventDefinition | null;
   bookmarkType?: string | null;
   includeInAutoClips?: boolean;
   subtractsEventId?: number | null;
@@ -355,6 +357,34 @@ export interface TrainingEventDefinition {
   fixedLabelCenterY?: number | null;
   fixedLabelWidth?: number | null;
   fixedLabelHeight?: number | null;
+}
+
+export interface TrainingOcrPattern {
+  languageTag: string;
+  template: string;
+  maximumEditDistance?: number;
+  minimumScore?: number;
+}
+
+export interface TrainingOcrSegment {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface TrainingOcrEventDefinition {
+  patterns: TrainingOcrPattern[];
+  segments?: TrainingOcrSegment[];
+  minimumConfidence?: number;
+  tracking?: {
+    confirmationFrames?: number;
+    minimumStableMilliseconds?: number;
+    expireAfterMissingMilliseconds?: number;
+    maximumTextDistance?: number;
+    minimumBoundsIou?: number;
+  };
 }
 
 export interface GameRecordingPromptMessage {
@@ -389,6 +419,7 @@ export interface TrainingSample {
   imageWidth: number;
   imageHeight: number;
   labels: TrainingLabel[];
+  ocrTranscriptions?: TrainingOcrTranscription[];
 }
 
 export interface TrainingModelInfo {
@@ -715,6 +746,14 @@ export interface UpdateTrainingSampleParameters {
   sampleId: string;
   requestId: string;
   labels: TrainingLabel[];
+  ocrTranscriptions?: TrainingOcrTranscription[];
+}
+
+export interface TrainingOcrTranscription {
+  eventId: number;
+  segmentId: string;
+  languageTag: string;
+  text: string;
 }
 
 export interface GameRecordingConfirmParameters {

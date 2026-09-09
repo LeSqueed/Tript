@@ -32,7 +32,8 @@ public static class ModelPredictionService
         {
             NamedOnnxValue.CreateFromTensor(metadata.InputName, inputTensor),
         };
-        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions.ToList());
+        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object).ToList());
         var detections = new List<DetectionResult>();
 
         foreach (var group in groups)
@@ -53,6 +54,7 @@ public static class ModelPredictionService
                     inputWidth, inputHeight, classCount);
                 DetectionFramePreprocessor.MapDetectionsToFullFrame(groupDetections, cropX, cropY, cropW, cropH,
                     image.Width, image.Height);
+                DetectionFramePreprocessor.FilterDetectionsToEventRegions(groupDetections, definitions);
                 detections.AddRange(groupDetections);
             }
             finally

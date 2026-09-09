@@ -410,7 +410,8 @@ export function TrainingView({ client }: TrainingViewProps) {
   const invalidSamples = training.invalidSamples ?? [];
   const invalidById = new Map(invalidSamples.map((sample) => [sample.id, sample.reason]));
   const validLabeledSampleCount = training.samples.filter((sample) =>
-    sample.labels.length > 0 && !invalidById.has(sample.id)).length;
+    (sample.labels.length > 0 || (sample.ocrTranscriptions?.length ?? 0) > 0)
+      && !invalidById.has(sample.id)).length;
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
@@ -428,8 +429,12 @@ export function TrainingView({ client }: TrainingViewProps) {
     if (sampleValidity === 'invalid' && !isInvalid) return false;
     if (sampleValidity === 'valid' && isInvalid) return false;
     if (!normalizedSampleFilter) return true;
-    const labels = sample.labels.map((label) => training.events.find((event) => event.classId === label.classId)?.name ?? String(label.classId));
-    return [sample.id, sample.timestampSeconds.toFixed(2), ...labels]
+    const labelNames = sample.labels.map((label) => training.events.find((event) => event.classId === label.classId)?.name ?? String(label.classId));
+    const ocrText = (sample.ocrTranscriptions ?? []).flatMap((transcription) => {
+      const eventName = training.events.find((event) => event.id === transcription.eventId)?.name ?? '';
+      return [eventName, transcription.text];
+    });
+    return [sample.id, sample.timestampSeconds.toFixed(2), ...labelNames, ...ocrText]
       .some((value) => value.toLowerCase().includes(normalizedSampleFilter));
   });
   const samplePageCount = Math.max(1, Math.ceil(filteredSamples.length / SAMPLE_PAGE_SIZE));
@@ -479,13 +484,16 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const openNewEvent = () => {
     const nextId = Math.max(0, ...training.events.map((event) => event.id)) + 1;
-    const nextClassId = Math.max(-1, ...training.events.map((event) => event.classId)) + 1;
+    const nextClassId = Math.max(-1, ...training.events
+      .filter((event) => (event.detectionKind ?? 'Object') === 'Object')
+      .map((event) => event.classId)) + 1;
     setEventEditor({
       event: {
         id: nextId,
         classId: nextClassId,
         name: 'New event',
         type: 'Trigger',
+        detectionKind: 'Object',
         bookmarkType: 'Manual',
       },
       isNew: true,
@@ -560,18 +568,28 @@ export function TrainingView({ client }: TrainingViewProps) {
     });
   };
 
-  const findRegionPreviewSample = (classIds: Set<number>) => {
+  const findRegionPreviewSample = (events: TrainingEventDefinition[]) => {
+    const objectClassIds = new Set(events
+      .filter((event) => (event.detectionKind ?? 'Object') === 'Object')
+      .map((event) => event.classId));
+    const ocrEventIds = new Set(events
+      .filter((event) => event.detectionKind === 'Ocr')
+      .map((event) => event.id));
     const matches = training.samples.filter((sample) =>
-      sample.labels.some((label) => classIds.has(label.classId)));
+      sample.labels.some((label) => objectClassIds.has(label.classId))
+      || (sample.ocrTranscriptions ?? []).some((transcription) => ocrEventIds.has(transcription.eventId)));
     return matches.find((sample) => samplePreviews[sample.id]) ?? matches[0];
   };
+
+  const groupEvents = (group: TrainingRegionGroup) =>
+    training.events.filter((event) => event.regionGroupId === group.id);
 
   const openRegionEditor = (
     target: TrainingEventDefinition | TrainingRegionGroup,
     targetType: 'event' | 'group',
-    classIds: Set<number>,
+    events: TrainingEventDefinition[],
   ) => {
-    const sample = findRegionPreviewSample(classIds);
+    const sample = findRegionPreviewSample(events);
     if (sample && !samplePreviews[sample.id] && !previewRequestsRef.current.has(sample.id)) {
       requestPreview(sample);
     }
@@ -607,19 +625,12 @@ export function TrainingView({ client }: TrainingViewProps) {
     const group = event.regionGroupId == null
       ? undefined
       : regionGroups.find((candidate) => candidate.id === event.regionGroupId);
-    if (group) {
-      openRegionEditor(group, 'group', new Set(training.events
-        .filter((candidate) => candidate.regionGroupId === group.id)
-        .map((candidate) => candidate.classId)));
-    } else {
-      openRegionEditor(event, 'event', new Set([event.classId]));
-    }
+    if (group) openRegionEditor(group, 'group', groupEvents(group));
+    else openRegionEditor(event, 'event', [event]);
   };
 
   const openRegionGroup = (group: TrainingRegionGroup) => {
-    openRegionEditor(group, 'group', new Set(training.events
-      .filter((event) => event.regionGroupId === group.id)
-      .map((event) => event.classId)));
+    openRegionEditor(group, 'group', groupEvents(group));
   };
 
   const saveRegion = (updated: TrainingEventDefinition | TrainingRegionGroup) => {

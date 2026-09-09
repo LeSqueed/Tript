@@ -17,8 +17,22 @@ public class VisualEventDetector : IDisposable
     private const int TargetCaptureFps = 3;
     private const int ObsSubscribeWidth = 1920;
     private const int ObsSubscribeHeight = 1080;
+
+    // OCR of small in-game text (kill feed) needs more than 1080p — recall roughly doubles at the
+    // native canvas size. When a game has OCR events the frame is requested at the OBS output
+    // resolution instead, capped here to bound the per-frame copy and crop cost.
+    private const int OcrSubscribeMaxWidth = 2560;
+    private const int OcrSubscribeMaxHeight = 1440;
     // Past this, the loop is assumed to still be inside session.Run.
     private const int StopJoinTimeoutSeconds = 3;
+
+    // Stop waits this long for the OCR worker to exit, then leaves it to tear itself down.
+    private const int OcrStopJoinSeconds = 3;
+
+    // Past this a completed OCR pass is dropped rather than merged into further object cycles.
+    private const int OcrSnapshotMaxAgeMs = 2500;
+
+    private const int OcrPollIntervalMs = 100;
 
     // Past this, a frame callback is assumed never to finish, and teardown stops waiting for it.
     private const int FrameCallbackQuiesceTimeoutMs = 1000;
@@ -35,7 +49,21 @@ public class VisualEventDetector : IDisposable
         },
         static dropped => dropped.ReturnBuffer());
 
+    // OCR runs on its own thread so a multi-second pass never sets the object cadence or blocks
+    // Stop. It pulls a frame only when idle, so OnFrame copies for it at the OCR rate, not capture.
+    private readonly Channel<FrameData> _ocrFrameQueue = Channel.CreateBounded<FrameData>(
+        new BoundedChannelOptions(1)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest
+        },
+        static dropped => dropped.ReturnBuffer());
+    private Thread? _ocrThread;
+    private volatile bool _ocrActive;
+    private volatile bool _ocrHungry;
+    private volatile OcrSnapshot? _ocrSnapshot;
+
     private InferenceSession? _session;
+    private object? _runIdentity;
     private float[]? _inputBuffer;
     private DenseTensor<float>? _inputTensor;
     private List<NamedOnnxValue>? _inputContainer;
@@ -46,12 +74,13 @@ public class VisualEventDetector : IDisposable
     private int _diagnosticFrameCount;
     private DateTime _lastEmptyInferenceLog;
     private List<RegionGroup> _regionGroups = new();
+    private List<EventDefinition> _objectDefinitions = [];
     private GrayscaleStrategy _grayscaleStrategy = GrayscaleStrategy.PerGroupCrop;
     private int _numClasses;
     private bool _disposed;
     private bool _quarantined;
 
-    public event Action<List<DetectionResult>>? DetectionsAvailable;
+    public event Action<DetectionBatch>? DetectionsAvailable;
 
     public VisualEventDetector(int detectionIntervalMs = 1000)
     {
@@ -70,6 +99,7 @@ public class VisualEventDetector : IDisposable
 
         public int Width { get; set; }
         public int Height { get; set; }
+        public DateTime Timestamp { get; set; }
 
         // Idempotent: returning the same array to the pool twice lets the pool hand it
         // to two callers at once.
@@ -80,6 +110,8 @@ public class VisualEventDetector : IDisposable
         }
     }
 
+    private sealed record OcrSnapshot(List<OcrMatch> Matches, DateTime CompletedAtUtc);
+
     public void Start(string gameId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
@@ -87,21 +119,32 @@ public class VisualEventDetector : IDisposable
         lock (_lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_detectionThread is not null || _quarantined)
+            if (_detectionThread is not null || _ocrThread is not null || _quarantined)
                 throw new InvalidOperationException("VisualEventDetector is already running or is still quiescing.");
 
             InferenceSession? session = null;
             IFrameSubscription? subscription = null;
             CancellationTokenSource? cts = null;
             RunOptions? runOptions = null;
+            PaddleOcrRecognizer? ocrRecognizer = null;
+            var ocrThreadStarted = false;
+            var runIdentity = new object();
+            var modelLoaded = false;
 
             try
             {
                 List<EventDefinition> definitions;
                 while (true)
                 {
-                    session = ModelService.LoadModel(gameId);
                     definitions = ModelService.LoadEventDefinitions(gameId);
+                    var objectDefinitions = definitions
+                        .Where(definition => definition.DetectionKind == DetectionKind.Object)
+                        .ToList();
+                    if (objectDefinitions.Count == 0)
+                        break;
+
+                    session = ModelService.LoadModel(gameId);
+                    modelLoaded = true;
                     var metadata = OnnxModelInspector.Inspect(session, ModelService.GetModelPath(gameId));
                     var apiMismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
                     if (apiMismatch is null)
@@ -109,6 +152,7 @@ public class VisualEventDetector : IDisposable
 
                     ModelService.UnloadModel(gameId);
                     session = null;
+                    modelLoaded = false;
                     if (!ModelService.RejectCurrentBundle(gameId, out var rejectedPath))
                     {
                         throw new InvalidDataException(
@@ -120,47 +164,92 @@ public class VisualEventDetector : IDisposable
                         rejectedPath, gameId, apiMismatch);
                 }
 
-                // Reused across every region of every cycle: a fresh float[640*640*3] per inference is
-                // 4.9 MB straight to the LOH.
-                var inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
-                var inputTensor = new DenseTensor<float>(
-                    inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
-                var outputNames = session.OutputMetadata.Keys.ToList();
-                var inputContainer = new List<NamedOnnxValue>
+                var ocrDefinitions = definitions
+                    .Where(definition => definition.DetectionKind == DetectionKind.Ocr)
+                    .ToList();
+                if (session is null && ocrDefinitions.Count == 0)
+                    throw new InvalidDataException($"No detection events are configured for {gameId}.");
+                if (ocrDefinitions.Count > 0)
                 {
-                    NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor)
-                };
+                    ocrRecognizer = new PaddleOcrRecognizer(
+                        ModelService.GetOcrModelPath(gameId), ModelService.GetOcrDictionaryPath(gameId),
+                        ModelService.GetOcrDetectorPath(gameId));
+                }
 
-                var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
-                var regionGroups = BuildRuntimeRegionGroups(definitions, numClasses);
+                float[]? inputBuffer = null;
+                DenseTensor<float>? inputTensor = null;
+                List<string>? outputNames = null;
+                List<NamedOnnxValue>? inputContainer = null;
+                var numClasses = 0;
+                var regionGroups = new List<RegionGroup>();
+                if (session is not null)
+                {
+                    inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
+                    inputTensor = new DenseTensor<float>(
+                        inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
+                    outputNames = session.OutputMetadata.Keys.ToList();
+                    inputContainer =
+                    [
+                        NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor),
+                    ];
+                    numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
+                    regionGroups = BuildRuntimeRegionGroups(definitions, numClasses);
+                }
+                var ocrRegionPlans = OcrRegionPlanner.Build(definitions,
+                    ModelService.LoadRegionGroups(gameId));
                 var grayscaleStrategy = DetectionFramePreprocessor.SelectGrayscaleStrategy(regionGroups);
                 var divisor = ComputeFrameRateDivisor(GetConfiguredOutputFps());
+
+                var (subscribeWidth, subscribeHeight) = ResolveSubscribeSize(ocrDefinitions.Count > 0);
 
                 cts = new CancellationTokenSource();
                 subscription = FrameSourceRegistry.Current.Subscribe(
                     FramePixelFormat.Bgra,
-                    width: ObsSubscribeWidth,
-                    height: ObsSubscribeHeight,
+                    width: subscribeWidth,
+                    height: subscribeHeight,
                     callback: OnFrame,
                     frameRateDivisor: (uint)divisor);
                 runOptions = new RunOptions();
 
                 _gameId = gameId;
                 _session = session;
+                _runIdentity = runIdentity;
                 _inputBuffer = inputBuffer;
                 _inputTensor = inputTensor;
                 _inputContainer = inputContainer;
                 _outputNames = outputNames;
                 _runOptions = runOptions;
                 _regionGroups = regionGroups;
+                _objectDefinitions = definitions
+                    .Where(definition => definition.DetectionKind == DetectionKind.Object)
+                    .ToList();
                 _grayscaleStrategy = grayscaleStrategy;
                 _numClasses = numClasses;
                 _subscription = subscription;
                 _cts = cts;
 
                 var token = cts.Token;
+
+                if (ocrRecognizer is not null)
+                {
+                    _ocrSnapshot = null;
+                    _ocrHungry = true;
+                    _ocrActive = true;
+                    var capturedRecognizer = ocrRecognizer;
+                    var ocrThread = new Thread(() => RunOcrThread(
+                        token, capturedRecognizer, ocrRegionPlans))
+                    {
+                        IsBackground = true,
+                        Name = "Tript.VisualEventDetector.Ocr",
+                        Priority = ThreadPriority.Lowest,
+                    };
+                    _ocrThread = ocrThread;
+                    ocrThreadStarted = true;
+                    ocrThread.Start();
+                }
+
                 var thread = new Thread(() => RunDetectionThread(
-                    token, session, gameId, runOptions, cts))
+                    token, runIdentity, gameId, runOptions, cts, modelLoaded))
                 {
                     IsBackground = true,
                     Name = "Tript.VisualEventDetector",
@@ -179,14 +268,30 @@ public class VisualEventDetector : IDisposable
                 _runOptions = null;
                 _detectionThread = null;
                 _session = null;
+                _runIdentity = null;
                 _gameId = null;
+                _objectDefinitions = [];
                 _quarantined = false;
 
                 subscription?.Dispose();
                 DrainFrameQueue();
                 runOptions?.Dispose();
-                cts?.Dispose();
-                if (session is not null)
+
+                if (ocrThreadStarted)
+                {
+                    // The OCR thread self-tears-down on cancel; leave its cts alive to observe it.
+                    cts?.Cancel();
+                }
+                else
+                {
+                    _ocrActive = false;
+                    _ocrThread = null;
+                    _ocrSnapshot = null;
+                    ocrRecognizer?.Dispose();
+                    cts?.Dispose();
+                }
+
+                if (modelLoaded)
                     ModelService.UnloadModel(gameId);
                 throw;
             }
@@ -196,13 +301,16 @@ public class VisualEventDetector : IDisposable
     public void Stop()
     {
         Thread? thread;
+        Thread? ocrThread;
         IFrameSubscription? subscription;
 
         lock (_lifecycleGate)
         {
             _cts?.Cancel();
+            _ocrActive = false;
             subscription = Interlocked.Exchange(ref _subscription, null);
             thread = _detectionThread;
+            ocrThread = _ocrThread;
         }
 
         subscription?.Dispose();
@@ -216,6 +324,11 @@ public class VisualEventDetector : IDisposable
                 _gameId, StopJoinTimeoutSeconds);
             return;
         }
+
+        // Bounded, non-quarantining: a still-running OCR pass releases itself in the background.
+        if (ocrThread is not null && !ocrThread.Join(TimeSpan.FromSeconds(OcrStopJoinSeconds)))
+            Log.Warning("VisualEventDetector: OCR worker for {GameId} did not exit within {TimeoutSeconds}s; it will finish and release in the background",
+                _gameId, OcrStopJoinSeconds);
 
         DrainFrameQueue();
 
@@ -233,8 +346,8 @@ public class VisualEventDetector : IDisposable
         Log.Information("VisualEventDetector: Stopped");
     }
 
-    private void RunDetectionThread(CancellationToken token, InferenceSession session,
-        string gameId, RunOptions runOptions, CancellationTokenSource cts)
+    private void RunDetectionThread(CancellationToken token, object runIdentity,
+        string gameId, RunOptions runOptions, CancellationTokenSource cts, bool modelLoaded)
     {
         try
         {
@@ -253,14 +366,13 @@ public class VisualEventDetector : IDisposable
             // Stop may have timed out while this thread was inside native inference. Once the loop
             // finally exits, no consumer can touch queued frames, so return every remaining buffer
             // before releasing the run's native resources.
-            while (_frameQueue.Reader.TryRead(out var stale))
-                stale.ReturnBuffer();
+            DrainFrameQueue();
 
             var ownsRun = false;
             IFrameSubscription? orphanedSubscription = null;
             lock (_lifecycleGate)
             {
-                if (ReferenceEquals(_session, session))
+                if (ReferenceEquals(_runIdentity, runIdentity))
                 {
                     ownsRun = true;
                     orphanedSubscription = _subscription;
@@ -273,6 +385,8 @@ public class VisualEventDetector : IDisposable
                     _inputBuffer = null;
                     _outputNames = null;
                     _session = null;
+                    _runIdentity = null;
+                    _objectDefinitions = [];
                     _gameId = null;
                 }
             }
@@ -281,7 +395,7 @@ public class VisualEventDetector : IDisposable
             {
                 orphanedSubscription?.Dispose();
                 DrainFrameQueue();
-                ModelService.UnloadModel(gameId);
+                if (modelLoaded) ModelService.UnloadModel(gameId);
                 runOptions.Dispose();
                 cts.Dispose();
 
@@ -291,9 +405,71 @@ public class VisualEventDetector : IDisposable
         }
     }
 
+    // Runs the OCR pass off the object cadence and publishes a snapshot; owns its recogniser and
+    // clears _ocrThread (by thread identity) on exit.
+    private void RunOcrThread(CancellationToken token,
+        PaddleOcrRecognizer recognizer, IReadOnlyList<OcrRegionPlan> regionPlans)
+    {
+        try
+        {
+            _ocrHungry = true;
+            while (!token.IsCancellationRequested)
+            {
+                if (token.WaitHandle.WaitOne(OcrPollIntervalMs)) break;
+                if (!_ocrFrameQueue.Reader.TryRead(out var frame))
+                {
+                    _ocrHungry = true;
+                    continue;
+                }
+
+                try
+                {
+                    var matches = RunOcrPass(recognizer, regionPlans, frame, token);
+                    _ocrSnapshot = new OcrSnapshot(matches, DateTime.UtcNow);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (ObjectDisposedException) { break; }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "VisualEventDetector: OCR pass failed");
+                }
+                finally
+                {
+                    frame.ReturnBuffer();
+                    _ocrHungry = true;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "VisualEventDetector: OCR worker terminated unexpectedly");
+        }
+        finally
+        {
+            while (_ocrFrameQueue.Reader.TryRead(out var stale))
+                stale.ReturnBuffer();
+
+            lock (_lifecycleGate)
+            {
+                if (ReferenceEquals(_ocrThread, Thread.CurrentThread))
+                {
+                    _ocrThread = null;
+                    _ocrActive = false;
+                    _ocrSnapshot = null;
+                }
+            }
+
+            recognizer.Dispose();
+        }
+    }
+
     private void DrainFrameQueue()
     {
         while (_frameQueue.Reader.TryRead(out var stale))
+            stale.ReturnBuffer();
+        while (_ocrFrameQueue.Reader.TryRead(out var stale))
             stale.ReturnBuffer();
     }
 
@@ -309,7 +485,7 @@ public class VisualEventDetector : IDisposable
         if (!TryDeriveClassCount(dimensions, out var numClasses))
         {
             // A dynamic axis exports as -1/0; arithmetic on it yields a plausible-looking stride.
-            numClasses = definitions.Count;
+            numClasses = definitions.Count(definition => definition.DetectionKind == DetectionKind.Object);
             Log.Warning("VisualEventDetector: output {OutputName} of model {GameId} has no static class dimension ({Dimensions}), falling back to {NumClasses} classes from events.json",
                 outputName, gameId, string.Join('x', dimensions), numClasses);
         }
@@ -362,7 +538,8 @@ public class VisualEventDetector : IDisposable
         IReadOnlyList<EventDefinition> definitions, int numClasses)
     {
         var modelDefinitions = definitions
-            .Where(definition => (uint)definition.ClassId < (uint)numClasses)
+            .Where(definition => definition.DetectionKind == DetectionKind.Object
+                && (uint)definition.ClassId < (uint)numClasses)
             .ToList();
         return DetectionFramePreprocessor.BuildRegionGroups(modelDefinitions);
     }
@@ -381,6 +558,7 @@ public class VisualEventDetector : IDisposable
             var width = (int)frame.Width;
             var height = (int)frame.Height;
             var rowBytes = width * 4;
+            var timestamp = DateTime.Now;
             buffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
 
             var src = frame.GetPlane(0, (uint)height);
@@ -390,8 +568,35 @@ public class VisualEventDetector : IDisposable
             {
                 Buffer = buffer,
                 Width = width,
-                Height = height
+                Height = height,
+                Timestamp = timestamp,
             });
+
+            // Independent copy for the OCR worker, only when it is idle and asking — never shared
+            // with the object pipeline's buffer.
+            if (_ocrActive && _ocrHungry)
+            {
+                var ocrBuffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
+                try
+                {
+                    DetectionFramePreprocessor.CopyPlane(src, srcStride, ocrBuffer, rowBytes, height);
+                    if (_ocrFrameQueue.Writer.TryWrite(new FrameData
+                    {
+                        Buffer = ocrBuffer,
+                        Width = width,
+                        Height = height,
+                        Timestamp = timestamp,
+                    }))
+                    {
+                        _ocrHungry = false;
+                        ocrBuffer = null;
+                    }
+                }
+                finally
+                {
+                    if (ocrBuffer is not null) ArrayPool<byte>.Shared.Return(ocrBuffer);
+                }
+            }
 
             if (queued && Interlocked.Increment(ref _diagnosticFrameCount) % 15 == 0)
                 Log.Information("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
@@ -420,7 +625,7 @@ public class VisualEventDetector : IDisposable
     private void DetectionLoop(CancellationToken ct)
     {
         var session = _session;
-        if (session == null) return;
+        if (session is null && !_ocrActive) return;
 
         while (!ct.IsCancellationRequested)
         {
@@ -450,56 +655,66 @@ public class VisualEventDetector : IDisposable
                     {
                         Log.Debug("DetectionLoop: skipping near-black frame");
                         // A skipped frame is still a checked frame for the host's net-count state.
-                        DetectionsAvailable?.Invoke([]);
+                        DetectionsAvailable?.Invoke(new DetectionBatch { FrameTimestamp = frameData.Timestamp });
                         continue;
                     }
 
                     // Both branches feed byte-identical buffers to inference; they differ only in
                     // how many pixels they convert. Chosen once at Start — the group set is fixed
                     // for the session, so deciding per frame would re-derive the same answer.
-                    var frameGray = _grayscaleStrategy == GrayscaleStrategy.WholeFrameOnce
+                    var frameGray = session is not null
+                        && _grayscaleStrategy == GrayscaleStrategy.WholeFrameOnce
                         ? DetectionFramePreprocessor.BgraToGray(frameData.Buffer, fW, fH)
                         : null;
 
                     try
                     {
-                        foreach (var group in _regionGroups)
+                        if (session is not null)
                         {
-                            if (!DetectionFramePreprocessor.TryGetCropRect(group, fW, fH, out var cropX, out var cropY,
-                                    out var cropW, out var cropH))
-                                continue;
+                            foreach (var group in _regionGroups)
+                            {
+                                if (!DetectionFramePreprocessor.TryGetCropRect(group, fW, fH, out var cropX,
+                                        out var cropY, out var cropW, out var cropH))
+                                    continue;
 
-                            byte[] resized;
-                            if (frameGray != null)
-                            {
-                                resized = DetectionFramePreprocessor.CropAndResizeGray(frameGray, fW, fH, cropX, cropY,
-                                    cropW, cropH, ModelInputSize, ModelInputSize);
-                            }
-                            else
-                            {
-                                var crop = DetectionFramePreprocessor.CropBgraToGray(frameData.Buffer, fW, cropX, cropY, cropW, cropH);
+                                byte[] resized;
+                                if (frameGray != null)
+                                {
+                                    resized = DetectionFramePreprocessor.CropAndResizeGray(frameGray, fW, fH,
+                                        cropX, cropY, cropW, cropH, ModelInputSize, ModelInputSize);
+                                }
+                                else
+                                {
+                                    var crop = DetectionFramePreprocessor.CropBgraToGray(frameData.Buffer, fW,
+                                        cropX, cropY, cropW, cropH);
+                                    try
+                                    {
+                                        resized = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH,
+                                            ModelInputSize, ModelInputSize);
+                                    }
+                                    finally
+                                    {
+                                        ArrayPool<byte>.Shared.Return(crop);
+                                    }
+                                }
+
                                 try
                                 {
-                                    resized = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH, ModelInputSize, ModelInputSize);
+                                    var results = RunInferenceOnGray(session, resized);
+                                    if (results != null)
+                                    {
+                                        foreach (var result in results) result.Timestamp = frameData.Timestamp;
+                                        DetectionFramePreprocessor.MapDetectionsToFullFrame(results, cropX, cropY,
+                                            cropW, cropH, fW, fH);
+                                        DetectionFramePreprocessor.FilterDetectionsToEventRegions(results,
+                                            _objectDefinitions);
+                                        allResults.AddRange(results);
+                                    }
                                 }
                                 finally
                                 {
-                                    ArrayPool<byte>.Shared.Return(crop);
+                                    ArrayPool<byte>.Shared.Return(resized);
                                 }
-                            }
-
-                            try
-                            {
-                                var results = RunInferenceOnGray(session, resized);
-                                if (results != null)
-                                {
-                                    DetectionFramePreprocessor.MapDetectionsToFullFrame(results, cropX, cropY, cropW, cropH, fW, fH);
-                                    allResults.AddRange(results);
-                                }
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(resized);
                             }
                         }
                     }
@@ -515,7 +730,13 @@ public class VisualEventDetector : IDisposable
                         Log.Information("DetectionLoop: processed live frame {W}x{H}; inference returned no detections",
                             fW, fH);
                     }
-                    DetectionsAvailable?.Invoke(allResults);
+                    // Fold the latest OCR pass in so the host still gets object + OCR per batch.
+                    DetectionsAvailable?.Invoke(new DetectionBatch
+                    {
+                        FrameTimestamp = frameData.Timestamp,
+                        ObjectDetections = allResults,
+                        OcrMatches = TakeOcrMatches(),
+                    });
                 }
                 finally
                 {
@@ -532,6 +753,64 @@ public class VisualEventDetector : IDisposable
         }
     }
 
+    private List<OcrMatch> TakeOcrMatches()
+    {
+        var snapshot = _ocrSnapshot;
+        return FreshMatches(snapshot?.Matches, snapshot?.CompletedAtUtc ?? default,
+            DateTime.UtcNow, OcrSnapshotMaxAgeMs);
+    }
+
+    internal static List<OcrMatch> FreshMatches(List<OcrMatch>? matches, DateTime completedAtUtc,
+        DateTime nowUtc, int maxAgeMs)
+        // Absolute age so a clock step in either direction retires the snapshot.
+        => matches is not null && (nowUtc - completedAtUtc).Duration() <= TimeSpan.FromMilliseconds(maxAgeMs)
+            ? matches
+            : [];
+
+    private static List<OcrMatch> RunOcrPass(PaddleOcrRecognizer recognizer,
+        IReadOnlyList<OcrRegionPlan> regionPlans, FrameData frame, CancellationToken token)
+    {
+        var matches = new List<OcrMatch>();
+        var fW = frame.Width;
+        var fH = frame.Height;
+        if (fW <= 0 || fH <= 0) return matches;
+
+        foreach (var plan in regionPlans)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!DetectionFramePreprocessor.TryGetCropRect(plan.Region, fW, fH,
+                    out var cropX, out var cropY, out var cropW, out var cropH))
+                continue;
+
+            var recognitions = recognizer.RecognizeAll(frame.Buffer, fW, fH, cropX, cropY, cropW, cropH);
+            foreach (var recognition in recognitions)
+            foreach (var binding in plan.Bindings)
+            {
+                var ocr = binding.Definition.Ocr;
+                if (ocr is null
+                    || recognition.Confidence < OcrTokenTemplateMatcher.EffectiveMinimumConfidence(ocr.MinimumConfidence))
+                    continue;
+                var match = OcrTokenTemplateMatcher.FindBestMatch(recognition.Text, ocr.Patterns);
+                if (match is null) continue;
+                matches.Add(new OcrMatch
+                {
+                    EventId = binding.Definition.Id,
+                    Text = recognition.Text,
+                    NormalizedText = match.NormalizedText,
+                    LanguageTag = match.LanguageTag,
+                    SegmentId = binding.SegmentId,
+                    Confidence = recognition.Confidence,
+                    X = (float)recognition.X / fW,
+                    Y = (float)recognition.Y / fH,
+                    Width = (float)recognition.Width / fW,
+                    Height = (float)recognition.Height / fH,
+                });
+            }
+        }
+
+        return matches;
+    }
+
     // The divisor is relative to OBS's configured recording framerate, not the game's render rate:
     // OBS composites its canvas at obs_video_info fps_num/fps_den, which Tript sets from the user's
     // FrameRate setting (OBSService.ResetVideoSettings, called at OBSService.cs:873). A game
@@ -540,6 +819,28 @@ public class VisualEventDetector : IDisposable
     {
         if (outputFps <= 0) return FpsDivisor;
         return Math.Max(1, outputFps / TargetCaptureFps);
+    }
+
+    // 1920x1080 unless the game has OCR events and OBS reports a larger output, in which case the
+    // native size (capped) is requested so small text survives the crop.
+    private static (int Width, int Height) ResolveSubscribeSize(bool hasOcr)
+    {
+        if (!hasOcr) return (ObsSubscribeWidth, ObsSubscribeHeight);
+        try
+        {
+            if (FrameSourceRegistry.Current.GetVideoTiming() is { Width: > 0, Height: > 0 } timing)
+            {
+                return (
+                    Math.Clamp((int)timing.Width, ObsSubscribeWidth, OcrSubscribeMaxWidth),
+                    Math.Clamp((int)timing.Height, ObsSubscribeHeight, OcrSubscribeMaxHeight));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "VisualEventDetector: could not read OBS output size, using {W}x{H}",
+                ObsSubscribeWidth, ObsSubscribeHeight);
+        }
+        return (ObsSubscribeWidth, ObsSubscribeHeight);
     }
 
     // Returns 0 when the rate is unavailable, which ComputeFrameRateDivisor maps to the default.

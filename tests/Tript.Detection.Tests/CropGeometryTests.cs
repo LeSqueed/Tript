@@ -146,4 +146,113 @@ public class CropGeometryTests
         Assert.Equal(0.3, det.Width, 4);
         Assert.Equal(0.2, det.Height, 4);
     }
+
+    [Fact]
+    public void FilterDetectionsToEventRegions_RemovesAClassOutsideItsRegion()
+    {
+        var definitions = new List<EventDefinition>
+        {
+            new()
+            {
+                DetectionKind = DetectionKind.Object,
+                ClassId = 1,
+                ScreenRegionX = 0.1f,
+                ScreenRegionY = 0.1f,
+                ScreenRegionW = 0.2f,
+                ScreenRegionH = 0.2f,
+            },
+        };
+        var detections = new List<DetectionResult>
+        {
+            new() { ClassId = 1, X = 0.7f, Y = 0.7f, Width = 0.1f, Height = 0.1f },
+        };
+
+        DetectionFramePreprocessor.FilterDetectionsToEventRegions(detections, definitions);
+
+        Assert.Empty(detections);
+    }
+
+    [Fact]
+    public void FilterDetectionsToEventRegions_KeepsAClassCenteredInsideItsRegion()
+    {
+        var definitions = new List<EventDefinition>
+        {
+            new()
+            {
+                DetectionKind = DetectionKind.Object,
+                ClassId = 1,
+                ScreenRegionX = 0.1f,
+                ScreenRegionY = 0.1f,
+                ScreenRegionW = 0.2f,
+                ScreenRegionH = 0.2f,
+            },
+        };
+        var detection = new DetectionResult
+        {
+            ClassId = 1,
+            X = 0.25f,
+            Y = 0.15f,
+            Width = 0.1f,
+            Height = 0.1f,
+        };
+        var detections = new List<DetectionResult> { detection };
+
+        DetectionFramePreprocessor.FilterDetectionsToEventRegions(detections, definitions);
+
+        Assert.Same(detection, Assert.Single(detections));
+    }
+
+    [Fact]
+    public void FilterDetectionsToEventRegions_KeepsAClassWithoutARegion()
+    {
+        var definitions = new List<EventDefinition>
+        {
+            new() { DetectionKind = DetectionKind.Object, ClassId = 1 },
+        };
+        var detection = new DetectionResult
+        {
+            ClassId = 1,
+            X = 0.7f,
+            Y = 0.7f,
+            Width = 0.1f,
+            Height = 0.1f,
+        };
+        var detections = new List<DetectionResult> { detection };
+
+        DetectionFramePreprocessor.FilterDetectionsToEventRegions(detections, definitions);
+
+        Assert.Same(detection, Assert.Single(detections));
+    }
+
+    // A box centred just past the region edge (from the padded crop) is kept by the tolerance.
+    [Fact]
+    public void FilterDetectionsToEventRegions_KeepsAClassJustOutsideItsRegionWithinTolerance()
+    {
+        var definitions = new List<EventDefinition>
+        {
+            new()
+            {
+                DetectionKind = DetectionKind.Object,
+                ClassId = 1,
+                ScreenRegionX = 0.1f,
+                ScreenRegionY = 0.1f,
+                ScreenRegionW = 0.2f,
+                ScreenRegionH = 0.2f,
+            },
+        };
+        // Centre at (0.315, 0.2): 0.015 past the region's right edge (0.3), inside the 0.02 margin.
+        var detection = new DetectionResult
+        {
+            ClassId = 1,
+            X = 0.295f,
+            Y = 0.15f,
+            Width = 0.04f,
+            Height = 0.1f,
+        };
+        var detections = new List<DetectionResult> { detection };
+
+        DetectionFramePreprocessor.FilterDetectionsToEventRegions(detections, definitions);
+
+        Assert.Same(detection, Assert.Single(detections));
+    }
 }

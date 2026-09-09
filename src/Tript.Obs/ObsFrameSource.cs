@@ -76,7 +76,7 @@ internal sealed class ObsFrameSource : IFrameSource
         if (info == null)
             return null;
 
-        return new VideoTiming(info->FpsNumerator, info->FpsDenominator);
+        return new VideoTiming(info->FpsNumerator, info->FpsDenominator, info->Width, info->Height);
     }
 
     // The seam's format vocabulary is its own, not libobs's. FramePixelFormat.Bgra is member 0 of

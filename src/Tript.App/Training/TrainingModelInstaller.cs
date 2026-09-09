@@ -8,27 +8,46 @@ using Tript.Detection;
 
 namespace Tript.App.Training;
 
-internal sealed record TrainingInstallResult(string GameId, string ModelPath, OnnxModelMetadata Metadata);
+internal sealed record TrainingInstallResult(string GameId, string ModelPath, OnnxModelMetadata? Metadata);
 
 internal static class TrainingModelInstaller
 {
-    internal static TrainingInstallResult Install(TrainingWorkspace workspace, string modelSourcePath)
+    internal static TrainingInstallResult Install(TrainingWorkspace workspace, string? modelSourcePath,
+        string? ocrModelSourcePath = null, string? ocrDictionarySourcePath = null,
+        string? ocrDetectorSourcePath = null)
     {
-        if (!File.Exists(modelSourcePath))
-            throw new FileNotFoundException("The trained model was not found.", modelSourcePath);
         if (!File.Exists(workspace.EventsPath))
             throw new FileNotFoundException("The workspace has no events.json.", workspace.EventsPath);
 
         var definitions = workspace.LoadDefinitions();
+        var hasObjectEvents = definitions.Any(definition => definition.DetectionKind == DetectionKind.Object);
+        var hasOcrEvents = definitions.Any(definition => definition.DetectionKind == DetectionKind.Ocr);
+        if (hasOcrEvents)
+        {
+            ocrModelSourcePath ??= Path.Combine(workspace.DatasetPath, "ocr_model.onnx");
+            ocrDictionarySourcePath ??= Path.Combine(workspace.DatasetPath, "ocr_dict.txt");
+            if (File.Exists(workspace.OcrDetectorPath)) ocrDetectorSourcePath ??= workspace.OcrDetectorPath;
+        }
+        if (hasObjectEvents && (string.IsNullOrWhiteSpace(modelSourcePath) || !File.Exists(modelSourcePath)))
+            throw new FileNotFoundException("The trained object model was not found.", modelSourcePath);
+        if (hasOcrEvents && (string.IsNullOrWhiteSpace(ocrModelSourcePath) || !File.Exists(ocrModelSourcePath)))
+            throw new FileNotFoundException("The trained OCR model was not found.", ocrModelSourcePath);
+        if (hasOcrEvents && (string.IsNullOrWhiteSpace(ocrDictionarySourcePath)
+            || !File.Exists(ocrDictionarySourcePath)))
+            throw new FileNotFoundException("The trained OCR dictionary was not found.", ocrDictionarySourcePath);
         var regionGroups = workspace.LoadRegionGroups();
         TrainingEventValidator.ValidateRegionGroups(regionGroups);
         TrainingEventValidator.ValidateRegionGroupReferences(definitions, regionGroups);
         var runtimeDefinitions = TrainingRegionResolver.MaterializeEffectiveRegions(definitions,
             regionGroups);
-        var metadata = OnnxModelInspector.Inspect(modelSourcePath);
-        var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
-        if (mismatch is not null)
-            throw new InvalidDataException($"The model cannot be installed: {mismatch}");
+        OnnxModelMetadata? metadata = null;
+        if (hasObjectEvents)
+        {
+            metadata = OnnxModelInspector.Inspect(modelSourcePath!);
+            var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
+            if (mismatch is not null)
+                throw new InvalidDataException($"The model cannot be installed: {mismatch}");
+        }
 
         var targetWorkspace = TrainingWorkspace.ForGame(workspace.GameId, TrainingPaths.InstalledModelsPath);
         Directory.CreateDirectory(TrainingPaths.InstalledModelsPath);
@@ -39,7 +58,14 @@ internal static class TrainingModelInstaller
 
         try
         {
-            File.Copy(modelSourcePath, staging.ModelPath);
+            if (hasObjectEvents) File.Copy(modelSourcePath!, staging.ModelPath);
+            if (hasOcrEvents)
+            {
+                File.Copy(ocrModelSourcePath!, Path.Combine(staging.RootPath, "ocr_model.onnx"));
+                File.Copy(ocrDictionarySourcePath!, Path.Combine(staging.RootPath, "ocr_dict.txt"));
+                if (!string.IsNullOrWhiteSpace(ocrDetectorSourcePath) && File.Exists(ocrDetectorSourcePath))
+                    File.Copy(ocrDetectorSourcePath, Path.Combine(staging.RootPath, "ocr_detector.onnx"));
+            }
             TrainingSampleStore.WriteAtomically(staging.EventsPath,
                 JsonSerializer.SerializeToUtf8Bytes(runtimeDefinitions,
                     TrainingRegionResolver.WriteJsonOptions));
@@ -49,10 +75,14 @@ internal static class TrainingModelInstaller
                     JsonSerializer.SerializeToUtf8Bytes(regionGroups,
                         TrainingRegionResolver.WriteJsonOptions));
             }
-            var stagedMetadata = OnnxModelInspector.Inspect(staging.ModelPath);
-            var stagedMismatch = ModelApiV1Compatibility.FindMismatch(definitions, stagedMetadata);
-            if (stagedMismatch is not null)
-                throw new InvalidDataException($"The staged model cannot be installed: {stagedMismatch}");
+            OnnxModelMetadata? stagedMetadata = null;
+            if (hasObjectEvents)
+            {
+                stagedMetadata = OnnxModelInspector.Inspect(staging.ModelPath);
+                var stagedMismatch = ModelApiV1Compatibility.FindMismatch(definitions, stagedMetadata);
+                if (stagedMismatch is not null)
+                    throw new InvalidDataException($"The staged model cannot be installed: {stagedMismatch}");
+            }
 
             var hadPrevious = Directory.Exists(targetWorkspace.RootPath);
             if (hadPrevious)
@@ -73,7 +103,8 @@ internal static class TrainingModelInstaller
                 Directory.Delete(backupPath, recursive: true);
 
             return new TrainingInstallResult(workspace.GameId,
-                Path.Combine(targetWorkspace.RootPath, "model.onnx"), stagedMetadata);
+                Path.Combine(targetWorkspace.RootPath, hasObjectEvents ? "model.onnx" : "ocr_model.onnx"),
+                stagedMetadata);
         }
         catch
         {

@@ -414,6 +414,62 @@ public sealed class TrainingSamplesTests
     }
 
     [Fact]
+    public void OcrTranscriptions_are_keyed_by_event_and_removed_independently_from_object_labels()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tript-training-ocr-" + Guid.NewGuid().ToString("N"));
+        var source = Path.Combine(root, "recording.mp4");
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(source, [1]);
+
+        try
+        {
+            var workspace = TrainingWorkspace.ForGame("Example", Path.Combine(root, "workspaces"));
+            var store = new TrainingSampleStore(workspace);
+            var definitions = new List<EventDefinition>
+            {
+                new() { Id = 1, Name = "Object", ClassId = 0, Type = EventType.Trigger },
+                new()
+                {
+                    Id = 9,
+                    Name = "Kill feed",
+                    ClassId = -1,
+                    Type = EventType.Trigger,
+                    DetectionKind = DetectionKind.Ocr,
+                    Ocr = new OcrEventDefinition
+                    {
+                        Patterns = [new OcrPatternDefinition { LanguageTag = "de-DE", Template = "KILL {player}" }],
+                    },
+                },
+            };
+            var sample = store.Save(source, 1, 1280, 720,
+                [new TrainingLabel { ClassId = 0, CenterX = 0.5, CenterY = 0.5, Width = 0.2, Height = 0.2 }],
+                [137, 80], definitions);
+            store.UpdateLabels(sample.Id, sample.Labels, definitions, ocrTranscriptions:
+            [
+                new TrainingOcrTranscription
+                {
+                    EventId = 9,
+                    SegmentId = "default",
+                    LanguageTag = "de-DE",
+                    Text = "KILL AMON",
+                },
+            ]);
+
+            var remap = store.RemapClassIds(new Dictionary<int, int> { [0] = 0 },
+                survivingOcrEventIds: new HashSet<int>());
+            var updated = store.LoadById(sample.Id);
+
+            Assert.Single(updated.Labels);
+            Assert.Empty(updated.OcrTranscriptions);
+            Assert.Equal(1, remap.RemovedTranscriptionCount);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void LabelSuggestions_accept_fixed_geometry_inside_region_when_prediction_is_outside()
     {
         var definition = new EventDefinition

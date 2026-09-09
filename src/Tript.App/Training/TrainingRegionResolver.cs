@@ -53,7 +53,8 @@ internal static class TrainingRegionResolver
 
     internal static Dictionary<int, TrainingScreenRegion?> ResolveByClassId(
         IReadOnlyList<EventDefinition> definitions, IReadOnlyList<TrainingRegionGroup> groups) =>
-        definitions.ToDictionary(definition => definition.ClassId,
+        definitions.Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToDictionary(definition => definition.ClassId,
             definition => EffectiveRegion(definition, groups));
 
     internal static List<EventDefinition> MaterializeEffectiveRegions(
@@ -65,7 +66,9 @@ internal static class TrainingRegionResolver
                 Id = definition.Id,
                 Name = definition.Name,
                 Type = definition.Type,
+                DetectionKind = definition.DetectionKind,
                 ClassId = definition.ClassId,
+                Ocr = definition.Ocr,
                 SubtractsEventId = definition.SubtractsEventId,
                 BookmarkType = definition.BookmarkType,
                 IncludeInAutoClips = definition.IncludeInAutoClips,

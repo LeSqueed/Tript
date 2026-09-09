@@ -1,11 +1,56 @@
 ﻿#if TRIPT_TRAINING
 
+using System.Globalization;
 using Tript.Detection;
 
 namespace Tript.App.Training;
 
 internal static class TrainingEventValidator
 {
+    internal static void ValidateDetectionKinds(IReadOnlyList<EventDefinition> events)
+    {
+        var objectEvents = events.Where(eventDefinition =>
+            eventDefinition.DetectionKind == DetectionKind.Object).ToList();
+        if (objectEvents.Select(eventDefinition => eventDefinition.ClassId).Distinct().Count()
+            != objectEvents.Count)
+        {
+            throw new InvalidDataException("Object detection event class ids must be unique.");
+        }
+
+        foreach (var eventDefinition in events)
+        {
+            if (eventDefinition.DetectionKind == DetectionKind.Object)
+            {
+                if (eventDefinition.ClassId < 0)
+                    throw new InvalidDataException($"Object event '{eventDefinition.Name}' has a negative class id.");
+                continue;
+            }
+
+            if (eventDefinition.Ocr is null || eventDefinition.Ocr.Patterns.Count == 0)
+                throw new InvalidDataException($"OCR event '{eventDefinition.Name}' requires at least one pattern.");
+            foreach (var pattern in eventDefinition.Ocr.Patterns)
+            {
+                try
+                {
+                    _ = System.Globalization.CultureInfo.GetCultureInfo(pattern.LanguageTag);
+                    OcrTokenTemplateMatcher.Validate(pattern);
+                }
+                catch (Exception exception) when (exception is CultureNotFoundException or FormatException)
+                {
+                    throw new InvalidDataException(
+                        $"OCR event '{eventDefinition.Name}' has an invalid pattern: {exception.Message}", exception);
+                }
+            }
+            if (!float.IsFinite(eventDefinition.Ocr.MinimumConfidence)
+                || eventDefinition.Ocr.MinimumConfidence is < 0 or > 1)
+            {
+                throw new InvalidDataException(
+                    $"OCR event '{eventDefinition.Name}' has an invalid minimum confidence.");
+            }
+            ValidateOcrSegments(eventDefinition);
+        }
+    }
+
     internal static void ValidateRegions(IReadOnlyList<EventDefinition> events)
     {
         foreach (var eventDefinition in events)
@@ -44,7 +89,8 @@ internal static class TrainingEventValidator
     // fatal here.
     internal static void ValidateFixedPositions(IReadOnlyList<EventDefinition> events)
     {
-        foreach (var eventDefinition in events.Where(eventDefinition => eventDefinition.FixedPosition))
+        foreach (var eventDefinition in events.Where(eventDefinition =>
+                     eventDefinition.DetectionKind == DetectionKind.Object && eventDefinition.FixedPosition))
         {
             var values = new[]
             {
@@ -68,6 +114,25 @@ internal static class TrainingEventValidator
             if (error is not null)
                 throw new InvalidDataException(
                     $"Training event '{eventDefinition.Name}' has an invalid fixed label position: {error}.");
+        }
+    }
+
+    private static void ValidateOcrSegments(EventDefinition eventDefinition)
+    {
+        var segmentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in eventDefinition.Ocr!.Segments)
+        {
+            if (string.IsNullOrWhiteSpace(segment.Id) || !segmentIds.Add(segment.Id))
+                throw new InvalidDataException(
+                    $"OCR event '{eventDefinition.Name}' segment ids must be non-empty and unique.");
+            if (!float.IsFinite(segment.X) || !float.IsFinite(segment.Y)
+                || !float.IsFinite(segment.Width) || !float.IsFinite(segment.Height)
+                || segment.X < 0 || segment.Y < 0 || segment.Width <= 0 || segment.Height <= 0
+                || segment.X + segment.Width > 1 || segment.Y + segment.Height > 1)
+            {
+                throw new InvalidDataException(
+                    $"OCR event '{eventDefinition.Name}' has an out-of-bounds segment.");
+            }
         }
     }
 

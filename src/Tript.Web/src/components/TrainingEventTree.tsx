@@ -16,6 +16,7 @@ interface TrainingEventTreeProps {
   onDelete?(event: TrainingEventDefinition): void;
   onAddFixedLabel?(event: TrainingEventDefinition): void;
   canAddFixedLabel?(event: TrainingEventDefinition): boolean;
+  onAddOcrText?(event: TrainingEventDefinition): void;
   onMove(eventId: number, groupId: number | null): void;
   onRenameGroup?(group: TrainingRegionGroup): void;
   onRegionGroup?(group: TrainingRegionGroup): void;
@@ -34,6 +35,7 @@ export function TrainingEventTree({
   onDelete,
   onAddFixedLabel,
   canAddFixedLabel,
+  onAddOcrText,
   onMove,
   onRenameGroup,
   onRegionGroup,
@@ -120,18 +122,22 @@ export function TrainingEventTree({
                       className="training-tree-event-main"
                       onClick={() => onSelect(event)}
                     >
-                      <span className="training-event-swatch">{event.classId}</span>
+                      <span className="training-event-swatch">
+                        {event.detectionKind === 'Ocr' ? 'OCR' : event.classId}
+                      </span>
                       <span className="training-tree-event-copy">
                         <strong>{event.name}</strong>
-                        <small>{eventMeta?.(event) ?? event.type}</small>
+                        <small>{eventMeta?.(event) ?? (event.detectionKind === 'Ocr' ? `OCR · ${event.type}` : event.type)}</small>
                       </span>
                     </Button>
                   ) : (
                     <span className="training-tree-event-main">
-                      <span className="training-event-swatch">{event.classId}</span>
+                      <span className="training-event-swatch">
+                        {event.detectionKind === 'Ocr' ? 'OCR' : event.classId}
+                      </span>
                       <span className="training-tree-event-copy">
                         <strong>{event.name}</strong>
-                        <small>{eventMeta?.(event) ?? event.type}</small>
+                        <small>{eventMeta?.(event) ?? (event.detectionKind === 'Ocr' ? `OCR · ${event.type}` : event.type)}</small>
                       </span>
                     </span>
                   )}
@@ -143,6 +149,14 @@ export function TrainingEventTree({
                         aria-label={`Add fixed label for ${event.name}`}
                         onClick={() => onAddFixedLabel(event)}
                         disabled={canAddFixedLabel ? !canAddFixedLabel(event) : false}
+                      >+</Button>
+                    )}
+                    {event.detectionKind === 'Ocr' && onAddOcrText && (
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        aria-label={`Add OCR text for ${event.name}`}
+                        onClick={() => onAddOcrText(event)}
                       >+</Button>
                     )}
                     <Button variant="ghost" size="small" onClick={() => onEdit(event)}>Edit</Button>

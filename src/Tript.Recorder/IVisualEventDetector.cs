@@ -12,7 +12,7 @@ public interface IVisualEventDetector : IDisposable
 {
     // Raised on the detector's own thread, one batch per detection cycle. Empty batches are
     // significant because the host uses every cycle to update each event's net count.
-    event Action<List<DetectionResult>>? DetectionsAvailable;
+    event Action<DetectionBatch>? DetectionsAvailable;
 
     void Start(string gameId);
 
@@ -31,7 +31,7 @@ internal sealed class VisualEventDetectorAdapter : IVisualEventDetector
         _inner = inner;
     }
 
-    public event Action<List<DetectionResult>>? DetectionsAvailable
+    public event Action<DetectionBatch>? DetectionsAvailable
     {
         add => _inner.DetectionsAvailable += value;
         remove => _inner.DetectionsAvailable -= value;

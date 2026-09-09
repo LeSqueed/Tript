@@ -49,4 +49,54 @@ describe('TrainingEventEditor', () => {
       subtractsEventId: 1,
     }));
   });
+
+  it('saves multiple language-tagged OCR patterns', () => {
+    const onSave = vi.fn();
+    const event: TrainingEventDefinition = {
+      id: 3,
+      classId: 2,
+      name: 'Turret elimination',
+      type: 'Trigger',
+    };
+    render(<TrainingEventEditor event={event} isNew onCancel={vi.fn()} onSave={onSave} />);
+
+    fireEvent.change(screen.getByLabelText('Detection'), { target: { value: 'Ocr' } });
+    fireEvent.change(screen.getByLabelText('Language 1'), { target: { value: 'en-US' } });
+    fireEvent.change(screen.getByLabelText('Pattern 1'), {
+      target: { value: 'ELIMINATED {player:1..4} SENTRY TURRET' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add pattern' }));
+    fireEvent.change(screen.getByLabelText('Language 2'), { target: { value: 'de-DE' } });
+    fireEvent.change(screen.getByLabelText('Pattern 2'), {
+      target: { value: 'ELIMINIERT {player:1..4} GESCHUETZ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      detectionKind: 'Ocr',
+      classId: -1,
+      ocr: expect.objectContaining({
+        patterns: [
+          expect.objectContaining({ languageTag: 'en-US' }),
+          expect.objectContaining({ languageTag: 'de-DE' }),
+        ],
+      }),
+    }));
+  });
+
+  it('requires both language and template for every OCR pattern', () => {
+    const onSave = vi.fn();
+    render(<TrainingEventEditor
+      event={{ id: 3, classId: 2, name: 'OCR event', type: 'Trigger' }}
+      isNew
+      onCancel={vi.fn()}
+      onSave={onSave}
+    />);
+
+    fireEvent.change(screen.getByLabelText('Detection'), { target: { value: 'Ocr' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(screen.getByRole('alert').textContent).toContain('requires a language and template');
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });

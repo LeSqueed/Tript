@@ -236,8 +236,9 @@ internal sealed partial class AppHost : IDisposable
             bool HasCustomModel(string gameId)
             {
                 var gamePath = Path.Combine(customRoot, GameModelPaths.ValidateGameId(gameId));
-                return File.Exists(Path.Combine(gamePath, "model.onnx")) &&
-                    File.Exists(Path.Combine(gamePath, "events.json"));
+                return File.Exists(Path.Combine(gamePath, "events.json")) &&
+                    (File.Exists(Path.Combine(gamePath, "model.onnx")) ||
+                     File.Exists(Path.Combine(gamePath, "ocr_model.onnx")));
             }
 #else
             Func<string, bool>? HasCustomModel = null;

@@ -20,8 +20,11 @@ public static class ModelEventCompatibility
     internal static string? FindMismatch(IReadOnlyList<EventDefinition> definitions,
         int classCount, IReadOnlyDictionary<int, string>? classNames)
     {
+        var objectDefinitions = definitions
+            .Where(definition => definition.DetectionKind == DetectionKind.Object)
+            .ToList();
         var seenClassIds = new HashSet<int>();
-        foreach (var definition in definitions)
+        foreach (var definition in objectDefinitions)
         {
             if (definition.ClassId < 0)
                 return $"classId {definition.ClassId} ('{definition.Name}') is negative";
@@ -46,10 +49,10 @@ public static class ModelEventCompatibility
             }
         }
 
-        if (definitions.Count < classCount)
+        if (objectDefinitions.Count < classCount)
         {
             return $"model declares {classCount} classes but events.json contains " +
-                $"{definitions.Count} definitions";
+                $"{objectDefinitions.Count} object definitions";
         }
 
         for (var classId = 0; classId < classCount; classId++)

@@ -63,9 +63,15 @@ internal sealed class InstalledGameModel
 
     public string PackageSha256 { get; init; } = string.Empty;
 
-    public string ModelSha256 { get; init; } = string.Empty;
+    public string? ModelSha256 { get; init; }
 
     public string EventsSha256 { get; init; } = string.Empty;
+
+    public string? OcrModelSha256 { get; init; }
+
+    public string? OcrDetectorSha256 { get; init; }
+
+    public string? OcrDictionarySha256 { get; init; }
 
     public DateTimeOffset InstalledAt { get; init; }
 

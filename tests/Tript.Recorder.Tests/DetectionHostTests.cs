@@ -40,6 +40,41 @@ public sealed class DetectionHostTests
         SubtractsEventId = targetId,
     };
 
+    private static EventDefinition OcrEvent(int id, EventType type = EventType.Trigger,
+        int? targetId = null, BookmarkType? bookmarkType = BookmarkType.Kill) => new()
+    {
+        Id = id,
+        Name = "ocr" + id,
+        Type = type,
+        DetectionKind = DetectionKind.Ocr,
+        BookmarkType = bookmarkType,
+        SubtractsEventId = targetId,
+        Ocr = new OcrEventDefinition
+        {
+            Patterns = [new OcrPatternDefinition { LanguageTag = "en", Template = "KILL {player}" }],
+            Tracking = new OcrTrackingDefinition
+            {
+                ConfirmationFrames = 1,
+                MinimumStableMilliseconds = 0,
+                ExpireAfterMissingMilliseconds = 0,
+            },
+        },
+    };
+
+    private static OcrMatch Text(int eventId, string text, float y = 0.1f, float confidence = 0.95f) => new()
+    {
+        EventId = eventId,
+        Text = text,
+        NormalizedText = OcrTextNormalizer.Normalize(text),
+        LanguageTag = "en",
+        SegmentId = "feed",
+        Confidence = confidence,
+        X = 0.1f,
+        Y = y,
+        Width = 0.4f,
+        Height = 0.05f,
+    };
+
     private static DetectionResult Box(int classId, float x = 0.4f, float y = 0.3f,
         float w = 0.12f, float h = 0.06f) => new()
     {
@@ -95,12 +130,14 @@ public sealed class DetectionHostTests
             ["Overwatch"] = [Trigger(0)],
         });
         var recording = new FakeRecordingSession { StartTime = DateTime.Now };
+        var detection = Box(0);
+        detection.Timestamp = recording.StartTime;
 
         using (new ActiveRecordingScope(recording))
         using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
-            detector.RaiseDetections(Box(0));
+            detector.RaiseDetections(detection);
 
             var bookmark = Assert.Single(recording.Bookmarks);
             Assert.True(bookmark.Time >= TimeSpan.Zero, $"bookmark offset {bookmark.Time} is negative");
@@ -243,6 +280,138 @@ public sealed class DetectionHostTests
             detector.RaiseDetections(Box(0));
 
             Assert.Equal(2, recording.Bookmarks.Count);
+        }
+    }
+
+    [Fact]
+    public void OcrTrigger_PersistentTextCreatesOneBookmark()
+    {
+        var detector = WithFrameSource(new() { ["Overwatch"] = [OcrEvent(7)] });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseOcr(Text(7, "KILL AMON"));
+            detector.RaiseOcr(Text(7, "KILL AMON"));
+
+            Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void OcrTrigger_DuplicateRecognitionInOneBatchCountsOnce()
+    {
+        var detector = WithFrameSource(new() { ["Overwatch"] = [OcrEvent(7)] });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            var match = Text(7, "KILL AMON");
+            detector.RaiseOcr(match, match);
+
+            Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void OcrExclusion_SuppressesObjectTriggerInSameBatch()
+    {
+        var exclusion = OcrEvent(7, EventType.Exclusion, bookmarkType: null);
+        exclusion.Ocr!.Tracking.ConfirmationFrames = 2;
+        exclusion.Ocr.Tracking.MinimumStableMilliseconds = 1000;
+        var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0), exclusion] });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseBatch([Box(0)], [Text(7, "KILL CAM")]);
+            detector.RaiseBatch([Box(0)], [], Origin.AddMilliseconds(1));
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void OcrSubtractor_SubtractsFromObjectTriggerInSameBatch()
+    {
+        var subtractor = OcrEvent(7, EventType.Subtractor, targetId: 0, bookmarkType: null);
+        subtractor.Ocr!.Tracking.ConfirmationFrames = 2;
+        subtractor.Ocr.Tracking.MinimumStableMilliseconds = 1000;
+        var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0), subtractor] });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseBatch([Box(0)], [Text(7, "KILL TURRET")]);
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    // A low-confidence misread of an exclusion pattern must not cancel a real object bookmark.
+    [Fact]
+    public void OcrExclusion_LowConfidenceMisread_DoesNotSuppressObjectTrigger()
+    {
+        var exclusion = OcrEvent(7, EventType.Exclusion, bookmarkType: null);
+        var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0), exclusion] });
+        var recording = new FakeRecordingSession { StartTime = Origin };
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseBatch([Box(0)], [Text(7, "KILL CAM", confidence: 0.55f)]);
+
+            Assert.Single(recording.Bookmarks);
+        }
+    }
+
+    [Fact]
+    public void ObjectSubtractor_SubtractsFromOcrTriggerInSameBatch()
+    {
+        var detector = WithFrameSource(new()
+        {
+            ["Overwatch"] = [OcrEvent(7), Subtractor(8, 0, 7)],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseBatch([Box(0)], [Text(7, "KILL AMON")]);
+
+            Assert.Empty(recording.Bookmarks);
+        }
+    }
+
+    // An implausible burst of distinct detections for one event in a single cycle is clamped.
+    [Fact]
+    public void Detections_ImplausibleBurstInOneCycle_IsClamped()
+    {
+        var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0)] });
+        var recording = new FakeRecordingSession { StartTime = Origin };
+
+        var boxes = (from column in new[] { 0.05f, 0.20f, 0.35f, 0.50f }
+                     from row in new[] { 0.05f, 0.20f, 0.35f }
+                     select Box(0, column, row, 0.05f, 0.05f)).ToArray();
+        Assert.Equal(12, boxes.Length);
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Overwatch"));
+            detector.RaiseDetections(boxes);
+
+            Assert.Equal(8, recording.Bookmarks.Count);
         }
     }
 
@@ -705,20 +874,35 @@ public sealed class DetectionHostTests
 
         internal DetectionResult[]? DetectionsOnStart;
 
-        public event Action<List<DetectionResult>>? DetectionsAvailable;
+        public event Action<DetectionBatch>? DetectionsAvailable;
 
         public void Start(string gameId)
         {
             StartedGameId = gameId;
             StartCount++;
             if (DetectionsOnStart is { } detections)
-                DetectionsAvailable?.Invoke(detections.ToList());
+                RaiseDetections(detections);
         }
 
         public void Stop() => StopCount++;
 
         internal void RaiseDetections(params DetectionResult[] detections)
-            => DetectionsAvailable?.Invoke(detections.ToList());
+            => DetectionsAvailable?.Invoke(new DetectionBatch
+            {
+                FrameTimestamp = detections.FirstOrDefault()?.Timestamp ?? DateTime.Now,
+                ObjectDetections = detections.ToList(),
+            });
+
+        internal void RaiseOcr(params OcrMatch[] matches) => RaiseBatch([], matches);
+
+        internal void RaiseBatch(IEnumerable<DetectionResult> detections, IEnumerable<OcrMatch> matches,
+            DateTime? frameTimestamp = null)
+            => DetectionsAvailable?.Invoke(new DetectionBatch
+            {
+                FrameTimestamp = frameTimestamp ?? Origin,
+                ObjectDetections = detections.ToList(),
+                OcrMatches = matches.ToList(),
+            });
 
         public void Dispose()
         {
@@ -741,6 +925,8 @@ public sealed class DetectionHostTests
             CheckedForModel.Add(gameId);
             return _definitions.ContainsKey(gameId);
         }
+
+        public bool HasDetectionBundleForGame(string gameId) => HasModelForGame(gameId);
 
         public List<EventDefinition> LoadEventDefinitions(string gameId)
         {

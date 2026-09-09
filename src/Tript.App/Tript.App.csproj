@@ -25,6 +25,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <Content Include="..\..\data\ocr\**\*" LinkBase="data\ocr">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Content Include="..\..\config\resolver.json" Link="resolver.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
@@ -35,8 +39,8 @@
   </ItemGroup>
   <ItemGroup Condition="'$(EnableTraining)' == 'true'">
     <Content Include="Training\Scripts\**\*"
-             Exclude="Training\Scripts\**\__pycache__\**\*;Training\Scripts\**\*.pyc"
-             LinkBase="Training\Scripts">
+              Exclude="Training\Scripts\**\__pycache__\**\*;Training\Scripts\**\*.pyc"
+              LinkBase="Training\Scripts">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

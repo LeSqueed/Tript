@@ -37,6 +37,12 @@ internal sealed class TrainingWorkspace
 
     internal string ModelPath => Path.Combine(RootPath, "model.onnx");
 
+    internal string OcrDetectorPath => Path.Combine(RootPath, "ocr_detector.onnx");
+
+    internal string OcrModelPath => Path.Combine(RootPath, "ocr_model.onnx");
+
+    internal string OcrDictionaryPath => Path.Combine(RootPath, "ocr_dict.txt");
+
     internal string PreferencesPath => Path.Combine(RootPath, "preferences.json");
 
     internal string SamplesPath => Path.Combine(RootPath, "samples");

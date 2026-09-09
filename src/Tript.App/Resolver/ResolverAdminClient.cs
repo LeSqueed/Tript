@@ -24,14 +24,14 @@ internal sealed class ResolverAdminClient : IDisposable
         _ownsHttp = httpClient is null;
     }
 
-    internal async Task<int> PublishAsync(string gameId, string modelPath, string eventsPath,
+    internal async Task<int> PublishAsync(string gameId, string installDirectory, string eventsPath,
         string username, string password, CancellationToken cancellationToken = default)
     {
         var token = await LoginAsync(username, password, cancellationToken).ConfigureAwait(false);
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var revision = await NextRevisionAsync(gameId, token, cancellationToken).ConfigureAwait(false);
-            var archivePath = BuildArchive(gameId, revision, modelPath, eventsPath);
+            var archivePath = BuildArchive(gameId, revision, installDirectory, eventsPath);
             try
             {
                 var published = await UploadAsync(gameId, archivePath, token, cancellationToken)
@@ -112,25 +112,46 @@ internal sealed class ResolverAdminClient : IDisposable
         return request;
     }
 
-    private static string BuildArchive(string gameId, int revision, string modelPath, string eventsPath)
+    private static string BuildArchive(string gameId, int revision, string installDirectory, string eventsPath)
     {
-        if (!File.Exists(modelPath) || !File.Exists(eventsPath))
-            throw new FileNotFoundException("The installed model is incomplete.");
+        if (!File.Exists(eventsPath))
+            throw new FileNotFoundException("The installed model is incomplete: no events.json.");
         var archivePath = Path.Combine(Path.GetTempPath(), $"tript-model-{Guid.NewGuid():N}.zip");
         using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
-        archive.CreateEntryFromFile(modelPath, "model.onnx", CompressionLevel.NoCompression);
         archive.CreateEntryFromFile(eventsPath, "events.json", CompressionLevel.Optimal);
+        var modelPath = Path.Combine(installDirectory, "model.onnx");
+        if (File.Exists(modelPath))
+            archive.CreateEntryFromFile(modelPath, "model.onnx", CompressionLevel.NoCompression);
+        var ocrModelPath = Path.Combine(installDirectory, "ocr_model.onnx");
+        var ocrDetectorPath = Path.Combine(installDirectory, "ocr_detector.onnx");
+        var ocrDictionaryPath = Path.Combine(installDirectory, "ocr_dict.txt");
+        if (File.Exists(ocrModelPath) && File.Exists(ocrDictionaryPath))
+        {
+            if (File.Exists(ocrDetectorPath))
+                archive.CreateEntryFromFile(ocrDetectorPath, "ocr_detector.onnx", CompressionLevel.NoCompression);
+            archive.CreateEntryFromFile(ocrModelPath, "ocr_model.onnx", CompressionLevel.NoCompression);
+            archive.CreateEntryFromFile(ocrDictionaryPath, "ocr_dict.txt", CompressionLevel.Optimal);
+        }
+        var files = new Dictionary<string, GameModelPackageFile>(StringComparer.Ordinal)
+        {
+            ["events.json"] = PackageFile(eventsPath),
+        };
+        if (File.Exists(modelPath))
+            files["model.onnx"] = PackageFile(modelPath);
+        if (File.Exists(ocrModelPath) && File.Exists(ocrDictionaryPath))
+        {
+            if (File.Exists(ocrDetectorPath))
+                files["ocr_detector.onnx"] = PackageFile(ocrDetectorPath);
+            files["ocr_model.onnx"] = PackageFile(ocrModelPath);
+            files["ocr_dict.txt"] = PackageFile(ocrDictionaryPath);
+        }
         var metadata = new GameModelPackageMetadata
         {
             PackageFormatVersion = 1,
             GameId = gameId,
             ModelApiVersion = ModelApiV1Compatibility.Version,
             Revision = revision,
-            Files = new Dictionary<string, GameModelPackageFile>(StringComparer.Ordinal)
-            {
-                ["model.onnx"] = PackageFile(modelPath),
-                ["events.json"] = PackageFile(eventsPath),
-            },
+            Files = files,
         };
         var entry = archive.CreateEntry("package.json", CompressionLevel.Optimal);
         using var destination = entry.Open();

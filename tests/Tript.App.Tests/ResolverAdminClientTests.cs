@@ -24,7 +24,7 @@ public sealed class ResolverAdminClientTests : IDisposable
         using var client = new ResolverAdminClient(
             new ResolverConfig(new Uri("https://resolver.test/"), null), http);
 
-        var revision = await client.PublishAsync("01HRESOLVEDGAME000000000000", model, events,
+        var revision = await client.PublishAsync("01HRESOLVEDGAME000000000000", _root, events,
             "admin", "password-123");
 
         Assert.Equal(1, revision);

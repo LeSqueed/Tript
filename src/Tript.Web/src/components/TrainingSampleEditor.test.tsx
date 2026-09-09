@@ -92,6 +92,101 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('saves an OCR transcription without creating an object label', () => {
+    const client = createClient();
+    render(<TrainingSampleEditor
+      client={client}
+      gameId="game-1"
+      sample={{ ...sample, sample: { ...sample.sample, labels: [], ocrTranscriptions: [] } }}
+      events={[{
+        id: 9,
+        classId: -1,
+        name: 'Kill feed',
+        type: 'Trigger',
+        detectionKind: 'Ocr',
+        ocr: {
+          patterns: [
+            { languageTag: 'en-US', template: 'ELIMINATED {player}' },
+            { languageTag: 'de-DE', template: 'ELIMINIERT {player}' },
+          ],
+        },
+      }]}
+      onClose={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add OCR text for Kill feed' }));
+    fireEvent.change(screen.getByLabelText('Language'), {
+      target: { value: 'de-DE' },
+    });
+    fireEvent.change(screen.getByLabelText('Text'), {
+      target: { value: 'ELIMINIERT AMON' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+
+    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({
+      labels: [],
+      ocrTranscriptions: [{
+        eventId: 9,
+        segmentId: 'default',
+        languageTag: 'de-DE',
+        text: 'ELIMINIERT AMON',
+      }],
+    }));
+  });
+
+  it('edits and removes the OCR transcription selected from a segment marker', () => {
+    const client = createClient();
+    render(<TrainingSampleEditor
+      client={client}
+      gameId="game-1"
+      sample={{
+        ...sample,
+        sample: {
+          ...sample.sample,
+          labels: [],
+          ocrTranscriptions: [
+            { eventId: 9, segmentId: 'upper', languageTag: 'en-US', text: 'UPPER TEXT' },
+            { eventId: 9, segmentId: 'lower', languageTag: 'en-US', text: 'LOWER TEXT' },
+          ],
+        },
+      }}
+      events={[{
+        id: 9,
+        classId: -1,
+        name: 'Kill feed',
+        type: 'Trigger',
+        detectionKind: 'Ocr',
+        screenRegionX: 0.2,
+        screenRegionY: 0.3,
+        screenRegionW: 0.5,
+        screenRegionH: 0.4,
+        ocr: {
+          patterns: [{ languageTag: 'en-US', template: 'ELIMINATED {player}' }],
+          segments: [
+            { id: 'upper', x: 0, y: 0, width: 1, height: 0.5 },
+            { id: 'lower', x: 0, y: 0.5, width: 1, height: 0.5 },
+          ],
+        },
+      }]}
+      onClose={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kill feed: LOWER TEXT' }));
+    expect((screen.getByLabelText('Text') as HTMLInputElement).value).toBe('LOWER TEXT');
+    fireEvent.change(screen.getByLabelText('Text'), { target: { value: 'UPDATED LOWER' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Kill feed: UPDATED LOWER' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+
+    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({
+      ocrTranscriptions: [
+        { eventId: 9, segmentId: 'upper', languageTag: 'en-US', text: 'UPPER TEXT' },
+      ],
+    }));
+  });
+
   it('reports a failed save and keeps the unsaved-change guard active', () => {
     const client = createClient();
     const onClose = vi.fn();
@@ -260,6 +355,7 @@ describe('TrainingSampleEditor save lifecycle', () => {
       sampleId: 'sample-1',
       requestId: expect.any(String),
       labels: [{ classId: 4, centerX: 0.16, centerY: 0.05, width: 0.11, height: 0.03 }],
+      ocrTranscriptions: [],
     });
   });
 

@@ -429,6 +429,17 @@ internal sealed class TrainingLabelParameters
     public double Height { get; set; }
 }
 
+internal sealed class TrainingOcrTranscriptionParameters
+{
+    public int EventId { get; set; }
+
+    public string SegmentId { get; set; } = "default";
+
+    public string LanguageTag { get; set; } = string.Empty;
+
+    public string Text { get; set; } = string.Empty;
+}
+
 internal sealed class CaptureTrainingSampleParameters
 {
     public string GameId { get; set; } = string.Empty;
@@ -453,6 +464,8 @@ internal sealed class UpdateTrainingSampleParameters
     public string RequestId { get; set; } = string.Empty;
 
     public List<TrainingLabelParameters> Labels { get; set; } = [];
+
+    public List<TrainingOcrTranscriptionParameters> OcrTranscriptions { get; set; } = [];
 }
 
 internal sealed class UpdateTrainingEventsParameters

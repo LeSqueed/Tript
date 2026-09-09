@@ -66,16 +66,35 @@ def main() -> int:
     model_path = source_dir / "model.onnx"
     events_path = source_dir / "events.json"
     manifest_path = source_dir / "manifest.json"
-    for path in (model_path, events_path, manifest_path):
+    ocr_detector_path = source_dir / "ocr_detector.onnx"
+    ocr_model_path = source_dir / "ocr_model.onnx"
+    ocr_dict_path = source_dir / "ocr_dict.txt"
+    for path in (events_path, manifest_path):
         if not path.is_file():
             fail(f"required input does not exist: {path}")
+    if not model_path.is_file() and not ocr_model_path.is_file():
+        fail("at least one of model.onnx or ocr_model.onnx is required")
 
-    with model_path.open("rb") as model:
-        header = model.read(len(LFS_HEADER))
-    if not header:
-        fail("model.onnx is empty")
-    if header == LFS_HEADER:
-        fail("model.onnx is a Git LFS pointer; fetch LFS content before packaging")
+    if model_path.is_file():
+        with model_path.open("rb") as model:
+            header = model.read(len(LFS_HEADER))
+        if not header:
+            fail("model.onnx is empty")
+        if header == LFS_HEADER:
+            fail("model.onnx is a Git LFS pointer; fetch LFS content before packaging")
+    if ocr_model_path.is_file() and not ocr_dict_path.is_file():
+        fail("ocr_dict.txt is required when ocr_model.onnx is present")
+    if ocr_detector_path.is_file() and not ocr_model_path.is_file():
+        fail("ocr_model.onnx is required when ocr_detector.onnx is present")
+    for path in (ocr_detector_path, ocr_model_path):
+        if not path.is_file():
+            continue
+        with path.open("rb") as model:
+            header = model.read(len(LFS_HEADER))
+        if not header:
+            fail(f"{path.name} is empty")
+        if header == LFS_HEADER:
+            fail(f"{path.name} is a Git LFS pointer; fetch LFS content before packaging")
 
     with events_path.open(encoding="utf-8") as events_file:
         events = json.load(events_file)
@@ -94,9 +113,15 @@ def main() -> int:
         fail("manifest modelApiVersion does not match --model-api-version")
 
     files = {
-        "model.onnx": file_metadata(model_path),
         "events.json": file_metadata(events_path),
     }
+    if model_path.is_file():
+        files["model.onnx"] = file_metadata(model_path)
+    if ocr_model_path.is_file() and ocr_dict_path.is_file():
+        if ocr_detector_path.is_file():
+            files["ocr_detector.onnx"] = file_metadata(ocr_detector_path)
+        files["ocr_model.onnx"] = file_metadata(ocr_model_path)
+        files["ocr_dict.txt"] = file_metadata(ocr_dict_path)
     package_metadata = {
         "packageFormatVersion": 1,
         "gameId": game_id,
@@ -110,8 +135,14 @@ def main() -> int:
     asset_name = f"{game_id}-model-api-{args.model_api_version}-revision-{revision}.zip"
     asset_path = (args.output_dir / asset_name).resolve()
     with zipfile.ZipFile(asset_path, "x", compression=zipfile.ZIP_DEFLATED) as package:
-        package.write(model_path, "model.onnx")
+        if model_path.is_file():
+            package.write(model_path, "model.onnx")
         package.write(events_path, "events.json")
+        if ocr_model_path.is_file():
+            if ocr_detector_path.is_file():
+                package.write(ocr_detector_path, "ocr_detector.onnx")
+            package.write(ocr_model_path, "ocr_model.onnx")
+            package.write(ocr_dict_path, "ocr_dict.txt")
         package.writestr("package.json", metadata_bytes)
 
     asset = file_metadata(asset_path)

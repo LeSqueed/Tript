@@ -13,6 +13,8 @@ public static class ModelService
     // "models" rather than "training": these are the shipped runtime assets, not a training workspace.
     public static readonly string BasePath = Path.Combine(AppContext.BaseDirectory, "data", "models");
 
+    public static readonly string SharedOcrPath = Path.Combine(AppContext.BaseDirectory, "data", "ocr");
+
     private static string[] _userModelRoots = [];
 
     // An InferenceSession is ~10 MB of native memory shared by every detector on the same game, so
@@ -28,6 +30,8 @@ public static class ModelService
     private static readonly object _modelsLock = new();
     private static readonly ConcurrentDictionary<string, List<EventDefinition>> _definitions =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, List<RegionGroupDefinition>> _regionGroups =
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _rejectedBundles = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -41,7 +45,7 @@ public static class ModelService
         var key = CanonicalGameId(gameId);
         return _definitions.GetOrAdd(key, id =>
         {
-            var path = Path.Combine(GetGamePath(id), "events.json");
+            var path = Path.Combine(GetDetectionGamePath(id), "events.json");
 
             if (!File.Exists(path))
             {
@@ -56,6 +60,26 @@ public static class ModelService
         });
     }
 
+    public static IReadOnlyList<RegionGroupDefinition> LoadRegionGroups(string gameId)
+    {
+        var key = CanonicalGameId(gameId);
+        return _regionGroups.GetOrAdd(key, id =>
+        {
+            var path = Path.Combine(GetDetectionGamePath(id), "regionGroups.json");
+            if (!File.Exists(path)) return [];
+            try
+            {
+                return JsonSerializer.Deserialize<List<RegionGroupDefinition>>(
+                    File.ReadAllText(path), _jsonOptions) ?? [];
+            }
+            catch (JsonException)
+            {
+                Log.Warning("Could not parse regionGroups.json for game {GameId}", id);
+                return [];
+            }
+        });
+    }
+
     public static void SaveEventDefinitions(string gameId, List<EventDefinition> definitions)
     {
         var key = CanonicalGameId(gameId);
@@ -64,6 +88,7 @@ public static class ModelService
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, json);
         _definitions[key] = definitions;
+        _regionGroups.TryRemove(key, out _);
         Log.Information("Saved {Count} event definitions for game {GameId}", definitions.Count, gameId);
     }
 
@@ -88,6 +113,9 @@ public static class ModelService
 
         return true;
     }
+
+    public static bool HasDetectionBundleForGame(string gameId)
+        => FindDetectionDirectory(gameId) is not null;
 
     // Takes a reference on the game's session. Every successful call must be paired with exactly
     // one UnloadModel; the session stays alive until the last of those calls.
@@ -250,9 +278,69 @@ public static class ModelService
         return incompleteMatch;
     }
 
+    private static string? FindDetectionDirectory(string gameId)
+    {
+        foreach (var root in ModelRoots())
+        {
+            if (!Directory.Exists(root)) continue;
+            foreach (var directory in EnumerateDirectories(root))
+            {
+                if (!Path.GetFileName(directory).Equals(gameId, StringComparison.OrdinalIgnoreCase)) continue;
+                lock (_modelsLock)
+                {
+                    if (_rejectedBundles.Contains(Path.GetFullPath(directory))) continue;
+                }
+                if (IsCompleteDetectionBundle(directory)) return directory;
+            }
+        }
+        return null;
+    }
+
     private static bool IsCompleteModelBundle(string directory)
         => File.Exists(Path.Combine(directory, "model.onnx"))
             && File.Exists(Path.Combine(directory, "events.json"));
+
+    // Memoise the events.json parse the bundle-completeness checks repeat; the write time + length
+    // stamp retires the entry on any real edit.
+    private static readonly ConcurrentDictionary<string, ((DateTime WriteTimeUtc, long Length) Stamp,
+        List<EventDefinition> Definitions)> _eventsFileCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static List<EventDefinition>? ReadEventDefinitionsFile(string eventsPath)
+    {
+        FileInfo info;
+        try
+        {
+            info = new FileInfo(eventsPath);
+            if (!info.Exists) return null;
+        }
+        catch (IOException) { return null; }
+
+        var stamp = (info.LastWriteTimeUtc, info.Length);
+        if (_eventsFileCache.TryGetValue(eventsPath, out var cached) && cached.Stamp == stamp)
+            return cached.Definitions;
+
+        try
+        {
+            var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
+                File.ReadAllText(eventsPath), _jsonOptions) ?? [];
+            _eventsFileCache[eventsPath] = (stamp, definitions);
+            return definitions;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsCompleteDetectionBundle(string directory)
+    {
+        var definitions = ReadEventDefinitionsFile(Path.Combine(directory, "events.json"));
+        if (definitions is null || definitions.Count == 0) return false;
+        var needsObject = definitions.Any(definition => definition.DetectionKind == DetectionKind.Object);
+        var needsOcr = definitions.Any(definition => definition.DetectionKind == DetectionKind.Ocr);
+        return (!needsObject || File.Exists(Path.Combine(directory, "model.onnx")))
+            && (!needsOcr || HasOcrModel(directory) || HasOcrModel(SharedOcrPath));
+    }
 
     private static string[] GetAvailableGameIds()
     {
@@ -273,6 +361,19 @@ public static class ModelService
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(HasModelForGame)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static string[] GetLoadableDetectionGameIds()
+    {
+        return ModelRoots()
+            .SelectMany(EnumerateDirectories)
+            .Where(IsCompleteDetectionBundle)
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(HasDetectionBundleForGame)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -307,9 +408,31 @@ public static class ModelService
         return FindGameDirectory(gameId) ?? Path.Combine(BasePath, gameId);
     }
 
+    public static string GetDetectionGamePath(string gameId)
+        => FindDetectionDirectory(gameId) ?? FindGameDirectory(gameId) ?? Path.Combine(BasePath, gameId);
+
     public static string GetModelPath(string gameId)
     {
-        return Path.Combine(GetGamePath(gameId), "model.onnx");
+        return Path.Combine(GetDetectionGamePath(gameId), "model.onnx");
+    }
+
+    public static string GetOcrModelPath(string gameId)
+        => ResolveOcrAsset(gameId, "ocr_model.onnx");
+
+    public static string GetOcrDetectorPath(string gameId)
+        => ResolveOcrAsset(gameId, "ocr_detector.onnx");
+
+    public static string GetOcrDictionaryPath(string gameId)
+        => ResolveOcrAsset(gameId, "ocr_dict.txt");
+
+    private static bool HasOcrModel(string directory) =>
+        File.Exists(Path.Combine(directory, "ocr_model.onnx"))
+        && File.Exists(Path.Combine(directory, "ocr_dict.txt"));
+
+    private static string ResolveOcrAsset(string gameId, string fileName)
+    {
+        var gameAsset = Path.Combine(GetDetectionGamePath(gameId), fileName);
+        return File.Exists(gameAsset) ? gameAsset : Path.Combine(SharedOcrPath, fileName);
     }
 
     public static void ConfigureUserModelRoot(string root)
@@ -372,6 +495,7 @@ public static class ModelService
             }
 
             _definitions.TryRemove(key, out _);
+            _regionGroups.TryRemove(key, out _);
         }
 
         released?.Dispose();

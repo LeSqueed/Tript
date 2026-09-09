@@ -113,6 +113,8 @@ assemble-windows: obs-fetch
 	mkdir -p $(WIN_APP_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(WIN_APP_DIR)/dist/
 	# Optional offline fallback. Thin releases download only models for detected games.
+	mkdir -p $(WIN_APP_DIR)/data/ocr
+	cp -r data/ocr/* $(WIN_APP_DIR)/data/ocr/
 	@if [ "$(BUNDLE_MODELS)" = "true" ]; then \
 		mkdir -p $(WIN_APP_DIR)/data/models; \
 		cp -r data/models/* $(WIN_APP_DIR)/data/models/; \

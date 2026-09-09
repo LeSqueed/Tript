@@ -133,6 +133,53 @@ public sealed class GameModelManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task DuplicatePackageEntry_IsRejectedBeforeExtraction()
+    {
+        var package = BuildPackageWithDuplicateEntry("Overwatch", revision: 1);
+        var packageHash = Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
+        var manifest = Manifest("Overwatch", apiVersion: 1, revision: 1,
+            package.Length, packageHash, "http://127.0.0.1:8895/overwatch.zip");
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
+            ["http://127.0.0.1:8895/overwatch.zip"] = package,
+        });
+        using var manager = CreateManager(handler, (_, _, _) => Task.CompletedTask);
+
+        await manager.EnsureModelAsync("Overwatch");
+
+        var status = Assert.Single(manager.Snapshot());
+        Assert.Equal("error", status.Stage);
+        Assert.Contains("Duplicate", status.Message);
+        Assert.False(Directory.Exists(Path.Combine(ModelsRoot, "Overwatch")));
+    }
+
+    [Fact]
+    public async Task OcrModelLargerThanTheSmallFileCap_StillInstalls()
+    {
+        var package = BuildOversizedOcrPackage("KillFeedGame", revision: 1);
+        var packageHash = Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
+        var manifest = Manifest("KillFeedGame", apiVersion: 1, revision: 1,
+            package.Length, packageHash, "http://127.0.0.1:8895/killfeed.zip");
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
+            ["http://127.0.0.1:8895/killfeed.zip"] = package,
+        });
+        using var manager = CreateManager(handler, async (gameId, stagedPath, _) =>
+        {
+            GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, ModelsRoot);
+            await Task.CompletedTask;
+        });
+
+        await manager.EnsureModelAsync("KillFeedGame");
+
+        Assert.Equal("ready", Assert.Single(manager.Snapshot()).Stage);
+        Assert.True(File.Exists(Path.Combine(ModelsRoot, "KillFeedGame", "ocr_model.onnx")));
+        Assert.False(File.Exists(Path.Combine(ModelsRoot, "KillFeedGame", "model.onnx")));
+    }
+
+    [Fact]
     public void FailedDirectorySwap_RestoresPreviousModel()
     {
         var target = Path.Combine(ModelsRoot, "SwapGame");
@@ -221,6 +268,84 @@ public sealed class GameModelManagerTests : IDisposable
         {
             AddEntry(archive, "model.onnx", model);
             AddEntry(archive, "events.json", events);
+            AddEntry(archive, "package.json", package);
+        }
+        return output.ToArray();
+    }
+
+    // A package with two entries of one name, to prove the extractor rejects it up front.
+    private static byte[] BuildPackageWithDuplicateEntry(string gameId, int revision)
+    {
+        var sourceRoot = Path.Combine(AppContext.BaseDirectory, "data", "models",
+            "57ZZVAZ0PJK8VQGPKB728QE57C");
+        var model = File.ReadAllBytes(Path.Combine(sourceRoot, "model.onnx"));
+        var events = File.ReadAllBytes(Path.Combine(sourceRoot, "events.json"));
+        var package = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            packageFormatVersion = 1,
+            gameId,
+            modelApiVersion = 1,
+            revision,
+            files = new Dictionary<string, object>
+            {
+                ["model.onnx"] = FileFacts(model),
+                ["events.json"] = FileFacts(events),
+            },
+        });
+
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            AddEntry(archive, "model.onnx", model);
+            AddEntry(archive, "events.json", events);
+            AddEntry(archive, "events.json", events);
+            AddEntry(archive, "package.json", package);
+        }
+        return output.ToArray();
+    }
+
+    // An OCR-only package whose recogniser graph exceeds the 10 MiB small-file cap.
+    private static byte[] BuildOversizedOcrPackage(string gameId, int revision)
+    {
+        var events = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                id = 1,
+                name = "Kill feed",
+                type = "Trigger",
+                detectionKind = "Ocr",
+                ocr = new
+                {
+                    patterns = new[]
+                    {
+                        new { languageTag = "en-US", template = "ELIMINATED {player}" },
+                    },
+                },
+            },
+        }));
+        var ocrModel = new byte[10 * 1024 * 1024 + 1];
+        var ocrDict = Encoding.UTF8.GetBytes("A\nB\nC\n");
+        var package = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            packageFormatVersion = 1,
+            gameId,
+            modelApiVersion = 1,
+            revision,
+            files = new Dictionary<string, object>
+            {
+                ["events.json"] = FileFacts(events),
+                ["ocr_model.onnx"] = FileFacts(ocrModel),
+                ["ocr_dict.txt"] = FileFacts(ocrDict),
+            },
+        });
+
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            AddEntry(archive, "events.json", events);
+            AddEntry(archive, "ocr_model.onnx", ocrModel);
+            AddEntry(archive, "ocr_dict.txt", ocrDict);
             AddEntry(archive, "package.json", package);
         }
         return output.ToArray();

@@ -149,9 +149,16 @@ def main() -> int:
                 *train_opts], args.paddle_root, env, progress_path, args.epochs)
 
         write_progress(progress_path, "exporting", args.epochs, args.epochs)
+        # PaddleOCR only writes best_accuracy when eval acc improves; a short run or a noisy
+        # held-out set can leave only the always-written latest checkpoint.
+        trained = out_dir / "best_accuracy"
+        if not (out_dir / "best_accuracy.pdparams").exists():
+            trained = out_dir / "latest"
+        if not trained.with_suffix(".pdparams").exists():
+            raise SystemExit(f"training produced no checkpoint in {out_dir}")
         inference_dir = staging / "inference"
         stream([sys.executable, args.paddle_root / "tools" / "export_model.py", "-c", run_config, "-o",
-                f"Global.pretrained_model={out_dir / 'best_accuracy'}",
+                f"Global.pretrained_model={trained}",
                 f"Global.character_dict_path={args.dict}",
                 f"Global.save_inference_dir={inference_dir}"], args.paddle_root, env, None, args.epochs)
 

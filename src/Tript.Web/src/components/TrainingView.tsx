@@ -1031,7 +1031,7 @@ export function TrainingView({ client }: TrainingViewProps) {
             {hasOcrEvents && (
               <div className="training-field compact">
                 <Field label={hasObjectEvents ? 'OCR epochs' : 'Epochs'}
-                  hint="The OCR recogniser fine-tunes from the pretrained PP-OCRv3 model on CPU.">
+                  hint="The OCR recogniser fine-tunes from the pretrained PP-OCRv4 model on CPU.">
                   <TextField type="number" value={ocrEpochs} min={1} onChange={(value) => setOcrEpochs(Number(value))} />
                 </Field>
               </div>

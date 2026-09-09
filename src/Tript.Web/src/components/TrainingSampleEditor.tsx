@@ -308,9 +308,11 @@ export function TrainingSampleEditor({
         : region));
       return;
     }
-    setOcrRegions((current) => current.map((region, index) => index === gesture.index
-      ? { ...region, ...resizeRegionBottomRight(gesture.original, point) }
-      : region));
+    if (gesture.kind === 'resize-ocr') {
+      setOcrRegions((current) => current.map((region, index) => index === gesture.index
+        ? { ...region, ...resizeRegionBottomRight(gesture.original, point) }
+        : region));
+    }
   };
 
   const beginDraw = (event: PointerEvent) => {

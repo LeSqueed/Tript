@@ -662,25 +662,28 @@ export function TrainingSampleEditor({
           </div>
 
           <aside className="training-event-palette" aria-label="Training events">
-            <div className="training-palette-heading">
-              <div>
-                <p className="training-eyebrow">Events</p>
-                <h3>What is in this frame?</h3>
+            <div className="training-palette-top">
+              <div className="training-palette-heading">
+                <div>
+                  <p className="training-eyebrow">Events</p>
+                  <h3>What is in this frame?</h3>
+                </div>
+                <Button variant="ghost" size="small" onClick={openNewEvent} aria-label="Create event">+ Add</Button>
               </div>
-              <Button variant="ghost" size="small" onClick={openNewEvent} aria-label="Create event">+ Add</Button>
-            </div>
-            <div className="training-ocr-region-toolbar">
-              <Button
-                variant={drawMode === 'ocrRegion' ? 'primary' : 'ghost'}
-                size="small"
-                aria-pressed={drawMode === 'ocrRegion'}
-                onClick={() => setDrawMode((mode) => mode === 'ocrRegion' ? 'label' : 'ocrRegion')}
-              >
-                {drawMode === 'ocrRegion' ? 'Drawing OCR region…' : 'Add OCR region'}
-              </Button>
-              <span className="muted small">
-                {ocrRegions.length} OCR region{ocrRegions.length === 1 ? '' : 's'}
-              </span>
+              <div className={`training-ocr-tool${drawMode === 'ocrRegion' ? ' is-armed' : ''}`}>
+                <button
+                  type="button"
+                  className="training-ocr-tool-toggle"
+                  aria-pressed={drawMode === 'ocrRegion'}
+                  onClick={() => setDrawMode((mode) => mode === 'ocrRegion' ? 'label' : 'ocrRegion')}
+                >
+                  <span className="training-ocr-tool-icon" aria-hidden="true" />
+                  {drawMode === 'ocrRegion' ? 'Drawing — drag on the frame' : 'Add OCR region'}
+                </button>
+                <span className="training-ocr-tool-count">
+                  {ocrRegions.length} region{ocrRegions.length === 1 ? '' : 's'}
+                </span>
+              </div>
             </div>
             <div className="training-event-scroll">
               <TrainingEventTree

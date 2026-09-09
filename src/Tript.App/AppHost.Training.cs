@@ -779,12 +779,8 @@ internal sealed partial class AppHost
             var cancellation = _trainingCancellation;
             _ = RunTrainingAsync(workspace, imageSize.Value, augmentCopies, parameters, cancellation);
         }
-        var augmentMessage = (parameters.AugmentCopies ?? 0) > 0
-            ? $" augmentation: {parameters.AugmentCopies} copies per training crop (validation unchanged)."
-            : string.Empty;
         PushTrainingProgress(parameters.GameId, "exporting",
-            $"Preparing the training dataset in a console window. Requested device: {parameters.Device}; " +
-            $"epochs: {parameters.Epochs}; input: {imageSize}x{imageSize}." + augmentMessage);
+            $"Preparing the training data. Requested device: {parameters.Device}; epochs: {parameters.Epochs}.");
     }
 
     internal void CancelTraining()
@@ -927,12 +923,14 @@ internal sealed partial class AppHost
         var datasetOcrModel = Path.Combine(workspace.DatasetPath, "ocr_model.onnx");
         var datasetOcrDict = Path.Combine(workspace.DatasetPath, "ocr_dict.txt");
         var haveDatasetOcr = hasOcrEvents && File.Exists(datasetOcrModel) && File.Exists(datasetOcrDict);
-        var result = haveDatasetOcr
-            ? InstallTrainingModel(parameters.GameId, modelSource, datasetOcrModel, datasetOcrDict)
-            : InstallTrainingModel(parameters.GameId, modelSource);
+        if (haveDatasetOcr)
+            InstallTrainingModel(parameters.GameId, modelSource, datasetOcrModel, datasetOcrDict);
+        else
+            InstallTrainingModel(parameters.GameId, modelSource);
         if (modelSource is not null)
             RefreshWorkspaceModel(workspace, modelSource);
-        PushTrainingProgress(parameters.GameId, "completed", $"Installed {result.ModelPath}.");
+        PushTrainingProgress(parameters.GameId, "completed",
+            DescribeTrainingOutcome(modelSource is not null, haveDatasetOcr, haveDatasetOcr));
         PushTrainingCore(parameters.GameId);
     }
 
@@ -967,6 +965,18 @@ internal sealed partial class AppHost
                 if (!trainObject && !trainOcr)
                     throw new InvalidOperationException(
                         "The requested training scope has no matching events to train.");
+                var datasetKinds = (trainObject, trainOcr) switch
+                {
+                    (true, true) => "object-detection dataset and OCR training data",
+                    (true, false) => "object-detection dataset",
+                    _ => "OCR training data",
+                };
+                var augmentNote = trainObject && augmentCopies > 0
+                    ? $" Augmentation: {augmentCopies} extra copies per crop."
+                    : string.Empty;
+                PushTrainingProgress(parameters.GameId, "exporting",
+                    $"Preparing the {datasetKinds}. The workspace is locked until this finishes; "
+                    + "details are in the console window." + augmentNote);
                 if (trainObject)
                 {
                     await _trainingRunner.PrepareDatasetAsync(workspace, imageSize, augmentCopies,
@@ -993,6 +1003,7 @@ internal sealed partial class AppHost
             string? ocrModelPath = null;
             string? ocrDictionaryPath = null;
             string? ocrDetectorPath = null;
+            var ocrFineTuned = false;
             if (trainObject)
             {
                 modelPath = await _trainingRunner.TrainModelAsync(workspace, imageSize, parameters.Epochs,
@@ -1018,6 +1029,7 @@ internal sealed partial class AppHost
                             details),
                         cancellation.Token).ConfigureAwait(false);
                     ocrDictionaryPath = Path.Combine(workspace.DatasetPath, "ocr_dict.txt");
+                    ocrFineTuned = true;
                     PushTrainingProgress(parameters.GameId, "progress", "Fine-tuned the OCR recogniser.");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1050,7 +1062,8 @@ internal sealed partial class AppHost
                 var installed = InstallTrainingModel(parameters.GameId, modelPath,
                     ocrModelPath, ocrDictionaryPath, ocrDetectorPath);
                 if (modelPath is not null) RefreshWorkspaceModel(workspace, modelPath);
-                PushTrainingProgress(parameters.GameId, "completed", $"Installed {installed.ModelPath}.");
+                PushTrainingProgress(parameters.GameId, "completed",
+                    DescribeTrainingOutcome(trainObject, trainOcr, ocrFineTuned));
                 PushTrainingCore(parameters.GameId);
             }
             finally
@@ -1098,6 +1111,19 @@ internal sealed partial class AppHost
                 Log.Warning(exception, "Training: could not refresh workspace state after training ended");
             }
         }
+    }
+
+    private static string DescribeTrainingOutcome(bool trainedObject, bool trainedOcr, bool ocrFineTuned)
+    {
+        var parts = new List<string>();
+        if (trainedObject) parts.Add("object detector");
+        if (trainedOcr)
+            parts.Add(ocrFineTuned
+                ? "fine-tuned OCR recogniser"
+                : "OCR recogniser (kept the pretrained model)");
+        return parts.Count == 0
+            ? "Training complete."
+            : $"Training complete — installed and activated the {string.Join(" and ", parts)}.";
     }
 
     private static TrainingLabel ToTrainingLabel(TrainingLabelParameters label) => new()

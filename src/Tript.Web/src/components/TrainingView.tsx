@@ -26,6 +26,9 @@ interface TrainingViewProps {
 
 const EMPTY_TRAINING: TrainingMessage = { gameId: null, events: [], samples: [], regionGroups: [], invalidSamples: [] };
 const SAMPLE_PAGE_SIZE = 8;
+const TERMINAL_STATUS_LABELS: Record<string, string> = {
+  completed: 'Done', cancelled: 'Cancelled', error: 'Failed', imported: 'Imported',
+};
 
 // One per-epoch heartbeat (loss/mAP50 plus arrival time) for the in-progress panel: it feeds the
 // sparkline and the elapsed/remaining pacing derived from when each epoch finished.
@@ -413,8 +416,12 @@ export function TrainingView({ client }: TrainingViewProps) {
   const validLabeledSampleCount = training.samples.filter((sample) =>
     (sample.labels.length > 0 || (sample.ocrRegions?.length ?? 0) > 0)
       && !invalidById.has(sample.id)).length;
-  const canPickScope = training.events.some((event) => (event.detectionKind ?? 'Object') === 'Object')
-    && training.events.some((event) => event.detectionKind === 'Ocr');
+  const hasObjectEvents = training.events.some((event) => (event.detectionKind ?? 'Object') === 'Object');
+  const hasOcrEvents = training.events.some((event) => event.detectionKind === 'Ocr');
+  const canPickScope = hasObjectEvents && hasOcrEvents;
+  const effectiveScope = canPickScope ? trainingScope : 'all';
+  const willTrainObject = hasObjectEvents && effectiveScope !== 'ocr';
+  const willTrainOcr = hasOcrEvents && effectiveScope !== 'object';
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
@@ -426,6 +433,8 @@ export function TrainingView({ client }: TrainingViewProps) {
   // populate (e.g. DirectML skips validation) must not show an empty graph frame.
   const hasLoss = epochHistory.some((point) => point.loss != null);
   const hasMap50 = epochHistory.some((point) => point.map50 != null);
+  // The OCR run reuses the mAP50 slot for exact-match validation accuracy.
+  const accuracyLabel = willTrainObject ? 'mAP50' : 'exact match';
   const normalizedSampleFilter = sampleFilter.trim().toLowerCase();
   const filteredSamples = training.samples.filter((sample) => {
     const isInvalid = invalidById.has(sample.id);
@@ -938,7 +947,8 @@ export function TrainingView({ client }: TrainingViewProps) {
                   </div>
                    <span className="muted small">
                     Requested device: {device === 'auto' ? 'Auto (actual device is shown in the console)' : device.toUpperCase()}
-                    {' · '} {epochs} epochs {' · '} {training.model?.inputWidth ?? 640}x{training.model?.inputHeight ?? 640} input
+                    {' · '} {epochs} epochs
+                    {willTrainObject && ` · ${training.model?.inputWidth ?? 640}x${training.model?.inputHeight ?? 640} input`}
                   </span>
                   {epochDetails && (
                     <div
@@ -956,20 +966,20 @@ export function TrainingView({ client }: TrainingViewProps) {
                       <TrainingSparkline points={epochHistory} totalEpochs={epochDetails?.epochs ?? epochs} />
                       <span className="muted small training-metrics-legend">
                         {hasLoss && <span className="training-metrics-legend-loss">loss</span>}
-                        {hasMap50 && <span className="training-metrics-legend-map">mAP50</span>}
+                        {hasMap50 && <span className="training-metrics-legend-map">{accuracyLabel}</span>}
                       </span>
                     </div>
                   )}
                   {epochDetails && (
                     <span className="muted small training-metrics-numbers">
                       {epochDetails.loss != null && <span>loss {epochDetails.loss.toFixed(4)}</span>}
-                      {epochDetails.map50 != null && <span>mAP50 {epochDetails.map50.toFixed(4)}</span>}
+                      {epochDetails.map50 != null && <span>{accuracyLabel} {epochDetails.map50.toFixed(4)}</span>}
                       {pace.elapsedMs > 0 && <span>{formatDuration(pace.elapsedMs)} elapsed</span>}
                       {pace.remainingMs != null && <span>~{formatDuration(pace.remainingMs)} remaining</span>}
                     </span>
                   )}
                   {statusNote && <span className="muted small">{statusNote}</span>}
-                  <span className="muted small">Detailed Ultralytics output is open in the training console window.</span>
+                  <span className="muted small">Detailed training output is in the console window.</span>
                 </div>
               )}
             <div className="training-field compact">
@@ -1034,7 +1044,8 @@ export function TrainingView({ client }: TrainingViewProps) {
               non-training flows (import, event deletion). */}
           {progress && !trainingIsActive && (
             <p className={`training-progress training-progress-${progress.status}`} role="status">
-              <strong>{progress.status}</strong> {progress.message}
+              <strong>{TERMINAL_STATUS_LABELS[progress.status] ?? progress.status}</strong>{' '}
+              {progress.message}
             </p>
           )}
 
@@ -1106,7 +1117,13 @@ export function TrainingView({ client }: TrainingViewProps) {
       {exportingDataset && (
         <LoadingOverlay
           title="Preparing training data"
-          description="Cropping, splitting and augmenting the dataset. The workspace is locked until the dataset is ready; the console window shows details."
+          description={
+            willTrainObject && willTrainOcr
+              ? 'Building the object-detection dataset and the OCR training crops. The workspace is locked until this finishes; the console window shows details.'
+              : willTrainOcr
+                ? 'Collecting the text crops you labelled and rendering synthetic feed lines. The workspace is locked until this finishes; the console window shows details.'
+                : 'Cropping, splitting and augmenting the object-detection dataset. The workspace is locked until this finishes; the console window shows details.'
+          }
           cancelLabel="Cancel"
           onCancel={() => client.send('CancelTraining')}
         />

@@ -24,11 +24,12 @@ internal sealed class TrainingLabel
     public double Height { get; set; }
 }
 
-internal sealed class TrainingOcrTranscription
+internal sealed class TrainingOcrRegion
 {
-    public int EventId { get; set; }
-    public string SegmentId { get; set; } = "default";
-    public string LanguageTag { get; set; } = string.Empty;
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
     public string Text { get; set; } = string.Empty;
 }
 
@@ -167,7 +168,7 @@ internal sealed class TrainingSampleRecord
 
     public List<TrainingLabel> Labels { get; set; } = [];
 
-    public List<TrainingOcrTranscription> OcrTranscriptions { get; set; } = [];
+    public List<TrainingOcrRegion> OcrRegions { get; set; } = [];
 
     // Imported dataset images are already cropped to the model input. Keep them in the imported
     // dataset instead of sending them through the full-frame crop exporter a second time.
@@ -257,35 +258,30 @@ internal static class TrainingLabelValidator
     }
 }
 
-internal static class TrainingOcrTranscriptionValidator
+internal static class TrainingOcrRegionValidator
 {
-    internal static string? FindError(IReadOnlyList<TrainingOcrTranscription> transcriptions,
-        IReadOnlyList<EventDefinition> definitions)
+    private const double Tolerance = 1e-4;
+
+    internal static string? FindError(IReadOnlyList<TrainingOcrRegion> regions)
     {
-        var definitionsById = definitions
-            .Where(definition => definition.DetectionKind == DetectionKind.Ocr)
-            .ToDictionary(definition => definition.Id);
-        for (var index = 0; index < transcriptions.Count; index++)
+        for (var index = 0; index < regions.Count; index++)
         {
-            var transcription = transcriptions[index];
-            if (!definitionsById.TryGetValue(transcription.EventId, out var definition))
-                return $"OCR transcription {index} references unknown eventId {transcription.EventId}";
-            if (string.IsNullOrWhiteSpace(transcription.Text))
-                return $"OCR transcription {index} is empty";
-            var segments = definition.Ocr?.Segments ?? [];
-            var segmentExists = segments.Count == 0
-                ? string.Equals(transcription.SegmentId, "default", StringComparison.OrdinalIgnoreCase)
-                : segments.Any(segment => string.Equals(segment.Id, transcription.SegmentId,
-                    StringComparison.OrdinalIgnoreCase));
-            if (!segmentExists)
-                return $"OCR transcription {index} references an unknown segment for '{definition.Name}'";
-            if (string.IsNullOrWhiteSpace(transcription.LanguageTag)
-                || definition.Ocr is null
-                || !definition.Ocr.Patterns.Any(pattern => string.Equals(pattern.LanguageTag,
-                    transcription.LanguageTag, StringComparison.OrdinalIgnoreCase)))
+            var region = regions[index];
+            if (!double.IsFinite(region.X) || !double.IsFinite(region.Y)
+                || !double.IsFinite(region.Width) || !double.IsFinite(region.Height))
             {
-                return $"OCR transcription {index} uses an unsupported language for '{definition.Name}'";
+                return $"OCR region {index} contains a non-finite coordinate";
             }
+            if (region.Width <= 0 || region.Height <= 0)
+                return $"OCR region {index} has no area";
+            if (region.X < -Tolerance || region.Y < -Tolerance
+                || region.X + region.Width > 1 + Tolerance
+                || region.Y + region.Height > 1 + Tolerance)
+            {
+                return $"OCR region {index} lies outside the image bounds";
+            }
+            if (string.IsNullOrWhiteSpace(region.Text))
+                return $"OCR region {index} is empty";
         }
         return null;
     }
@@ -396,7 +392,7 @@ internal sealed class TrainingSampleStore
     internal TrainingSampleRecord UpdateLabels(string id, IReadOnlyList<TrainingLabel> labels,
         IReadOnlyList<EventDefinition> definitions,
         IReadOnlyList<TrainingRegionGroup>? regionGroups = null,
-        IReadOnlyList<TrainingOcrTranscription>? ocrTranscriptions = null)
+        IReadOnlyList<TrainingOcrRegion>? ocrRegions = null)
     {
         var records = List().ToList();
         var record = records.FirstOrDefault(candidate => candidate.Id == id)
@@ -421,8 +417,8 @@ internal sealed class TrainingSampleStore
         }
 
         record.Labels = labels.Select(Clone).ToList();
-        if (ocrTranscriptions is not null)
-            record.OcrTranscriptions = ocrTranscriptions.Select(Clone).ToList();
+        if (ocrRegions is not null)
+            record.OcrRegions = ocrRegions.Select(Clone).ToList();
         foreach (var other in records.Where(candidate => candidate.Id != id))
         {
             foreach (var label in other.Labels)
@@ -442,10 +438,9 @@ internal sealed class TrainingSampleStore
             var labelError = TrainingLabelValidator.FindBlockingError(candidate.Labels, definitions);
             if (labelError is not null)
                 throw new InvalidDataException($"Invalid training sample: {labelError}.");
-            var transcriptionError = TrainingOcrTranscriptionValidator.FindError(
-                candidate.OcrTranscriptions, definitions);
-            if (transcriptionError is not null)
-                throw new InvalidDataException($"Invalid training sample: {transcriptionError}.");
+            var regionError = TrainingOcrRegionValidator.FindError(candidate.OcrRegions);
+            if (regionError is not null)
+                throw new InvalidDataException($"Invalid training sample: {regionError}.");
         }
         TrainingEventValidator.ValidateFixedPositions(definitions);
 
@@ -484,24 +479,20 @@ internal sealed class TrainingSampleStore
 
     internal sealed record RemapClassIdsResult(
         IReadOnlyDictionary<string, byte[]?> Originals,
-        int RemovedLabelCount,
-        int RemovedTranscriptionCount);
+        int RemovedLabelCount);
 
-    // Remaps surviving event class ids and, when an event is being deleted (its class is missing
-    // from the mapping), strips those labels from every sample in the same transaction instead of
-    // rejecting the delete. dataset-backed label files stay in step. `progress(completed, total)`
-    // reports progress so the UI can show a meaningful loading indicator on large workspaces.
+    // Remaps surviving event class ids. When an event is deleted (its class missing from the
+    // mapping) its labels are stripped from every sample in the same transaction rather than
+    // rejecting the delete; dataset-backed label files stay in step. OCR regions carry no event
+    // reference, so a remap never touches them.
     internal RemapClassIdsResult RemapClassIds(IReadOnlyDictionary<int, int> mapping,
         IReadOnlyDictionary<int, TrainingLabel>? fixedPositions = null,
-        Action<int, int>? progress = null,
-        IReadOnlySet<int>? survivingOcrEventIds = null,
-        IReadOnlyList<EventDefinition>? survivingOcrDefinitions = null)
+        Action<int, int>? progress = null)
     {
         var records = List().ToList();
         var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
         var updates = new List<(string Path, byte[] Contents)>();
         var removedLabelCount = 0;
-        var removedTranscriptionCount = 0;
         for (var recordIndex = 0; recordIndex < records.Count; recordIndex++)
         {
             progress?.Invoke(recordIndex + 1, records.Count);
@@ -534,20 +525,6 @@ internal sealed class TrainingSampleStore
                 }
             }
             record.Labels = nextLabels;
-            if (survivingOcrEventIds is not null || survivingOcrDefinitions is not null)
-            {
-                var survivingIds = survivingOcrEventIds
-                    ?? survivingOcrDefinitions!.Select(definition => definition.Id).ToHashSet();
-                var nextTranscriptions = record.OcrTranscriptions
-                    .Where(transcription => survivingIds.Contains(transcription.EventId)
-                        && (survivingOcrDefinitions is null
-                            || TrainingOcrTranscriptionValidator.FindError([transcription],
-                                survivingOcrDefinitions) is null))
-                    .ToList();
-                removedTranscriptionCount += record.OcrTranscriptions.Count - nextTranscriptions.Count;
-                changed |= nextTranscriptions.Count != record.OcrTranscriptions.Count;
-                record.OcrTranscriptions = nextTranscriptions;
-            }
             if (!changed) continue;
 
             var path = MetadataPath(record.Id);
@@ -573,7 +550,7 @@ internal sealed class TrainingSampleStore
             throw;
         }
 
-        return new RemapClassIdsResult(originals, removedLabelCount, removedTranscriptionCount);
+        return new RemapClassIdsResult(originals, removedLabelCount);
     }
 
     internal void RestoreMetadata(IReadOnlyDictionary<string, byte[]?> originals)
@@ -623,12 +600,13 @@ internal sealed class TrainingSampleStore
         Height = label.Height,
     };
 
-    private static TrainingOcrTranscription Clone(TrainingOcrTranscription transcription) => new()
+    private static TrainingOcrRegion Clone(TrainingOcrRegion region) => new()
     {
-        EventId = transcription.EventId,
-        SegmentId = transcription.SegmentId,
-        LanguageTag = transcription.LanguageTag,
-        Text = transcription.Text,
+        X = region.X,
+        Y = region.Y,
+        Width = region.Width,
+        Height = region.Height,
+        Text = region.Text,
     };
 
     private TrainingSampleRecord Load(string path) =>

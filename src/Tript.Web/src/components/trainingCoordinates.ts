@@ -1,4 +1,5 @@
 import type { TrainingLabel } from '../ipc/protocol';
+import type { TrainingRegion } from './trainingRegions';
 
 export interface TrainingPoint {
   x: number;
@@ -52,4 +53,24 @@ export function resizeBottomRight(box: TrainingLabel, point: TrainingPoint): Tra
     width: right - left,
     height: bottom - top,
   };
+}
+
+export function regionFromPoints(start: TrainingPoint, end: TrainingPoint): TrainingRegion {
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  return { x, y, width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+}
+
+export function moveRegion(region: TrainingRegion, delta: TrainingPoint): TrainingRegion {
+  return {
+    ...region,
+    x: clamp(region.x + delta.x, 0, 1 - region.width),
+    y: clamp(region.y + delta.y, 0, 1 - region.height),
+  };
+}
+
+export function resizeRegionBottomRight(region: TrainingRegion, point: TrainingPoint): TrainingRegion {
+  const right = clamp(point.x, region.x + 0.001, 1);
+  const bottom = clamp(point.y, region.y + 0.001, 1);
+  return { ...region, width: right - region.x, height: bottom - region.y };
 }

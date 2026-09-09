@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Build the OCR recogniser's fine-tune dataset from a Tript workspace.
 
-No per-sample transcription is required. Training crops come from three sources:
+Training crops come from three sources:
 
 1. Object-detection labels of a pre-conversion sample set (``--object-samples``). Each kill-feed
    row carries an elimination-icon box plus an ability-keyword box whose class *name* matches an
    OCR event, so the feed-line strip and its meaning are both known.
-2. ``ocrTranscriptions`` in the workspace samples, when present (direct ground truth).
+2. ``ocrRegions`` in the workspace samples: a free-form box the user drew on a frame plus the
+   exact text they read inside it (direct ground truth).
 3. Synthetic feed lines rendered in a condensed bold face over real empty-feed backgrounds, with
    random owner names, italic shear, drop shadow, the red banner, and a faded variant.
 
@@ -119,10 +120,10 @@ def main() -> int:
             records.extend(real)
             print(f"REAL object-crops={len(real)} backgrounds={len(backgrounds)}", flush=True)
 
-        trans = harvest_transcription_crops(workspace, events, groups, images)
-        records.extend(trans)
-        if trans:
-            print(f"REAL transcription-crops={len(trans)}", flush=True)
+        region_crops = harvest_region_crops(workspace, images)
+        records.extend(region_crops)
+        if region_crops:
+            print(f"REAL region-crops={len(region_crops)}", flush=True)
 
         if args.synthetic_per_phrase:
             synth = render_synthetic(phrases, backgrounds, args.synthetic_per_phrase, images, rng)
@@ -302,48 +303,33 @@ def nearest_icon(ability: dict, icons: list[dict]) -> dict | None:
     return best
 
 
-def harvest_transcription_crops(workspace: Path, events: list[dict], groups: dict[int, dict],
-                                images: Path) -> list:
+def harvest_region_crops(workspace: Path, images: Path) -> list:
     samples_dir = workspace / "samples"
     if not samples_dir.is_dir():
         return []
-    events_by_id = {e["id"]: e for e in events}
     records: list[tuple[str, str, str]] = []
     seq = 0
     for meta_path in sorted(samples_dir.glob("*.json")):
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        transcriptions = meta.get("ocrTranscriptions") or []
+        regions = meta.get("ocrRegions") or []
         image_path = samples_dir / meta["imageFile"]
-        if not transcriptions or not image_path.is_file():
+        if not regions or not image_path.is_file():
             continue
         with Image.open(image_path) as src:
             image = ImageOps.exif_transpose(src).convert("RGB")
-            for t in transcriptions:
-                event = events_by_id.get(t.get("eventId"))
-                label = normalize(t.get("text", ""))
-                if event is None or not label:
+            for region in regions:
+                label = normalize(region.get("text", ""))
+                if not label:
                     continue
-                region = segment_region(event, groups, t.get("segmentId"))
-                crop = crop_strip(image, region.x, region.y, region.right, region.bottom) if region else None
+                x, y = float(region.get("x", 0)), float(region.get("y", 0))
+                crop = crop_strip(image, x, y, x + float(region.get("width", 0)),
+                                  y + float(region.get("height", 0)))
                 if crop is None:
                     continue
-                fit_crop(crop).save(images / f"trans_{seq:05d}.png")
-                records.append((f"images/trans_{seq:05d}.png", label, "real"))
+                fit_crop(crop).save(images / f"region_{seq:05d}.png")
+                records.append((f"images/region_{seq:05d}.png", label, "real"))
                 seq += 1
     return records
-
-
-def segment_region(event: dict, groups: dict[int, dict], segment_id) -> Region | None:
-    base = event_region(event, groups)
-    if base is None:
-        return None
-    for segment in (event.get("ocr") or {}).get("segments") or []:
-        if segment.get("id") == segment_id:
-            return Region(base.x + float(segment.get("x", 0)) * base.w,
-                          base.y + float(segment.get("y", 0)) * base.h,
-                          float(segment.get("width", 1)) * base.w,
-                          float(segment.get("height", 1)) * base.h)
-    return base
 
 
 def crop_strip(image: Image.Image, x0: float, y0: float, x1: float, y1: float) -> Image.Image | None:

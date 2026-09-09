@@ -4,12 +4,12 @@ import type {
   TrainingEventDefinition,
   TrainingLabel,
   TrainingLabelSuggestionsMessage,
-  TrainingOcrTranscription,
+  TrainingOcrRegion,
   TrainingRegionGroup,
   TrainingSampleMessage,
   TrainingUpdateResultMessage,
 } from '../ipc/protocol';
-import { Button, Field, SelectField, TextField } from './ui/controls';
+import { Button, Field, TextField } from './ui/controls';
 import { TrainingEventEditor } from './TrainingEventEditor';
 import { TrainingEventTree } from './TrainingEventTree';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
@@ -18,8 +18,11 @@ import { useTrainingDialog } from './useTrainingDialog';
 import {
   boxFromPoints,
   moveBox,
+  moveRegion,
   normalizedPoint,
+  regionFromPoints,
   resizeBottomRight,
+  resizeRegionBottomRight,
   type TrainingPoint,
 } from './trainingCoordinates';
 
@@ -41,7 +44,10 @@ interface TrainingSampleEditorProps {
 type Gesture =
   | { kind: 'draw'; start: TrainingPoint; classId: number; index: number }
   | { kind: 'move'; index: number; start: TrainingPoint; original: TrainingLabel }
-  | { kind: 'resize'; index: number; original: TrainingLabel };
+  | { kind: 'resize'; index: number; original: TrainingLabel }
+  | { kind: 'draw-ocr'; start: TrainingPoint; index: number }
+  | { kind: 'move-ocr'; index: number; start: TrainingPoint; original: TrainingRegion }
+  | { kind: 'resize-ocr'; index: number; original: TrainingRegion };
 
 const EMPTY_REGION_GROUPS: TrainingRegionGroup[] = [];
 
@@ -83,11 +89,11 @@ export function TrainingSampleEditor({
 }: TrainingSampleEditorProps) {
   const [labels, setLabels] = useState<TrainingLabel[]>(sample.sample.labels);
   const [savedLabels, setSavedLabels] = useState<TrainingLabel[]>(sample.sample.labels);
-  const [ocrTranscriptions, setOcrTranscriptions] = useState<TrainingOcrTranscription[]>(
-    sample.sample.ocrTranscriptions ?? [],
+  const [ocrRegions, setOcrRegions] = useState<TrainingOcrRegion[]>(
+    sample.sample.ocrRegions ?? [],
   );
-  const [savedOcrTranscriptions, setSavedOcrTranscriptions] = useState<TrainingOcrTranscription[]>(
-    sample.sample.ocrTranscriptions ?? [],
+  const [savedOcrRegions, setSavedOcrRegions] = useState<TrainingOcrRegion[]>(
+    sample.sample.ocrRegions ?? [],
   );
   const [showSaveNotice, setShowSaveNotice] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -102,18 +108,14 @@ export function TrainingSampleEditor({
   const firstObjectEvent = events.find((event) => (event.detectionKind ?? 'Object') === 'Object');
   const [classId, setClassId] = useState(String(sample.sample.labels[0]?.classId ?? firstObjectEvent?.classId ?? 0));
   const [gesture, setGesture] = useState<Gesture | null>(null);
+  const [drawMode, setDrawMode] = useState<'label' | 'ocrRegion'>('label');
   const [eventDraft, setEventDraft] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
   const [regionDraft, setRegionDraft] = useState<
     { target: TrainingEventDefinition; targetType: 'event' }
     | { target: TrainingRegionGroup; targetType: 'group' }
     | null
   >(null);
-  const [ocrTextDraft, setOcrTextDraft] = useState<{
-    event: TrainingEventDefinition;
-    segmentId: string;
-    text: string;
-    languageTag: string;
-  } | null>(null);
+  const [ocrRegionDraft, setOcrRegionDraft] = useState<{ index: number; text: string } | null>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -121,11 +123,11 @@ export function TrainingSampleEditor({
   const pendingSaveRef = useRef<{
     requestId: string;
     labels: TrainingLabel[];
-    ocrTranscriptions: TrainingOcrTranscription[];
+    ocrRegions: TrainingOcrRegion[];
   } | null>(null);
   const requestCounterRef = useRef(0);
   const labelsAreDirty = JSON.stringify(labels) !== JSON.stringify(savedLabels)
-    || JSON.stringify(ocrTranscriptions) !== JSON.stringify(savedOcrTranscriptions);
+    || JSON.stringify(ocrRegions) !== JSON.stringify(savedOcrRegions);
   const invalidLabelIndexes = new Set(labels.flatMap((label, index) =>
     isLabelInsideEffectiveRegion(label, eventDefinitions, groupDefinitions) ? [] : [index]));
   const activeEvent = eventDefinitions.find((event) => (event.detectionKind ?? 'Object') === 'Object'
@@ -133,28 +135,6 @@ export function TrainingSampleEditor({
     selectedIndex == null ? Number(classId) : labels[selectedIndex]?.classId
   ));
   const activeRegion = activeEvent ? effectiveTrainingRegion(activeEvent, groupDefinitions) : null;
-  const ocrMarkers = (() => {
-    const byRegion = new Map<string, { rect: TrainingRegion; items: { eventId: number; segmentId: string; name: string; text: string }[] }>();
-    for (const transcription of ocrTranscriptions) {
-      if (!transcription.text.trim()) continue;
-      const event = eventDefinitions.find((candidate) => candidate.id === transcription.eventId);
-      if (!event || event.detectionKind !== 'Ocr') continue;
-      const eventRect = effectiveTrainingRegion(event, groupDefinitions) ?? { x: 0, y: 0, width: 1, height: 1 };
-      const segment = event.ocr?.segments?.find((candidate) => candidate.id === transcription.segmentId)
-        ?? { x: 0, y: 0, width: 1, height: 1 };
-      const rect = {
-        x: eventRect.x + segment.x * eventRect.width,
-        y: eventRect.y + segment.y * eventRect.height,
-        width: segment.width * eventRect.width,
-        height: segment.height * eventRect.height,
-      };
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
-      const bucket = byRegion.get(key) ?? { rect, items: [] };
-      bucket.items.push({ eventId: event.id, segmentId: transcription.segmentId, name: event.name, text: transcription.text });
-      byRegion.set(key, bucket);
-    }
-    return [...byRegion.values()];
-  })();
 
   const requestClose = () => {
     if (labelsAreDirty && !window.confirm(
@@ -168,8 +148,10 @@ export function TrainingSampleEditor({
   useEffect(() => {
     setLabels(sample.sample.labels);
     setSavedLabels(sample.sample.labels);
-    setOcrTranscriptions(sample.sample.ocrTranscriptions ?? []);
-    setSavedOcrTranscriptions(sample.sample.ocrTranscriptions ?? []);
+    setOcrRegions(sample.sample.ocrRegions ?? []);
+    setSavedOcrRegions(sample.sample.ocrRegions ?? []);
+    setDrawMode('label');
+    setOcrRegionDraft(null);
     setShowSaveNotice(false);
     setSaveError(null);
     setIsSaving(false);
@@ -180,7 +162,7 @@ export function TrainingSampleEditor({
     setSelectedIndex(null);
     setGesture(null);
     if (sample.sample.labels[0]) setClassId(String(sample.sample.labels[0].classId));
-  }, [sample.sample.id, sample.sample.labels, sample.sample.ocrTranscriptions]);
+  }, [sample.sample.id, sample.sample.labels, sample.sample.ocrRegions]);
 
   useEffect(() => {
     const removeSuggestions = client.on('trainingLabelSuggestions', (content) => {
@@ -218,7 +200,7 @@ export function TrainingSampleEditor({
       setIsSaving(false);
       if (message.success) {
         setSavedLabels(pending.labels);
-        setSavedOcrTranscriptions(pending.ocrTranscriptions);
+        setSavedOcrRegions(pending.ocrRegions);
         setSaveError(null);
         setShowSaveNotice(true);
       } else {
@@ -246,17 +228,17 @@ export function TrainingSampleEditor({
     return () => window.clearTimeout(timer);
   }, [showSaveNotice]);
 
-  const ocrTextOpen = ocrTextDraft !== null;
+  const ocrRegionDraftOpen = ocrRegionDraft !== null;
   useEffect(() => {
-    if (!ocrTextOpen) return;
+    if (!ocrRegionDraftOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      setOcrTextDraft(null);
+      closeOcrRegionDraft();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [ocrTextOpen]);
+  }, [ocrRegionDraftOpen]);
 
   useEffect(() => {
     setEventDefinitions(events);
@@ -309,16 +291,42 @@ export function TrainingSampleEditor({
         : label));
       return;
     }
-    setLabels((current) => current.map((label, index) => index === gesture.index
-      ? resizeBottomRight(gesture.original, point)
-      : label));
+    if (gesture.kind === 'resize') {
+      setLabels((current) => current.map((label, index) => index === gesture.index
+        ? resizeBottomRight(gesture.original, point)
+        : label));
+      return;
+    }
+    if (gesture.kind === 'draw-ocr') {
+      const draft = { ...regionFromPoints(gesture.start, point), text: ocrRegions[gesture.index]?.text ?? '' };
+      setOcrRegions((current) => current.map((region, index) => index === gesture.index ? draft : region));
+      return;
+    }
+    if (gesture.kind === 'move-ocr') {
+      setOcrRegions((current) => current.map((region, index) => index === gesture.index
+        ? { ...region, ...moveRegion(gesture.original, { x: point.x - gesture.start.x, y: point.y - gesture.start.y }) }
+        : region));
+      return;
+    }
+    setOcrRegions((current) => current.map((region, index) => index === gesture.index
+      ? { ...region, ...resizeRegionBottomRight(gesture.original, point) }
+      : region));
   };
 
   const beginDraw = (event: PointerEvent) => {
     const target = event.target as HTMLElement;
     if (event.target !== event.currentTarget && target.tagName !== 'IMG') return;
     const point = pointFor(event);
-    if (!point || !activeEvent) return;
+    if (!point) return;
+    if (drawMode === 'ocrRegion') {
+      setSelectedIndex(null);
+      const index = ocrRegions.length;
+      setOcrRegions((current) => [...current, { ...regionFromPoints(point, point), text: '' }]);
+      setGesture({ kind: 'draw-ocr', start: point, index });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (!activeEvent) return;
     setSelectedIndex(null);
     const index = labels.length;
     const activeClassId = Number(classId);
@@ -344,6 +352,20 @@ export function TrainingSampleEditor({
     event.stopPropagation();
   };
 
+  const beginMoveOcr = (event: PointerEvent, index: number) => {
+    const point = pointFor(event);
+    if (!point) return;
+    setGesture({ kind: 'move-ocr', index, start: point, original: ocrRegions[index] });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
+
+  const beginResizeOcr = (event: PointerEvent, index: number) => {
+    setGesture({ kind: 'resize-ocr', index, original: ocrRegions[index] });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
+
   const finishGesture = () => {
     if (gesture?.kind === 'draw') {
       const draft = labels[gesture.index];
@@ -351,6 +373,13 @@ export function TrainingSampleEditor({
         setSelectedIndex(gesture.index);
       } else {
         setLabels((current) => current.filter((_, index) => index !== gesture.index));
+      }
+    } else if (gesture?.kind === 'draw-ocr') {
+      const draft = ocrRegions[gesture.index];
+      if (draft && draft.width > 0.002 && draft.height > 0.002) {
+        setOcrRegionDraft({ index: gesture.index, text: draft.text });
+      } else {
+        setOcrRegions((current) => current.filter((_, index) => index !== gesture.index));
       }
     }
     setGesture(null);
@@ -361,6 +390,11 @@ export function TrainingSampleEditor({
       setLabels((current) => current.filter((_, index) => index !== gesture.index));
     } else if (gesture?.kind === 'move' || gesture?.kind === 'resize') {
       setLabels((current) => current.map((label, index) => index === gesture.index ? gesture.original : label));
+    } else if (gesture?.kind === 'draw-ocr') {
+      setOcrRegions((current) => current.filter((_, index) => index !== gesture.index));
+    } else if (gesture?.kind === 'move-ocr' || gesture?.kind === 'resize-ocr') {
+      setOcrRegions((current) => current.map((region, index) =>
+        index === gesture.index ? { ...gesture.original, text: region.text } : region));
     }
     setGesture(null);
   };
@@ -417,14 +451,17 @@ export function TrainingSampleEditor({
     const submittedLabels = labels
       .filter((label) => validClassIds.has(label.classId))
       .map((label) => ({ ...label }));
-    const submittedTranscriptions = ocrTranscriptions
-      .filter((transcription) => transcription.text.trim())
-      .map((transcription) => ({ ...transcription, text: transcription.text.trim() }));
+    const submittedOcrRegions = ocrRegions
+      .filter((region) => region.text.trim())
+      .map((region) => ({
+        x: region.x, y: region.y, width: region.width, height: region.height,
+        text: region.text.trim(),
+      }));
     const requestId = `sample-${sample.sample.id}-${++requestCounterRef.current}`;
     pendingSaveRef.current = {
       requestId,
       labels: submittedLabels,
-      ocrTranscriptions: submittedTranscriptions,
+      ocrRegions: submittedOcrRegions,
     };
     setIsSaving(true);
     setSaveError(null);
@@ -434,7 +471,7 @@ export function TrainingSampleEditor({
       sampleId: sample.sample.id,
       requestId,
       labels: submittedLabels,
-      ocrTranscriptions: submittedTranscriptions,
+      ocrRegions: submittedOcrRegions,
     });
   };
 
@@ -511,43 +548,34 @@ export function TrainingSampleEditor({
     setRegionDraft(null);
   };
 
-  const openOcrText = (event: TrainingEventDefinition, requestedSegmentId?: string) => {
-    if (event.detectionKind !== 'Ocr') return;
-    const segmentId = requestedSegmentId ?? event.ocr?.segments?.[0]?.id ?? 'default';
-    const existing = ocrTranscriptions.find((item) => item.eventId === event.id && item.segmentId === segmentId);
-    const patternLanguages = (event.ocr?.patterns ?? []).map((pattern) => pattern.languageTag);
-    setOcrTextDraft({
-      event,
-      segmentId,
-      text: existing?.text ?? '',
-      languageTag: existing?.languageTag ?? patternLanguages[0] ?? 'en-US',
-    });
+  const openOcrRegionText = (index: number) => {
+    setOcrRegionDraft({ index, text: ocrRegions[index]?.text ?? '' });
   };
 
-  const updateOcrTextDraft = (patch: Partial<NonNullable<typeof ocrTextDraft>>) => {
-    setOcrTextDraft((current) => (current ? { ...current, ...patch } : current));
+  // Dismissing the dialog for a region whose text was never committed discards the region.
+  const closeOcrRegionDraft = () => {
+    const draft = ocrRegionDraft;
+    if (draft && !ocrRegions[draft.index]?.text.trim()) {
+      setOcrRegions((current) => current.filter((_, index) => index !== draft.index));
+    }
+    setOcrRegionDraft(null);
   };
 
-  const saveOcrText = () => {
-    const draft = ocrTextDraft;
+  const saveOcrRegionText = () => {
+    const draft = ocrRegionDraft;
     if (!draft) return;
     const text = draft.text.trim();
-    setOcrTranscriptions((current) => {
-      const without = current.filter((item) =>
-        !(item.eventId === draft.event.id && item.segmentId === draft.segmentId));
-      return text
-        ? [...without, { eventId: draft.event.id, segmentId: draft.segmentId, languageTag: draft.languageTag, text }]
-        : without;
-    });
-    setOcrTextDraft(null);
+    setOcrRegions((current) => text
+      ? current.map((region, index) => index === draft.index ? { ...region, text } : region)
+      : current.filter((_, index) => index !== draft.index));
+    setOcrRegionDraft(null);
   };
 
-  const removeOcrText = () => {
-    const draft = ocrTextDraft;
+  const removeOcrRegion = () => {
+    const draft = ocrRegionDraft;
     if (!draft) return;
-    setOcrTranscriptions((current) => current.filter((item) =>
-      !(item.eventId === draft.event.id && item.segmentId === draft.segmentId)));
-    setOcrTextDraft(null);
+    setOcrRegions((current) => current.filter((_, index) => index !== draft.index));
+    setOcrRegionDraft(null);
   };
 
   return (
@@ -604,32 +632,28 @@ export function TrainingSampleEditor({
                   <span className="training-box-handle" onPointerDown={(event) => beginResize(event, index)} />
                 </span>
               ))}
-              {ocrMarkers.map(({ rect, items }, markerIndex) => (
+              {ocrRegions.map((region, index) => (
                 <span
-                  key={`ocr-marker-${markerIndex}`}
-                  className="training-ocr-marker"
-                  aria-label={`OCR region: ${items.map((item) => `${item.name} ${item.text}`).join(', ')}`}
+                  key={`ocr-region-${index}`}
+                  className="training-ocr-region"
+                  aria-label={`OCR region: ${region.text || 'untitled'}`}
                   style={{
-                    left: `${rect.x * 100}%`,
-                    top: `${rect.y * 100}%`,
-                    width: `${rect.width * 100}%`,
-                    height: `${rect.height * 100}%`,
+                    left: `${region.x * 100}%`,
+                    top: `${region.y * 100}%`,
+                    width: `${region.width * 100}%`,
+                    height: `${region.height * 100}%`,
                   }}
+                  onPointerDown={(event) => beginMoveOcr(event, index)}
                 >
-                  {items.map((item) => (
-                    <Button
-                      key={`${item.eventId}-${item.segmentId}`}
-                      variant="ghost"
-                      size="small"
-                      className="training-ocr-marker-item"
-                      onClick={() => {
-                        const event = eventDefinitions.find((candidate) => candidate.id === item.eventId);
-                        if (event) openOcrText(event, item.segmentId);
-                      }}
-                    >
-                      {item.name}: {item.text}
-                    </Button>
-                  ))}
+                  <button
+                    type="button"
+                    className="training-ocr-region-caption"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => openOcrRegionText(index)}
+                  >
+                    {region.text || 'Add text'}
+                  </button>
+                  <span className="training-box-handle" onPointerDown={(event) => beginResizeOcr(event, index)} />
                 </span>
               ))}
             </div>
@@ -643,6 +667,19 @@ export function TrainingSampleEditor({
               </div>
               <Button variant="ghost" size="small" onClick={openNewEvent} aria-label="Create event">+ Add</Button>
             </div>
+            <div className="training-ocr-region-toolbar">
+              <Button
+                variant={drawMode === 'ocrRegion' ? 'primary' : 'ghost'}
+                size="small"
+                aria-pressed={drawMode === 'ocrRegion'}
+                onClick={() => setDrawMode((mode) => mode === 'ocrRegion' ? 'label' : 'ocrRegion')}
+              >
+                {drawMode === 'ocrRegion' ? 'Drawing OCR region…' : 'Add OCR region'}
+              </Button>
+              <span className="muted small">
+                {ocrRegions.length} OCR region{ocrRegions.length === 1 ? '' : 's'}
+              </span>
+            </div>
             <div className="training-event-scroll">
               <TrainingEventTree
                 compact
@@ -655,7 +692,6 @@ export function TrainingSampleEditor({
                 onAddFixedLabel={addFixedLabel}
                 canAddFixedLabel={(event) => fixedLabelFor(event) !== null
                   && !labels.some((label) => label.classId === event.classId)}
-                onAddOcrText={openOcrText}
                 onMove={(eventId, groupId) => updateEventGroup(eventId, groupId == null ? '' : String(groupId))}
                 onRegionGroup={(group) => setRegionDraft({ target: group, targetType: 'group' })}
               />
@@ -723,47 +759,32 @@ export function TrainingSampleEditor({
           onSave={saveRegion}
         />
       )}
-      {ocrTextDraft && (
+      {ocrRegionDraft && (
         <div className="training-ocr-text-overlay" role="presentation">
           <section className="training-ocr-text-dialog" role="dialog" aria-modal="true" aria-labelledby="ocr-text-title">
             <div className="training-palette-heading">
               <div>
-                <p className="training-eyebrow">OCR text</p>
-                <h3 id="ocr-text-title">{ocrTextDraft.event.name}</h3>
+                <p className="training-eyebrow">OCR region</p>
+                <h3 id="ocr-text-title">Text in this box</h3>
               </div>
             </div>
             <p className="muted small">
-              Type the exact text you can read in this region of the frame. It is the ground truth that teaches the model — not a translation.
+              Type the exact text you can read inside the box. It is the ground truth that teaches the recogniser.
             </p>
-            {(() => {
-              const patternLanguages = (ocrTextDraft.event.ocr?.patterns ?? []).map((pattern) => pattern.languageTag);
-              return patternLanguages.length > 1 ? (
-                <Field label="Language">
-                  <SelectField
-                    value={ocrTextDraft.languageTag}
-                    options={patternLanguages.map((tag) => ({ value: tag, label: tag }))}
-                    onChange={(value) => updateOcrTextDraft({ languageTag: value })}
-                  />
-                </Field>
-              ) : (
-                ocrTextDraft.languageTag && <span className="muted small">{ocrTextDraft.languageTag}</span>
-              );
-            })()}
             <Field label="Text">
               <TextField
                 autoFocus
-                value={ocrTextDraft.text}
-                placeholder="Exact text visible in this region"
-                onChange={(value) => updateOcrTextDraft({ text: value })}
+                value={ocrRegionDraft.text}
+                placeholder="Exact text visible in this box"
+                onChange={(value) => setOcrRegionDraft((draft) => draft ? { ...draft, text: value } : draft)}
               />
             </Field>
             <div className="training-event-dialog-actions">
-              {ocrTranscriptions.some((item) => item.eventId === ocrTextDraft.event.id
-                && item.segmentId === ocrTextDraft.segmentId && item.text.trim()) && (
-                <Button variant="danger" onClick={removeOcrText}>Remove</Button>
+              {ocrRegions[ocrRegionDraft.index]?.text.trim() && (
+                <Button variant="danger" onClick={removeOcrRegion}>Remove</Button>
               )}
-              <Button variant="ghost" onClick={() => setOcrTextDraft(null)}>Cancel</Button>
-              <Button onClick={saveOcrText} disabled={!ocrTextDraft.text.trim()}>Save</Button>
+              <Button variant="ghost" onClick={closeOcrRegionDraft}>Cancel</Button>
+              <Button onClick={saveOcrRegionText} disabled={!ocrRegionDraft.text.trim()}>Save</Button>
             </div>
           </section>
         </div>

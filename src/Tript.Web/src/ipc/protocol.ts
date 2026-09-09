@@ -419,7 +419,7 @@ export interface TrainingSample {
   imageWidth: number;
   imageHeight: number;
   labels: TrainingLabel[];
-  ocrTranscriptions?: TrainingOcrTranscription[];
+  ocrRegions?: TrainingOcrRegion[];
 }
 
 export interface TrainingModelInfo {
@@ -746,13 +746,14 @@ export interface UpdateTrainingSampleParameters {
   sampleId: string;
   requestId: string;
   labels: TrainingLabel[];
-  ocrTranscriptions?: TrainingOcrTranscription[];
+  ocrRegions?: TrainingOcrRegion[];
 }
 
-export interface TrainingOcrTranscription {
-  eventId: number;
-  segmentId: string;
-  languageTag: string;
+export interface TrainingOcrRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   text: string;
 }
 
@@ -794,6 +795,8 @@ export interface StartTrainingParameters {
   baseModel?: string | null;
   /** Extra mildly-distorted copies of every training crop; validation is never augmented. */
   augmentCopies?: number;
+  /** "all" (default), "object", or "ocr" — retrain just one kind on a game that has both. */
+  scope?: 'all' | 'object' | 'ocr';
 }
 
 export interface PublishTrainingModelParameters {

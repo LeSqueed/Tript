@@ -132,6 +132,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [epochs, setEpochs] = useState(100);
   const [device, setDevice] = useState('auto');
   const [augmentCopies, setAugmentCopies] = useState(0);
+  const [trainingScope, setTrainingScope] = useState<'all' | 'object' | 'ocr'>('all');
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
   const [epochHistory, setEpochHistory] = useState<TrainingEpochPoint[]>([]);
   // Latest non-epoch runner message (export console lines, coverage summary, ONNX export note),
@@ -410,8 +411,10 @@ export function TrainingView({ client }: TrainingViewProps) {
   const invalidSamples = training.invalidSamples ?? [];
   const invalidById = new Map(invalidSamples.map((sample) => [sample.id, sample.reason]));
   const validLabeledSampleCount = training.samples.filter((sample) =>
-    (sample.labels.length > 0 || (sample.ocrTranscriptions?.length ?? 0) > 0)
+    (sample.labels.length > 0 || (sample.ocrRegions?.length ?? 0) > 0)
       && !invalidById.has(sample.id)).length;
+  const canPickScope = training.events.some((event) => (event.detectionKind ?? 'Object') === 'Object')
+    && training.events.some((event) => event.detectionKind === 'Ocr');
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
@@ -430,10 +433,7 @@ export function TrainingView({ client }: TrainingViewProps) {
     if (sampleValidity === 'valid' && isInvalid) return false;
     if (!normalizedSampleFilter) return true;
     const labelNames = sample.labels.map((label) => training.events.find((event) => event.classId === label.classId)?.name ?? String(label.classId));
-    const ocrText = (sample.ocrTranscriptions ?? []).flatMap((transcription) => {
-      const eventName = training.events.find((event) => event.id === transcription.eventId)?.name ?? '';
-      return [eventName, transcription.text];
-    });
+    const ocrText = (sample.ocrRegions ?? []).map((region) => region.text);
     return [sample.id, sample.timestampSeconds.toFixed(2), ...labelNames, ...ocrText]
       .some((value) => value.toLowerCase().includes(normalizedSampleFilter));
   });
@@ -478,7 +478,10 @@ export function TrainingView({ client }: TrainingViewProps) {
 
   const startTraining = () => {
     if (gameId) {
-      client.send('StartTraining', { gameId, epochs, device, augmentCopies });
+      client.send('StartTraining', {
+        gameId, epochs, device, augmentCopies,
+        scope: canPickScope ? trainingScope : 'all',
+      });
     }
   };
 
@@ -572,12 +575,10 @@ export function TrainingView({ client }: TrainingViewProps) {
     const objectClassIds = new Set(events
       .filter((event) => (event.detectionKind ?? 'Object') === 'Object')
       .map((event) => event.classId));
-    const ocrEventIds = new Set(events
-      .filter((event) => event.detectionKind === 'Ocr')
-      .map((event) => event.id));
+    const wantsOcr = events.some((event) => event.detectionKind === 'Ocr');
     const matches = training.samples.filter((sample) =>
       sample.labels.some((label) => objectClassIds.has(label.classId))
-      || (sample.ocrTranscriptions ?? []).some((transcription) => ocrEventIds.has(transcription.eventId)));
+      || (wantsOcr && (sample.ocrRegions?.length ?? 0) > 0));
     return matches.find((sample) => samplePreviews[sample.id]) ?? matches[0];
   };
 
@@ -1005,6 +1006,21 @@ export function TrainingView({ client }: TrainingViewProps) {
                 />
               </Field>
             </div>
+            {canPickScope && (
+              <div className="training-field compact">
+                <Field label="Retrain" hint="This game has object and OCR events. Retrain just one; the other model is kept as installed.">
+                  <SelectField
+                    value={trainingScope}
+                    onChange={(value) => setTrainingScope(value as 'all' | 'object' | 'ocr')}
+                    options={[
+                      { value: 'all', label: 'Object + OCR' },
+                      { value: 'object', label: 'Object detection only' },
+                      { value: 'ocr', label: 'OCR recogniser only' },
+                    ]}
+                  />
+                </Field>
+              </div>
+            )}
              <Button onClick={startTraining} disabled={trainingIsActive || validLabeledSampleCount === 0}>
                Start training
              </Button>

@@ -55,7 +55,8 @@ def main() -> int:
     records = read_labels(ocr_dir / "labels.tsv")
     train_records = [r for r in records if r[0] == "train"]
     # Real crops are a small fraction of the set; weight them up so synthetic does not dominate.
-    real = [r for r in train_records if "/real_" in r[1] or "/trans_" in r[1]]
+    real = [r for r in train_records
+            if "/real_" in r[1] or "/trans_" in r[1] or "/region_" in r[1]]
     train = OcrDataset(train_records + real * 4, ocr_dir, char_to_index)
     val = OcrDataset([r for r in records if r[0] == "val"], ocr_dir, char_to_index)
     if len(train) == 0:

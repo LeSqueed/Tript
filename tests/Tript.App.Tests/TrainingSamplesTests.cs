@@ -414,7 +414,7 @@ public sealed class TrainingSamplesTests
     }
 
     [Fact]
-    public void OcrTranscriptions_are_keyed_by_event_and_removed_independently_from_object_labels()
+    public void OcrRegions_persist_and_survive_a_class_id_remap()
     {
         var root = Path.Combine(Path.GetTempPath(), "tript-training-ocr-" + Guid.NewGuid().ToString("N"));
         var source = Path.Combine(root, "recording.mp4");
@@ -428,45 +428,45 @@ public sealed class TrainingSamplesTests
             var definitions = new List<EventDefinition>
             {
                 new() { Id = 1, Name = "Object", ClassId = 0, Type = EventType.Trigger },
-                new()
-                {
-                    Id = 9,
-                    Name = "Kill feed",
-                    ClassId = -1,
-                    Type = EventType.Trigger,
-                    DetectionKind = DetectionKind.Ocr,
-                    Ocr = new OcrEventDefinition
-                    {
-                        Patterns = [new OcrPatternDefinition { LanguageTag = "de-DE", Template = "KILL {player}" }],
-                    },
-                },
+                new() { Id = 2, Name = "Doomed", ClassId = 1, Type = EventType.Trigger },
             };
             var sample = store.Save(source, 1, 1280, 720,
-                [new TrainingLabel { ClassId = 0, CenterX = 0.5, CenterY = 0.5, Width = 0.2, Height = 0.2 }],
+                [new TrainingLabel { ClassId = 1, CenterX = 0.5, CenterY = 0.5, Width = 0.2, Height = 0.2 }],
                 [137, 80], definitions);
-            store.UpdateLabels(sample.Id, sample.Labels, definitions, ocrTranscriptions:
+            store.UpdateLabels(sample.Id, sample.Labels, definitions, ocrRegions:
             [
-                new TrainingOcrTranscription
-                {
-                    EventId = 9,
-                    SegmentId = "default",
-                    LanguageTag = "de-DE",
-                    Text = "KILL AMON",
-                },
+                new TrainingOcrRegion { X = 0.2, Y = 0.3, Width = 0.4, Height = 0.1, Text = "KILL AMON" },
             ]);
 
-            var remap = store.RemapClassIds(new Dictionary<int, int> { [0] = 0 },
-                survivingOcrEventIds: new HashSet<int>());
+            // Deleting event id 2 drops class 1's label; the OCR region carries no class and stays.
+            var remap = store.RemapClassIds(new Dictionary<int, int> { [0] = 0 });
             var updated = store.LoadById(sample.Id);
 
-            Assert.Single(updated.Labels);
-            Assert.Empty(updated.OcrTranscriptions);
-            Assert.Equal(1, remap.RemovedTranscriptionCount);
+            Assert.Empty(updated.Labels);
+            Assert.Equal(1, remap.RemovedLabelCount);
+            var region = Assert.Single(updated.OcrRegions);
+            Assert.Equal("KILL AMON", region.Text);
+            Assert.Equal(0.2, region.X, 6);
+            Assert.Equal(0.4, region.Width, 6);
         }
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(0.1, 0.1, 0.2, 0.2, "TEXT", null)]
+    [InlineData(0.1, 0.1, 0.2, 0.2, "   ", "OCR region 0 is empty")]
+    [InlineData(-0.1, 0.1, 0.2, 0.2, "TEXT", "OCR region 0 lies outside the image bounds")]
+    [InlineData(0.9, 0.1, 0.2, 0.2, "TEXT", "OCR region 0 lies outside the image bounds")]
+    [InlineData(0.1, 0.1, 0.0, 0.2, "TEXT", "OCR region 0 has no area")]
+    public void TrainingOcrRegionValidator_reports_structural_errors(
+        double x, double y, double width, double height, string text, string? expected)
+    {
+        var error = TrainingOcrRegionValidator.FindError(
+            [new TrainingOcrRegion { X = x, Y = y, Width = width, Height = height, Text = text }]);
+        Assert.Equal(expected, error);
     }
 
     [Fact]

@@ -92,50 +92,45 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('saves an OCR transcription without creating an object label', () => {
+  function drawOcrRegion() {
+    const canvas = document.querySelector('.training-editor-canvas') as HTMLElement;
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 100, height: 100,
+      right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}),
+    });
+    Object.defineProperty(canvas, 'setPointerCapture', { value: vi.fn(), configurable: true });
+    fireEvent.pointerDown(canvas, { clientX: 20, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 60, clientY: 70, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 60, clientY: 70, pointerId: 1 });
+  }
+
+  it('draws a free OCR region and saves its text without creating an object label', () => {
     const client = createClient();
     render(<TrainingSampleEditor
       client={client}
       gameId="game-1"
-      sample={{ ...sample, sample: { ...sample.sample, labels: [], ocrTranscriptions: [] } }}
-      events={[{
-        id: 9,
-        classId: -1,
-        name: 'Kill feed',
-        type: 'Trigger',
-        detectionKind: 'Ocr',
-        ocr: {
-          patterns: [
-            { languageTag: 'en-US', template: 'ELIMINATED {player}' },
-            { languageTag: 'de-DE', template: 'ELIMINIERT {player}' },
-          ],
-        },
-      }]}
+      sample={{ ...sample, sample: { ...sample.sample, labels: [], ocrRegions: [] } }}
+      events={events}
       onClose={vi.fn()}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add OCR text for Kill feed' }));
-    fireEvent.change(screen.getByLabelText('Language'), {
-      target: { value: 'de-DE' },
-    });
-    fireEvent.change(screen.getByLabelText('Text'), {
-      target: { value: 'ELIMINIERT AMON' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add OCR region' }));
+    drawOcrRegion();
+    fireEvent.change(screen.getByLabelText('Text'), { target: { value: 'ELIMINATED AMON' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
 
-    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({
-      labels: [],
-      ocrTranscriptions: [{
-        eventId: 9,
-        segmentId: 'default',
-        languageTag: 'de-DE',
-        text: 'ELIMINIERT AMON',
-      }],
-    }));
+    const call = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingSample');
+    expect(call?.[1].labels).toEqual([]);
+    expect(call?.[1].ocrRegions).toHaveLength(1);
+    expect(call?.[1].ocrRegions[0]).toMatchObject({ text: 'ELIMINATED AMON' });
+    expect(call?.[1].ocrRegions[0].x).toBeCloseTo(0.2, 5);
+    expect(call?.[1].ocrRegions[0].y).toBeCloseTo(0.4, 5);
+    expect(call?.[1].ocrRegions[0].width).toBeCloseTo(0.4, 5);
+    expect(call?.[1].ocrRegions[0].height).toBeCloseTo(0.3, 5);
   });
 
-  it('edits and removes the OCR transcription selected from a segment marker', () => {
+  it('edits and removes an OCR region from its caption', () => {
     const client = createClient();
     render(<TrainingSampleEditor
       client={client}
@@ -145,46 +140,28 @@ describe('TrainingSampleEditor save lifecycle', () => {
         sample: {
           ...sample.sample,
           labels: [],
-          ocrTranscriptions: [
-            { eventId: 9, segmentId: 'upper', languageTag: 'en-US', text: 'UPPER TEXT' },
-            { eventId: 9, segmentId: 'lower', languageTag: 'en-US', text: 'LOWER TEXT' },
+          ocrRegions: [
+            { x: 0.1, y: 0.1, width: 0.3, height: 0.08, text: 'UPPER TEXT' },
+            { x: 0.1, y: 0.5, width: 0.3, height: 0.08, text: 'LOWER TEXT' },
           ],
         },
       }}
-      events={[{
-        id: 9,
-        classId: -1,
-        name: 'Kill feed',
-        type: 'Trigger',
-        detectionKind: 'Ocr',
-        screenRegionX: 0.2,
-        screenRegionY: 0.3,
-        screenRegionW: 0.5,
-        screenRegionH: 0.4,
-        ocr: {
-          patterns: [{ languageTag: 'en-US', template: 'ELIMINATED {player}' }],
-          segments: [
-            { id: 'upper', x: 0, y: 0, width: 1, height: 0.5 },
-            { id: 'lower', x: 0, y: 0.5, width: 1, height: 0.5 },
-          ],
-        },
-      }]}
+      events={events}
       onClose={vi.fn()}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Kill feed: LOWER TEXT' }));
+    fireEvent.click(screen.getByRole('button', { name: 'LOWER TEXT' }));
     expect((screen.getByLabelText('Text') as HTMLInputElement).value).toBe('LOWER TEXT');
     fireEvent.change(screen.getByLabelText('Text'), { target: { value: 'UPDATED LOWER' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Kill feed: UPDATED LOWER' }));
+    fireEvent.click(screen.getByRole('button', { name: 'UPDATED LOWER' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
 
-    expect(client.send).toHaveBeenCalledWith('UpdateTrainingSample', expect.objectContaining({
-      ocrTranscriptions: [
-        { eventId: 9, segmentId: 'upper', languageTag: 'en-US', text: 'UPPER TEXT' },
-      ],
-    }));
+    const call = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingSample');
+    expect(call?.[1].ocrRegions).toEqual([
+      { x: 0.1, y: 0.1, width: 0.3, height: 0.08, text: 'UPPER TEXT' },
+    ]);
   });
 
   it('reports a failed save and keeps the unsaved-change guard active', () => {
@@ -355,7 +332,7 @@ describe('TrainingSampleEditor save lifecycle', () => {
       sampleId: 'sample-1',
       requestId: expect.any(String),
       labels: [{ classId: 4, centerX: 0.16, centerY: 0.05, width: 0.11, height: 0.03 }],
-      ocrTranscriptions: [],
+      ocrRegions: [],
     });
   });
 

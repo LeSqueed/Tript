@@ -976,29 +976,36 @@ span.training-tree-event-main {
   font-size: 0.76rem;
 }
 
-.training-ocr-marker {
+.training-ocr-region {
   position: absolute;
   z-index: 2;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.2rem;
-  overflow: hidden;
   border: 2px solid var(--color-accent);
   border-radius: var(--radius-small);
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  pointer-events: none;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  cursor: move;
 }
 
-.training-ocr-marker-item {
-  max-width: 100%;
+.training-ocr-region-caption {
+  position: absolute;
+  top: -1.5rem;
+  left: -2px;
+  max-width: 22rem;
   min-height: 1.4rem;
-  justify-content: flex-start;
-  pointer-events: auto;
+  padding: 0.1rem 0.35rem;
+  background: var(--color-accent);
+  color: var(--color-primary-content);
+  font-size: 0.7rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.training-ocr-region-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
 }
 
 .training-ocr-text-overlay {

@@ -429,13 +429,15 @@ internal sealed class TrainingLabelParameters
     public double Height { get; set; }
 }
 
-internal sealed class TrainingOcrTranscriptionParameters
+internal sealed class TrainingOcrRegionParameters
 {
-    public int EventId { get; set; }
+    public double X { get; set; }
 
-    public string SegmentId { get; set; } = "default";
+    public double Y { get; set; }
 
-    public string LanguageTag { get; set; } = string.Empty;
+    public double Width { get; set; }
+
+    public double Height { get; set; }
 
     public string Text { get; set; } = string.Empty;
 }
@@ -465,7 +467,7 @@ internal sealed class UpdateTrainingSampleParameters
 
     public List<TrainingLabelParameters> Labels { get; set; } = [];
 
-    public List<TrainingOcrTranscriptionParameters> OcrTranscriptions { get; set; } = [];
+    public List<TrainingOcrRegionParameters> OcrRegions { get; set; } = [];
 }
 
 internal sealed class UpdateTrainingEventsParameters
@@ -520,6 +522,9 @@ internal sealed class StartTrainingParameters
 
     // Extra mildly-distorted copies of every training crop. Validation is never augmented.
     public int? AugmentCopies { get; set; }
+
+    // "all" (default), "object", or "ocr" — lets a game with both kinds retrain just one.
+    public string? Scope { get; set; }
 }
 
 #endif

@@ -455,7 +455,10 @@ export interface TrainingMessage {
   /** Active run's phase so a client connecting mid-run renders the right state. */
   trainingPhase?: 'exporting' | 'training' | null;
   /** Last training settings used for this game (local to the machine, absent until the first run). */
-  preferences?: { epochs: number; device: string; augmentCopies: number } | null;
+  preferences?: {
+    epochs: number; device: string; augmentCopies: number;
+    ocrEpochs?: number; ocrDevice?: string;
+  } | null;
 }
 
 export type TrainingProgressStatus =
@@ -797,6 +800,9 @@ export interface StartTrainingParameters {
   augmentCopies?: number;
   /** "all" (default), "object", or "ocr" — retrain just one kind on a game that has both. */
   scope?: 'all' | 'object' | 'ocr';
+  /** Override epochs/device for the OCR recogniser step; fall back to epochs/device when unset. */
+  ocrEpochs?: number;
+  ocrDevice?: string;
 }
 
 export interface PublishTrainingModelParameters {

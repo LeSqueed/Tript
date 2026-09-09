@@ -17,6 +17,8 @@ internal sealed class TrainingPreferences
     public int Epochs { get; init; } = 100;
     public string Device { get; init; } = "auto";
     public int AugmentCopies { get; init; }
+    public int OcrEpochs { get; init; } = 50;
+    public string OcrDevice { get; init; } = "auto";
 }
 
 internal sealed class TrainingWorkspace

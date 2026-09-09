@@ -525,6 +525,12 @@ internal sealed class StartTrainingParameters
 
     // "all" (default), "object", or "ocr" — lets a game with both kinds retrain just one.
     public string? Scope { get; set; }
+
+    // The OCR recogniser fine-tune trains on a different scale than the object detector; these
+    // override Epochs/Device for the OCR step and fall back to them when unset.
+    public int? OcrEpochs { get; set; }
+
+    public string? OcrDevice { get; set; }
 }
 
 #endif

@@ -29,6 +29,13 @@ const SAMPLE_PAGE_SIZE = 8;
 const TERMINAL_STATUS_LABELS: Record<string, string> = {
   completed: 'Done', cancelled: 'Cancelled', error: 'Failed', imported: 'Imported',
 };
+const DEVICE_OPTIONS = [
+  { value: 'auto', label: 'Auto GPU / CPU' },
+  { value: 'rocm', label: 'ROCm / AMD GPU' },
+  { value: 'cuda', label: 'CUDA GPU' },
+  { value: 'directml', label: 'DirectML / AMD GPU' },
+  { value: 'cpu', label: 'CPU' },
+];
 
 // One per-epoch heartbeat (loss/mAP50 plus arrival time) for the in-progress panel: it feeds the
 // sparkline and the elapsed/remaining pacing derived from when each epoch finished.
@@ -135,6 +142,8 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [epochs, setEpochs] = useState(100);
   const [device, setDevice] = useState('auto');
   const [augmentCopies, setAugmentCopies] = useState(0);
+  const [ocrEpochs, setOcrEpochs] = useState(50);
+  const [ocrDevice, setOcrDevice] = useState('auto');
   const [trainingScope, setTrainingScope] = useState<'all' | 'object' | 'ocr'>('all');
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
   const [epochHistory, setEpochHistory] = useState<TrainingEpochPoint[]>([]);
@@ -218,6 +227,8 @@ export function TrainingView({ client }: TrainingViewProps) {
             setEpochs(message.preferences?.epochs ?? 100);
             setDevice(message.preferences?.device ?? 'auto');
             setAugmentCopies(message.preferences?.augmentCopies ?? 0);
+            setOcrEpochs(message.preferences?.ocrEpochs ?? 50);
+            setOcrDevice(message.preferences?.ocrDevice ?? 'auto');
           }
         }
       }
@@ -422,13 +433,15 @@ export function TrainingView({ client }: TrainingViewProps) {
   const effectiveScope = canPickScope ? trainingScope : 'all';
   const willTrainObject = hasObjectEvents && effectiveScope !== 'ocr';
   const willTrainOcr = hasOcrEvents && effectiveScope !== 'object';
+  const displayEpochs = willTrainObject ? epochs : ocrEpochs;
+  const displayDevice = willTrainObject ? device : ocrDevice;
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
   // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
   // connected mid-run and learned the phase from the training push.
   const exportingDataset = preparingDataset || training.trainingPhase === 'exporting';
   const epochDetails = progress?.details && progress.details.epoch > 0 ? progress.details : null;
-  const pace = trainingPace(epochHistory, epochDetails?.epochs ?? epochs);
+  const pace = trainingPace(epochHistory, epochDetails?.epochs ?? displayEpochs);
   // A series only earns its legend entry once a real value arrives; a run whose metrics never
   // populate (e.g. DirectML skips validation) must not show an empty graph frame.
   const hasLoss = epochHistory.some((point) => point.loss != null);
@@ -488,7 +501,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const startTraining = () => {
     if (gameId) {
       client.send('StartTraining', {
-        gameId, epochs, device, augmentCopies,
+        gameId, epochs, device, augmentCopies, ocrEpochs, ocrDevice,
         scope: canPickScope ? trainingScope : 'all',
       });
     }
@@ -946,8 +959,8 @@ export function TrainingView({ client }: TrainingViewProps) {
                     )}
                   </div>
                    <span className="muted small">
-                    Requested device: {device === 'auto' ? 'Auto (actual device is shown in the console)' : device.toUpperCase()}
-                    {' · '} {epochs} epochs
+                    Requested device: {displayDevice === 'auto' ? 'Auto (actual device is shown in the console)' : displayDevice.toUpperCase()}
+                    {' · '} {displayEpochs} epochs
                     {willTrainObject && ` · ${training.model?.inputWidth ?? 640}x${training.model?.inputHeight ?? 640} input`}
                   </span>
                   {epochDetails && (
@@ -963,7 +976,7 @@ export function TrainingView({ client }: TrainingViewProps) {
                   )}
                   {(hasLoss || hasMap50) && (
                     <div className="training-metrics">
-                      <TrainingSparkline points={epochHistory} totalEpochs={epochDetails?.epochs ?? epochs} />
+                      <TrainingSparkline points={epochHistory} totalEpochs={epochDetails?.epochs ?? displayEpochs} />
                       <span className="muted small training-metrics-legend">
                         {hasLoss && <span className="training-metrics-legend-loss">loss</span>}
                         {hasMap50 && <span className="training-metrics-legend-map">{accuracyLabel}</span>}
@@ -982,40 +995,48 @@ export function TrainingView({ client }: TrainingViewProps) {
                   <span className="muted small">Detailed training output is in the console window.</span>
                 </div>
               )}
-            <div className="training-field compact">
-              <Field label="Epochs">
-                <TextField type="number" value={epochs} min={1} onChange={(value) => setEpochs(Number(value))} />
-              </Field>
-            </div>
-            <div className="training-field compact">
-              <Field label="Device">
-                <SelectField
-                  value={device}
-                  onChange={setDevice}
-                  options={[
-                    { value: 'auto', label: 'Auto GPU / CPU' },
-                    { value: 'rocm', label: 'ROCm / AMD GPU' },
-                    { value: 'cuda', label: 'CUDA GPU' },
-                    { value: 'directml', label: 'DirectML / AMD GPU' },
-                    { value: 'cpu', label: 'CPU' },
-                  ]}
-                />
-              </Field>
-            </div>
-            <div className="training-field compact">
-              <Field label="Augmentation" hint="Adds mildly distorted copies of each training crop to grow small sample sets. Validation is never augmented.">
-                <SelectField
-                  value={String(augmentCopies)}
-                  onChange={(value) => setAugmentCopies(Number(value))}
-                  options={[
-                    { value: '0', label: 'Off' },
-                    { value: '2', label: '2 copies per crop' },
-                    { value: '4', label: '4 copies per crop' },
-                    { value: '8', label: '8 copies per crop' },
-                  ]}
-                />
-              </Field>
-            </div>
+            {hasObjectEvents && (
+              <>
+                <div className="training-field compact">
+                  <Field label={hasOcrEvents ? 'Object epochs' : 'Epochs'}>
+                    <TextField type="number" value={epochs} min={1} onChange={(value) => setEpochs(Number(value))} />
+                  </Field>
+                </div>
+                <div className="training-field compact">
+                  <Field label={hasOcrEvents ? 'Object device' : 'Device'}>
+                    <SelectField value={device} onChange={setDevice} options={DEVICE_OPTIONS} />
+                  </Field>
+                </div>
+                <div className="training-field compact">
+                  <Field label="Augmentation" hint="Adds mildly distorted copies of each training crop to grow small sample sets. Validation is never augmented.">
+                    <SelectField
+                      value={String(augmentCopies)}
+                      onChange={(value) => setAugmentCopies(Number(value))}
+                      options={[
+                        { value: '0', label: 'Off' },
+                        { value: '2', label: '2 copies per crop' },
+                        { value: '4', label: '4 copies per crop' },
+                        { value: '8', label: '8 copies per crop' },
+                      ]}
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
+            {hasOcrEvents && (
+              <>
+                <div className="training-field compact">
+                  <Field label={hasObjectEvents ? 'OCR epochs' : 'Epochs'}>
+                    <TextField type="number" value={ocrEpochs} min={1} onChange={(value) => setOcrEpochs(Number(value))} />
+                  </Field>
+                </div>
+                <div className="training-field compact">
+                  <Field label={hasObjectEvents ? 'OCR device' : 'Device'}>
+                    <SelectField value={ocrDevice} onChange={setOcrDevice} options={DEVICE_OPTIONS} />
+                  </Field>
+                </div>
+              </>
+            )}
             {canPickScope && (
               <div className="training-field compact">
                 <Field label="Retrain" hint="This game has object and OCR events. Retrain just one; the other model is kept as installed.">

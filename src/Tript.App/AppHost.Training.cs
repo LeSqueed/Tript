@@ -752,7 +752,9 @@ internal sealed partial class AppHost
             throw new ArgumentException("A game id is required to train a model.");
 
         var augmentCopies = parameters.AugmentCopies ?? 0;
+        var ocrEpochs = parameters.OcrEpochs ?? parameters.Epochs;
         TrainingRunner.ValidateEpochs(parameters.Epochs);
+        TrainingRunner.ValidateEpochs(ocrEpochs);
         TrainingRunner.ValidateAugmentCopies(augmentCopies);
         var workspace = EnsureTrainingWorkspace(parameters.GameId);
         var imageSize = parameters.ImageSize;
@@ -772,6 +774,9 @@ internal sealed partial class AppHost
                 Epochs = parameters.Epochs,
                 Device = parameters.Device,
                 AugmentCopies = augmentCopies,
+                OcrEpochs = ocrEpochs,
+                OcrDevice = string.IsNullOrWhiteSpace(parameters.OcrDevice)
+                    ? parameters.Device : parameters.OcrDevice,
             });
             _trainingCancellation = new CancellationTokenSource();
             _trainingGameId = parameters.GameId;
@@ -1021,8 +1026,9 @@ internal sealed partial class AppHost
                 if (!File.Exists(ocrDetectorPath)) ocrDetectorPath = null;
                 try
                 {
-                    ocrModelPath = await _trainingRunner.TrainOcrModelAsync(workspace, parameters.Epochs,
-                        parameters.Device,
+                    ocrModelPath = await _trainingRunner.TrainOcrModelAsync(workspace,
+                        parameters.OcrEpochs ?? parameters.Epochs,
+                        string.IsNullOrWhiteSpace(parameters.OcrDevice) ? parameters.Device : parameters.OcrDevice,
                         (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
                             details is null || details.Epochs == 0 ? null
                                 : (int)Math.Round(100.0 * details.Epoch / details.Epochs),

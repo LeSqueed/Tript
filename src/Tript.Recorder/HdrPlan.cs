@@ -5,12 +5,8 @@ using Tript.Obs;
 
 namespace Tript.Recorder;
 
-// A registered video encoder, reduced to the two facts the HDR decision turns on.
 public sealed record VideoEncoderCandidate(string Id, string Codec);
 
-// What the mix and the encoder should be for one recording. Decided once, before the output is
-// created: obs_reset_video answers CurrentlyActive (-4) once an output is running, so the canvas
-// colour space cannot be revised mid-recording.
 public sealed record HdrPlan
 {
     public required bool UseHdr { get; init; }
@@ -19,29 +15,17 @@ public sealed record HdrPlan
     public ObsVideoFormat OutputFormat => UseHdr ? ObsVideoFormat.P010 : ObsVideoFormat.Nv12;
     public ObsColorSpace ColorSpace => UseHdr ? ObsColorSpace.Rec2100Pq : ObsColorSpace.Rec709;
 
-    // The h264/hevc profile key the encoder families read. HEVC needs main10 to carry ten bits at
-    // all; an HDR mix into "main" is silently truncated to eight.
     public string? Profile { get; init; }
 
-    // Told to the capture sources when the mix is SDR. An HDR game presents an FP16 scRGB swapchain
-    // and win-capture hands that texture over as-is; composited into a Rec.709 canvas with nothing
-    // saying otherwise, the result is not merely dark but unusable. force_sdr makes the plugin
-    // tonemap on the way in, which is the correct answer whenever we are not recording HDR.
     public bool ForceSdrOnCapture => !UseHdr;
 
-    // Why this plan and not another, for the one log line that explains a recording's colour to a
-    // user looking at an unexpectedly flat file.
     public required string Reason { get; init; }
 }
 
 public static class HdrPlanner
 {
-    // The codecs whose OBS encoders can carry Rec.2100 PQ at ten bits. H.264 is absent deliberately:
-    // its Hi10 profile exists but no OBS H.264 encoder exposes an HDR path, so an "HDR" recording on
-    // one would be a PQ-tagged eight-bit file.
     private static readonly string[] HdrCapableCodecs = ["hevc", "av1"];
 
-    // Preferred last-to-first, so the search below reads in preference order.
     private const string Hevc = "hevc";
 
     public static bool IsHdrCapable(VideoEncoderCandidate candidate)
@@ -50,29 +34,9 @@ public static class HdrPlanner
         return HdrCapableCodecs.Contains(candidate.Codec, StringComparer.OrdinalIgnoreCase);
     }
 
-    // Whether a source's colour space needs an HDR canvas. The two extended spaces are the HDR ones;
-    // Srgb16F is high-precision SDR and still belongs on an SDR canvas.
     public static bool IsHdr(ObsSourceColorSpace space) =>
         space is ObsSourceColorSpace.Extended709 or ObsSourceColorSpace.Scrgb709;
 
-    // The mix and encoder for one recording.
-    //
-    // The colour decision comes from what is being CAPTURED, not from the monitor's mode. A game
-    // hands over its own swap chain, so an HDR game reports Scrgb709 and an SDR game reports Srgb
-    // whatever the desktop is set to. Keying off the display instead gets both cases wrong on a
-    // mixed setup: an HDR game on an SDR display records black, and — the case that is easy to miss
-    // — an SDR game on an HDR display records black too, because the mismatch is symmetric.
-    //
-    // captured is null when nothing is hooked yet and there is no source to ask, which is the
-    // display-capture path; the display's own mode is the right answer there and the only one
-    // available.
-    //
-    // HDR is taken only when all three hold: the captured content is HDR, the user has not turned it
-    // off, and some registered encoder can actually encode it.
-    //
-    // A configured encoder is honoured in SDR. It is NOT honoured in HDR when it cannot encode HDR:
-    // the alternative is writing a PQ-tagged file the encoder truncated to eight bits, which reads
-    // as a corrupt recording rather than as a setting that did not apply.
     public static HdrPlan Decide(
         ObsSourceColorSpace? capturedColorSpace,
         bool displayIsHdr,
@@ -87,13 +51,16 @@ public static class HdrPlanner
 
         var sdrEncoder = ResolveSdrEncoder(registered, configuredEncoderId);
 
-        var contentIsHdr = capturedColorSpace is { } space ? IsHdr(space) : displayIsHdr;
-        var because = capturedColorSpace is { } reported
-            ? $"the captured source reports {reported}"
-            : "nothing is hooked, so the display's mode stands in";
+        var sourceIsHdr = capturedColorSpace is { } space && IsHdr(space);
+        var contentIsHdr = sourceIsHdr || displayIsHdr;
 
         if (!contentIsHdr)
-            return Sdr(sdrEncoder, because + " and that is SDR");
+        {
+            var why = capturedColorSpace is { } sdrSpace
+                ? $"the captured source reports {sdrSpace} and no display is in HDR mode"
+                : "nothing is hooked and no display is in HDR mode";
+            return Sdr(sdrEncoder, why);
+        }
 
         if (!hdrEnabledInSettings)
             return Sdr(sdrEncoder, "HDR recording is turned off in settings");
@@ -101,6 +68,10 @@ public static class HdrPlanner
         var hdrEncoder = ResolveHdrEncoder(registered, configuredEncoderId);
         if (hdrEncoder is null)
             return Sdr(sdrEncoder, "no registered encoder can encode HDR");
+
+        var because = sourceIsHdr
+            ? $"the captured source reports {capturedColorSpace}"
+            : "a display is in HDR mode";
 
         return new HdrPlan
         {
@@ -131,10 +102,6 @@ public static class HdrPlanner
         return registered[0].Id;
     }
 
-    // The configured encoder when it can do the job, so a user who picked one keeps it; otherwise the
-    // best HDR-capable one registered — hardware ahead of software, because the software AV1 encoders
-    // register on every machine and enumerate before the GPU's own. Picking by enumeration order put
-    // ffmpeg_svt_av1 ahead of h265_texture_amf, which is a real-time recording done in software.
     private static VideoEncoderCandidate? ResolveHdrEncoder(
         IReadOnlyList<VideoEncoderCandidate> registered, string? configuredEncoderId)
     {
@@ -151,9 +118,6 @@ public static class HdrPlanner
             .FirstOrDefault();
     }
 
-    // Lower sorts first. Judged by id because libobs exposes no "is this hardware" flag: the encoders
-    // that take a texture straight off the GPU say so in their ids, and the three software encoders
-    // are a closed set worth naming rather than inferring.
     internal static int HardwarePreference(VideoEncoderCandidate candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);

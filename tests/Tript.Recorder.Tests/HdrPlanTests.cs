@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The colour decision for one recording. Pure: it takes the display's HDR state, the setting, and
-// what this machine registered, and answers with a canvas and an encoder. No libobs involved.
 public sealed class HdrPlanTests
 {
     private static readonly VideoEncoderCandidate X264 = new("obs_x264", "h264");
@@ -42,8 +40,6 @@ public sealed class HdrPlanTests
         Assert.Equal("main10", plan.Profile);
     }
 
-    // AV1 has no "main10" to set: ten bits is the profile's own baseline, and writing a profile the
-    // encoder does not declare is how a family gets an unrecognised string.
     [Fact]
     public void AnAv1Encoder_TakesHdrWithoutAProfile()
     {
@@ -56,7 +52,6 @@ public sealed class HdrPlanTests
         Assert.Null(plan.Profile);
     }
 
-    // The case that makes an HDR game recordable at all on a machine that cannot encode HDR.
     [Fact]
     public void AnHdrDisplay_WithOnlyH264_RecordsSdrAndForcesTheCaptureToTonemap()
     {
@@ -81,8 +76,6 @@ public sealed class HdrPlanTests
         Assert.Contains("turned off", plan.Reason, StringComparison.Ordinal);
     }
 
-    // An SDR recording never asks the capture to tonemap: the source is already in the canvas's
-    // colour space, and forcing it would be a second conversion.
     [Fact]
     public void AnHdrRecording_LeavesTheCaptureAlone()
     {
@@ -103,8 +96,6 @@ public sealed class HdrPlanTests
         Assert.Equal("obs_nvenc_h264_tex", plan.EncoderId);
     }
 
-    // Deliberately overridden rather than honoured: an H.264 encoder handed a PQ canvas writes a
-    // file whose metadata promises a range the eight-bit stream does not carry.
     [Fact]
     public void AConfiguredEncoderThatCannotDoHdr_IsReplacedRatherThanUsed()
     {
@@ -129,8 +120,6 @@ public sealed class HdrPlanTests
         Assert.Equal("obs_nvenc_av1_tex", plan.EncoderId);
     }
 
-    // The exact set this machine registers, in the order libobs enumerates it. The software AV1
-    // encoders come first, so picking by enumeration order would record a game in software.
     [Fact]
     public void HardwareHevc_WinsOverSoftwareAv1_EvenWhenSoftwareEnumeratesFirst()
     {
@@ -151,7 +140,6 @@ public sealed class HdrPlanTests
         Assert.Equal("main10", plan.Profile);
     }
 
-    // A texture encoder takes the frame straight off the GPU; the fallback path copies it back first.
     [Fact]
     public void ATextureEncoder_WinsOverTheSameFamilysFallback()
     {
@@ -165,15 +153,42 @@ public sealed class HdrPlanTests
         Assert.Equal("h265_texture_amf", plan.EncoderId);
     }
 
-    // The regression that keying off the display created. On an HDR desktop an SDR game still hands
-    // over an sRGB swap chain, and putting that on a PQ canvas records black just as surely as the
-    // other way round — the mismatch is symmetric, so the source has the last word.
     [Fact]
-    public void AnSdrGameOnAnHdrDisplay_RecordsSdr()
+    public void AnSdrProbeWhileADisplayIsInHdrMode_RecordsHdr()
     {
         var plan = HdrPlanner.Decide(
             capturedColorSpace: ObsSourceColorSpace.Srgb,
             displayIsHdr: true,
+            hdrEnabledInSettings: true,
+            [X264, NvencHevc],
+            configuredEncoderId: null);
+
+        Assert.True(plan.UseHdr);
+        Assert.Equal(ObsVideoFormat.P010, plan.OutputFormat);
+        Assert.Equal(ObsColorSpace.Rec2100Pq, plan.ColorSpace);
+        Assert.Contains("HDR mode", plan.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASucceededSdrProbe_DoesNotVetoAnHdrDisplay()
+    {
+        var withoutProbe = HdrPlanner.Decide(
+            capturedColorSpace: null, displayIsHdr: true, hdrEnabledInSettings: true,
+            [NvencAv1], configuredEncoderId: null);
+        var withSdrProbe = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb, displayIsHdr: true, hdrEnabledInSettings: true,
+            [NvencAv1], configuredEncoderId: null);
+
+        Assert.True(withoutProbe.UseHdr);
+        Assert.Equal(withoutProbe.UseHdr, withSdrProbe.UseHdr);
+    }
+
+    [Fact]
+    public void AnSdrSourceWithNoHdrDisplay_RecordsSdr()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
+            displayIsHdr: false,
             hdrEnabledInSettings: true,
             [X264, NvencHevc],
             configuredEncoderId: null);
@@ -183,7 +198,6 @@ public sealed class HdrPlanTests
         Assert.Contains("Srgb", plan.Reason, StringComparison.Ordinal);
     }
 
-    // And the case that started all of this: Overwatch presents FP16 scRGB.
     [Fact]
     public void AnHdrGame_RecordsHdr_EvenWhenTheDisplayProbeSaysOtherwise()
     {
@@ -199,8 +213,6 @@ public sealed class HdrPlanTests
         Assert.Equal(ObsColorSpace.Rec2100Pq, plan.ColorSpace);
     }
 
-    // Srgb16F is high-precision SDR, not HDR. Treating "16F" as a synonym for HDR would put an
-    // ordinary source on a PQ canvas.
     [Theory]
     [InlineData(ObsSourceColorSpace.Srgb, false)]
     [InlineData(ObsSourceColorSpace.Srgb16F, false)]
@@ -224,10 +236,6 @@ public sealed class HdrPlanTests
     public void HdrCapabilityFollowsTheCodec(string codec, bool capable) =>
         Assert.Equal(capable, HdrPlanner.IsHdrCapable(new VideoEncoderCandidate("id", codec)));
 
-    // The probe answers on both platforms rather than throwing — a marshalling mistake in the
-    // display-config structs would surface here rather than at the start of a recording. Off Windows
-    // there is no single "is the desktop in HDR" switch, so the answer is always false and every
-    // Linux recording takes the SDR path with tonemapping.
     [Fact]
     public void TheDisplayProbe_Answers_AndIsFalseOffWindows()
     {
@@ -237,11 +245,6 @@ public sealed class HdrPlanTests
             Assert.False(isHdr);
     }
 
-    // These sizes are the whole correctness of the probe, and getting one wrong is silent: the query
-    // succeeds, the array is walked at the wrong stride, and every display reads as SDR. That is not
-    // hypothetical — DISPLAYCONFIG_RATIONAL declared as a ulong padded the target struct from 48 to
-    // 56 bytes and made an HDR monitor invisible, which sent an HDR game to an SDR canvas and
-    // recorded a black video. Runs everywhere: the layout is the platform's either way.
     [Fact]
     public void TheDisplayConfigStructs_MatchTheWindowsHeaders()
     {

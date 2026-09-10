@@ -8,9 +8,6 @@ using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// The recorder session over the OBS binding: composes the private scene that goes on the recording
-// channel, and builds the output — an ffmpeg_muxer, a video encoder at the resolved resolution, and
-// the audio encoders. The output is the recorder's to own; the sources are borrowed.
 public sealed class ObsRecorderSession : IRecorderSession
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
@@ -20,12 +17,8 @@ public sealed class ObsRecorderSession : IRecorderSession
     private const string FfmpegAacId = "ffmpeg_aac";
     private const uint VideoChannel = 0;
 
-    // Seek granularity of every recording, and the only boundary the clip engine can cut on
-    // without re-encoding.
     private const int KeyframeIntervalSeconds = 1;
 
-    // obs_source_get_width answers 0 for a game_capture that has not attached, so the hook state
-    // costs one call and no new interop. Polled only while the scene is on the recording channel.
     private static readonly TimeSpan HookProbeInterval = TimeSpan.FromSeconds(2);
 
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
@@ -61,8 +54,6 @@ public sealed class ObsRecorderSession : IRecorderSession
             _colourItem = _scene.AddSource(_source)
                 ?? throw new ObsException("The recorder scene refused the colour source.");
 
-            // Bottom to top: background, desktop, game. Order is z-order — obs_scene_add always
-            // lands on top — so the display layer has to be added before the game capture.
             if (Policy.IncludesDisplayCapture)
             {
                 _displaySource = CreateDisplayCaptureSource(Policy.PreferredDisplayId, out var display);
@@ -74,8 +65,6 @@ public sealed class ObsRecorderSession : IRecorderSession
                 }
             }
 
-            // Created even without an initial target: RetargetGame re-points it without restarting,
-            // so a game detected after construction still lands in the recording.
             if (Policy.IncludesGameCapture)
             {
                 _gameCaptureSource = CreateGameCaptureSource(gameCaptureTarget);
@@ -95,18 +84,10 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public ObsRuntime Runtime { get; }
 
-    // The capture policy this scene was composed for. A changed policy needs a new session: the
-    // layers are created in the constructor.
     public CapturePolicy Policy { get; }
 
-    // The monitor the display layer is capturing, or null when there is no display layer or the
-    // runtime enumerated no monitors. Reported rather than saved — a preference that named a
-    // monitor which is not attached stays the preference (see ObsCaptureSource.ResolveDisplay).
     public ObsDisplay? SelectedDisplay { get; }
 
-    // Whether the game-capture source has actually attached to a process. False on a platform with
-    // no game capture, and false whenever the scene is not on the recording channel: win-capture
-    // stops its hook while the source is not showing (game-capture.c game_capture_tick).
     public bool IsGameCaptureHooked
     {
         get
@@ -118,9 +99,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
     }
 
-    // Whether the scene has a display-capture layer. False for the Game method by design, and false
-    // when no module registers a display capture — in both cases an unhooked game capture records
-    // the colour background and nothing else.
     public bool HasDisplayFallback => _displaySource is not null;
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
@@ -155,8 +133,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         if (!ObsOutput.IsTypeRegistered(outputId))
             throw new ObsException($"No loaded module registers the output type '{outputId}'.");
 
-        // Before anything binds to the mix: obs_reset_video answers CurrentlyActive once an output
-        // exists, so the canvas colour space is settled here or not at all.
         var plan = ResolveHdrPlan(settings);
         plan = ApplyCanvasColour(plan);
         ApplyCaptureColour(plan);
@@ -192,10 +168,6 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         var output = ObsOutput.Create(outputId, outputName, outputSettings);
 
-        // The encoders must stay reachable. obs_output_set_video_encoder only records the pointer,
-        // while ObsEncoderHandle holds the sole managed reference and releases it from its finalizer.
-        // Left as locals they are collectable the moment this method returns, and the output would
-        // then initialize a released encoder at obs_output_start.
         ObsEncoder? videoEncoder = null;
         ObsEncoder? audioEncoder = null;
         AudioRouting? audioRouting = null;
@@ -207,9 +179,6 @@ public sealed class ObsRecorderSession : IRecorderSession
             {
                 videoSettings.SetString("rate_control", rateControl.Mode);
 
-                // Which dial a mode reads is a per-family fact: constant quality reads only the
-                // quantiser, CBR only the bitrate, and x264's VBR reads both. x264 zeroes crf under
-                // CBR and bitrate under CRF, so the object should say only what the mode means.
                 if (rateControl.QuantiserKey is { } quantiserKey)
                     videoSettings.SetInt(quantiserKey, ObsEncoderPolicy.MapQualityToQuantiser(settings.Quality));
 
@@ -220,12 +189,8 @@ public sealed class ObsRecorderSession : IRecorderSession
                     videoSettings.SetInt(maxBitrateKey,
                         ObsEncoderPolicy.ResolveMaxBitrateKbps(settings.BitrateKbps, settings.MaxBitrateKbps));
 
-                // keyint_sec is an interval in SECONDS; the encoder converts it using the mix's
-                // frame rate. Passing the frame rate asked for a 60-second GOP that clamped to 10.
                 videoSettings.SetInt("keyint_sec", KeyframeIntervalSeconds);
 
-                // HEVC carries ten bits only under main10; an HDR mix into "main" is truncated to
-                // eight and the PQ transfer then describes a file that no longer holds its range.
                 if (plan.Profile is { } profile)
                     videoSettings.SetString("profile", profile);
 
@@ -235,8 +200,6 @@ public sealed class ObsRecorderSession : IRecorderSession
                 output.SetVideoEncoder(videoEncoder);
             }
 
-            // An empty track list keeps the single programme-mix encoder on slot 0, so a recording
-            // with no tracks configured still carries audio.
             if (settings.AudioTracks.Count > 0)
             {
                 var sink = new ObsAudioRoutingSink(output, audio, audioEncoderId: FfmpegAacId, scene: _scene);
@@ -258,7 +221,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
         catch
         {
-            // An output must never be left alive pointing at a released encoder.
             output.Dispose();
             videoEncoder?.Dispose();
             audioEncoder?.Dispose();
@@ -279,8 +241,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         Runtime.SetOutputSource(VideoChannel, (ObsSource?)null);
     }
 
-    // Re-points the live game-capture source without restarting it; obs_source_update merges, so
-    // the capture_mode it was created with survives. False when the platform has no game capture.
     public bool RetargetGame(ObsGameCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -293,8 +253,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         return true;
     }
 
-    // Scene items first — each holds a reference to its source and to its scene — then the scene,
-    // then the sources.
     public void Dispose()
     {
         StopHookProbe();
@@ -316,10 +274,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         _gameCaptureSource?.Dispose();
     }
 
-    // ---- scene composition ----
-
-    // The desktop layer. Null when no loaded module registers a display capture, which is a degraded
-    // but working state: the recording is then the colour background until the game capture hooks.
     private static ObsSource? CreateDisplayCaptureSource(string? preferredDisplayId, out ObsDisplay? selected)
     {
         selected = null;
@@ -334,9 +288,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         var source = ObsSource.CreatePrivate(displayId, "app display");
         try
         {
-            // Through the instance rather than the type: monitor_capture's "monitor_id" default is
-            // the sentinel "DUMMY", which matches no monitor and captures nothing, so the chosen
-            // monitor has to be written back explicitly.
             var displays = ObsCaptureSource.EnumerateDisplays(source);
             var resolution = ObsCaptureSource.ResolveDisplay(displays, preferredDisplayId);
             selected = resolution.Selected;
@@ -350,8 +301,6 @@ public sealed class ObsRecorderSession : IRecorderSession
 
             if (selected is null)
             {
-                // Enumerating nothing is an ordinary state, not a failure: the source keeps whatever
-                // the plugin defaults to and the recording proceeds.
                 Log.Warning("ObsRecorderSession: {DisplayId} enumerated no monitors; " +
                             "the display layer keeps the plugin's default.", displayId);
             }
@@ -372,9 +321,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         return source;
     }
 
-    // Null when the platform has no game-capture source (Linux), which the caller treats as display
-    // capture only. A null target still creates the source so RetargetGame has something to
-    // re-point.
     private static ObsSource? CreateGameCaptureSource(ObsGameCaptureTarget? target)
     {
         var properties = ObsSourceProperties.EnumerateTypeProperties(GameCaptureId);
@@ -385,9 +331,6 @@ public sealed class ObsRecorderSession : IRecorderSession
             ? ObsCaptureSource.BuildGameCaptureSettings(target) ?? new ObsSettings()
             : new ObsSettings();
 
-        // Written even when the property was not discovered: the plugin's default is any_fullscreen,
-        // which hooks whatever happens to be fullscreen and ignores the window string entirely, and
-        // a key a plugin does not declare is simply ignored. There is no path that leaves it unset.
         if (ResolveWindowCaptureMode(properties) is { } mode)
         {
             settings.SetString(CaptureModeKey, mode);
@@ -400,28 +343,16 @@ public sealed class ObsRecorderSession : IRecorderSession
             settings.SetString(CaptureModeKey, WindowCaptureModeValue);
         }
 
-        // win-capture waits 10 seconds before its first hook attempt when a source becomes visible
-        // at the default Normal rate. Tript already knows the exact executable and waits for a real
-        // captured frame before starting output, so use OBS's Fastest rate (10s * 0.1 = 1s). This
-        // changes only the retry cadence; target-startup protection and indefinite retries remain
-        // inside win-capture.
         settings.SetInt(HookRateKey, FastestHookRate);
 
         return ObsSource.CreatePrivate(GameCaptureId, "app capture", settings);
     }
 
-    // win-capture's mode key, and the value that makes it match on the window string rather than
-    // grabbing whatever is fullscreen in the foreground.
     private const string CaptureModeKey = "capture_mode";
     private const string WindowCaptureModeValue = "window";
     private const string HookRateKey = "hook_rate";
     private const long FastestHookRate = 3;
 
-    // Without this the plugin's default capture_mode is "any_fullscreen": it hooks whichever
-    // fullscreen window is foreground and ignores the window string entirely. The value is
-    // plugin-side, so it is taken from the property's own item list rather than assumed — but the
-    // property is found by its declared key, because game capture's window list also carries items
-    // spelled "window" and the first list that does is not necessarily this one.
     internal static string? ResolveWindowCaptureMode(IReadOnlyList<ObsSourceProperty> properties)
     {
         ArgumentNullException.ThrowIfNull(properties);
@@ -445,15 +376,8 @@ public sealed class ObsRecorderSession : IRecorderSession
         return null;
     }
 
-    // ---- hook visibility ----
-
-    // The game item is deliberately never hidden while it waits for a hook. An invisible scene item
-    // drops the source's showing reference, and win-capture stops — and never starts — its hook
-    // while the source is not showing.
     private void StartHookProbe()
     {
-        // A platform that registers no game-capture source cannot hook, so there is nothing to
-        // probe. The host skips preflight for that case rather than waiting forever.
         if (_gameCaptureSource is null)
             return;
 
@@ -511,9 +435,6 @@ public sealed class ObsRecorderSession : IRecorderSession
                 }
             }
 
-            // Said once, because a hook that has not happened by now is the shape of the failure
-            // that otherwise reads as a working recording of the wrong picture. The game may still
-            // be loading in the background, so this is diagnostic only and never ends the recording.
             var deadline = HookDeadlineFor(Policy);
             if (!hooked && !_hookTimeoutReported && _probeTicks * HookProbeInterval >= deadline)
             {
@@ -569,18 +490,12 @@ public sealed class ObsRecorderSession : IRecorderSession
         return false;
     }
 
-    // The Game method's deadline is the user's configured game-capture timeout; every other method
-    // has a display layer showing meanwhile, so its deadline only governs a log line.
     internal static TimeSpan HookDeadlineFor(CapturePolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
         return policy.Method == DisplayCaptureMethod.Game ? policy.GameCaptureTimeout : HookTimeout;
     }
 
-    // ---- canvas fit ----
-
-    // With no width/height setting the colour source renders at the plugin's default block size
-    // instead of filling the canvas.
     private void SizeColourSourceToCanvas(int width, int height)
     {
         using var settings = _source.GetSettings();
@@ -592,11 +507,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         _source.Update(settings);
     }
 
-    // Every item is fitted to the canvas instead of being drawn 1:1 at the origin: a capture is
-    // whatever resolution its monitor or its game window happens to be, and an unbounded item at a
-    // different resolution is either cropped or a picture in the corner of a black frame. The scene
-    // renders at the mix's BASE size — the encoder does the scale to the output size — so that, not
-    // the requested recording resolution, is the box to fit to.
     private void FitItemsToCanvas(int fallbackWidth, int fallbackHeight)
     {
         var width = (float)fallbackWidth;
@@ -613,9 +523,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         FitToCanvas(_gameItem, width, height);
     }
 
-    // The individual bounds setters rather than the whole-transform one: obs_sceneitem_set_info2 is
-    // an OBS 30.1 entry point and these are not, so this path still works against an older libobs.
-    // A runtime missing even these is left unbounded rather than failing the recording.
     private static void FitToCanvas(ObsSceneItem? item, float width, float height)
     {
         if (item is null)
@@ -639,15 +546,12 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
     }
 
-    // What this machine can actually do with the colour the captured display is in.
     private HdrPlan ResolveHdrPlan(ResolvedRecorderSettings settings)
     {
         var candidates = ObsEncoderPolicy.EnumerateVideoEncoderCandidates();
         if (candidates.Count == 0)
             throw new ObsException("No loaded module registers a usable video encoder.");
 
-        // The configured id only counts when it is one this machine registered; the settings model's
-        // "x264" placeholder is a request for the default, not an encoder id.
         var configured = ObsEncoderPolicy.IsUsableId(settings.Encoder) ? settings.Encoder : null;
 
         var plan = HdrPlanner.Decide(
@@ -663,40 +567,24 @@ public sealed class ObsRecorderSession : IRecorderSession
         return plan;
     }
 
-    // The colour the recording is being made in, from the desktop duplicator — the one Windows
-    // signal that reports it honestly. The capture SOURCES do not: game capture answers Srgb while
-    // hooked to a game presenting scRGB, and monitor capture answers Srgb for a Rec.2100 PQ desktop.
-    //
-    // The DISPLAY is deliberately the input, not the game, and not only because the game will not
-    // say. A display's HDR mode is stable for the length of a recording; a game's is not — it can be
-    // toggled in the game's own settings mid-session, and obs_reset_video refuses once an output is
-    // running, so a canvas chosen from the game can go stale with no way to correct it. A canvas
-    // chosen from the display cannot. The mismatch that a mid-recording toggle then creates is
-    // absorbed by the compositor's own conversion, which works now that the video levels are set.
-    //
-    // The probe also carries the display's real SDR white level, which is the number that conversion
-    // is done with, so it is applied here rather than left at the generic default.
     private ObsSourceColorSpace? CaptureColourSpace()
     {
-        var index = SelectedDisplay?.Index ?? 0;
-        if (Runtime.ProbeDisplay(index) is not { } display)
+        var probes = Runtime.ProbeDisplays();
+        if (probes.Count == 0)
             return null;
 
-        // Guarded, because zero is the value that started all of this: a white level of zero makes
-        // every conversion between colour spaces black, and a probe that answered zero would put it
-        // straight back. The reset's default stands in that case.
-        if (display.SdrWhiteLevelNits > 0f)
-            Runtime.SetVideoLevels(display.SdrWhiteLevelNits, ObsRuntime.DefaultHdrNominalPeakLevelNits);
+        if (Log.IsEnabled(Serilog.Events.LogEventLevel.Debug))
+            Log.Debug("ObsRecorderSession: display probe — {Probes}", string.Join("; ",
+                probes.Select(p => $"[{p.MonitorIndex}] {p.ColorSpace} @ {p.SdrWhiteLevelNits} nits")));
 
-        Log.Debug("ObsRecorderSession: display {Index} reports {Space} at {Nits} nits SDR white.",
-            index, display.ColorSpace, display.SdrWhiteLevelNits);
+        var choice = DisplayColourResolver.Choose(probes);
 
-        return display.ColorSpace;
+        if (choice.SdrWhiteLevelNits > 0f)
+            Runtime.SetVideoLevels(choice.SdrWhiteLevelNits, ObsRuntime.DefaultHdrNominalPeakLevelNits);
+
+        return choice.ColourSpace;
     }
 
-    // Moves the canvas onto the plan's format and colour space, keeping every other dimension of the
-    // mix as it was. A refused reset is not fatal: the canvas is still the SDR one that was working,
-    // so the plan is downgraded to match rather than recording HDR metadata over SDR pixels.
     private HdrPlan ApplyCanvasColour(HdrPlan plan)
     {
         if (!Runtime.TryGetVideoInfo(out var current) || current is null)
@@ -713,16 +601,12 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         if (result == ObsVideoResetResult.Success)
         {
-            // obs_reset_video rebuilds the mix. Re-asserting the program source costs nothing and
-            // removes any question about whether the scene survived the rebuild.
             PlaceSourceOnChannel();
             return plan;
         }
 
         if (!plan.UseHdr)
         {
-            // Refused on the way back to SDR: the mix stays where it is, and the capture sources are
-            // still told to tonemap, so the frame remains watchable.
             Log.Warning("ObsRecorderSession: obs_reset_video refused the SDR canvas ({Result}); " +
                         "the mix keeps its current colour space.", result);
             return plan;
@@ -731,8 +615,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         Log.Warning("ObsRecorderSession: obs_reset_video refused the HDR canvas ({Result}); " +
                     "recording SDR instead.", result);
 
-        // Forced to SDR outright rather than re-asked: the canvas the mix still has is the SDR one,
-        // so the plan has to match that fact and not the content's preference.
         var downgraded = HdrPlanner.Decide(
             capturedColorSpace: ObsSourceColorSpace.Srgb,
             displayIsHdr: false,
@@ -744,9 +626,6 @@ public sealed class ObsRecorderSession : IRecorderSession
         return downgraded;
     }
 
-    // Tells the capture sources whether they are feeding an SDR canvas. This is the line that makes
-    // an HDR game record at all when we are not recording HDR: win-capture hands over the game's
-    // FP16 scRGB texture untouched otherwise, and Rec.709 has nowhere to put it.
     private void ApplyCaptureColour(HdrPlan plan)
     {
         ApplyForceSdr(_gameCaptureSource, plan.ForceSdrOnCapture);
@@ -766,19 +645,12 @@ public sealed class ObsRecorderSession : IRecorderSession
         }
         catch (ObsException exception)
         {
-            // A capture plugin without the key ignores it; only a failure to talk to the source at
-            // all lands here, and that is not worth failing a recording over.
             Log.Debug(exception, "ObsRecorderSession: could not set '{Key}' on a capture source.", ForceSdrKey);
         }
     }
 
-    // win-capture's key on both game and monitor capture. Absent on the Linux sources, where it is
-    // simply ignored — there is no HDR desktop path there to disagree with.
     private const string ForceSdrKey = "force_sdr";
 
-// The IRecorderOutput over a real ObsOutput: forwards start, stop and the stop signal, and owns the
-// output and the two encoders wired into it. The encoders are fields rather than locals for the
-// reachability reason documented in CreateOutput.
     private sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
     {
         private readonly ObsOutput _output;
@@ -873,9 +745,6 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         public bool WaitForReplaySave(TimeSpan timeout) => _replaySaveCompleted.Wait(timeout);
 
-        // Release order matters: the output first, while its encoder pointers are still valid, then
-        // the encoders, then the audio routing — whose dispose deactivates the capture sources only
-        // after the output has stopped reading the mixes.
         public void Dispose()
         {
             if (_isReplayBuffer)

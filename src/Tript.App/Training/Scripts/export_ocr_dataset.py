@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Build the OCR recogniser's fine-tune dataset from a Tript workspace.
 
 Training crops come from three sources:
@@ -31,7 +32,6 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
-# Ability names the OCR template hides inside a {...AndType} capture. Override with --ability-names.
 OVERWATCH_ABILITY_NAMES = {
     "Turret": "SENTRY TURRET",
     "Mine": "VENOM MINE",
@@ -39,8 +39,8 @@ OVERWATCH_ABILITY_NAMES = {
 }
 
 CROP_HEIGHT = 48
-CROP_WIDTH = 320  # PP-OCRv3 rec input width; matches PaddleOcrRecognizer's default
-PAD_VALUE = 127  # normalises to ~0 under both PP-OCR's (x/255-0.5)/0.5 and the runtime's x/127.5-1
+CROP_WIDTH = 320
+PAD_VALUE = 127
 WINDOWS_FONTS = Path("C:/Windows/Fonts")
 FONT_CANDIDATES = ["impact.ttf", "bahnschrift.ttf", "arialbd.ttf"]
 
@@ -49,7 +49,6 @@ NAME_WORDS = [
     "RAREPEPE", "STRYDE", "KYVRAA", "BRKLYN", "CRUMDUDDLER", "PANTSUUU", "CAESURA", "LORIC",
     "SVACINA", "ROXAS", "DAVIDSHO", "FLAMBAYNE", "SYRON", "VALAARK", "DAN", "MOLL", "WIST",
 ]
-
 
 @dataclass(frozen=True)
 class Region:
@@ -66,15 +65,13 @@ class Region:
     def bottom(self) -> float:
         return self.y + self.h
 
-
 @dataclass(frozen=True)
 class Phrase:
-    label: str          # canonical text every crop for this event is labelled with
-    kind: str           # "elimination" | "literal"
+    label: str
+    kind: str
     region: Region | None
-    render_prefix: str  # synthetic: text before the owner name
-    render_suffix: str  # synthetic: text after the owner name
-
+    render_prefix: str
+    render_suffix: str
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -110,7 +107,7 @@ def main() -> int:
     staging = workspace / f"dataset.ocr-export-{rng.getrandbits(48):012x}"
     images = staging / "images"
     images.mkdir(parents=True)
-    records: list[tuple[str, str, str]] = []  # (relative image path, label, "real"|"synthetic")
+    records: list[tuple[str, str, str]] = []
 
     try:
         backgrounds: list[Image.Image] = []
@@ -136,9 +133,6 @@ def main() -> int:
         charset = sorted({ch for _, label, _ in records for ch in label if ch != " "})
         (staging / "character_dict.txt").write_text("\n".join(charset) + "\n", encoding="utf-8")
 
-        # Split real and synthetic crops independently so the fine-tune always trains on the
-        # human-labelled crops - holding all of them out for validation would train the model on
-        # synthetic text alone and then score it on text it never saw.
         rng.shuffle(records)
         lines = []
         val_target = 0
@@ -174,10 +168,8 @@ def main() -> int:
             shutil.rmtree(staging)
         raise
 
-
 def load_json_list(path: Path) -> list:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-
 
 def normalize(text: str) -> str:
     out: list[str] = []
@@ -194,7 +186,6 @@ def normalize(text: str) -> str:
             pending_space = bool(out)
     return "".join(out)
 
-
 def event_region(event: dict, groups: dict[int, dict]) -> Region | None:
     source = groups.get(event.get("regionGroupId")) or event
     values = [source.get(k) for k in
@@ -202,7 +193,6 @@ def event_region(event: dict, groups: dict[int, dict]) -> Region | None:
     if any(v is None for v in values):
         return None
     return Region(*(float(v) for v in values))
-
 
 def build_phrases(events: list[dict], groups: dict[int, dict],
                   overrides: dict[str, str]) -> dict[str, Phrase]:
@@ -226,7 +216,6 @@ def build_phrases(events: list[dict], groups: dict[int, dict],
             label = normalize(template)
             result[name] = Phrase(label, "literal", region, render_prefix="", render_suffix=label)
     return result
-
 
 def harvest_object_crops(samples_dir: Path, ocr_events: list[dict], phrases: dict[str, Phrase],
                          images: Path) -> tuple[list, list]:
@@ -270,8 +259,7 @@ def harvest_object_crops(samples_dir: Path, ocr_events: list[dict], phrases: dic
                     continue
                 row_cy = (ability["centerY"] + icon["centerY"]) / 2
                 line_h = max(ability["height"], icon["height"]) * 1.3
-                # Left edge on the icon (the true start of the row), not the ability box, so the
-                # full "ELIMINATED <owner> <ability>" strip is captured for narrow ability boxes.
+
                 crop = crop_strip(image,
                                   icon["centerX"] - icon["width"] / 2 - 0.003, row_cy - line_h / 2,
                                   ability["centerX"] + ability["width"] * 0.6, row_cy + line_h / 2)
@@ -295,7 +283,6 @@ def harvest_object_crops(samples_dir: Path, ocr_events: list[dict], phrases: dic
 
     return records, backgrounds
 
-
 def nearest_icon(ability: dict, icons: list[dict]) -> dict | None:
     best, best_dy = None, 1e9
     limit = max(ability["height"], 0.02) * 1.6
@@ -306,7 +293,6 @@ def nearest_icon(ability: dict, icons: list[dict]) -> dict | None:
         if dy < best_dy and dy < limit:
             best, best_dy = icon, dy
     return best
-
 
 def harvest_region_crops(workspace: Path, images: Path) -> list:
     samples_dir = workspace / "samples"
@@ -336,7 +322,6 @@ def harvest_region_crops(workspace: Path, images: Path) -> list:
                 seq += 1
     return records
 
-
 def crop_strip(image: Image.Image, x0: float, y0: float, x1: float, y1: float) -> Image.Image | None:
     iw, ih = image.size
     left, top = max(0, int(x0 * iw)), max(0, int(y0 * ih))
@@ -345,17 +330,14 @@ def crop_strip(image: Image.Image, x0: float, y0: float, x1: float, y1: float) -
         return None
     return image.crop((left, top, right, bottom))
 
-
 def fit_crop(crop: Image.Image) -> Image.Image:
-    # Match the runtime recogniser (PaddleOcrRecognizer.PrepareInput): keep colour, scale to the
-    # input height, squash to the input width if the natural width overruns, gray-pad the rest.
+
     natural = max(1, round(crop.width * CROP_HEIGHT / crop.height))
     width = min(natural, CROP_WIDTH)
     resized = crop.convert("RGB").resize((width, CROP_HEIGHT), Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (CROP_WIDTH, CROP_HEIGHT), (PAD_VALUE, PAD_VALUE, PAD_VALUE))
     canvas.paste(resized, (0, 0))
     return canvas
-
 
 def render_synthetic(phrases: dict[str, Phrase], backgrounds: list[Image.Image], per_phrase: int,
                      images: Path, rng: random.Random) -> list:
@@ -375,15 +357,13 @@ def render_synthetic(phrases: dict[str, Phrase], backgrounds: list[Image.Image],
             seq += 1
     return records
 
-
 def render_one(text: str, kind: str, backgrounds: list[Image.Image], font_path: str | None,
                rng: random.Random) -> Image.Image:
     size = rng.randint(30, 40)
     font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default(size)
     pad = 14
     tw = int(ImageDraw.Draw(Image.new("RGB", (4, 4))).textlength(text, font=font))
-    # A trailing score box like the real feed ("… TURRET  100"); the label omits it so the model
-    # learns to stop at the phrase.
+
     score = str(rng.choice([100, 100, 100, 47, 6, 88, 150])) if kind == "elimination" and rng.random() < 0.6 else ""
     score_w = int(ImageDraw.Draw(Image.new("RGB", (4, 4))).textlength(score, font=font)) + 20 if score else 0
     tile_w, tile_h = tw + pad * 2 + score_w, size + 10 + pad
@@ -421,7 +401,6 @@ def render_one(text: str, kind: str, backgrounds: list[Image.Image], font_path: 
     if rng.random() < 0.5:
         tile = tile.filter(ImageFilter.GaussianBlur(rng.uniform(0.3, 1.0)))
     return fit_crop(tile)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

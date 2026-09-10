@@ -5,8 +5,6 @@ using System;
 
 namespace Tript.Detection.Tests;
 
-// Frozen copies of the preprocessing algorithms as they stood before any optimisation work, kept so
-// optimised versions can be diffed against them byte-for-byte. NEVER optimise this file.
 public static class ReferenceImplementations
 {
     public static byte[] BgraToGray(byte[] bgra, int w, int h)
@@ -82,10 +80,6 @@ public static class ReferenceImplementations
         return buf;
     }
 
-    // The three region groups BuildRegionGroups produces from the 7 event definitions in
-    // data/training/Overwatch/events.json. Group 1's W is the literal for the merged
-    // Death Spectating + POTG regions, which BuildRegionGroups computes as 0.21669999f;
-    // both round to the same integer crop width at every realistic frame size.
     public static readonly (float X, float Y, float W, float H)[] OverwatchGroups =
     {
         (0.2583f, 0.5101f, 0.5375f, 0.3161f),

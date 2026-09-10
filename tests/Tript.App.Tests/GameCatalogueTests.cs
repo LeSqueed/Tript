@@ -8,10 +8,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The game catalogue behind AppHost.GameList. It is read from three threads — the IPC dispatch pool,
-// the game detector's timer and the hook probe — and it used to rebuild itself, in place, on every
-// read that found it empty: Clear() then AddRange() on the one list the other threads were
-// enumerating. A user who deleted every game entry turned every read into that.
 public sealed class GameCatalogueTests : IDisposable
 {
     private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
@@ -78,27 +74,20 @@ public sealed class GameCatalogueTests : IDisposable
     [Fact]
     public void AnEmptyCatalogue_IsNotRebuiltByReadingIt()
     {
-        // Removing settings entries does not remove the project catalogue.
         Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
         {
             game = new { gameList = Array.Empty<object>() },
         })));
         Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
 
-        // A game appears in the settings object behind the host's back. Reading the property must not
-        // notice: the read is a read, not a reload of the whole catalogue over the top of whatever
-        // another thread is holding.
         _store.Load().Game.GameList.Add(new GameSetting { Id = "Doom", Name = "Doom" });
         Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
         Assert.Equal(OverwatchId, Assert.Single(_host.GameList).Id);
 
-        // An explicit reload still replaces the snapshot, and it now reflects the custom entry too.
         _host.ReloadGameList();
         Assert.Equal([OverwatchId, "Doom"], _host.GameList.Select(game => game.Id));
     }
 
-    // The reload the property used to do is still done where it belongs: a settings change is the
-    // only moment the catalogue can differ.
     [Fact]
     public void ASettingsChange_ReloadsTheCatalogue()
     {
@@ -125,8 +114,6 @@ public sealed class GameCatalogueTests : IDisposable
         Assert.Equal(doom, _host.GameList.First(game => game.Id == "custom-doom").ExecutablePath);
     }
 
-    // A reload replaces the list rather than emptying and refilling it, so a reader that already has
-    // the old one can finish with it.
     [Fact]
     public void AReload_DoesNotMutateTheListAReaderIsAlreadyHolding()
     {

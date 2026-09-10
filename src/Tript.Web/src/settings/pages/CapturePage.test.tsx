@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Tests for the capture page: the capture-method copy, the display picker's visibility per method,
-// and the game-capture timeout that now lives in this page's advanced disclosure but patches the
-// game page.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

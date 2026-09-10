@@ -3,8 +3,6 @@
 
 namespace Tript.Core;
 
-// Compile-time feature switches shared by the host and its libraries. Training is deliberately not
-// a runtime setting: a normal build must not carry an activatable training surface.
 public static class BuildFeatures
 {
 #if TRIPT_TRAINING

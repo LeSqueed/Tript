@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Recording mode, resolution, frame rate, quality, HDR, and output location form the main section;
-// the encoder and its rate-control surface, plus the replay buffer's size cap, are advanced.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
@@ -21,12 +18,6 @@ const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
   { value: 'ReplayBufferOnly', label: 'Replay buffer only (highlights without session recordings)' },
 ];
 
-/**
- * The quality profile applied when a game has no override of its own. The numbers are the backend's
- * 1..20 scale; the recorder maps them onto the H.264 quantiser scale the resolved encoder family
- * reads, so these four presets land at CRF/QP 28, 23, 20
- * and 16 — the band where H.264 game footage is worth keeping.
- */
 const QUALITY_OPTIONS: SelectOption[] = [
   { value: '3', label: 'Low' },
   { value: '5', label: 'Medium' },
@@ -34,18 +25,8 @@ const QUALITY_OPTIONS: SelectOption[] = [
   { value: '18', label: 'Max' },
 ];
 
-/**
- * The common frame rates OBS accepts (libobs takes the FPS as an fps_num/fps_den fraction, so
- * every integer rate here is fine). 60 is the default.
- */
 const FPS_PRESETS = [30, 60, 90, 144];
 
-/**
- * The common 16:9 recording sizes, smallest first. Every entry is a multiple of four wide and of two
- * high, which is what libobs silently rounds to — it accepts 1366 and records 1364 while still
- * reporting success, so a preset list is also how the page avoids offering a size that quietly
- * becomes a different one.
- */
 const RESOLUTION_PRESETS: [number, number][] = [
   [1280, 720],
   [1920, 1080],
@@ -53,21 +34,10 @@ const RESOLUTION_PRESETS: [number, number][] = [
   [3840, 2160],
 ];
 
-/**
- * The software encoder every libobs build registers. Offered as the floor when the machine's real
- * encoder set is unknown, so the selector is never empty.
- */
 const FALLBACK_ENCODER = 'obs_x264';
 
-/**
- * The settings model's encoder default. It is a placeholder meaning "the backend decides" — the real
- * software id is `obs_x264` — so it is neither labelled as x264 nor treated as a family whose
- * rate-control vocabulary is known (the backend prefers a hardware
- * encoder when one is registered, so what this resolves to is not knowable from the frontend).
- */
 const BACKEND_DECIDES_ENCODER = 'x264';
 
-/** 1 MiB — the human-readable unit the buffer size field is edited in. */
 const MIB = 1024 * 1024;
 
 function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
@@ -77,14 +47,8 @@ function nativeDirectoryExample(): { placeholder: string; defaultLabel: string }
     : { placeholder: '/home/you/Videos/Tript', defaultLabel: 'Videos/Tript' };
 }
 
-/** The encoder families whose key sets — and therefore whose rate-control vocabularies — differ. */
 type EncoderFamily = 'x264' | 'vaapi' | 'nvenc' | 'amf' | 'qsv' | 'unknown';
 
-/**
- * Which family an encoder id belongs to, mirroring the backend encoder policy: x264 matched
- * exactly and the rest by substring, because each hardware family ships several ids while "contains
- * x264" would also catch a third-party id that merely mentions it.
- */
 function encoderFamily(id: string): EncoderFamily {
   if (id === FALLBACK_ENCODER) {
     return 'x264';
@@ -108,10 +72,8 @@ function encoderFamily(id: string): EncoderFamily {
   return 'unknown';
 }
 
-/** The human name for each family. Unknown has none — an unrecognised id is shown as itself. */
 const FAMILY_LABELS: Record<EncoderFamily, string> = {
   x264: 'Software (x264)',
-  // VAAPI is the Linux hardware path for both AMD and Intel GPUs, so it is not one vendor's encoder.
   vaapi: 'AMD/Intel (VAAPI)',
   nvenc: 'NVIDIA (NVENC)',
   amf: 'AMD (AMF)',
@@ -119,23 +81,12 @@ const FAMILY_LABELS: Record<EncoderFamily, string> = {
   unknown: '',
 };
 
-/**
- * The modes each family accepts, in the order they are offered. Mirrored from
- * the backend encoder policy, which is the authority — see the file header for
- * why this copy is a convenience rather than the safety property.
- */
 const RATE_CONTROL_MODES: Record<EncoderFamily, RateControlMode[]> = {
-  // CRF is x264's spelling of constant quality and exists in no other family; x264 has no CQP mode.
   x264: ['Crf', 'Cbr', 'Vbr'],
-  // VAAPI is held to the two modes actually evidenced on a real runtime. Its
-  // VBR ceiling key is unknown to us, and a mistyped key fails silently at the wrong bitrate.
   vaapi: ['Cqp', 'Cbr'],
   nvenc: ['Cqp', 'Cbr', 'Vbr'],
   amf: ['Cqp', 'Cbr', 'Vbr'],
   qsv: ['Cqp', 'Cbr', 'Vbr'],
-  // An id no table describes: constant quality plus CBR, the one mode every documented family
-  // accepts. Also where the "backend decides" placeholder lands, since what it resolves to is not
-  // knowable here.
   unknown: ['Cqp', 'Cbr'],
 };
 
@@ -146,14 +97,8 @@ const RATE_CONTROL_LABELS: Record<RateControlMode, string> = {
   Vbr: 'Variable bitrate (VBR)',
 };
 
-/** The modes that read the quality profile rather than a bitrate. */
 const QUANTISER_MODES: RateControlMode[] = ['Crf', 'Cqp'];
 
-/**
- * Appends the stored value to `options` when it is not already one of them. A `<select>` whose
- * value matches no option renders its *first* option instead, which would show the user a setting
- * they do not have — and the next unrelated edit would then persist that lie.
- */
 function withStoredValue(options: SelectOption[], stored: string): SelectOption[] {
   if (!stored || options.some((option) => option.value === stored)) {
     return options;
@@ -161,28 +106,15 @@ function withStoredValue(options: SelectOption[], stored: string): SelectOption[
   return [...options, { value: stored, label: `${stored} (custom)` }];
 }
 
-/**
- * The wire form of a resolution in this selector: `<width>x<height>`, which is also what the user
- * reads. The option *value* has to be a single string because that is what a `<select>` carries, and
- * the two numbers are split back out when the choice is sent.
- */
 function resolutionValue(width: number, height: number): string {
   return `${width}x${height}`;
 }
 
-/** The two numbers back out of an option value, or null when it is not one of ours. */
 function parseResolution(value: string): { width: number; height: number } | null {
   const match = /^(\d+)x(\d+)$/.exec(value);
   return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
 }
 
-/**
- * The resolution options: the common sizes, plus this machine's primary display when it is not one
- * of them, plus the stored size when it is outside both. The display's own size is marked
- * "(display)" wherever it appears — including when it coincides with a preset, because "which of
- * these is my screen" is the question the label answers and 2560x1440 looks no different from
- * 1920x1080 without it.
- */
 function resolutionOptions(
   storedWidth: number,
   storedHeight: number,
@@ -207,21 +139,11 @@ function resolutionOptions(
   return storedIsSane ? withStoredValue(options, resolutionValue(storedWidth, storedHeight)) : options;
 }
 
-/**
- * The frame-rate options: the presets, plus the stored rate when it is not one of them. A
- * non-finite rate is a corrupt setting rather than a custom one, so it is not offered as a choice.
- */
 function fpsOptions(stored: number): SelectOption[] {
   const presets = FPS_PRESETS.map((fps) => ({ value: String(fps), label: String(fps) }));
   return Number.isFinite(stored) ? withStoredValue(presets, String(stored)) : presets;
 }
 
-/**
- * The label for one encoder id among a set of them: the family's human name, disambiguated by the raw
- * id when the same family registered more than one (both NVENC key sets are live at once on OBS 31+).
- * An id from a family nothing here recognises keeps its raw id as its label, so a real encoder is
- * never hidden behind a guess — and the "backend decides" placeholder says what it actually does.
- */
 function encoderLabel(id: string, ids: string[]): string {
   if (id.toLowerCase() === BACKEND_DECIDES_ENCODER) {
     return 'Automatic (hardware if available)';
@@ -235,11 +157,6 @@ function encoderLabel(id: string, ids: string[]): string {
   return sameFamily > 1 ? `${label} (${id})` : label;
 }
 
-/**
- * The encoder options: exactly the ids this machine registered, so unsupported encoders are hidden
- * rather than offered and refused at record time. `available` is undefined when the backend could
- * not tell us (see the file header) — then offer the stored value plus the software encoder.
- */
 function encoderOptions(stored: string, available?: string[]): SelectOption[] {
   const ids = available?.length ? available : [stored, FALLBACK_ENCODER].filter(Boolean);
   const unique = [...new Set(ids)];
@@ -247,13 +164,9 @@ function encoderOptions(stored: string, available?: string[]): SelectOption[] {
   if (!stored || unique.includes(stored)) {
     return options;
   }
-  // The stored encoder is not registered here — a pulled plugin, a swapped GPU, or a config written
-  // on another machine. It stays selectable and marked, rather than being silently replaced by
-  // whatever happens to be first in the list.
   return [...options, { value: stored, label: `${encoderLabel(stored, [stored])} (custom)` }];
 }
 
-/** The rate-control options for an encoder: only what that family accepts. */
 function rateControlOptions(encoderId: string): SelectOption[] {
   return RATE_CONTROL_MODES[encoderFamily(encoderId)].map((mode) => ({
     value: mode,
@@ -261,18 +174,11 @@ function rateControlOptions(encoderId: string): SelectOption[] {
   }));
 }
 
-/**
- * The mode the recording will actually use: the stored one when the selected encoder's family accepts
- * it, else that family's constant-quality mode — exactly the coercion
- * backend encoder policy performs. Showing the coerced value is what keeps the
- * page honest: the alternative is a selector displaying CRF while the recorder writes CQP.
- */
 function effectiveRateControl(stored: RateControlMode | undefined, encoderId: string): RateControlMode {
   const modes = RATE_CONTROL_MODES[encoderFamily(encoderId)];
   return stored && modes.includes(stored) ? stored : modes[0];
 }
 
-/** A whole number of kbps, or null when the draft is not one. */
 function parseKbps(draft: string): number | null {
   const match = /^\s*(\d+)\s*$/.exec(draft);
   return match ? Number(match[1]) : null;
@@ -289,22 +195,12 @@ export function RecordingPage({
   onBrowse,
 }: {
   settings: RecordingSettings;
-  /** The replay buffer model: this page's size cap edits buffer.maxSizeBytes under the buffer page. */
   buffer: BufferSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => void;
   page: SettingsPageName;
   externalPushCount: number;
-  /**
-   * The encoder ids this machine registered, from the settings push (a sibling of `settings`, not a
-   * field of it). Undefined means the backend could not tell us; the selector then falls back.
-   */
   availableEncoders?: string[];
-  /**
-   * The primary display's size, from the settings push (a sibling of `settings` for the same reason).
-   * Undefined when the host could not detect a display; the selector then offers the presets alone.
-   */
   displayResolution?: DisplayResolution;
-  /** Opens the native folder picker. The picked directory arrives as a settings push, like any edit. */
   onBrowse: () => void;
 }) {
   const directoryExample = nativeDirectoryExample();
@@ -313,11 +209,8 @@ export function RecordingPage({
   const [bufferSizeMiB, setBufferSizeMiB] = useState<string>(
     String(Math.round(buffer.maxSizeBytes / MIB)),
   );
-  // Picking 'Session' with automatic highlights on needs a confirmation before it is sent.
   const [confirmBufferOff, setConfirmBufferOff] = useState(false);
 
-  // Re-sync drafts from the model only on an external push. Including model values here would let
-  // a delayed self echo erase text entered after the preceding commit.
   useEffect(() => {
     setBitrate(String(settings.bitrateKbps ?? ''));
     setMaxBitrate(String(settings.maxBitrateKbps ?? ''));
@@ -327,8 +220,6 @@ export function RecordingPage({
   function changeMode(value: string) {
     const mode = value as RecordingMode;
     if (mode === 'Session' && settings.automaticClipsEnabled === true) {
-      // The select stays controlled by the stored value, so it keeps showing the mode on file while
-      // the dialog is open; nothing is sent until the user confirms.
       setConfirmBufferOff(true);
       return;
     }
@@ -375,9 +266,6 @@ export function RecordingPage({
 
   const encoder = settings.encoder;
   const rateControl = effectiveRateControl(settings.rateControl, encoder);
-  // A stored mode this encoder cannot use is not an error to correct on the user's behalf — the page
-  // says which mode the recording will use and leaves the stored value alone, exactly as it does for
-  // an out-of-list encoder. Changing it without being asked would persist a choice nobody made.
   const coercedFrom = settings.rateControl && settings.rateControl !== rateControl ? settings.rateControl : undefined;
   const usesQuantiser = QUANTISER_MODES.includes(rateControl);
 
@@ -449,8 +337,7 @@ export function RecordingPage({
 
       <Field label="Output directory" hint={`Where recordings and highlights are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
         <span className="settings-row">
-          {/* Explicit aria-label: this is the only field sharing its <label> with a second
-              control, so its derived name would otherwise absorb the Browse button's text. */}
+          {}
           <TextField
             value={settings.outputDirectory ?? ''}
             onChange={(value) => update(page, { outputDirectory: value === '' ? null : value })}

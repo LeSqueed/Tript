@@ -5,9 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The recorder state machine against a real muxer. The unit tests prove the transitions with a fake
-// output; this proves the state machine actually owns a recording that lands on disk — Start, run,
-// Stop, the stop signal completing the transition back to Idle, and a real, probeable file.
 public sealed class RecorderStateMachineRecordingTests
 {
     [SkippableFact]
@@ -28,9 +25,6 @@ public sealed class RecorderStateMachineRecordingTests
         Cleanup(directory);
     }
 
-    // The state machine's stop is what the harness reports: a success verdict means the recorder
-    // returned to Idle with a UserRequested stop reason and the muxer reported Success. The file is
-    // the other half — the output actually wrote video and audio, not just a header.
     [SkippableFact]
     public void TheRecorder_StopsWithTheCleanReasonAndTheFileIsProbeable()
     {
@@ -72,7 +66,6 @@ public sealed class RecorderStateMachineRecordingTests
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A leftover recording in the temp directory is not worth failing a green suite over.
         }
     }
 }

@@ -5,8 +5,6 @@ using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// The recorder receives an already-resolved mode (a RecordingMode from the settings schema, via
-// ResolvedRecorderSettings) and decides which explicitly selected outputs to run.
 public static class RecordingModeExtensions
 {
     public static bool RecordsSession(this RecordingMode mode) => mode is not RecordingMode.ReplayBufferOnly;

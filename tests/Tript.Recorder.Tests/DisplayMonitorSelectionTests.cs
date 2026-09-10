@@ -6,13 +6,8 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// How a monitor gets a stable identity and how a saved one is resolved. Both plugins describe their
-// monitors in one human string and nothing else, so the parse of that string is the whole basis for
-// the id, the name, the size and which monitor is primary.
 public sealed class DisplayMonitorSelectionTests
 {
-    // win-capture's monitor_capture: a String list whose values are opaque device-interface ids and
-    // whose item names are "<adapter name>: <w>x<h> @ <x>,<y>".
     private static IReadOnlyList<ObsSourceProperty> WindowsMonitorList() =>
     [
         new("monitor_id", ObsPropertyType.List,
@@ -22,7 +17,6 @@ public sealed class DisplayMonitorSelectionTests
         ])
     ];
 
-    // linux-capture's xshm_input: an Int list of screen indices, named "Screen <output> (<w>x<h> @ <x>,<y>)".
     private static IReadOnlyList<ObsSourceProperty> XshmScreenList() =>
     [
         new("screen", ObsPropertyType.List,
@@ -32,8 +26,6 @@ public sealed class DisplayMonitorSelectionTests
         ])
     ];
 
-    // The id is what the plugin matches on, never the position: a monitor unplugged ahead of yours
-    // renumbers the list, and an index saved as an identity then captures somebody else's screen.
     [Fact]
     public void OnWindows_TheIdIsTheOpaqueDeviceIdAndTheNameLosesTheGeometry()
     {
@@ -58,8 +50,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.Equal(1080, displays[0].Height);
     }
 
-    // The monitor at the virtual desktop's origin is the primary one, which is the only thing either
-    // plugin's label says about it — and it is not the first item in the list.
     [Fact]
     public void ThePrimaryMonitor_IsTheOneAtTheDesktopOrigin()
     {
@@ -70,8 +60,6 @@ public sealed class DisplayMonitorSelectionTests
             ObsCaptureSource.DescribeDisplays(XshmScreenList()).Single(display => display.Primary).Name);
     }
 
-    // A label with no geometry in it (a plugin that formats differently) still yields a usable
-    // entry: the whole label becomes the name and the first monitor stands in as primary.
     [Fact]
     public void ALabelWithoutGeometry_StillDescribesAMonitor()
     {
@@ -90,7 +78,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.Equal(0, displays[0].Width);
         Assert.True(displays[0].Primary);
 
-        // A nameless item is still selectable, so it gets a name of its own rather than a blank one.
         Assert.Equal("Display 2", displays[1].Name);
     }
 
@@ -101,7 +88,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.Empty(ObsCaptureSource.DescribeDisplays([new("window", ObsPropertyType.Text, [])]));
     }
 
-    // An item with no value at all cannot be selected, so it is not offered.
     [Fact]
     public void AnItemWithNoValue_IsSkipped()
     {
@@ -117,8 +103,6 @@ public sealed class DisplayMonitorSelectionTests
         var display = Assert.Single(ObsCaptureSource.DescribeDisplays(properties));
         Assert.Equal("device-b", display.Id);
     }
-
-    // ---- resolution ----
 
     [Fact]
     public void NoPreference_MeansThePrimaryMonitor()
@@ -144,8 +128,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.Equal(displays[0], resolution.Selected);
     }
 
-    // The state a user reaches by unplugging a monitor: this session records the primary one and
-    // says so. The preference is the caller's to keep — nothing here rewrites it.
     [Fact]
     public void ASavedIdThatIsNotAttached_FallsBackToThePrimaryAndReportsIt()
     {
@@ -157,8 +139,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.True(resolution.Selected!.Primary);
     }
 
-    // Matching is byte-for-byte: the ids are opaque plugin handles, and a case-insensitive match
-    // could select a different monitor.
     [Fact]
     public void IdMatchingIsOrdinal()
     {
@@ -167,8 +147,6 @@ public sealed class DisplayMonitorSelectionTests
         Assert.True(ObsCaptureSource.ResolveDisplay(displays, displays[0].Id.ToUpperInvariant()).RequestedMissing);
     }
 
-    // Enumerating nothing is an ordinary state — a headless machine, a plugin that would not answer
-    // — and the recorder must proceed rather than fail.
     [Fact]
     public void NoMonitorsAtAll_ResolvesToNothingRatherThanThrowing()
     {

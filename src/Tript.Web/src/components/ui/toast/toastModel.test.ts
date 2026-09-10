@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The toast model's pure behaviour: push, replace, cap and queue, the clock derived from reading
-// time, and the held-then-released dance between the timer and the pointer. No timers, no DOM.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -75,7 +72,6 @@ describe('pushToast', () => {
     const items = stackOf(MAX_VISIBLE + 2);
     expect(items.filter((toast) => toast.state === 'visible')).toHaveLength(MAX_VISIBLE);
     expect(items.filter((toast) => toast.state === 'waiting')).toHaveLength(2);
-    // The queue keeps push order.
     expect(items[MAX_VISIBLE].message).toBe(`toast ${MAX_VISIBLE + 1}`);
   });
 
@@ -168,6 +164,6 @@ describe('removal', () => {
     expect(items).toHaveLength(MAX_VISIBLE);
     expect(items.filter((toast) => toast.state === 'visible')).toHaveLength(MAX_VISIBLE);
     expect(items.filter((toast) => toast.state === 'waiting')).toHaveLength(0);
-    expect(items[0].message).toBe('toast 2'); // the promoted one took the head of the stack
+    expect(items[0].message).toBe('toast 2');
   });
 });

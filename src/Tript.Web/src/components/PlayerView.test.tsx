@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The player + dual synced timeline tests. The sync model is single-source: both timeline levels
-// render `currentTime`, and the video is the driver.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -36,7 +33,6 @@ const source: SessionSource = {
   },
 };
 
-/** A minimal IpcClient double that records sent commands for assertion. */
 function mockClient(): IpcClient & { sent: { method: string; parameters?: unknown }[] } {
   const sent: { method: string; parameters?: unknown }[] = [];
   return {
@@ -56,10 +52,6 @@ function renderPlayer() {
   return render(<PlayerView client={mockClient()} source={source} />);
 }
 
-/**
- * The zoom window's width in seconds, derived from the scale row the timeline shows while zoomed.
- * The player used to print "Zoom window: 48.0s" in its footer, which read as debug output on screen.
- */
 function zoomWindowSeconds(container: Element): number {
   const scale = container.querySelector('.timeline-scale');
   const [start, end] = [...(scale?.querySelectorAll('span') ?? [])].map((span) => {
@@ -69,7 +61,6 @@ function zoomWindowSeconds(container: Element): number {
   return end - start;
 }
 
-/** Which item the player is showing, read off the video's accessible name. */
 function playingItem(): string {
   return (document.querySelector('video')?.getAttribute('aria-label') ?? '').split(' — ')[0];
 }
@@ -78,12 +69,6 @@ function currentReadout(): string {
   return screen.getByTestId('transport-current').textContent ?? '';
 }
 
-/**
- * Give the DOM the fixed test geometry. jsdom has no layout, so every element reports the same
- * 100px-wide rect at x=0 (a pointer clientX maps one-to-one to a time in a 100-second session),
- * and pointer capture is a no-op. Stubbed on the prototype so the stub is seen by whichever DOM
- * node the component ref holds.
- */
 function stubLayout(): void {
   Element.prototype.getBoundingClientRect = () =>
     ({ left: 0, top: 0, right: 100, bottom: 44, width: 100, height: 44 }) as DOMRect;
@@ -91,7 +76,6 @@ function stubLayout(): void {
   Element.prototype.releasePointerCapture = () => {};
 }
 
-/** Click the full-session bar at a session time (rect left 0, width 100 → clientX = time). */
 function clickBarAt(container: HTMLElement, time: number): void {
   const element = container.querySelector('.timeline-bar');
   expect(element).not.toBeNull();
@@ -99,7 +83,6 @@ function clickBarAt(container: HTMLElement, time: number): void {
   fireEvent.pointerUp(element as Element, { clientX: time, pointerId: 1 });
 }
 
-/** Click inside the zoomed track at a window-relative time. */
 function clickZoomedAt(container: HTMLElement, windowTime: number, windowStart = 0, windowSeconds = 100): void {
   const track = container.querySelector('.timeline-track');
   expect(track).not.toBeNull();
@@ -248,7 +231,6 @@ describe('dual timeline sync', () => {
 
   it('moves the playhead in the zoomed timeline and the full-session bar follows', () => {
     const { container } = renderPlayer();
-    // The initial window is the full 100-second session, so clientX 36 maps to 36s.
     act(() => clickZoomedAt(container, 36));
     expect(currentReadout()).toBe('0:36');
     const fill = container.querySelector('.timeline-bar-fill') as HTMLElement;
@@ -260,7 +242,6 @@ describe('dual timeline sync', () => {
     act(() => clickBarAt(container, 42));
     const track = container.querySelector('.timeline-track') as HTMLElement;
     expect(track).not.toBeNull();
-    // The fully zoomed-out window remains {0, 100}, so 42s sits at 42px.
     const playhead = track.querySelector('.timeline-playhead') as HTMLElement;
     expect(playhead).not.toBeNull();
     expect(playhead.style.left).toBe('42px');
@@ -334,7 +315,6 @@ describe('zoom model', () => {
     const { container } = renderPlayer();
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
-    // 100s × 0.8 = 80s window.
     expect(zoomWindowSeconds(container)).toBe(80);
   });
 
@@ -366,7 +346,6 @@ describe('zoom model', () => {
     const zoomed = container.querySelector('.timeline-zoomed') as Element;
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: -100 });
     fireEvent.wheel(zoomed, { clientX: 40, deltaY: 100 });
-    // 80s × 1.25 restores the full extent, where the redundant scale row is hidden.
     expect(container.querySelector('.timeline-scale')).toBeNull();
   });
 
@@ -600,8 +579,6 @@ describe('region selection seam (T9)', () => {
   });
 
   it('recovers sound after the slider is dragged to zero and then unmuted', () => {
-    // Dragging to zero mutes. Unmuting from there used to leave volume at zero: the button read
-    // "Mute" again, the slider sat at zero, and nothing played.
     renderPlayer();
     act(() => {
       fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.7' } });
@@ -628,8 +605,6 @@ describe('region selection seam (T9)', () => {
   });
 
   it('keeps the chosen speed when moving to another session', () => {
-    // playbackRate resets to defaultPlaybackRate whenever a source loads, so unlike volume it is
-    // not enough to set it once — both have to be written or the speed silently returns to 1x.
     renderPlayer();
     act(() => {
       fireEvent.change(screen.getByLabelText('Playback speed'), { target: { value: '2' } });

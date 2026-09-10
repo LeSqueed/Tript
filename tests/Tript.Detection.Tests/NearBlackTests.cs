@@ -53,7 +53,6 @@ public class NearBlackTests
         Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
-    // The tolerance is zero bright samples: one probe above the luma threshold is enough.
     [Fact]
     public void IsNearBlack_SinglePixelOnSamplePoint_IsNotNearBlack()
     {
@@ -63,8 +62,6 @@ public class NearBlackTests
         Assert.False(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
-    // Documents a deliberate limitation, not a bug. The 16px stride probes 1/256 of the frame, so a
-    // lit pixel landing between probes is invisible to the check.
     [Fact]
     public void IsNearBlack_SinglePixelBetweenSamplePoints_IsMissedByDesign()
     {
@@ -76,8 +73,6 @@ public class NearBlackTests
         Assert.True(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
-    // Upper bound on what the check can miss: a region spanning less than the stride on
-    // both axes can cover no probe at all, at any offset.
     [Fact]
     public void IsNearBlack_BlobSmallerThanStride_IsMissedByDesign()
     {
@@ -87,8 +82,6 @@ public class NearBlackTests
         Assert.True(DetectionFramePreprocessor.IsNearBlack(bgra, W, H));
     }
 
-    // Covers exactly 10 probes. A tolerance of 10 bright samples waved this through despite
-    // 2560 lit pixels; at zero it is correctly treated as not-black.
     [Fact]
     public void IsNearBlack_StripCoveringTenSamplePoints_IsNotNearBlack()
     {

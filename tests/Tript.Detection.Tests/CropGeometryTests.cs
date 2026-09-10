@@ -8,10 +8,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// Two crop-geometry edge cases that produced wrong pixels and wrong coordinates in silence:
-// a crop one pixel wide or tall, where ResizeGray's clamp went negative and sampled outside the
-// crop, and a region overhanging a frame edge, where TryGetCropRect trimmed the rect the model saw
-// but MapDetectionsToFullFrame scaled the boxes back by the untrimmed one.
 public class CropGeometryTests
 {
     private const int Dst = 4;
@@ -19,13 +15,11 @@ public class CropGeometryTests
     private static byte[] Output(byte[] crop, int cropW, int cropH)
     {
         var dst = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH, Dst, Dst);
-        // ArrayPool-rented, so the buffer may be longer than the destination.
+
         Assert.True(dst.Length >= Dst * Dst);
         return dst.AsSpan(0, Dst * Dst).ToArray();
     }
 
-    // The source array is exactly one byte, so the old second tap at index 1 is an out-of-range
-    // read rather than a silent pick-up of whatever followed the crop in a pooled buffer.
     [Fact]
     public void ResizeGray_On1x1Crop_ReadsOnlyThePixelItWasGiven()
     {
@@ -34,9 +28,6 @@ public class CropGeometryTests
         Assert.All(dst, b => Assert.Equal(200, b));
     }
 
-    // Duplicating the only column cannot change the image, so it cannot change a single output
-    // byte either. The 2px source takes the ordinary interpolation path, which makes it the
-    // reference for what the degenerate one must produce.
     [Fact]
     public void ResizeGray_On1PxWideCrop_MatchesTheSameCropWithItsColumnDuplicated()
     {
@@ -61,7 +52,6 @@ public class CropGeometryTests
         Assert.Equal(Output([77, 77, 77, 77], 2, 2), Output([77], 1, 1));
     }
 
-    // A region wholly inside the frame is unaffected by the clamped-rect change.
     [Fact]
     public void MapDetectionsToFullFrame_ForARegionInsideTheFrame_ScalesByTheRegion()
     {
@@ -87,9 +77,6 @@ public class CropGeometryTests
         Assert.Equal(0.25, det.Height, 4);
     }
 
-    // The regression: the crop handed to the model was 250px wide, not the 500px the group asks
-    // for, so a box filling that crop covers the last quarter of the frame — not half of it
-    // starting three quarters in, which would run 25% past the right edge.
     [Fact]
     public void MapDetectionsToFullFrame_ForARegionOverhangingTheFrameEdge_UsesTheClampedRect()
     {
@@ -101,7 +88,6 @@ public class CropGeometryTests
             out var cropX, out var cropY, out var cropW, out var cropH));
         Assert.Equal((750, 500, 250, 500), (cropX, cropY, cropW, cropH));
 
-        // A box filling the crop the model was actually given.
         var detections = new List<DetectionResult>
         {
             new() { X = 0f, Y = 0f, Width = 1f, Height = 1f }
@@ -118,11 +104,6 @@ public class CropGeometryTests
         Assert.True(det.Y + det.Height <= 1f, "box ran past the bottom edge of the frame");
     }
 
-    // A region-less event definition produces a (0, 0, 1, 1) group, whose crop is the frame, so the
-    // mapping has to be the identity. Everything downstream reads these coordinates as frame-relative
-    // — DetectionBatchCounter matches boxes in exactly this space — so a full-frame
-    // group that rescaled its boxes would put the whole class in the wrong place with no crop
-    // geometry left to blame.
     [Fact]
     public void MapDetectionsToFullFrame_ForAFullFrameGroup_LeavesTheBoxUntouched()
     {
@@ -224,7 +205,6 @@ public class CropGeometryTests
         Assert.Same(detection, Assert.Single(detections));
     }
 
-    // A box centred just past the region edge (from the padded crop) is kept by the tolerance.
     [Fact]
     public void FilterDetectionsToEventRegions_KeepsAClassJustOutsideItsRegionWithinTolerance()
     {
@@ -240,7 +220,7 @@ public class CropGeometryTests
                 ScreenRegionH = 0.2f,
             },
         };
-        // Centre at (0.315, 0.2): 0.015 past the region's right edge (0.3), inside the 0.02 margin.
+
         var detection = new DetectionResult
         {
             ClassId = 1,

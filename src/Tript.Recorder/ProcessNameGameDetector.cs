@@ -222,8 +222,6 @@ public sealed class ProcessNameGameDetector : IGameDetector
                 try { startTime = process.StartTime.ToUniversalTime(); }
                 catch (Exception exception) when (IsInspectionFailure(exception)) { }
 
-                // The start time is cheap to read and pins the pid to one process, so it
-                // decides whether the cached MainModule path may be reused.
                 string? path;
                 if (previous.TryGetValue(processId, out var known)
                     && SameProcessIdentity(known.StartTime, startTime))

@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-// The settings service: loads and saves the settings model as JSON at the platform config
-// directory, and hands out page-scoped read/write handles so the settings UI edits one logical page
-// at a time. Round-trip preservation of unknown keys is the forward-compatibility contract: a build
-// that models only part of the settings surface must neither lose fields it does not model when it
-// saves, nor choke on them when it loads.
 namespace Tript.Settings;
 
 public sealed class SettingsStore
@@ -29,8 +24,6 @@ public sealed class SettingsStore
         FilePath = provider.FilePath;
     }
 
-    // The typed model. Loading is lazy and read-once: the first call reads the file (or the
-    // defaults if it does not exist), and the model stays live in memory until Save is called.
     public Settings Load()
     {
         lock (_gate)
@@ -46,18 +39,12 @@ public sealed class SettingsStore
         }
     }
 
-    // A handle to one logical page of the model. Loading the handle materializes (but does not
-    // persist) the model and returns the page's typed object for editing; Save persists the whole
-    // model, so a page edit never destroys a field from a page this build does not model.
     public SettingsPageHandle<TPage> Page<TPage>(SettingsPage page)
         where TPage : class
     {
         return new SettingsPageHandle<TPage>(this, page, GetPage);
     }
 
-    // Persists the model back to disk. Saving before the model was ever loaded writes the
-    // defaults — a settings file is not a thing that should be absent just because the user
-    // never edited a setting.
     public void Save()
     {
         lock (_gate)
@@ -113,8 +100,6 @@ public sealed class SettingsStore
     };
 }
 
-// A read/write handle to one logical page of the settings model. The settings UI loads a page,
-// edits its properties, and saves it; the store serializes the whole model on save.
 public sealed class SettingsPageHandle<TPage> where TPage : class
 {
     private readonly SettingsStore _store;
@@ -133,7 +118,6 @@ public sealed class SettingsPageHandle<TPage> where TPage : class
 
     public SettingsPage Page => _page;
 
-    // The page's typed sub-object, materialized from the live model.
     public TPage Load() => (TPage)_getPage(_store.Load(), _page);
 
     public void Save() => _store.Save();

@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Content-server URL construction by path. The frontend builds URLs against the content server
-// root; the backend resolves them against a canonical root (path-traversal guard on its side —
-// this build keeps the frontend's side honest by normalising leading slashes and encoding the
-// segments).
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { controlSocketUrl, contentUrl, thumbnailUrl } from './endpoints';
@@ -30,8 +25,6 @@ describe('contentUrl', () => {
 });
 
 describe('content URL encoding', () => {
-  // A '#' in a file name is the worst case: unencoded it starts the fragment, the server is asked
-  // for the truncated path and answers about a different file entirely.
   it('encodes a hash in a file name rather than starting a fragment', () => {
     const url = contentUrl('session/my#clip.mp4');
 
@@ -63,8 +56,6 @@ describe('content URL encoding', () => {
   });
 });
 
-// Every listener requires the per-launch token, and a `<video src>` / a WebSocket handshake can only
-// carry it on the query string. These URLs are the whole of the frontend's side of that.
 describe('the session token on the endpoint URLs', () => {
   const TOKEN = 'a1b2c3d4e5f6';
 
@@ -94,8 +85,6 @@ describe('the session token on the endpoint URLs', () => {
     expect(controlSocketUrl()).toBe(`ws://localhost:8894/?k=${TOKEN}`);
   });
 
-  // The token is a query parameter and the file name is a path segment; neither may leak into the
-  // other. A '?' in a file name stays encoded in the path, and the token stays the only parameter.
   it('keeps the encoded path and the token apart', () => {
     captureSessionToken(`?k=${TOKEN}`);
     const url = new URL(contentUrl('session/is it?.mp4'));

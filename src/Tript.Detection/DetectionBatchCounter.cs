@@ -7,8 +7,6 @@ public static class DetectionBatchCounter
 {
     private const float OverlapIouThreshold = 0.3f;
 
-    // Region groups can produce duplicate boxes for one object. Keep the best-overlap replacement
-    // rule so nearby objects remain separate while repeated boxes for one object count once.
     public static IReadOnlyList<DetectionResult> DistinctDetections(IReadOnlyList<DetectionResult> results)
     {
         var instances = new List<DetectionResult>();

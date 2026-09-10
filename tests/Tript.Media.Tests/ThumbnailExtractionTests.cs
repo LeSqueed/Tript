@@ -5,10 +5,6 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// Pulling a still frame out of a recording, and the bounded runner underneath it. The library's grid
-// draws these on an HTTP request thread, so two properties matter beyond "an image comes out": a
-// wedged ffmpeg is killed rather than waited on, and a source too short for the seek still yields an
-// image instead of nothing.
 public sealed class ThumbnailExtractionTests
 {
     [Fact]
@@ -22,15 +18,11 @@ public sealed class ThumbnailExtractionTests
 
         Assert.True(new FileInfo(destination).Length > 0);
         Assert.Equal("mjpeg", MediaTestFixture.ProbeValue(MediaTestFixture.Binaries.Ffprobe, destination, "v:0", "codec_name"));
-        // The frame is scaled to a fixed width, height following the source's aspect ratio: a
-        // 320x240 source comes out 480x360.
+
         Assert.Equal("480", MediaTestFixture.ProbeValue(MediaTestFixture.Binaries.Ffprobe, destination, "v:0", "width"));
         Assert.Equal("360", MediaTestFixture.ProbeValue(MediaTestFixture.Binaries.Ffprobe, destination, "v:0", "height"));
     }
 
-    // The frame is taken a second in, past the black or fading first frames of a real capture. A
-    // recording shorter than that must still produce a card: the seek writes no file at all (see
-    // FfmpegThumbnailExtractor for the measured exit codes) and the retry at frame 0 covers it.
     [Fact]
     public void TryExtract_FallsBackToTheFirstFrame_WhenTheSourceIsShorterThanTheSeek()
     {
@@ -78,9 +70,6 @@ public sealed class ThumbnailExtractionTests
         Assert.True(new FileInfo(destination).Length > 0);
     }
 
-    // The spawn budget. A probed source gets one ffmpeg run at a seek point chosen from its
-    // duration and, only when that yields no usable frame, one more at frame 0; nothing beyond
-    // that. A grid of cards used to cost up to five decoder launches per thumbnail.
     [Fact]
     public void TryExtract_RunsFfmpegOnce_WhenTheChosenSeekProducesAFrame()
     {
@@ -93,7 +82,6 @@ public sealed class ThumbnailExtractionTests
 
         Assert.True(extractor.TryExtract(source, destination));
 
-        // 30% of a five-second source.
         var run = Assert.Single(File.ReadAllLines(log));
         Assert.Contains("-ss 1.5 -i", run);
     }
@@ -117,9 +105,6 @@ public sealed class ThumbnailExtractionTests
         Assert.False(File.Exists(destination));
     }
 
-    // A recording still being written has no readable duration yet (an MP4 gets its index only
-    // when finalised). The probe failing must not cost the fallback: the fixed early seek runs,
-    // then frame 0.
     [Fact]
     public void TryExtract_StillTriesTheFixedSeekAndFrameZero_WhenTheProbeFails()
     {
@@ -148,8 +133,7 @@ public sealed class ThumbnailExtractionTests
         var extractor = new FfmpegThumbnailExtractor(MediaTestFixture.Binaries.Ffmpeg);
 
         Assert.False(extractor.TryExtract(source, destination));
-        // A zero-length leftover would be served as a thumbnail by a caller that only checked for
-        // the file's existence.
+
         Assert.False(File.Exists(destination));
     }
 
@@ -163,13 +147,9 @@ public sealed class ThumbnailExtractionTests
             Path.Combine(MediaTestFixture.ScratchRoot, "no-such-file.jpg")));
     }
 
-    // The guarantee the thumbnail path rests on: an ffmpeg that will not exit is killed at the
-    // timeout, so it can never hold an HTTP request (or a listener worker) open indefinitely.
     [Fact]
     public void RunBounded_KillsAProcessThatOverrunsTheTimeout()
     {
-        // -re paces a synthetic input at its native rate, so this ffmpeg would run for an hour at
-        // nearly no CPU cost — a wedged process, without having to wedge one.
         var arguments = new[]
         {
             "-nostdin", "-loglevel", "error",
@@ -208,8 +188,7 @@ public sealed class ThumbnailExtractionTests
         Assert.True(outcome.Completed);
         Assert.True(outcome.Succeeded);
         Assert.Equal(0, outcome.ExitCode);
-        // -loglevel error on a clean run says nothing; the point is that the stderr read completed
-        // rather than being left dangling by the wait.
+
         Assert.Equal(string.Empty, outcome.StandardError.Trim());
     }
 

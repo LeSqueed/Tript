@@ -8,8 +8,6 @@ using Tript.Core;
 
 namespace Tript.Shell;
 
-// Autostart and tray applications must not create a second host that loses the port race. The second
-// launch sends a local activation request to the first instance and exits instead.
 internal sealed class SingleInstance : IDisposable
 {
     private const string ActivationMessage = "activate";
@@ -123,8 +121,6 @@ internal sealed class SingleInstance : IDisposable
         }
         catch (Exception exception) when (exception is IOException or TimeoutException)
         {
-            // The mutex owner may be between startup stages or shutting down. The second process has
-            // no useful work left after the activation attempt, so it exits quietly.
         }
     }
 
@@ -168,7 +164,6 @@ internal sealed class SingleInstance : IDisposable
             }
             catch (IOException) when (!_cancellation.IsCancellationRequested)
             {
-                // A transient client or pipe teardown should not kill the activation listener.
             }
         }
     }

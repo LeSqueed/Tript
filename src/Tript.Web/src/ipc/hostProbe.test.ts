@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The one signal that separates "the host rejected my key" from "the host is gone": the UI host is
-// same-origin, so its status is readable where the WebSocket handshake's is not. 403 is the host
-// saying no, a transport failure is nobody saying anything, and the probe must carry this page's key
-// or it would ask a question about a key it did not present.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifyProbeStatus, hostProbeUrl, probeHost } from './hostProbe';
@@ -40,8 +35,6 @@ describe('probeHost', () => {
     await expect(probeHost({ fetchImpl: serves, origin: ORIGIN })).resolves.toBe('accepted');
   });
 
-  // A refused connection rejects the fetch rather than answering; that is the "not running" case,
-  // and it must not surface as an error the caller has to catch.
   it('reports a transport failure as unreachable', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('Failed to fetch');

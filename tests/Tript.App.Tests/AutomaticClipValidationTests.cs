@@ -8,12 +8,6 @@ using SettingsModel = Tript.Settings.Settings;
 
 namespace Tript.App.Tests;
 
-// The rejection rules for the automatic-clip window, pinned at the validator's seam. The frontend
-// UI can only move the global and per-game before/after fields, but the control socket is a trust
-// boundary regardless: the effective window — each side resolved independently, a per-game override
-// when set and the global value otherwise — must not end up with after below before. Equal values
-// are a valid window; testing them is not testing the clamp, it is pinning what the clamp is
-// allowed to leave in place.
 public sealed class AutomaticClipWindowValidationTests
 {
     [Fact]
@@ -35,8 +29,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_RejectsAnInvertedFullOverrideAndNamesTheGame()
     {
-        // Globals are sane; the game overrides BOTH sides into an inverted window. The failure must
-        // say which game so the settings page can surface it on the right row.
         var settings = new SettingsModel();
         settings.Game.GameList.Add(new GameSetting
         {
@@ -52,8 +44,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_RejectsABeforeOnlyOverrideAboveTheGlobalAfter()
     {
-        // Global window is 5s before / 8s after. The game raises only its before side to 10s, so
-        // the effective window inverts (10 before vs 8 after) even though neither global looks bad.
         var settings = new SettingsModel();
         settings.Game.GameList.Add(new GameSetting
         {
@@ -69,7 +59,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_RejectsAnAfterOnlyOverrideBelowTheGlobalBefore()
     {
-        // Global window is 5s before / 8s after. The game lowers only its after side to 3s.
         var settings = new SettingsModel();
         settings.Game.GameList.Add(new GameSetting
         {
@@ -85,8 +74,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_AcceptsAnEqualWindow()
     {
-        // A zero-length window (before == after) is valid: the planner simply keeps nothing before
-        // the bookmark and nothing after. Rejecting it would forbid the "fire on the mark" shape.
         var settings = new SettingsModel
         {
             Recording =
@@ -103,7 +90,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_AcceptsValidInheritance()
     {
-        // Globals sane; the default packaged game carries no override and inherits them.
         var settings = new SettingsModel
         {
             Recording =
@@ -120,8 +106,6 @@ public sealed class AutomaticClipWindowValidationTests
     [Fact]
     public void ValidateAutomaticClipWindows_AcceptsACorrectOverride()
     {
-        // A game with a sane override of its own: 2s before / 10s after, both narrower and wider
-        // than the globals without ever inverting.
         var settings = new SettingsModel();
         settings.Game.GameList.Add(new GameSetting
         {
@@ -135,10 +119,6 @@ public sealed class AutomaticClipWindowValidationTests
     }
 }
 
-// The same rules through UpdateSettings, where the private PatchUpdatesAutomaticClipWindows gates
-// them: an update is rejected only when the patch could actually have changed the window, and a
-// rejected update changes nothing on disk. A patch to an unrelated page passes even when the stored
-// window is already inverted, because it cannot have caused it.
 public sealed class AutomaticClipWindowUpdateTests : IDisposable
 {
     private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
@@ -280,9 +260,6 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
     [Fact]
     public void AnUnrelatedPagePatch_IsAcceptedEvenWhenTheStoredWindowIsInvalid()
     {
-        // The stored window is inverted, but the patch touches only the general page. The private
-        // PatchUpdatesAutomaticClipWindows must not claim such a patch can change the window, or
-        // this perfectly ordinary update would be refused for a window it never touched.
         Seed(InvertedWindowJson);
         var (store, host) = NewHost();
         using var scope = host;

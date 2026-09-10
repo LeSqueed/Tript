@@ -86,8 +86,6 @@ public class OcrTokenTemplateMatcherTests
         Assert.Equal(expectedCapture, Assert.Single(match.Captures).Value);
     }
 
-    // Real reads the sample harness produced from Overwatch kill-feed frames (installed events.json
-    // uses maximumEditDistance:1 / minimumScore:0.85, so the relaxed path is what runs).
     [Theory]
     [InlineData("ELIMINATED AMON'S SENTRY TURRE", "ELIMINATED {playerAndType} TURRET")]
     [InlineData("ELMNATEWISTSENTRYTURRE", "ELIMINATED {playerAndType} TURRET")]
@@ -110,8 +108,6 @@ public class OcrTokenTemplateMatcherTests
         Assert.NotNull(match);
     }
 
-    // The relaxed matcher must not let the common "ELIMINATED" prefix carry a weak tail: a turret
-    // or "eliminated by" line is not a Mine.
     [Theory]
     [InlineData("ELIMINATED AMON'S SENTRY TURRET")]
     [InlineData("YOU WERE ELIMINATED BY ERIEK")]

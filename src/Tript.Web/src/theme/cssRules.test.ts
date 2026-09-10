@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The scanner's own tests. Every case below is one the previous regex-based implementation got
-// wrong by failing open — reporting fewer rules than the stylesheet contains.
 
 import { describe, expect, it } from 'vitest';
 import { normaliseSelector, parseRules, shadowedRules } from './cssRules';
@@ -14,7 +11,6 @@ describe('parseRules', () => {
   });
 
   it('keeps rules after a block-less at-rule', () => {
-    // The regex version skipped to the next `{` and swallowed `.a` whole.
     expect(selectorsOf("@import 'x.css';\n.a{color:red}\n.b{color:blue}\n.a{color:green}")).toEqual([
       '.a',
       '.b',
@@ -73,8 +69,6 @@ describe('normaliseSelector', () => {
 
 describe('shadowedRules', () => {
   it('reports a group rule whose every declaration a later rule overrides', () => {
-    // The TrashView.css shape: an appended "replacement" group placed ABOVE the rules it meant to
-    // replace, so at equal specificity it never rendered.
     const css = `
       .toolbar, .row { background: panel; border-radius: 11px; }
       .toolbar { background: base; border-radius: 6px; }
@@ -84,8 +78,6 @@ describe('shadowedRules', () => {
   });
 
   it('leaves a shared rule alone when the later rule overrides only some of it', () => {
-    // The legitimate pattern: shared family/weight, then a size per element. Flagging this would
-    // bury the signal.
     const css = `
       .intro h2, .empty h3 { font-family: sans; font-weight: 600; }
       .empty h3 { font-size: 19px; }

@@ -13,8 +13,6 @@ using Tript.App;
 
 namespace Tript.App.Ipc;
 
-// The WebSocket control socket. Sits on a single
-// HttpListener and answers WebSocket upgrade requests; every other path/verb gets 404.
 internal sealed class IpcServer : IDisposable
 {
     private readonly int _port;
@@ -27,8 +25,6 @@ internal sealed class IpcServer : IDisposable
     private readonly List<ClientConnection> _clients = [];
     private readonly CancellationTokenSource _cts = new();
 
-    // Captured once: the accept loop reads this, never _cts.Token, so Dispose can dispose the source
-    // without racing a read that would throw ObjectDisposedException.
     private readonly CancellationToken _shutdown;
 
     private Task? _acceptLoop;
@@ -70,8 +66,6 @@ internal sealed class IpcServer : IDisposable
         }
     }
 
-    // Awaits both the request and the WebSocket handshake, so a client that is slow to complete
-    // its upgrade holds no thread — the old dedicated accept thread sat blocked in the handshake.
     private async Task AcceptLoopAsync()
     {
         while (_running)
@@ -86,11 +80,6 @@ internal sealed class IpcServer : IDisposable
                     continue;
                 }
 
-                // Browsers do not apply CORS to a WebSocket handshake, so without this any page the
-                // user happens to have open could drive this socket: delete recordings, empty the
-                // trash, move the output directory. The Origin header is the only thing that
-                // distinguishes the app's own UI from someone else's page, and a browser will not
-                // let script forge it.
                 if (!IsOriginAllowed(context.Request.Headers["Origin"]))
                 {
                     context.Response.StatusCode = 403;
@@ -98,14 +87,6 @@ internal sealed class IpcServer : IDisposable
                     continue;
                 }
 
-                // The session token, required IN ADDITION to the Origin check and never instead of
-                // it. The Origin check answers "is this the app's own page"; it says nothing about
-                // a client that presents no Origin at all — another user's process on this machine,
-                // or a browser extension with host permissions — and those are exactly what the
-                // allowlist has to let through so the app's own webview can connect. It rides in
-                // the query string because a browser cannot set a header on a WebSocket handshake.
-                // Refused before the upgrade, so nothing is ever dispatched for an unauthorised
-                // client.
                 if (!_token.Authorises(context.Request))
                 {
                     context.Response.StatusCode = 403;
@@ -113,8 +94,6 @@ internal sealed class IpcServer : IDisposable
                     continue;
                 }
 
-                // Bounded by the shutdown token: a client that starts the upgrade and never finishes
-                // it would otherwise keep Dispose waiting on this loop.
                 var wsContext = await context.AcceptWebSocketAsync(null).WaitAsync(_shutdown);
                 var client = new ClientConnection(wsContext.WebSocket, this);
                 var accepted = false;
@@ -127,8 +106,6 @@ internal sealed class IpcServer : IDisposable
                     }
                 }
 
-                // Dispose has already emptied _clients; a client admitted after that would never be
-                // torn down.
                 if (accepted)
                     client.Start();
                 else
@@ -142,7 +119,6 @@ internal sealed class IpcServer : IDisposable
             }
             catch (WebSocketException)
             {
-                // A client that dies mid-handshake; nothing to do.
             }
             catch (OperationCanceledException)
             {
@@ -160,7 +136,6 @@ internal sealed class IpcServer : IDisposable
         }
     }
 
-    // The UI host's own origin, in both spellings a browser may present for the loopback address.
     private static readonly string[] AllowedOrigins = LocalPorts.UiOrigins;
 
     private bool IsOriginAllowed(string? origin) =>
@@ -170,8 +145,6 @@ internal sealed class IpcServer : IDisposable
     internal static bool IsAllowedOrigin(string? origin) =>
         string.IsNullOrEmpty(origin) ||
         AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
-
-    // ---- dispatch ----
 
     internal async Task DispatchAsync(ClientConnection client, string method, JsonElement? parameters)
     {
@@ -185,9 +158,6 @@ internal sealed class IpcServer : IDisposable
         {
             Console.Error.WriteLine($"Tript.App.Ipc: command {Loggable(method)} failed: {exception.Message}");
 
-            // A command that threw produced no frame of its own, so without this the client is left
-            // waiting on a reply that never comes and the user sees nothing happen at all. Several
-            // commands can throw on input the wire allows, and stderr is not somewhere a user looks.
             TrySendError(client, $"That action could not be completed ({exception.Message}).");
         }
     }
@@ -201,20 +171,15 @@ internal sealed class IpcServer : IDisposable
         catch (Exception exception) when (exception is ObjectDisposedException or WebSocketException
                                              or InvalidOperationException)
         {
-            // The client that sent the command has gone. Nothing left to tell.
         }
     }
 
-    // A method name off the wire, bounded and stripped of anything that could forge a line in the
-    // log. It is attacker-influenced and reached on every frame.
     private static string Loggable(string method)
     {
         var trimmed = method.Length <= 64 ? method : method[..64];
         return new string(Array.ConvertAll(trimmed.ToCharArray(),
             c => char.IsControl(c) ? '?' : c));
     }
-
-    // ---- broadcast ----
 
     public void Broadcast(string method, JsonElement content)
     {
@@ -229,7 +194,6 @@ internal sealed class IpcServer : IDisposable
     public void Broadcast(string method, object content) =>
         Broadcast(method, JsonSerializer.SerializeToElement(content, Wire.Options));
 
-    // The envelope on the wire: { method, content }.
     internal static string Serialize(string method, JsonElement content)
     {
         using var stream = new MemoryStream();
@@ -285,29 +249,16 @@ internal sealed class IpcServer : IDisposable
         }
         catch
         {
-            // A Close racing the listener's own teardown can throw (HttpListenerException when the
-            // endpoint is already gone); the process is exiting, so a close failure is not worth
-            // propagating into Program.Main's exit code.
         }
 
-        // The loop swallows its own exceptions, so this can only time out; the token it holds is
-        // captured, so disposing the source after a timeout cannot make it throw.
         _acceptLoop?.Wait(TimeSpan.FromSeconds(2));
         _cts.Dispose();
     }
 
-    // ---- client ----
-
     internal sealed class ClientConnection : IDisposable
     {
-        // The largest command this protocol can carry. Commands are small JSON objects; the biggest
-        // real one is a clip request with its segment list. The receive loop accumulated
-        // continuation frames with no ceiling at all and then doubled the peak with ToArray(), so a
-        // single client message of arbitrary length was an unbounded allocation in this process.
         internal const int MaxInboundMessageBytes = 256 * 1024;
 
-        // How many outgoing frames may queue for a client that has stopped reading. Unbounded meant
-        // one such client made every Broadcast queue forever.
         private const int OutboundCapacity = 256;
 
         private readonly WebSocket _socket;
@@ -318,7 +269,6 @@ internal sealed class IpcServer : IDisposable
         private int _dropped;
         private int _disposed;
 
-        // How many outgoing frames this connection has thrown away because it was not being read.
         internal int DroppedFrames => Volatile.Read(ref _dropped);
 
         internal ClientConnection(WebSocket socket, IpcServer owner)
@@ -327,14 +277,6 @@ internal sealed class IpcServer : IDisposable
             _owner = owner;
             _closed = _cts.Token;
 
-            // DropOldest, not DropWrite: every push in this app is a FULL push, so the newest frame
-            // supersedes every older one and dropping from the front leaves the client converging on
-            // the current truth. DropWrite would do the opposite — discard the newest and leave a
-            // stale view pinned forever. The cost is that a one-shot frame (an error toast, an
-            // intermediate importProgress tick) can be lost by a client that is this far behind;
-            // that is the right trade against a queue that grows without limit. Waiting is not an
-            // option: Send runs under the broadcast gate, so a blocked write would stall the caller
-            // and every other client with it.
             _outbound = Channel.CreateBounded<byte[]>(
                 new BoundedChannelOptions(OutboundCapacity)
                 {
@@ -367,7 +309,6 @@ internal sealed class IpcServer : IDisposable
             }
             catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException)
             {
-                // A cancelled/closed client ends the writer; ReceiveLoop notices the close.
             }
             catch (Exception exception)
             {
@@ -394,8 +335,6 @@ internal sealed class IpcServer : IDisposable
 
                         if (ms.Length + result.Count > MaxInboundMessageBytes)
                         {
-                            // Refusing the rest of the message would leave the connection out of step
-                            // with a sender that is still writing it, so the connection goes.
                             Console.Error.WriteLine(
                                 $"Tript.App.Ipc: a client sent a message over {MaxInboundMessageBytes} bytes; closing it.");
                             await CloseTooBigAsync();
@@ -412,7 +351,6 @@ internal sealed class IpcServer : IDisposable
             }
             catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException)
             {
-                // A dead peer; nothing to clean up but the client itself.
             }
             catch (Exception exception)
             {
@@ -442,7 +380,6 @@ internal sealed class IpcServer : IDisposable
             catch (Exception exception) when (exception is WebSocketException or ObjectDisposedException
                                                  or OperationCanceledException)
             {
-                // The peer is already gone; the finally below tears the connection down anyway.
             }
         }
 
@@ -450,14 +387,10 @@ internal sealed class IpcServer : IDisposable
         {
             try
             {
-                // DropOldest, so TryWrite makes room rather than refusing; it only returns false once
-                // the writer has completed, which is the connection already going away.
                 _outbound.Writer.TryWrite(Encoding.UTF8.GetBytes(frame));
             }
             catch (Exception)
             {
-                // A frame for a client that is already gone. Broadcast holds the client list gate
-                // while it calls this, so throwing here would take every other client down with it.
             }
         }
 
@@ -484,7 +417,6 @@ internal sealed class IpcServer : IDisposable
             }
             catch (JsonException)
             {
-                // A malformed frame is dropped; the connection stays up.
             }
         }
 
@@ -504,8 +436,6 @@ internal sealed class IpcServer : IDisposable
 
             _socket.Dispose();
 
-            // The writer and receive loops hold the captured token and end on the cancelled socket;
-            // neither reads _cts again, so the source can go now.
             _cts.Dispose();
         }
     }

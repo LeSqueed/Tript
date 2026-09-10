@@ -5,8 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Scenes, attachment and the output channel a scene is recorded through. Placement lives in
-// ObsSceneItemTransformTests and z-order in ObsSceneItemOrderTests.
 public sealed class ObsSceneTests
 {
     private const string ColourSourceId = "color_source";
@@ -86,7 +84,6 @@ public sealed class ObsSceneTests
         Assert.Null(scene.FindItem(9999L));
     }
 
-    // The same source in two places at once is legitimate and gives two independent items.
     [SkippableFact]
     public void AddingOneSourceTwice_MakesTwoItemsWithDistinctIds()
     {
@@ -103,8 +100,6 @@ public sealed class ObsSceneTests
         Assert.Equal(2, scene.EnumerateItems().Count);
     }
 
-    // libobs refuses the cycle rather than recursing into it. The null is the whole report, so a
-    // binding that treated it as impossible would turn a refusal into a NullReferenceException.
     [SkippableFact]
     public void ASceneCannotContainItself()
     {
@@ -139,8 +134,6 @@ public sealed class ObsSceneTests
         Assert.Equal(2, items.Count);
         Assert.Equal([firstItem!.Id, secondItem!.Id], items.Select(item => item.Id));
 
-        // Disposing the enumerated handles must not take the items out of the scene: they are
-        // references of their own, not the scene's.
         foreach (var item in items)
             item.Dispose();
 
@@ -148,7 +141,6 @@ public sealed class ObsSceneTests
         Assert.True(firstItem.IsAttached);
     }
 
-    // The composition root: a scene on an output channel is what recording and preview both read.
     [SkippableFact]
     public void ASceneOnAnOutputChannel_IsReadBackAsThatScene()
     {
@@ -168,7 +160,6 @@ public sealed class ObsSceneTests
         Assert.Null(session.Runtime.GetOutputSource(0));
     }
 
-    // The channel takes a reference of its own, which is what makes "set it and forget it" safe.
     [SkippableFact]
     public void AnOutputChannel_HoldsItsSourceEvenAfterTheCallerLetsGo()
     {
@@ -199,8 +190,6 @@ public sealed class ObsSceneTests
         Assert.Throws<ArgumentOutOfRangeException>(() => session.Runtime.GetOutputSource(64));
     }
 
-    // The Linux capture source, which is what stands in here for the game capture this surface
-    // exists to carry. It reports a real screen size, which a source that failed to open would not.
     [SkippableFact]
     public void ScreenCapture_AttachesToASceneAndReportsTheScreenSize()
     {
@@ -222,8 +211,6 @@ public sealed class ObsSceneTests
             Assert.NotNull(programme);
         }
 
-        // Teardown in the order an application would use: clear the channel, detach, then let the
-        // handles go.
         session.Runtime.SetOutputSource(0, (ObsSource?)null);
         item.Remove();
         session.Runtime.WaitForDestroyQueue();
@@ -240,8 +227,6 @@ public sealed class ObsSceneTests
 
         Assert.Throws<ObjectDisposedException>(() => scene.Name);
 
-        // Disposing twice is not an error, which matters because the runtime disposes any scene the
-        // caller forgot.
         scene.Dispose();
     }
 

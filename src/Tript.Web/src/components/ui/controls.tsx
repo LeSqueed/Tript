@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The control layer. Every button, field and input in the app comes from here — see
-// docs/design-system.md §4. A view may position these; it must never restyle their interiors, and it
-// must never render a bare <button>, <input> or <select> of its own. This file used to live under
-// settings/ with a settings- class prefix, which is why the player hand-rolled raw controls beside
-// it and looked unstyled.
 
 import { useRef, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from 'react';
 import { Icon, type IconName } from './Icon';
 import { releasePointerFocus } from './pointerFocus';
-
-/* ---------------------------------------------------------------- buttons */
 
 export type ButtonVariant = 'primary' | 'ghost' | 'danger';
 export type ButtonSize = 'default' | 'small' | 'icon';
@@ -19,17 +11,14 @@ export interface ButtonProps {
   children?: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** Drawn before the label, or as the whole button when size is "icon". */
   icon?: IconName;
   iconFilled?: boolean;
-  /** Marks a toggle-ish button as on. Not for one-of-N — use SegmentedControl. */
   active?: boolean;
   onClick?: () => void;
   type?: 'button' | 'submit';
   disabled?: boolean;
   title?: string;
   className?: string;
-  /** React 19 hands `ref` to function components as an ordinary prop. */
   ref?: Ref<HTMLButtonElement>;
   'aria-label'?: string;
   'aria-pressed'?: boolean;
@@ -71,8 +60,6 @@ export function Button({
     </button>
   );
 }
-
-/* ----------------------------------------------------------------- fields */
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -121,7 +108,6 @@ export function SelectField({
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
-  /** Narrower padding for a control sitting inside a dense row, like the transport. */
   compact?: boolean;
 } & Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange'>) {
   const pointerSelection = useRef(false);
@@ -160,8 +146,6 @@ export function SelectField({
   );
 }
 
-/* ---------------------------------------------------------------- slider */
-
 export function Slider({
   value,
   min = 0,
@@ -176,8 +160,6 @@ export function Slider({
   step?: number;
   onChange: (value: number) => void;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
-  // The filled portion is a gradient stop rather than a second element: a range input has no
-  // styleable "fill" pseudo that both engines agree on.
   const fraction = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <input
@@ -195,9 +177,6 @@ export function Slider({
   );
 }
 
-/* ---------------------------------------------------------------- toggle */
-
-/** A boolean. Deliberately unlike SegmentedControl — see design-system §4. */
 export function Toggle({
   checked,
   onChange,
@@ -226,20 +205,11 @@ export function Toggle({
   );
 }
 
-/* ------------------------------------------------------- segmented control */
-
 export interface Segment<T extends string> {
   value: T;
   label: string;
 }
 
-/**
- * One-of-N, mutually exclusive. Never put a boolean in one — that is what Toggle is for.
- *
- * A radiogroup, which means the keyboard contract that comes with it: one tab stop for the whole
- * group, arrows move the selection. Declaring role="radio" without that is a worse lie than plain
- * buttons would have been.
- */
 export function SegmentedControl<T extends string>({
   value,
   segments,
@@ -269,7 +239,6 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
-            // Roving tabindex: the group is one stop, not one per option.
             tabIndex={selected ? 0 : -1}
             className={selected ? 'segment is-active' : 'segment'}
             onClick={() => onChange(segment.value)}
@@ -291,8 +260,6 @@ export function SegmentedControl<T extends string>({
     </div>
   );
 }
-
-/* ------------------------------------------------------------ check/radio */
 
 export function Checkbox({
   checked,

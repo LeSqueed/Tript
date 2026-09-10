@@ -5,8 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Every settings key in the table, driven through a real obs_data on the real runtime.
-// This is the condition the settings layer exists to satisfy.
 public sealed class EncoderSettingsKeyTests
 {
     [Theory]
@@ -27,8 +25,6 @@ public sealed class EncoderSettingsKeyTests
             if (!Equals(key.Sample, readBack))
                 failures.Add($"{key.Key}: wrote {Describe(key.Sample)}, read {Describe(readBack)}");
 
-            // Values such as 0 and false read identically whether or not the key was ever written,
-            // so equality alone would let a lost key pass. This is the assertion that does not.
             if (!settings.HasUserValue(key.Key))
                 failures.Add($"{key.Key}: written but reports no user value");
         }
@@ -36,9 +32,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
     }
 
-    // The specified defaults, exercised through the default channel rather than the user one. The
-    // distinction is real to obs_data and therefore has to be real here: an encoder asked whether a
-    // setting was configured must not be told yes because a default exists.
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void EverySpecifiedDefault_IsReadBackWhenNoValueIsSet(string family)
@@ -56,8 +49,6 @@ public sealed class EncoderSettingsKeyTests
             if (!Equals(key.SpecifiedDefault, EncoderSettingsKeyTable.ReadDefault(settings, key)))
                 failures.Add($"{key.Key}: default did not read back");
 
-            // With no user value, an ordinary read reports the default — which is what makes a
-            // wrong key invisible in production.
             if (!Equals(key.SpecifiedDefault, EncoderSettingsKeyTable.Read(settings, key)))
                 failures.Add($"{key.Key}: plain read did not fall through to the default");
 
@@ -71,9 +62,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
     }
 
-    // The accepted value strings, unchanged down to their case. NVENC compares "CQP" and "lossless"
-    // case-sensitively while treating everything else in the same key case-insensitively, AMF's
-    // preset list contains "highQuality", and QSV's target usages are "TU1" through "TU7".
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void EveryAcceptedValue_SurvivesUnchangedIncludingItsCase(string family)
@@ -99,9 +87,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
     }
 
-    // A whole family's keys in one object, which is how an encoder is actually configured. Two keys
-    // that collided — through a transcription slip or a hashing fault — would show up here and
-    // nowhere else, because a single-key test never has anything to overwrite.
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void AWholeFamilysKeys_CoexistInOneSettingsObject(string family)
@@ -119,15 +104,10 @@ public sealed class EncoderSettingsKeyTests
 
         Assert.True(failures.Length == 0, $"{family} — {string.Join("; ", failures)}");
 
-        // Every key present, and nothing invented along the way.
         var written = settings.EnumerateEntries().Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(keys.Select(key => key.Key).ToHashSet(StringComparer.Ordinal), written);
     }
 
-    // The wrong-type write, which is the silent failure that outranks the wrong-key one: obs_data
-    // converts between integers and doubles and between nothing else. A bitrate written as a string
-    // reads back as zero, a boolean written as an integer reads back as false, and neither reports
-    // anything at all.
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void EveryKey_ReadAsTheWrongType_YieldsNothingRatherThanTheValue(string family)
@@ -173,8 +153,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
     }
 
-    // obs_data keys are matched byte for byte. Neither a changed case nor a plausible near-miss
-    // finds the value, and neither is reported.
     [Theory]
     [MemberData(nameof(EncoderSettingsKeyTable.FamilyNames), MemberType = typeof(EncoderSettingsKeyTable))]
     public void EveryKey_IsFoundOnlyUnderItsExactSpelling(string family)
@@ -199,11 +177,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
     }
 
-    // ---- the transcribed table itself ----
-    //
-    // Guards on the known cross-family traps. They protect the table
-    // from being tidied into consistency, which is exactly the mistake each one describes.
-
     [Fact]
     public void TheKeyTable_CoversEveryFamilyWithEnoughKeysToBeMeaningful()
     {
@@ -213,8 +186,6 @@ public sealed class EncoderSettingsKeyTests
             Assert.True(EncoderSettingsKeyTable.For(family).Count >= 12,
                 $"{family} contributes only {EncoderSettingsKeyTable.For(family).Count} keys.");
 
-        // No family may list the same key twice, or the round-trip tests would silently test one of
-        // them and not the other.
         foreach (var family in EncoderSettingsKeyTable.Families)
         {
             var keys = EncoderSettingsKeyTable.For(family).Select(key => key.Key).ToArray();
@@ -245,7 +216,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.Contains("preset2", legacy);
         Assert.DoesNotContain("preset", legacy);
 
-        // The other two renames the rewrite brought with it.
         Assert.Contains("adaptive_quantization", texture);
         Assert.Contains("device", texture);
         Assert.Contains("psycho_aq", legacy);
@@ -260,7 +230,6 @@ public sealed class EncoderSettingsKeyTests
         Assert.DoesNotContain("max_bitrate", amf);
         Assert.DoesNotContain("tune", amf);
 
-        // Its QVBR quality level rides on cqp instead, so that key has to be there.
         Assert.Contains("cqp", amf);
     }
 

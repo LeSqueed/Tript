@@ -23,15 +23,12 @@ public sealed class ObsAudioResetTests
             Speakers = speakers
         }));
 
-        // Unlike video, the audio read-back does populate, so the settings can be compared directly.
         Assert.True(session.Runtime.TryGetAudioInfo(out var readBack));
         Assert.NotNull(readBack);
         Assert.Equal(samplesPerSecond, readBack.SamplesPerSecond);
         Assert.Equal(speakers, readBack.Speakers);
     }
 
-    // Confirms the enum's hole: 7.1 is 8, not 7. A contiguous enum would send 7 here and read back
-    // something else, which is why this asserts on the value rather than only on the member.
     [SkippableFact]
     public void SevenPointOne_IsSpeakerLayoutEightNotSeven()
     {

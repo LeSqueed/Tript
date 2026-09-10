@@ -8,9 +8,6 @@ using Serilog;
 
 namespace Tript.Recorder;
 
-// The detection-to-bookmarking host. Given a game, it starts a visual event detector for that game
-// and turns the detections that detector raises into bookmarks on the active recording via
-// frame-to-frame net-count transitions.
 public sealed class DetectionHost : IDisposable
 {
     private readonly IVisualEventDetector _detector;
@@ -18,13 +15,8 @@ public sealed class DetectionHost : IDisposable
     private readonly Action<Bookmark>? _onAutomaticClipBookmark;
     private readonly Lock _gate = new();
 
-    // Serialises Start/Stop/Dispose against each other.
     private readonly Lock _lifecycleGate = new();
 
-    // The detector raises detections on its own thread, and Stop disposes the subscription that
-    // handler is reading through, so a handler may be in flight while the host changes state. Every
-    // piece of state the handler touches is swapped under a lock, and the handler reads the
-    // swapped-out values through its own captured references.
     private DetectionRun? _run;
     public DetectionHost(IVisualEventDetector detector, ITrackDefinitionSource? definitionSource = null,
         Action<Bookmark>? onAutomaticClipBookmark = null)
@@ -35,7 +27,6 @@ public sealed class DetectionHost : IDisposable
         _onAutomaticClipBookmark = onAutomaticClipBookmark;
     }
 
-    // Whether a detector is currently running for a game.
     public bool IsRunning
     {
         get
@@ -47,7 +38,6 @@ public sealed class DetectionHost : IDisposable
         }
     }
 
-    // The game the running detector was started for; null when nothing is running.
     public string? CurrentGameId
     {
         get
@@ -59,9 +49,6 @@ public sealed class DetectionHost : IDisposable
         }
     }
 
-    // The game the recorder last decided to detect. Set once a detector actually starts for it, and
-    // cleared by Stop — Start keeps its game when a later Start switches games, so the recorder can
-    // tell "I asked for X" from "X is live".
     public string? LastStartedGameId
     {
         get
@@ -73,9 +60,6 @@ public sealed class DetectionHost : IDisposable
         }
     }
 
-    // Starts detection for the given game. A game already running is left running and reports true;
-    // a different game stops the old detector and starts the new. A game with no model is refused
-    // (false) rather than thrown at.
     public bool Start(string gameId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
@@ -112,7 +96,6 @@ public sealed class DetectionHost : IDisposable
         }
     }
 
-    // Stops detection for the current game, if any. No-op when nothing is running.
     public void Stop()
     {
         lock (_lifecycleGate)
@@ -140,8 +123,6 @@ public sealed class DetectionHost : IDisposable
 
     private bool StartLocked(string gameId)
     {
-        // Fail before anything else starts, with a message that says what is missing rather than
-        // letting the detector throw from inside its own thread.
         if (!HasRegisteredFrameSource())
         {
             Log.Warning("DetectionHost: cannot start detection for {GameId}: no frame source is registered",
@@ -151,7 +132,6 @@ public sealed class DetectionHost : IDisposable
 
         if (!_definitionSource.HasDetectionBundleForGame(gameId))
         {
-            // Not an error: most games legitimately have no model (ModelService logs the same).
             Log.Information("DetectionHost: no model for {GameId}, detection not started", gameId);
             return false;
         }
@@ -167,8 +147,6 @@ public sealed class DetectionHost : IDisposable
         _run = run;
         _detector.DetectionsAvailable += run.OnDetections;
 
-        // Subscribe before starting so a detector that emits immediately cannot lose its first
-        // batch. Roll the subscription back if startup itself fails.
         try
         {
             _detector.Start(gameId);
@@ -208,14 +186,10 @@ public sealed class DetectionHost : IDisposable
         }
         catch (InvalidOperationException)
         {
-            // The registry's contract: Current throws when nothing is registered.
             return false;
         }
     }
 
-    // The per-game state a detector's detections are routed through. A handler already running when
-    // the host swaps the run out keeps reading the run it captured and finishes without touching the
-    // new run's state.
     private sealed class DetectionRun
     {
         internal string GameId { get; }
@@ -227,9 +201,6 @@ public sealed class DetectionHost : IDisposable
         private readonly Dictionary<int, int> _previousNetCounts = new();
         private readonly Dictionary<int, List<TextTrack>> _ocrTracks = new();
 
-        // A veto still fires on its first, unconfirmed sighting, so it is guarded by confidence
-        // rather than by frames: a below-floor OCR read is ignored, and once seen a veto keeps
-        // suppressing for the memory window even if OCR drops it.
         private const float VetoConfidenceFloor = 0.8f;
         private const int VetoMemoryMilliseconds = 1000;
         private readonly object _callbackGate = new();
@@ -501,8 +472,6 @@ public sealed class DetectionHost : IDisposable
             return (double)previous[right.Length] / Math.Max(left.Length, right.Length);
         }
 
-        // A single cycle yielding more new occurrences than this is noise; the net-count still
-        // advances so the burst does not re-fire, only the bookmarks are clamped.
         private const int MaxNewOccurrencesPerCycle = 8;
 
         private void CreateBookmarks(EventDefinition definition, int count, DateTime now)
@@ -570,8 +539,6 @@ public sealed class DetectionHost : IDisposable
     }
 }
 
-// The host's view of ModelService: a tiny seam so the model/definition lookup can be faked in unit
-// tests without an ONNX model or a data directory on disk.
 public interface ITrackDefinitionSource
 {
     bool HasModelForGame(string gameId);

@@ -32,7 +32,6 @@ public class SettingsRoundTripTests : IDisposable
         }
         catch (IOException)
         {
-            // Best-effort cleanup of the temp directory.
         }
     }
 
@@ -64,17 +63,11 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(DisplayCaptureMethod.Display, reloaded.Capture.Method);
         Assert.Equal("DP-1", reloaded.Capture.Display);
 
-        // The label only exists so a warning can name a monitor that is no longer attached, which
-        // means it has to outlive the monitor being unplugged.
         Assert.Equal("Screen DP-1", reloaded.Capture.DisplayLabel);
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
         Assert.Equal([@"C:\Tools\overlay.exe"], reloaded.Game.IgnoredApplications);
     }
 
-    // The game-capture timeout crosses the JSON boundary as whole seconds: the settings UI sends a
-    // number (that is the shape an UpdateSettings patch arrives in) and reads a number back off a
-    // settings push. The TimeSpan string the serializer would otherwise demand is what made the
-    // settings save fail, so the numeric form is pinned here.
     [Fact]
     public void TheGameCaptureTimeout_IsPersistedAsWholeSeconds()
     {
@@ -87,7 +80,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(25, value.GetDouble());
     }
 
-    // A file written before the numeric seam carried an ISO 8601 duration: it still loads.
     [Fact]
     public void ALegacyTimeSpanStringGameCaptureTimeout_StillLoads()
     {
@@ -97,8 +89,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(95), settings.Game.GameCaptureTimeout);
     }
 
-    // A hand-edited value the converter cannot use degrades to a non-positive timeout, which the
-    // capture policy already maps to its default, rather than failing the whole file.
     [Fact]
     public void AnInvalidGameCaptureTimeoutNumber_ReadsBackNonPositive()
     {
@@ -211,8 +201,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(CloseBehavior.Exit, settings.General.CloseBehavior);
     }
 
-    // The trash retention is a stored setting with no UI yet, so the round trip is the only thing
-    // holding it: a one-day default on a fresh model, and whatever the user set after a reload.
     [Fact]
     public void SaveThenLoad_RoundTripsTheTrashRetention()
     {
@@ -223,8 +211,6 @@ public class SettingsRoundTripTests : IDisposable
 
         Assert.Equal(72, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
 
-        // Zero is the "never purge" value and must survive too, rather than being read back as the
-        // default because it is falsy.
         _store.Load().Recording.TrashRetentionHours = 0;
         _store.Save();
 
@@ -253,8 +239,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.False(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
     }
 
-    // The recording page's output-directory setting must survive a full save/load round trip so a
-    // user-chosen recording location persists across launches.
     [Fact]
     public void SaveThenLoad_RoundTripsTheOutputDirectory()
     {
@@ -267,8 +251,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal("/home/tester/Videos/Tript", reloaded.Recording.OutputDirectory);
     }
 
-    // An empty output directory is the default ("use the platform default"): it is written as a
-    // JSON null (WhenWritingNull) and reads back as null rather than a stale value.
     [Fact]
     public void SaveThenLoad_EmptyOutputDirectory_ReadsBackAsNull()
     {
@@ -281,10 +263,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Null(reloaded.Recording.OutputDirectory);
     }
 
-    // The recording resolution must survive a round trip because it is read twice per launch and by
-    // two different consumers: the host resets the OBS canvas to it at startup, and the recorder
-    // scales the video encoder to it per recording. A resolution that reverted to the default on
-    // every launch would silently change what every subsequent recording looks like.
     [Fact]
     public void SaveThenLoad_RoundTripsTheResolution()
     {
@@ -299,10 +277,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(1440, reloaded.Recording.ResolutionHeight);
     }
 
-    // The model's own default is 1080p, and it is reached without asking the platform anything. A
-    // fresh install actually starts at the primary display's resolution, but that default is
-    // applied by the host (Tript.App/Program.ApplyFirstRunDefaults) when it creates a settings file
-    // that does not exist yet — deliberately not here.
     [Fact]
     public void TheDefaultResolution_IsTheSafeFallback_AndNeedsNoDisplay()
     {
@@ -312,10 +286,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(1080, settings.Recording.ResolutionHeight);
     }
 
-    // An existing settings file keeps exactly the resolution it carries. This is the other half of
-    // the first-run rule: the host applies a detected display size only when there is no file, so a
-    // user who chose 1280x720 on a 1440p screen keeps 1280x720 — a load must never "correct" a stored
-    // resolution towards the hardware.
     [Fact]
     public void ALoadOfAnExistingFile_KeepsItsStoredResolution()
     {
@@ -326,7 +296,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(1280, settings.Recording.ResolutionWidth);
         Assert.Equal(720, settings.Recording.ResolutionHeight);
 
-        // And a save re-emits it rather than the model default.
         _store.Save();
         using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
         var recording = doc.RootElement.GetProperty("recording");
@@ -334,11 +303,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(720, recording.GetProperty("resolutionHeight").GetInt32());
     }
 
-    // The recording page's codec-and-quality surface: the rate-control choice and the two bitrate
-    // figures the rate-targeted modes use. These must survive a round trip for the same reason the
-    // encoder id must — the recorder resolves them per machine, but the *choice* is the user's and is
-    // persisted, and a mode that reverted to the default on every launch would silently change how
-    // every subsequent recording is encoded.
     [Fact]
     public void SaveThenLoad_RoundTripsTheRateControlAndBitrateFields()
     {
@@ -355,10 +319,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(40_000, reloaded.Recording.MaxBitrateKbps);
     }
 
-    // The audio source's device selection is persisted by id so it survives a settings round trip:
-    // the frontend saves a deviceId per source, and the recorder reads it back to attach the
-    // capture source to that device. It is serialized as the camelCase "deviceId" key inside the
-    // source object.
     [Fact]
     public void SaveThenLoad_RoundTripsTheAudioSourceDeviceId()
     {
@@ -405,8 +365,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(0.5f, reloaded.Audio.Tracks[1].Sources[0].Volume);
     }
 
-    // A source without a device selection reads back with a null DeviceId rather than a stale or
-    // empty value, so a config that never chose a device keeps meaning "the platform default".
     [Fact]
     public void SaveThenLoad_ASourceWithoutADevice_ReadsBackNull()
     {
@@ -422,11 +380,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Null(Assert.Single(Assert.Single(reloaded.Audio.Tracks).Sources).DeviceId);
     }
 
-    // The rate-control mode is persisted by name, not by ordinal: the member names are the
-    // compatibility surface (SettingsSerialization registers JsonStringEnumConverter), so a member
-    // added or reordered later cannot silently reinterpret an existing file as a different mode — and
-    // a mode is exactly the value that must not be misread, since the recorder writes it into the
-    // encoder's rate_control key.
     [Fact]
     public void TheRateControlMode_IsPersistedByName()
     {
@@ -439,9 +392,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal("Cbr", recording.GetProperty("rateControl").GetString());
     }
 
-    // A settings file written before this build knew about rate control still loads, and the missing
-    // fields take the model defaults — constant quality with the default bitrate, which is what the
-    // recorder wrote for those files anyway.
     [Fact]
     public void ALoadOfAFileWithoutRateControl_TakesTheDefaults()
     {
@@ -454,9 +404,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.Equal(0, settings.Recording.MaxBitrateKbps);
     }
 
-    // A build that models only part of the settings surface must not lose fields it does not
-    // model. The file carries a top-level field this model does not know about; a save after a
-    // load must re-emit it, and a load must not choke on it.
     [Fact]
     public void SaveAfterLoad_PreservesUnknownTopLevelKeys()
     {
@@ -474,8 +421,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.True(root.TryGetProperty("recording", out _));
     }
 
-    // Same contract at the page level: a page this build does not fully model keeps its unknown
-    // fields across a save.
     [Fact]
     public void SaveAfterLoad_PreservesUnknownPageKeys()
     {
@@ -509,8 +454,6 @@ public class SettingsRoundTripTests : IDisposable
         Assert.True(general.GetProperty("notifications").TryGetProperty("futureNotification", out _));
     }
 
-    // A file with no model fields at all still loads to defaults, and a save produces a valid
-    // versioned file.
     [Fact]
     public void SaveWithoutLoad_WritesDefaults()
     {
@@ -519,9 +462,7 @@ public class SettingsRoundTripTests : IDisposable
         using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
         Assert.Equal(Settings.CurrentVersion, doc.RootElement.GetProperty("version").GetInt32());
     }
-    // The settings file holds the recording directory, the game list and the audio routing. A plain
-    // File.WriteAllText truncates before it writes, and a crash in that window leaves a blank file —
-    // which loads as "no settings", i.e. every setting silently back to its default.
+
     [Fact]
     public void Save_NeverLeavesTheSettingsFileBlank()
     {
@@ -535,17 +476,12 @@ public class SettingsRoundTripTests : IDisposable
             settings.Recording.OutputDirectory = "/tmp/recordings";
             store.Save();
 
-            // A reader racing the writer must never observe a truncated file. The rename is what
-            // makes that true; assert the observable consequence rather than the mechanism.
             var stop = new ManualResetEventSlim();
             var blank = 0;
             var reader = new Thread(() =>
             {
                 while (!stop.IsSet)
                 {
-                    // Read the way SettingsFileProvider reads (ReadWrite|Delete sharing): a plain
-                    // ReadAllText holds the file without delete sharing and blocks the writer's
-                    // replace-rename on Windows, which is a writer failure, not a reader failure.
                     string text = "{}";
                     if (File.Exists(path))
                     {
@@ -558,8 +494,6 @@ public class SettingsRoundTripTests : IDisposable
                         }
                         catch (Exception ex) when (ex is IOException or FileNotFoundException or UnauthorizedAccessException)
                         {
-                            // Lost the race against a rename mid-flight; the next loop turn reads
-                            // the renamed-in file, which is the state the test is trying to pin.
                         }
                     }
 
@@ -586,8 +520,6 @@ public class SettingsRoundTripTests : IDisposable
         }
     }
 
-    // A fixed "<path>.tmp" is shared by every concurrent writer of the same file, so two interleaved
-    // write/rename pairs rename one writer's bytes over the other's.
     [Fact]
     public void AtomicFile_ReplacesTheTargetWithTheWrittenContents()
     {
@@ -605,5 +537,4 @@ public class SettingsRoundTripTests : IDisposable
             try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
         }
     }
-
 }

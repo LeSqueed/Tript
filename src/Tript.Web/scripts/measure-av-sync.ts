@@ -1,17 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Measures how far a sidecar audio track drifts from the video it follows, under the conditions
-// that matter: hard seeking, scrubbing while playing, and sustained playback.
-//
-// The player's multi-track design serves the video untouched (so it keeps native byte-range
-// seeking) and plays a non-default audio track from a small extracted sidecar. The cost of that
-// choice is client-side sync, so it is measured rather than assumed — and it must be re-measured on
-// Windows/WebView2, which is the primary target and a different media stack from this one.
-//
-//   cd src/Tript.Web && node --experimental-strip-types scripts/measure-av-sync.ts <video> <sidecar>
-//
-// Reports drift in milliseconds. Negative means the audio lags the video, which is the forgiving
-// direction: ITU-R BT.1359 puts the detection threshold near 125ms of lag but only ~45ms of lead.
 
 import { createServer } from 'node:http';
 import { readFileSync, statSync, writeFileSync, mkdtempSync } from 'node:fs';
@@ -56,7 +43,6 @@ const sources: Record<string, string> = {
   '/index.html': join(root, 'index.html'),
 };
 
-// Byte ranges, the same contract ContentServer offers — the video must seek the way it really does.
 const server = createServer((request, response) => {
   const url = (request.url || '/').split('?')[0];
   const file = sources[url === '/' ? '/index.html' : url];
@@ -114,7 +100,7 @@ const afterDrag = await tab.evaluate(async () => {
   const a = document.getElementById('a') as HTMLAudioElement;
   for (let step = 0; step < 25; step += 1) {
     v.currentTime = 2 + step * 0.9;
-    await new Promise((resolve) => setTimeout(resolve, 40)); // faster than seeks complete
+    await new Promise((resolve) => setTimeout(resolve, 40));
   }
   await new Promise((resolve) => setTimeout(resolve, 300));
   return a.currentTime - v.currentTime;

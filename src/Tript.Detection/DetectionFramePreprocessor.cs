@@ -12,10 +12,8 @@ namespace Tript.Detection;
 
 internal enum GrayscaleStrategy
 {
-    // Convert each group's crop rectangle on its own, straight from BGRA.
     PerGroupCrop,
 
-    // Convert the frame once, then cut every group out of that one grey buffer.
     WholeFrameOnce
 }
 
@@ -25,8 +23,6 @@ internal static class DetectionFramePreprocessor
     private const int BlackCheckLumaThreshold = 15;
     private const int BlackCheckMinBrightSamples = 0;
 
-    // Takes the crop rect the detections came from, not the group: TryGetCropRect trims a region
-    // overhanging a frame edge, and the untrimmed size would misplace every box.
     internal static void MapDetectionsToFullFrame(List<DetectionResult> detections,
         int cropX, int cropY, int cropW, int cropH, int frameW, int frameH)
     {
@@ -51,7 +47,6 @@ internal static class DetectionFramePreprocessor
             || !ContainsCenter(definition, detection));
     }
 
-    // The model sees a padded crop, so it can centre a box just past the region edge.
     private const float RegionContainmentToleranceFraction = 0.02f;
 
     private static bool ContainsCenter(EventDefinition definition, DetectionResult detection)
@@ -94,9 +89,6 @@ internal static class DetectionFramePreprocessor
             }
         }
 
-        // Merging grows a group's bounds, which can open overlaps with groups already passed
-        // over. Repeating until a pass finds nothing makes the result independent of the order
-        // events appear in events.json; the previous first-match-wins pass was not.
         bool changed = true;
         while (changed)
         {
@@ -123,21 +115,15 @@ internal static class DetectionFramePreprocessor
         return groups;
     }
 
-    // The per-group path converts each crop independently, so its cost is the sum of the crop
-    // areas. Coverage catches both one full-frame group and several large overlapping groups.
     internal static GrayscaleStrategy SelectGrayscaleStrategy(IReadOnlyList<RegionGroup> groups)
     {
         float coverage = 0f;
         foreach (var g in groups)
             coverage += g.W * g.H;
 
-        // A tie goes to the per-group path: the same conversions, minus the intermediate
-        // crop copy CropAndResizeGray makes.
         return coverage > 1f ? GrayscaleStrategy.WholeFrameOnce : GrayscaleStrategy.PerGroupCrop;
     }
 
-    // The pixels one cycle converts to greyscale, which is the quantity the two strategies
-    // trade off. Shares TryGetCropRect with the detection loop so the two cannot drift.
     internal static int CountGrayscalePixels(IReadOnlyList<RegionGroup> groups, int frameW, int frameH)
     {
         if (SelectGrayscaleStrategy(groups) == GrayscaleStrategy.WholeFrameOnce)
@@ -191,8 +177,6 @@ internal static class DetectionFramePreprocessor
         a.Y = y;
     }
 
-    // OBS may pad each row to an alignment boundary. When it does not, the plane is one
-    // contiguous block and the per-row loop is pure overhead for the same bytes moved.
     internal static void CopyPlane(ReadOnlySpan<byte> src, int srcStride, byte[] dst, int rowBytes, int height)
     {
         if (srcStride == rowBytes)
@@ -208,9 +192,6 @@ internal static class DetectionFramePreprocessor
         }
     }
 
-    // Probes a 16x16 grid rather than every pixel and bails on the first sample above the
-    // threshold: a frame that is genuinely black is black everywhere, so the sparse grid
-    // answers the question without a full-frame pass.
     internal static bool IsNearBlack(byte[] bgra, int w, int h)
     {
         var srcRowStride = w * 4;
@@ -249,8 +230,6 @@ internal static class DetectionFramePreprocessor
         return gray;
     }
 
-    // Greyscale is a pure per-pixel function, so converting only the crop rectangle gives the
-    // same bytes as converting the whole frame and then cropping.
     internal static byte[] CropBgraToGray(byte[] bgra, int srcW, int cropX, int cropY,
         int cropW, int cropH)
     {
@@ -293,13 +272,8 @@ internal static class DetectionFramePreprocessor
         }
     }
 
-    // Reads only columns [0, cropW-1] and rows [0, cropH-1] of crop: both taps of each axis are
-    // held inside the crop, so cropping before greyscale conversion stays byte-identical.
     internal static byte[] ResizeGray(byte[] crop, int cropW, int cropH, int dstW, int dstH)
     {
-        // A 1px axis has no second tap: `extent - 1.001f` alone yields -0.001, leaving tap 1
-        // outside the crop with a negative weight. Flooring the clamp and capping the tap collapses
-        // both onto pixel 0. For extent >= 2 both are no-ops, so real crops stay byte-identical.
         var maxX = cropW - 1;
         var maxY = cropH - 1;
 
@@ -330,7 +304,6 @@ internal static class DetectionFramePreprocessor
         return dst;
     }
 
-    // The vector path reads four bytes at a time as a uint, so it needs little-endian lane order.
     private static bool VectorFillSupported =>
         Vector128.IsHardwareAccelerated && BitConverter.IsLittleEndian;
 
@@ -355,8 +328,7 @@ internal static class DetectionFramePreprocessor
         {
             ref byte src = ref MemoryMarshal.GetArrayDataReference(grayData);
             ref float dst = ref MemoryMarshal.GetArrayDataReference(destination);
-            // A true divide, never a multiply by 1f/255f: the rounded reciprocal differs in the
-            // last ulp for 126 of the 256 byte values, which would break the golden test.
+
             var divisor = Vector128.Create(255f);
 
             for (; i <= pixels - Vector128<float>.Count; i += Vector128<float>.Count)
@@ -418,8 +390,6 @@ internal static class DetectionFramePreprocessor
             });
         }
 
-        // The rescan below re-walks the whole 8400-anchor tensor on the zero-detection path, for
-        // every region group of every cycle. Ask the sink before paying for it.
         if (Log.IsEnabled(LogEventLevel.Debug))
         {
             var highestConf = results.Count > 0

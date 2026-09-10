@@ -53,9 +53,8 @@ public class SettingsResolverTests
 
         var resolved = SettingsResolver.Resolve(settings, gameId: "ow");
 
-        // The per-game recording-mode override wins over the global combined default.
         Assert.Equal(RecordingMode.Session, resolved.Mode);
-        // Quality fields with an override use the override; fields without one inherit the global.
+
         Assert.Equal(240, resolved.Fps);
         Assert.Equal("nvenc", resolved.Encoder);
         Assert.Equal(1920, resolved.ResolutionWidth);
@@ -76,9 +75,6 @@ public class SettingsResolverTests
         Assert.Equal(3, resolved.Quality);
     }
 
-    // The recorder consumes a flat, resolved config — the seam the dependency map flagged. This
-    // test pins the contract that the recorder does NOT depend on the settings schema: it is fed a
-    // ResolvedRecorderSettings and never reaches into a Settings.
     [Fact]
     public void Resolve_ProducesTheFlatShapeTheRecorderConsumes()
     {
@@ -111,10 +107,6 @@ public class SettingsResolverTests
         Assert.Equal(expected, SettingsResolver.Resolve(settings).BufferEnabled);
     }
 
-    // The codec-and-quality choices reach the recorder through the same resolved shape as the encoder
-    // id and the quality profile. They have no per-game override — the schema's per-game quality
-    // override is resolution, fps, encoder and quality, and growing it is a separate decision — so the
-    // global choice is the effective one for every game, including one that overrides other fields.
     [Fact]
     public void Resolve_CarriesTheRateControlChoiceForEveryGame()
     {
@@ -132,17 +124,12 @@ public class SettingsResolverTests
         Assert.Equal(22_000, resolved.BitrateKbps);
         Assert.Equal(33_000, resolved.MaxBitrateKbps);
 
-        // And they survive the clone the recorder takes of the config it is handed, so a caller
-        // mutating its copy after the start cannot change how the running recording is encoded.
         var clone = resolved.Clone();
         Assert.Equal(RateControlMode.Cbr, clone.RateControl);
         Assert.Equal(22_000, clone.BitrateKbps);
         Assert.Equal(33_000, clone.MaxBitrateKbps);
     }
 
-    // The default is constant quality on every machine: Cqp is the stored value, and the recorder
-    // coerces it into x264's CRF when a software encoder is what the runtime resolved. The default
-    // therefore records the user's intent rather than one family's spelling of it.
     [Fact]
     public void Resolve_DefaultsToConstantQuality()
     {
@@ -152,8 +139,6 @@ public class SettingsResolverTests
         Assert.Equal(15_000, resolved.BitrateKbps);
     }
 
-    // The capture policy the recorder composes its scene from: the method, the preferred monitor and
-    // the game-capture timeout are all global, and all three have to survive the clone.
     [Fact]
     public void Resolve_CarriesTheCapturePolicy()
     {
@@ -174,7 +159,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(15), clone.GameCaptureTimeout);
     }
 
-    // Auto keeps the display layer, so it is the default that never records black.
     [Fact]
     public void Resolve_DefaultsToAutoCaptureOnThePrimaryMonitor()
     {
@@ -185,8 +169,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(10), resolved.GameCaptureTimeout);
     }
 
-    // A game may capture differently from the rest: a title that will not hook wants the display
-    // layer even when the global asks for game capture only, and vice versa.
     [Fact]
     public void CaptureMethod_PerGameOverride_WinsOverTheGlobal()
     {
@@ -213,12 +195,10 @@ public class SettingsResolverTests
         settings.Game.GameList = [new GameSetting { Id = "Overwatch", Name = "Overwatch" }];
 
         Assert.Equal(DisplayCaptureMethod.Game, SettingsResolver.Resolve(settings, "Overwatch").CaptureMethod);
-        // And a game nothing knows about still gets the global.
+
         Assert.Equal(DisplayCaptureMethod.Game, SettingsResolver.Resolve(settings, "Unknown").CaptureMethod);
     }
 
-    // The automatic-clip window defaults to the global pair stored on the recording settings: 5
-    // seconds before each save, 8 after. A fresh settings object is the canonical default.
     [Fact]
     public void ClipWindow_GlobalValues_AreTheDefaults()
     {
@@ -228,8 +208,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(8), after);
     }
 
-    // A game id nothing knows about, and a null id, resolve to the same global defaults rather
-    // than erroring or inventing a window.
     [Fact]
     public void ClipWindow_UnknownOrNullGame_InheritsTheGlobalValues()
     {
@@ -244,7 +222,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(8), nullAfter);
     }
 
-    // A per-game override with both sides set wins over the globals on both sides.
     [Fact]
     public void ClipWindow_BothSidesOverridden_UsesTheOverrideForEachSide()
     {
@@ -259,8 +236,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(12), after);
     }
 
-    // A before-only override replaces the before side while the after side is inherited from the
-    // global setting.
     [Fact]
     public void ClipWindow_BeforeOnlyOverride_UsesOverrideAndInheritsGlobalAfter()
     {
@@ -275,8 +250,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(8), after);
     }
 
-    // An after-only override replaces the after side while the before side is inherited from the
-    // global setting.
     [Fact]
     public void ClipWindow_AfterOnlyOverride_UsesOverrideAndInheritsGlobalBefore()
     {
@@ -291,8 +264,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(12), after);
     }
 
-    // If the effective pair has after before before, the after side is clamped up to the before
-    // side so the returned window never points into the past. Before stays untouched.
     [Fact]
     public void ClipWindow_GlobalAfterBeforeBefore_ClampsAfterUpToBefore()
     {
@@ -306,8 +277,6 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(10), after);
     }
 
-    // The same clamp applies to an overridden pair: an after below the game's own before is raised
-    // to the before side rather than surviving.
     [Fact]
     public void ClipWindow_OverriddenAfterBelowBefore_ClampsAfterUpToBefore()
     {

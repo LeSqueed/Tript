@@ -10,11 +10,6 @@ interface PlayerHeaderProps {
   creatingHighlights: boolean;
   highlightsPaused: boolean;
   highlightCount: number;
-  /**
-   * Whether the recording has at least one detected event automatic highlights could cut. When
-   * false, the "Create highlights" action is disabled: asking the backend to cut nothing would
-   * only produce an error the button could have avoided.
-   */
   canCreateHighlights: boolean;
   onBack?: () => void;
   onAutomaticClips: () => void;

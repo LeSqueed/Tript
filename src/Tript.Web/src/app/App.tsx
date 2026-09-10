@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The app shell: recorder bar on top, nav + content below, and a live connection status. Top-level
-// pages (library, sessions, settings, training) plus the player and session-review overlays.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useIpcClient } from './useConnection';
@@ -56,13 +53,9 @@ export function App({
   ipcOptions?: IpcClientOptions;
   trainingFeatureEnabled?: boolean;
 }) {
-  // Without the launch token every listener refuses this page: the socket, the videos, the
-  // thumbnails. Rendering the shell anyway would be an empty library over a socket reconnecting
-  // forever, which reads as a broken backend. Say what is wrong and open nothing.
   if (!hasSessionToken()) {
     return <MissingKeyNotice />;
   }
-  // The provider sits above the shell, not inside it: the shell's own restore toast needs useToast.
   return (
     <ToastProvider>
       <AppShell ipcOptions={ipcOptions} trainingFeatureEnabled={trainingFeatureEnabled} />
@@ -93,14 +86,9 @@ function AppShell({
   trainingFeatureEnabled: boolean;
 }) {
   const { client, connectionState } = useIpcClient(ipcOptions);
-  // A key is present (App checked) but may no longer be accepted: the host mints a new one per
-  // launch, so a tab left open across a restart 403s on everything and would otherwise just sit
-  // there empty.
   const reachability = useHostReachability(connectionState);
   const startupRoute = readStartupRoute();
   const [route, setRoute] = useState<Route>(startupRoute);
-  // The latest route, readable from a toast action that was pushed on another route: the clip's
-  // View button may be clicked long after the player it was made in has closed.
   const routeRef = useRef(route);
   routeRef.current = route;
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
@@ -188,27 +176,20 @@ function AppShell({
     };
   }, []);
 
-  // Register the listener before announcing readiness so queued tray commands are not lost.
   useEffect(() => {
     (window as PhotinoShellWindow).external?.sendMessage?.('tript:ready');
   }, []);
 
-  // One IPC session source for the shell's lifetime, shared by the library and the player so a
-  // `content` push anywhere is reflected everywhere.
   const source = useIpcSessionSource(client);
   const { items, loaded } = useSessionSource(source);
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  // Owned by the shell, not by the trash screen: the library's delete confirmation quotes
-  // `retentionHours`, and it must be right the first time a user deletes anything.
   const trash = useTrash(client);
   const { push, dismiss } = useToast();
   const [pendingRestore, setPendingRestore] = useState<ContentItem | null>(null);
   const restoreSentRef = useRef(false);
 
-  // The scrolling content column. Save its position while the library remains mounted under the
-  // player route so returning to Library restores the user's place.
   const contentRef = useRef<HTMLDivElement>(null);
   const savedScrollTop = useRef(0);
   const overlayWasOpen = useRef(false);
@@ -223,11 +204,6 @@ function AppShell({
     setRoute('session');
   }, [items, playerItem, playerNavigation, playerReturnRoute]);
 
-  // The player's playlist depends on what the user opened, not just what they opened it from: a
-  // session entry point (the recent shelf, the sessions page) plays that session's own list — main
-  // video plus its highlights in order — while a library card plays the result list it sits in, even
-  // when the card is a session. `returnRoute` is where back lands; the sessions page keeps its own
-  // tab, the library's review overlay does not.
   const openInPlayer = useCallback(
     (
       item: ContentItem,
@@ -237,8 +213,6 @@ function AppShell({
     ) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
       const isSession = item.contentType === 'recording' || item.contentType === 'buffer';
-      // A placeholder card has no main video to open, so even a library entry falls back to the
-      // session's own list: the first playable child, or the review when there is none.
       const recording = isSession && (origin === 'session' || lacksMainVideo(item)) ? item : null;
       const navigation = recording ? sessionPlaylist(recording, items) : resultItems;
       const requested = navigation.find((candidate) => candidate.filePath === item.filePath) ?? navigation[0];
@@ -414,8 +388,6 @@ function AppShell({
   const requestPlayerDelete = useCallback((item: ContentItem) => {
     if (playerReturnRoute === 'session') {
       deleteItem(item, false, false, true);
-      // Highlights delete without a confirmation on purpose, so the toast is the acknowledgement:
-      // the message says where the item went, and its action is the undo for the one slip.
       push({
         key: `trashed-${item.filePath}`,
         kind: 'success',
@@ -447,8 +419,6 @@ function AppShell({
   const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? (() => {
     const item = pendingDelete.item;
     const isRecording = item.contentType === 'recording';
-    // A missing-video placeholder names itself but has no session file to move; only its cascaded
-    // highlights (if any) actually go to the trash, so the sentence must not count the session.
     const placeholder = isRecording && (item.videoMissing === true || item.highlightsOnly === true);
     return makeDeleteConfirmation({
       names: [itemLabel(item)],
@@ -457,7 +427,6 @@ function AppShell({
       hasCascade: isRecording,
       cascadeCount: isRecording ? cascadableLinkedHighlights(item, items).length : 0,
       deleteLinkedHighlightsDefault: deleteLinkedHighlightsByDefault,
-      // The shell's player / session review phrases the heading without quotes, unlike the library.
       title: `Delete ${itemLabel(item)}?`,
     });
   })() : null;
@@ -467,8 +436,6 @@ function AppShell({
       overlayWasOpen.current = true;
       return;
     }
-    // Only on the open → closed transition; on first mount there is nothing to restore and writing 0
-    // would be a scroll the user did not ask for.
     if (overlayWasOpen.current) {
       overlayWasOpen.current = false;
       if (contentRef.current) {
@@ -477,8 +444,6 @@ function AppShell({
     }
   }, [playerItem]);
 
-  // One map per push, not a `find` per playlist entry: a whole-library playlist against a
-  // whole-library content list is the 9k × 9k case this effect must not make.
   useEffect(() => {
     if (!playerItem) {
       return;
@@ -503,12 +468,6 @@ function AppShell({
     );
   }, [items, playerItem, closePlayer]);
 
-  // The click may land before the backend's `trash` push that follows the delete, and only that push
-  // names the entry RestoreTrash needs. Send the restore the first time the entry is seen.
-  //
-  // The wire carries the BARE file name, not the relative path the content list uses, so match on
-  // that. The list is newest-first, so the first hit is the item just deleted even if an older entry
-  // happens to share its name.
   useEffect(() => {
     if (pendingRestore === null || restoreSentRef.current) {
       return;
@@ -524,12 +483,6 @@ function AppShell({
     }
   }, [pendingRestore, trash]);
 
-  // The restore is done when the item is back in the content. Open it only then: the player
-  // closes itself on any item the list does not have, so landing early would immediately bounce.
-  //
-  // Land where the item came from: with the session review still open, the player's back returns
-  // to that session's highlight list. Leaving for the library has already closed the review, so
-  // the library route is the fallback for anything the open review does not own.
   useEffect(() => {
     if (pendingRestore === null || !restoreSentRef.current) {
       return;
@@ -538,8 +491,6 @@ function AppShell({
     if (restored !== undefined) {
       setPendingRestore(null);
       dismiss(`trashed-${restored.filePath}`);
-      // Membership is judged against the live content list, not the review's cached clip array:
-      // the push that restores the item rebuilds that array a beat AFTER this effect has run.
       if (sessionReview !== null
         && restored.automated === true
         && restored.sourceSessionPath === sessionReview.recording.filePath) {
@@ -567,8 +518,6 @@ function AppShell({
         return null;
       }
 
-      // Content pushes are the live source of truth. Rebuild the highlight list instead of only
-      // pruning deleted clips, because automatic generation adds clips after this page is already open.
       const clips = items.filter(
         (item) => item.automated && item.sourceSessionPath === recording.filePath,
       );
@@ -595,7 +544,6 @@ function AppShell({
     }
   }, [items, sessionPlayerOrigin]);
 
-  // Leaving for another destination closes whatever was open in the player route.
   const leaveFor = useCallback((next: Route) => {
     setRoute(next);
     setPlayerItem(null);
@@ -653,7 +601,7 @@ function AppShell({
           <TripwireMark size={26} />
           <strong>Tript</strong>
         </div>
-        {/* The player is a workspace inside Tript, so primary navigation stays available while reviewing. */}
+        {}
         <nav className="app-nav" aria-label="Primary">
           <button
             type="button"
@@ -714,8 +662,6 @@ function AppShell({
           ref={contentRef}
         >
           {(route === 'library' || route === 'player' || route === 'session') && (
-            // Mounted but hidden while the player route is up. Unmounting would lose the user's
-            // filters, sort, page and scroll while the player is open.
             <div hidden={route === 'player' || route === 'session'}>
               <LibraryView
                 client={client}

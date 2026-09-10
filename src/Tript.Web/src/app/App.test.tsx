@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Shell render test: the recorder bar, nav and theme render; navigation switches views; the
-// connection state is shown even when the backend is not running (fails gracefully). The IPC client
-// is mocked at the socket level so the real client logic runs against a test double.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
@@ -10,10 +6,6 @@ import { App } from './App';
 import { MockWebSocket } from '../ipc/test/mockWebSocket';
 import { captureSessionToken } from '../ipc/sessionToken';
 
-/**
- * Make this test's window narrow. The setup stub reports "not compact", so a player opened at
- * desktop width is the full-size route; the overlay is what narrow windows get. Call before render.
- */
 function compactWindow(): void {
   window.matchMedia = ((query: string) => ({
     matches: true,
@@ -27,20 +19,13 @@ function compactWindow(): void {
   })) as typeof window.matchMedia;
 }
 
-/** Stands in for the 256-bit token the host mints per launch. */
 const TOKEN = 'f00dcafe1234567890';
 
-/** The active socket — under StrictMode the effect runs twice, so the app's live socket is last. */
 function activeSocket(): MockWebSocket {
   const sockets = MockWebSocket.instances;
   return sockets[sockets.length - 1];
 }
 
-/**
- * The backend's content-list answer to a ListContent command: two recordings and a clip, which is
- * the shape the library's type filter has to deal with. `SESSION_2` carries a `game` and a real
- * `startTime`; `SESSION_1` carries neither (the older/no-metadata shape) — both must show up.
- */
 const SESSION_1 = {
   contentType: 'recording',
   fileName: 'session-1.mp4',
@@ -89,12 +74,6 @@ const HIGHLIGHT_2 = {
   clipStartTime: 20,
 };
 
-/**
- * A mock backend that honours the ListContent contract: the backend does NOT include content in its
- * NewConnection push, it answers every ListContent command with a `content` push. The frontend's IPC
- * session sources send ListContent on creation (and again on (re)connect), so this round-trip is
- * what surfaces sessions and clips in the library / player.
- */
 class ContentBackend extends MockWebSocket {
   send(data: string): void {
     super.send(data);
@@ -114,8 +93,6 @@ describe('App shell', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.reset();
-    // The real page is served only to a request carrying the launch token, so the shell always
-    // starts with one; a token-less start is its own describe block below.
     captureSessionToken(`?k=${TOKEN}`);
   });
 
@@ -136,13 +113,11 @@ describe('App shell', () => {
 
   it('says only that it is not connected before the backend answers', () => {
     renderApp();
-    // Nothing else on the bar is actionable yet, so nothing else is offered.
     expect(screen.getByText(/not connected/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Record' })).toBeNull();
     expect(screen.queryByText('Stopped')).toBeNull();
   });
 
-  /** Open the socket so ListContent reaches the mock backend and its `content` push comes back. */
   function connect(): void {
     act(() => {
       activeSocket().serverOpen();
@@ -156,7 +131,6 @@ describe('App shell', () => {
     expect(within(nav).getByRole('button', { name: 'Settings' })).toBeTruthy();
 
     connect();
-    // The library grid carries both content types now — the clips page is gone.
     expect(screen.getByRole('button', { name: 'Open Session 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open Nice shot' })).toBeTruthy();
 
@@ -237,12 +211,10 @@ describe('App shell', () => {
   it('puts navigation in the topbar and does not repeat the route name below it', () => {
     renderApp();
     connect();
-    // No rail: the nav sits in the topbar beside the brand.
     expect(document.querySelector('.app-rail')).toBeNull();
     const topbar = document.querySelector('.app-topbar') as HTMLElement;
     expect(topbar).not.toBeNull();
     expect(within(topbar).getByRole('navigation', { name: 'Primary' })).toBeTruthy();
-    // The active nav item names the screen, so no heading says it a second time.
     expect(screen.queryByRole('heading', { level: 1, name: 'Library' })).toBeNull();
   });
 
@@ -250,12 +222,10 @@ describe('App shell', () => {
     renderApp();
     connect();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
-    // Player, Clips and Trash all folded into the library, leaving two places to be.
     expect(within(nav).getByRole('button', { name: 'Library' })).toBeTruthy();
     expect(within(nav).getByRole('button', { name: 'Settings' })).toBeTruthy();
     expect(within(nav).queryByRole('button', { name: 'Player' })).toBeNull();
     expect(within(nav).queryByRole('button', { name: /Trash/ })).toBeNull();
-    // Both survive as type FILTERS inside the library, which is where they went.
     expect(screen.getByRole('radio', { name: 'Clips', checked: false })).toBeTruthy();
     expect(screen.getByRole('radio', { name: 'Trash', checked: false })).toBeTruthy();
   });
@@ -267,15 +237,11 @@ describe('App shell', () => {
     expect(library.querySelectorAll('img').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
 
-    // The player is on the page...
     expect(document.querySelector('.player-view')).not.toBeNull();
-    // ...as a route, not as the overlay layer.
     expect(screen.queryByTestId('player-overlay')).toBeNull();
-    // ...and the library is still mounted underneath, merely hidden, so its state survives.
     expect(library).not.toBeNull();
     expect(library?.closest('[hidden]')).not.toBeNull();
     expect(library.querySelectorAll('img')).toHaveLength(0);
-    // The player remains inside the shell: primary navigation stays visible and Library is active.
     const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(within(nav).getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe('page');
     expect(document.querySelector('.app-topbar-context')?.textContent).toBe('Session 1');
@@ -382,7 +348,6 @@ describe('App shell', () => {
 
     const nav = screen.getByRole('navigation', { name: 'Primary' });
 
-    // From the sessions page: the player's playlist is that session's own list.
     fireEvent.click(within(nav).getByRole('button', { name: 'Sessions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
     expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
@@ -391,12 +356,10 @@ describe('App shell', () => {
     expect(screen.queryByRole('button', { name: 'Play Session 2' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Play Nice shot' })).toBeNull();
 
-    // Back lands on the sessions page, which kept its place.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(document.querySelector('.player-view')).toBeNull();
     expect(screen.getByTestId('sessions-view')).toBeTruthy();
 
-    // From a library list: the same card plays the result list it sits in.
     fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
@@ -566,14 +529,11 @@ describe('App shell', () => {
     expect(toast.textContent).toContain('Moved "First highlight" to trash.');
     expect(screen.queryByTestId('confirm-delete')).toBeNull();
 
-    // The backend's trash push names the entry; the content push drops the item from the list.
     act(() => {
       const ws = activeSocket();
       ws.serverMessage(JSON.stringify({
         method: 'trash',
         content: {
-          // The wire spells the entry with the BARE file name, not the relative path the content
-          // list uses — the restore match depends on that.
           entries: [{ id: 'trash-1', contentType: 'clip', fileName: HIGHLIGHT_1.fileName, deletedAt: 1000, purgeAt: 2000 }],
           retentionHours: 72,
         },
@@ -590,8 +550,6 @@ describe('App shell', () => {
       parameters: { entryIds: ['trash-1'] },
     });
 
-    // The restore is only visible once the item is back in the content; that is also when the
-    // player lands on it and the toast leaves.
     act(() => {
       const ws = activeSocket();
       ws.serverMessage(JSON.stringify({
@@ -610,8 +568,6 @@ describe('App shell', () => {
     });
     expect(screen.queryByRole('status')).toBeNull();
 
-    // The restore lands back in the highlights flow: back from the player returns to the
-    // session's clip list, not the library.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByText('2 highlights')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Back to session' })).toBeTruthy();
@@ -622,7 +578,6 @@ describe('App shell', () => {
     connect();
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
 
-    // The player only marks against a length the media itself has reported.
     const video = document.querySelector('video') as HTMLVideoElement;
     act(() => {
       Object.defineProperty(video, 'duration', { configurable: true, writable: true, value: 120 });
@@ -792,8 +747,6 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
 
-    // The player is handed the shell's source, so it must not create a second IPC source of its own —
-    // which would double-ask the backend for the whole content list every time a card is clicked.
     expect(document.querySelector('.player-view')).not.toBeNull();
     expect(listContents()).toBe(before);
   });
@@ -803,7 +756,6 @@ describe('App shell', () => {
     renderApp();
     connect();
 
-    // Narrow the library to clips and search for one, so there is real state to come back to.
     fireEvent.click(screen.getByRole('radio', { name: 'Clips' }));
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'shot' } });
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
@@ -811,7 +763,6 @@ describe('App shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Library' }));
 
-    // The library was covered, not unmounted: its query is untouched.
     expect(screen.getByRole('radio', { name: 'Clips', checked: true })).toBeTruthy();
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('shot');
     expect(screen.getAllByTestId('content-card')).toHaveLength(1);
@@ -822,7 +773,6 @@ describe('App shell', () => {
     renderApp();
     connect();
     const ws = activeSocket();
-    // The trash is not part of the NewConnection push, so it has to be asked for, like the content list.
     expect(ws.sent.some((frame) => frame.includes('"ListTrash"'))).toBe(true);
 
     act(() => {
@@ -846,7 +796,6 @@ describe('App shell', () => {
       );
     });
 
-    // The count rides on the filter, so a full trash is visible without going there first.
     const trashFilter = screen.getByRole('radio', { name: 'Trash (1)' });
     fireEvent.click(trashFilter);
     expect(screen.getByTestId('trash-list')).toBeTruthy();
@@ -863,7 +812,6 @@ describe('App shell', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete Session 1' }));
-    // The shell owns the trash state precisely so the FIRST delete can tell the truth about it.
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('for the next 3 days');
   });
 
@@ -874,7 +822,6 @@ describe('App shell', () => {
     act(() => {
       ws.serverOpen();
     });
-    // A "Connected" badge is only information when it is false, so it is not rendered when true.
     expect(screen.queryByTestId('connection-state')).toBeNull();
     expect(screen.queryByText(/not connected/i)).toBeNull();
     expect(screen.getByRole('button', { name: 'Record' })).toBeTruthy();
@@ -920,7 +867,7 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
     act(() => {
-      vi.advanceTimersByTime(200); // the exit plays before the toast leaves
+      vi.advanceTimersByTime(200);
     });
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -939,20 +886,13 @@ describe('App shell', () => {
         }),
       );
     });
-    // Scoped to the recorder bar: the detected game is now legitimately on screen twice, since the
-    // library shows the same game on a card and in its game filter. Asserting document-wide would
-    // pass or fail on the library's content, which is not what this test is about.
     const bar = within(screen.getByTestId('recorder-bar'));
-    // Elapsed time is the headline, not the word "Recording".
     expect(bar.getByTestId('recording-elapsed')).toBeTruthy();
     expect(bar.getByText('Counter-Strike 2')).toBeTruthy();
     expect(bar.getByRole('button', { name: 'Stop' })).toBeTruthy();
   });
 });
 
-// The host refuses every listener without the token, so a token-less page can do nothing at all.
-// Silently reconnecting behind an empty library would look like a broken backend; say what is wrong
-// instead. In practice this is what a bare `vite dev` (on :2883) hits.
 describe('App without a session token', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -998,8 +938,6 @@ describe('the session token in the rendered page', () => {
     captureSessionToken('');
   });
 
-  // It necessarily rides on the media URLs (a <video> has no other way to authenticate), but it must
-  // never be shown to the user or written to the console, where it outlives the page in a log.
   it('is never rendered as text and never logged', () => {
     const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
     const spies = methods.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
@@ -1019,9 +957,6 @@ describe('the session token in the rendered page', () => {
   });
 });
 
-// A tab left open across a host restart holds the previous launch key, so the socket, the videos and
-// the thumbnails all 403. That is correct, but on its own it presents as a shell that never fills in
-// — the user has no way to know a reload of the printed address is what they need.
 describe('App against a host that no longer accepts this page\'s key', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1036,7 +971,6 @@ describe('App against a host that no longer accepts this page\'s key', () => {
     captureSessionToken('');
   });
 
-  /** Answers the UI-host probe; the socket is left to never open, as a refused handshake leaves it. */
   function hostAnswers(status: number): void {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status })));
   }
@@ -1051,7 +985,6 @@ describe('App against a host that no longer accepts this page\'s key', () => {
     hostAnswers(403);
     render(<App ipcOptions={{ createSocket: (url: string) => new ContentBackend(url) }} />);
 
-    // Nothing while the socket is merely retrying.
     await settle(1_000);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
 

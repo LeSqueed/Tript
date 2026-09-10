@@ -5,7 +5,6 @@ export interface TripwireMarkProps extends Omit<SVGProps<SVGSVGElement>, 'aria-l
   size?: number | string;
 }
 
-/** The Tript mark: a viewfinder tightens around a moment without obscuring its center. */
 export function TripwireMark({ label, size = 32, className, ...props }: TripwireMarkProps) {
   const labelled = label !== undefined;
   return (

@@ -96,9 +96,6 @@ internal sealed partial class AppHost
         if (!root.Exists)
             return items;
 
-        // The session the active recording is appending to right now, as a wire path. Its metadata
-        // record is only written when the recording stops, so the item it describes would otherwise
-        // render as an attribution-less "unknown game" session the whole time it is being captured.
         var activeRecordingPath = IsRecording && _activeSessionPath is { Length: > 0 }
             ? Path.GetRelativePath(EffectiveRoot, _activeSessionPath).Replace(Path.DirectorySeparatorChar, '/')
             : null;
@@ -191,8 +188,6 @@ internal sealed partial class AppHost
                     item.Recording = true;
                     if (_pendingMetadata is not null)
                     {
-                        // A live recording's metadata record is written only on stop, so its in-memory
-                        // record — which knows the game being captured — is what the card should show.
                         item.Game = string.IsNullOrWhiteSpace(_pendingMetadata.Game)
                             ? null
                             : _pendingMetadata.Game;
@@ -229,7 +224,6 @@ internal sealed partial class AppHost
                 if (record is not null
                     && (!string.IsNullOrWhiteSpace(record.Game) || !string.IsNullOrWhiteSpace(record.GameId)))
                 {
-                    // The record's own attribution wins — it survives the source session being gone.
                     item.Game = string.IsNullOrWhiteSpace(record.Game) ? null : record.Game;
                     item.GameId = ResolveStoredGameId(record.GameId, item.Game);
                 }
@@ -326,15 +320,9 @@ internal sealed partial class AppHost
             }
             else if (earliestLinkedHighlightStart.TryGetValue(sourcePath, out var sessionStart))
             {
-                // The session's metadata went with its video. The placeholder still represents a real
-                // capture, so it takes a date rather than None: the earliest of its surviving
-                // highlights, which is the closest truth left on disk.
                 item.StartTime = sessionStart;
             }
 
-            // A deleted session's metadata is gone, but the per-game recording layout keeps its game in
-            // the path itself ("<game>/sessions/..."). Resolve the same way clips do so a session whose
-            // highlights survived is still attributed, not parked under "Unknown game".
             if (item.Game is null && item.GameId is null
                 && GameSegmentFromPath(sourcePath) is { } sessionSegment)
             {
@@ -353,8 +341,6 @@ internal sealed partial class AppHost
 
         foreach (var clip in clips)
         {
-            // A record that already carries its own attribution keeps it; everything else inherits
-            // from the source session (which may record the tag on the fly in BackfillClipGame).
             if (clip.Game is null && clip.GameId is null)
             {
                 clip.Game = InheritedGame(clip, gamesByRecordingPath, gamesByRecording);
@@ -377,11 +363,6 @@ internal sealed partial class AppHost
         return items;
     }
 
-    // The library shows the catalogue's current name for a game its items are tagged with. The
-    // metadata record keeps the name it was recorded under as a snapshot; when that snapshot's
-    // stable GameId is still a game in the catalogue — a custom game the user renamed — the current
-    // display name wins, so a rename updates every existing recording and clip. A GameId that matches
-    // nothing (the game was removed, a recovery-time attribution) keeps the stored snapshot.
     private string? ResolveLibraryGameName(string? storedName, string? gameId)
     {
         if (string.IsNullOrWhiteSpace(gameId))
@@ -434,9 +415,6 @@ internal sealed partial class AppHost
         return inherited;
     }
 
-    // A clip that has no stored game and no surviving source session can still name its game when the
-    // per-game recording layout put it (and the session it came from) under "<gameId>/highlights/".
-    // The container directories are never games, so only a real catalogue id is accepted.
     private static string? GameSegmentFromPath(string? relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -448,9 +426,6 @@ internal sealed partial class AppHost
             : segment;
     }
 
-    // Pins the game attribution onto a clip whose record predates the field: once the tag is known
-    // from any source, persist it so the next listing reads it straight from the record. Safe to run
-    // on every pass — a record that already carries the tag is left alone.
     private void BackfillClipGame(ContentItem clip, ClipTitleRecord? record)
     {
         var game = clip.Game;

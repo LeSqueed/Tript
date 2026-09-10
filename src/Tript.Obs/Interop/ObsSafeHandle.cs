@@ -5,30 +5,6 @@ using System.Runtime.InteropServices;
 
 namespace Tript.Obs.Interop;
 
-// Nothing libobs returns is garbage-collected, so this file decides once how ownership is expressed.
-// Sources, outputs and encoders will each need dozens of these, and they inherit whatever is decided
-// here.
-//
-// Three kinds of pointer come back from libobs, and the binding keeps them visibly distinct:
-//
-//   * Borrowed for the duration of a call — id strings, names. Read immediately into managed
-//     memory; never stored, never wrapped.
-//   * Owned by the OBS context — sources, outputs, encoders. ObsContextHandle.
-//   * Owned by the caller, outliving the context — bmem allocations, and the refcounted settings
-//     objects. BMemHandle, ObsSettingsHandle, ObsSettingsArrayHandle.
-//
-// SafeHandle rather than a raw pointer plus try/finally because the failure it prevents is
-// invisible: a leaked libobs object keeps a device, a thread or a file open, and nothing reports
-// it. The finalizer is the backstop for the paths that forget.
-//
-// What that backstop does NOT buy: every wrapper reads its handle through DangerousGetHandle, and
-// once the raw nint is in a register the wrapper is dead to the JIT. A wrapper that nothing else
-// references could in principle be finalized while the P/Invoke that raw pointer was read for is
-// still running. Holding it open properly is GC.KeepAlive (or DangerousAddRef/DangerousRelease) at
-// every one of the binding's ~300 call sites. It is not done here because no such site exists
-// today: every wrapper in the app is a field, a `using` local, or referenced by a later statement,
-// all of which keep it live across the call. A call site that ends on a wrapper's own property is
-// the shape that would break it.
 internal abstract class ObsSafeHandle : SafeHandle
 {
     protected ObsSafeHandle(nint handle, bool ownsHandle) : base(nint.Zero, ownsHandle) => SetHandle(handle);
@@ -36,11 +12,6 @@ internal abstract class ObsSafeHandle : SafeHandle
     public override bool IsInvalid => handle == nint.Zero;
 }
 
-// For objects the OBS context owns. obs_shutdown destroys all of them at once, so a release after
-// shutdown is a use-after-free — and because finalizers run whenever the GC decides, that ordering
-// is the ordinary case rather than a rare race. The generation stamp is what makes it safe:
-// a handle created before a shutdown declines to release afterwards, because there is nothing left
-// to release.
 internal abstract class ObsContextHandle : ObsSafeHandle
 {
     private readonly long _generation;
@@ -50,9 +21,6 @@ internal abstract class ObsContextHandle : ObsSafeHandle
 
     protected abstract void Release(nint handle);
 
-    // The stale check and the release have to be one step from shutdown's point of view: checking
-    // and then releasing leaves a window for obs_shutdown to land between them. The runtime's
-    // in-flight gate is that step — shutdown stamps the generation and then drains it.
     protected sealed override bool ReleaseHandle()
     {
         if (!ObsRuntime.TryEnterRelease(_generation))
@@ -71,9 +39,6 @@ internal abstract class ObsContextHandle : ObsSafeHandle
     }
 }
 
-// A bmem allocation the caller must free. Deliberately not an ObsContextHandle: bmem outlives
-// obs_shutdown, so freeing one after the context is gone is correct rather than a fault, and
-// skipping it would leak.
 internal sealed class BMemHandle : ObsSafeHandle
 {
     internal BMemHandle(nint handle) : base(handle, ownsHandle: true)
@@ -87,11 +52,6 @@ internal sealed class BMemHandle : ObsSafeHandle
     }
 }
 
-// A refcounted settings object. Deliberately **not** an ObsContextHandle, which is the assumption
-// the shape of obs_data invites and which measurement refutes: on 32.2.1 obs_data_create succeeds
-// before obs_startup, an object created inside a context still reads its values after obs_shutdown,
-// and obs_data_release afterwards neither crashes nor leaks. obs_data lives on bmem and the OBS
-// core holds no registry of these objects, so its lifetime is the caller's alone.
 internal sealed class ObsSettingsHandle : ObsSafeHandle
 {
     internal ObsSettingsHandle(nint handle) : base(handle, ownsHandle: true)
@@ -105,11 +65,6 @@ internal sealed class ObsSettingsHandle : ObsSafeHandle
     }
 }
 
-// A source, a scene or a scene item. All three are ObsContextHandles, and unlike obs_data that was
-// measured rather than assumed: obs_shutdown frees every one of these whether or not the caller
-// still holds a reference — a source deliberately leaked across a shutdown left the allocation count
-// back at zero — so a release afterwards is a use-after-free, which is what the generation stamp
-// declines to perform.
 internal sealed class ObsSourceHandle : ObsContextHandle
 {
     internal ObsSourceHandle(nint handle) : base(handle, ownsHandle: true)
@@ -132,10 +87,6 @@ internal sealed class ObsVolumeMeterHandle : ObsSafeHandle
     }
 }
 
-// A scene, which is a source with one measured difference: obs_scene_create registers the scene
-// with the OBS core, and that registration is a reference of its own. Releasing the caller's
-// reference leaves the scene alive and still findable by name, so a handle for such a scene marks
-// the source removed first — the call that makes the core let go.
 internal sealed class ObsSceneHandle : ObsContextHandle
 {
     private readonly bool _registeredWithCore;
@@ -152,10 +103,6 @@ internal sealed class ObsSceneHandle : ObsContextHandle
     }
 }
 
-// A scene item. obs_scene_add returns a *borrowed* pointer — the single reference it creates belongs
-// to the scene — so every handle takes its own reference first and this release balances that one,
-// never the scene's. Releasing a borrowed item instead frees it while the scene still lists it,
-// which measurement shows leaves the scene holding a dangling pointer rather than failing.
 internal sealed class ObsSceneItemHandle : ObsContextHandle
 {
     internal ObsSceneItemHandle(nint handle) : base(handle, ownsHandle: true)
@@ -165,9 +112,6 @@ internal sealed class ObsSceneItemHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_sceneitem_release(handle);
 }
 
-// An encoder. An ObsContextHandle for the same measured reason as a source: obs_shutdown destroys
-// every encoder regardless of outstanding references, so releasing one afterwards is a
-// use-after-free that the generation stamp declines to perform.
 internal sealed class ObsEncoderHandle : ObsContextHandle
 {
     internal ObsEncoderHandle(nint handle) : base(handle, ownsHandle: true)
@@ -177,9 +121,6 @@ internal sealed class ObsEncoderHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_encoder_release(handle);
 }
 
-// An output. An ObsContextHandle for the same measured reason as a source and an encoder:
-// obs_shutdown destroys every output regardless of outstanding references, so releasing one
-// afterwards is a use-after-free that the generation stamp declines to perform.
 internal sealed class ObsOutputHandle : ObsContextHandle
 {
     internal ObsOutputHandle(nint handle) : base(handle, ownsHandle: true)
@@ -189,9 +130,6 @@ internal sealed class ObsOutputHandle : ObsContextHandle
     protected override void Release(nint handle) => ObsNative.obs_output_release(handle);
 }
 
-// A weak source reference. Deliberately not an ObsContextHandle, for the same reason as obs_data
-// and on the same evidence: the control block is a bmem allocation that survives obs_shutdown, and
-// the count only returns to zero once it is released.
 internal sealed class ObsWeakSourceHandle : ObsSafeHandle
 {
     internal ObsWeakSourceHandle(nint handle) : base(handle, ownsHandle: true)
@@ -205,8 +143,6 @@ internal sealed class ObsWeakSourceHandle : ObsSafeHandle
     }
 }
 
-// Same ownership rules as ObsSettingsHandle; a separate type because obs_data_array_t has its own
-// release and passing one where the other is expected would corrupt a refcount silently.
 internal sealed class ObsSettingsArrayHandle : ObsSafeHandle
 {
     internal ObsSettingsArrayHandle(nint handle) : base(handle, ownsHandle: true)

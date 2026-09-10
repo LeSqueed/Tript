@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The transport bar is the player's whole control surface now that the video no longer carries the
-// browser's own controls, so volume and mute are covered here rather than assumed from the browser.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

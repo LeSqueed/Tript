@@ -9,9 +9,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The trash. A delete no longer unlinks: the video and every record keyed to it move into
-// <root>/.trash/<entryId>/files/<original path>, so the delete is undoable until the retention
-// window closes.
 public sealed class TrashTests : IDisposable
 {
     private readonly string _contentRoot;
@@ -47,8 +44,6 @@ public sealed class TrashTests : IDisposable
         }
     }
 
-    // ---- delete -> trash ----
-
     [Fact]
     public void DeleteContent_MovesTheVideoAndEveryRecordKeyedToIt()
     {
@@ -71,13 +66,11 @@ public sealed class TrashTests : IDisposable
         Assert.True(entry.DeletedAt > 0);
         Assert.Equal(entry.DeletedAt + 24 * 3600, entry.PurgeAt);
 
-        // The mirror under files/ is what a restore reads: everything sits at the path it came from.
         var files = Path.Combine(EntryDirectory(entry.Id), "files");
         Assert.True(File.Exists(Path.Combine(files, "sessions", "session-1.mp4")));
         Assert.True(File.Exists(Path.Combine(files, "metadata", "session-1.mp4.metadata.json")));
         Assert.True(File.Exists(Path.Combine(files, "metadata", "thumbnails", "session-1.mp4.jpg")));
 
-        // And the library no longer lists it.
         Assert.Empty(_host.ListContent());
     }
 
@@ -300,8 +293,6 @@ public sealed class TrashTests : IDisposable
         Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
     }
 
-    // ---- restore ----
-
     [Fact]
     public void RestoreTrash_PutsTheVideoAndItsRecordsBack()
     {
@@ -319,15 +310,12 @@ public sealed class TrashTests : IDisposable
         Assert.Empty(_host.TrashEntries());
         Assert.False(Directory.Exists(EntryDirectory(entry.Id)), "a restored entry leaves nothing behind");
 
-        // The bookmarks came back with the record, which is the whole point of moving it.
         var item = Assert.Single(_host.ListContent());
         Assert.Equal("The clutch", item.Title);
         Assert.Equal("Overwatch", item.Game);
         Assert.Single(item.Bookmarks!);
     }
 
-    // A name that was taken again while the item sat in the bin must not be overwritten: the
-    // restored file gets a free name, and every record keyed to the old one follows it.
     [Fact]
     public void RestoreTrash_NeverOverwritesAFileThatTookTheNameBack()
     {
@@ -335,7 +323,6 @@ public sealed class TrashTests : IDisposable
         _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
         var entry = Assert.Single(_host.TrashEntries());
 
-        // A new recording claimed the name while the old one was in the bin.
         File.WriteAllText(Path.Combine(_contentRoot, "sessions", "session-1.mp4"), "the newcomer");
 
         _host.RestoreTrash(new RestoreTrashParameters { EntryIds = [entry.Id] });
@@ -346,7 +333,6 @@ public sealed class TrashTests : IDisposable
         Assert.True(File.Exists(restored), "the restored file must land under a free name");
         Assert.Equal("session", File.ReadAllText(restored));
 
-        // The records followed the new key, and the record's own link back to the video was re-pointed.
         Assert.True(File.Exists(MetadataPath("session-1-restored-1.mp4")));
         var record = JsonSerializer.Deserialize<RecordingMetadata>(
             File.ReadAllText(MetadataPath("session-1-restored-1.mp4")), SettingsSerialization.Options)!;
@@ -363,8 +349,6 @@ public sealed class TrashTests : IDisposable
 
         Assert.Empty(_host.TrashEntries());
     }
-
-    // ---- purge ----
 
     [Fact]
     public void PurgeTrash_WithoutIds_EmptiesTheWholeBin()
@@ -396,8 +380,6 @@ public sealed class TrashTests : IDisposable
         Assert.Equal("session-2.mp4", remaining.FileName);
     }
 
-    // The retention window, in the two directions that matter: an entry past it goes, an entry
-    // inside it stays.
     [Fact]
     public void PurgeExpiredTrash_HonoursTheRetentionWindow()
     {
@@ -415,8 +397,6 @@ public sealed class TrashTests : IDisposable
         Assert.Equal("fresh.mp4", remaining.FileName);
     }
 
-    // Retention <= 0 disables the automatic purge outright: the bin then keeps what it holds until
-    // it is emptied by hand, and purgeAt goes out as 0 so nothing counts down in the UI.
     [Fact]
     public void PurgeExpiredTrash_IsDisabled_WhenTheRetentionIsNotPositive()
     {
@@ -431,8 +411,6 @@ public sealed class TrashTests : IDisposable
         Assert.Equal(0, entry.PurgeAt);
     }
 
-    // ---- the bin is not part of the library ----
-
     [Fact]
     public void ListContent_AndTheContentServer_BothIgnoreTheTrash()
     {
@@ -443,20 +421,12 @@ public sealed class TrashTests : IDisposable
 
         Assert.Empty(_host.ListContent());
 
-        // The same exclusion at the traversal guard, so nothing in the bin can be streamed, clipped
-        // or deleted through a wire path either.
         Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot,
             ".trash/20260818-101112123-abcdef01/files/sessions/session-1.mp4"));
         Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, ".trash"));
         Assert.NotNull(ContentServer.ResolveWithinRoot(_contentRoot, "sessions/session-1.mp4"));
     }
 
-    // ---- a bin whose own records are unusable ----
-
-    // The entry record is a convenience, not the truth: the mirror under files/ already says where
-    // everything came from. A hand-edited or half-written record must therefore neither hide the
-    // entry nor take the app down — and it is never rewritten over, the same rule the metadata
-    // store follows.
     [Fact]
     public void ACorruptEntryRecord_StillListsAndStillRestores()
     {
@@ -479,8 +449,6 @@ public sealed class TrashTests : IDisposable
         Assert.Empty(_host.TrashEntries());
     }
 
-    // A crash between the move and the record write leaves an entry with no record at all. The
-    // files are the ones that matter, so the entry still lists and still restores.
     [Fact]
     public void AnEntryWithNoRecordAtAll_StillListsAndStillRestores()
     {
@@ -497,8 +465,6 @@ public sealed class TrashTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
         Assert.Empty(_host.TrashEntries());
     }
-
-    // ---- the bin follows the recording root ----
 
     [Fact]
     public void ChangingTheOutputDirectory_MovesTheBinWithIt()
@@ -520,12 +486,6 @@ public sealed class TrashTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_contentRoot, ".trash")));
     }
 
-    // ---- helpers ----
-
-    // A restore that cannot put every file back used to delete the entry anyway, destroying exactly
-    // the files it had just logged as keeping. The record carries the recording's title and bookmarks;
-    // a duration probe re-creating a record under the same key is enough to trigger it, because the
-    // metadata store keys by bare file name.
     [Fact]
     public void Restore_WhenARecordCannotBePutBack_KeepsTheEntryInsteadOfDestroyingIt()
     {
@@ -533,16 +493,13 @@ public sealed class TrashTests : IDisposable
         _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
         var entry = Assert.Single(_host.TrashEntries());
 
-        // Something re-creates a record under the same key while the video sits in the trash.
         Directory.CreateDirectory(Path.Combine(_contentRoot, "metadata"));
         File.WriteAllText(MetadataPath("session-1.mp4"), "{}");
 
         _host.RestoreTrash(new RestoreTrashParameters { EntryIds = [entry.Id] });
 
-        // The video came back...
         Assert.True(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
 
-        // ...but the record that could not be put back is still in the trash, not deleted.
         Assert.True(Directory.Exists(EntryDirectory(entry.Id)),
             "the entry must survive when it still holds files that could not be restored");
         Assert.True(
@@ -551,9 +508,6 @@ public sealed class TrashTests : IDisposable
         Assert.Single(_host.TrashEntries());
     }
 
-    // Null here means "the frame carried parameters this host could not parse", never "no parameters":
-    // the dispatch substitutes an explicit object for the parameterless whole-bin case. Treating the
-    // two alike let a malformed frame empty the entire trash.
     [Fact]
     public void PurgeTrash_WithUnparseableParameters_LeavesTheBinAlone()
     {
@@ -566,8 +520,6 @@ public sealed class TrashTests : IDisposable
         Assert.Single(_host.TrashEntries());
     }
 
-    // The same thing over the dispatch table, which is where the absent/unparseable distinction is
-    // actually made.
     [Theory]
     [InlineData("{\"entryIds\":\"not-a-list\"}")]
     [InlineData("\"not-an-object\"")]
@@ -585,7 +537,6 @@ public sealed class TrashTests : IDisposable
         Assert.Single(_host.TrashEntries());
     }
 
-    // And the parameterless frame still means the whole bin.
     [Fact]
     public async Task PurgeTrash_OverTheDispatch_WithNoParameters_EmptiesTheBin()
     {
@@ -665,8 +616,6 @@ public sealed class TrashTests : IDisposable
 
     private string EntryDirectory(string entryId) => Path.Combine(_contentRoot, ".trash", entryId);
 
-    // Rewrites an entry's deletedAt so a retention window that is hours long can be crossed in a
-    // test without waiting for it.
     private void BackdateEntry(string entryId, TimeSpan age)
     {
         var path = Path.Combine(EntryDirectory(entryId), "entry.json");

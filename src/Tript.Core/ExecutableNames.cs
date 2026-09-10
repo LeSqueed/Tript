@@ -3,8 +3,6 @@
 
 namespace Tript.Core;
 
-// Game executables are Windows binaries on every host, so their names compare case-insensitively
-// and with or without the .exe suffix regardless of the OS. Paths follow FilePaths instead.
 public static class ExecutableNames
 {
     private const string Extension = ".exe";

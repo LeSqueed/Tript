@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Train and export one generic Tript YOLO model for a prepared workspace."""
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ import shutil
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -44,7 +44,7 @@ def main() -> int:
     run_root = workspace / "runs"
     run_root.mkdir(parents=True, exist_ok=True)
     model = YOLO(args.base_model)
-    # The host polls this file while the process runs and mirrors the heartbeat into the UI.
+
     model.add_callback("on_fit_epoch_end", make_epoch_progress_writer(workspace, args.epochs))
     write_progress(workspace, "starting", epochs=args.epochs)
     print(f"TRAINING epochs={args.epochs} size={args.size} base={args.base_model}", flush=True)
@@ -53,8 +53,7 @@ def main() -> int:
         "epochs": args.epochs,
         "imgsz": args.size,
         "batch": 32 if device != "cpu" else 16,
-        # The UI's epoch value is authoritative. Ultralytics otherwise stops after its patience
-        # window, which can terminate a requested 100-epoch run less than halfway through.
+
         "patience": 0,
         "device": device,
         "workers": max(1, (os.cpu_count() or 8) // 2),
@@ -64,15 +63,14 @@ def main() -> int:
         "verbose": True,
     }
     if device == "directml":
-        # DirectML currently fails inside Ultralytics' inference-mode BatchNorm validation path.
-        # The finished ONNX model is still inspected by Tript after export.
+
         train_options.update(amp=False, workers=0, val=False, batch=16)
     result = model.train(**train_options)
     del result
 
     best = run_root / "latest" / "weights" / "best.pt"
     if not best.is_file() and device == "directml":
-        # DirectML skips validation, so Ultralytics only writes last.pt.
+
         best = run_root / "latest" / "weights" / "last.pt"
     if not best.is_file():
         raise FileNotFoundError(f"training completed without a model checkpoint: {best}")
@@ -80,7 +78,7 @@ def main() -> int:
     print("EXPORTING format=onnx", flush=True)
     write_progress(workspace, "exporting")
     trained = YOLO(str(best))
-    # DirectML is useful for training, but ONNX export is more reliable from CPU.
+
     export_device = "cpu" if device == "directml" else device
     exported = Path(trained.export(format="onnx", imgsz=args.size, device=export_device, simplify=False))
     target = dataset / "model.onnx"
@@ -88,7 +86,6 @@ def main() -> int:
     print(f"MODEL {target}", flush=True)
     write_progress(workspace, "done")
     return 0
-
 
 def write_progress(
     workspace: Path,
@@ -110,12 +107,11 @@ def write_progress(
             json.dump(payload, handle)
         os.replace(temporary, dataset / "progress.json")
     except OSError:
-        # Progress is a convenience for the UI; a heartbeat failure must not kill the run.
+
         try:
             os.unlink(temporary)
         except OSError:
             pass
-
 
 def _epoch_loss(trainer) -> float | None:
     for source in (getattr(trainer, "tloss", None), getattr(trainer, "loss_items", None)):
@@ -136,14 +132,11 @@ def _epoch_loss(trainer) -> float | None:
             continue
     return None
 
-
 def _epoch_map50(trainer) -> float | None:
     metrics = getattr(trainer, "metrics", None)
     if metrics is None:
         return None
-    # 8.4.x: the validator returns results_dict (trainer.metrics is a plain dict, keys like
-    # "metrics/mAP50(B)" — see runs/latest/results.csv). Older versions keep a Metrics object
-    # whose .box exposes map50.
+
     if isinstance(metrics, dict):
         for key in ("metrics/mAP50(B)", "val/mAP50", "mAP50"):
             value = metrics.get(key)
@@ -162,7 +155,6 @@ def _epoch_map50(trainer) -> float | None:
     except Exception:
         return None
 
-
 def make_epoch_progress_writer(workspace: Path, epochs: int):
     def on_fit_epoch_end(trainer) -> None:
         write_progress(
@@ -171,7 +163,6 @@ def make_epoch_progress_writer(workspace: Path, epochs: int):
         )
 
     return on_fit_epoch_end
-
 
 def choose_device(torch, requested: str, directml_available: bool | None = None) -> str:
     requested = str(requested).strip().lower()
@@ -201,7 +192,6 @@ def choose_device(torch, requested: str, directml_available: bool | None = None)
         return "0" if requested == "rocm" else requested
     return requested
 
-
 def can_use_directml() -> bool:
     try:
         import torch_directml
@@ -210,7 +200,6 @@ def can_use_directml() -> bool:
         return torch_directml.device_count() > 0
     except (ImportError, OSError, RuntimeError, TypeError):
         return False
-
 
 def configure_directml() -> None:
     """Bridge the PrivateUse1 device used by torch-directml into Ultralytics."""
@@ -282,8 +271,7 @@ def configure_directml() -> None:
         return original_autocast(enabled, device)
 
     def preprocess(self, targets, batch_size, scale_tensor):
-        # DirectML has no unique(return_counts=True) kernel. Batch indices are integer bookkeeping,
-        # so calculating only the counts on CPU does not move model data or gradients off the GPU.
+
         if getattr(targets.device, "type", "") != "privateuseone":
             return original_preprocess(self, targets, batch_size, scale_tensor)
         nl, ne = targets.shape
@@ -310,8 +298,7 @@ def configure_directml() -> None:
             topk_mask = (topk_metrics.max(-1, keepdim=True)[0] > self.eps).expand_as(topk_idxs)
         topk_idxs = topk_idxs.to("cpu")
         topk_idxs.masked_fill_(~topk_mask.to("cpu"), 0)
-        # DirectML does not support this partially modified scatter shape. The indices are
-        # bookkeeping only, so perform the accumulation on CPU and return the result to DML.
+
         count_tensor = torch.zeros(metrics.shape, dtype=torch.int32, device="cpu")
         count_tensor.scatter_add_(-1, topk_idxs, torch.ones_like(topk_idxs, dtype=torch.int32))
         count_tensor.masked_fill_(count_tensor > 1, 0)
@@ -323,9 +310,6 @@ def configure_directml() -> None:
                 self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt
             )
 
-        # DirectML produces zero target scores in the normalization stage even though the detached
-        # boxes and overlaps are correct. Assignment has no gradients, so keep the model on DirectML
-        # but run the complete bookkeeping path on CPU before copying its targets back.
         if gt_bboxes.shape[1] == 0:
             return original_assigner_forward(
                 self, pd_scores, pd_bboxes, anc_points, gt_labels, gt_bboxes, mask_gt
@@ -345,7 +329,6 @@ def configure_directml() -> None:
             return {}, float(-self.loss.detach().cpu().item())
         return original_validate(self)
 
-    # Ultralytics imports these helpers into several modules, so patch each local reference.
     torch_utils.select_device = select_device
     torch_utils.get_torch_device_backend = get_torch_device_backend
     torch_utils.autocast = autocast
@@ -363,7 +346,6 @@ def configure_directml() -> None:
     tal.TaskAlignedAssigner.select_topk_candidates = select_topk_candidates
     tal.TaskAlignedAssigner.forward = assigner_forward
     trainer.BaseTrainer.validate = validate
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

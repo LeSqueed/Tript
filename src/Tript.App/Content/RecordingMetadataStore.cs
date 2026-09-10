@@ -7,13 +7,8 @@ using Serilog;
 
 namespace Tript.App.Content;
 
-// The on-disk metadata store. Every recording's metadata — game, start
-// time, content type, audio track layout and its bookmarks — lives in a single metadata/ tree under
-// the recording root, keyed by the video file's name.
 internal sealed class RecordingMetadataStore
 {
-    // See ContentServer._contentRoot: written on the IPC thread, read from the library and clip
-    // threads.
     private volatile string _metadataRoot;
     private readonly object _writeGate = new();
     internal object WriteGate => _writeGate;
@@ -23,21 +18,13 @@ internal sealed class RecordingMetadataStore
         _metadataRoot = metadataRoot;
     }
 
-    // Switches the metadata tree to a new root (a settings change that moves the recording output
-    // directory moves the metadata tree with it).
     internal void UpdateRoot(string metadataRoot)
     {
         _metadataRoot = metadataRoot;
     }
 
-    // The record for a video, or null when the video has no usable metadata record. A video with no
-    // record still lists — empty bookmarks, no title — so "no record" is a normal state, not an
-    // error, and a malformed record must not take the video's list entry down with it either: the
-    // read path deliberately cannot tell the two apart.
     internal RecordingMetadata? Load(string videoFileName) => Read(videoFileName).Record;
 
-    // The record together with what the load actually found, for the callers that write back. The
-    // three states are genuinely different outcomes and only this method reports them.
     internal StoredRecord<RecordingMetadata> Read(string videoFileName)
     {
         var path = PathFor(videoFileName);
@@ -46,11 +33,6 @@ internal sealed class RecordingMetadataStore
 
         try
         {
-            // File.ReadAllText opens with FileShare.Read, which cannot tolerate a concurrent
-            // AtomicFile rename on Windows: the move briefly locks the destination path, and a read
-            // that opens in that window fails with a sharing violation — a torn read even though the
-            // write is atomic. Opening with delete/write sharing lets the read coexist with the
-            // rename: it sees the old or the new complete file, never a half-written one.
             string json;
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
                        FileShare.ReadWrite | FileShare.Delete))
@@ -61,10 +43,7 @@ internal sealed class RecordingMetadataStore
 
             var record = JsonSerializer.Deserialize<RecordingMetadata>(json,
                 SettingsSerialization.Options);
-            // A file holding the literal "null" parses to no record at all. There is nothing to
-            // preserve in it, but there is a file, so it counts as present-and-unreadable rather
-            // than absent — the write path may replace it, the same as any other unusable record,
-            // only after saying so.
+
             return record is null
                 ? StoredRecord<RecordingMetadata>.Unreadable
                 : new StoredRecord<RecordingMetadata>(StoredRecordState.Loaded, record);
@@ -76,15 +55,11 @@ internal sealed class RecordingMetadataStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // The record exists and this process cannot read it (a lock, a permission, a failing
-            // disk). Least of all may it be overwritten now: the state is "unreadable", not "gone".
             return new StoredRecord<RecordingMetadata>(StoredRecordState.Unreadable, null,
                 exception.Message);
         }
     }
 
-    // Persists the metadata record. Returns true when the record was written, false when the write
-    // failed (read-only media, disk full, permissions).
     internal bool Save(RecordingMetadata metadata)
     {
         lock (_writeGate)
@@ -139,9 +114,6 @@ internal sealed class RecordingMetadataStore
         }
     }
 
-    // Removes the record for a video, when there is one. Deleting a video removes its record too
-    // (the cascade-delete contract): the metadata/ tree never keeps an orphaned record for a video
-    // that is gone.
     internal bool Delete(string videoFileName)
     {
         lock (_writeGate)
@@ -159,8 +131,6 @@ internal sealed class RecordingMetadataStore
         }
     }
 
-    // <metadataRoot>/<videoFileName>.metadata.json — keyed by the video's file name so a record
-    // is addressable without parsing anything.
     internal string PathFor(string videoFileName) =>
         Path.Combine(_metadataRoot, $"{videoFileName}.metadata.json");
 }
@@ -169,8 +139,6 @@ internal static class RecordingMetadataExtensions
 {
     internal static string VideoFileName(this RecordingMetadata metadata)
     {
-        // The VideoPath is the '/' separated path relative to the recording root; its file name
-        // is the record's key.
         var separator = metadata.VideoPath.LastIndexOf('/');
         return separator >= 0 ? metadata.VideoPath[(separator + 1)..] : metadata.VideoPath;
     }

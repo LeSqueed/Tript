@@ -6,15 +6,10 @@ using System.Text.Json;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Runs scripts/probe-media.sh over a recording and hands back what ffprobe saw. The script lives in
-// this repo and is found by walking up from the test assembly, so a machine that is not the author's
-// gets a real probe rather than a silent null.
 internal static class ProbeMediaScript
 {
     private const string ScriptRelativePath = "scripts/probe-media.sh";
 
-    // A probe that cannot run is a broken suite, not a test result: returning null used to satisfy
-    // "the file is unparseable" without a probe ever having run.
     internal static JsonDocument Run(string file)
     {
         var script = Locate();

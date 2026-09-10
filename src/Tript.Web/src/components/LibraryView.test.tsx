@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The library grid, rendered. The derivation itself is tested without a DOM
-// (library/libraryModel.test.ts); what needs a DOM is the wiring: that each control reaches the
-// right dimension of the query, that a filter change resets the page (so the user cannot be left
-// looking at a page that no longer exists), that a thumbnail the backend cannot supply degrades to
-// the placeholder tile instead of a broken image, and that the two empty states are actually
-// distinguishable — the one thing that separates "you have no recordings" from "your filters hide
-// all of them", which otherwise looks identical to a broken backend.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -15,7 +7,6 @@ import type { ContentItem } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { TrashController } from './trash/useTrash';
 
-/** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
 const HOUR = 3600;
 const DAY = 24 * HOUR;
@@ -67,7 +58,6 @@ const highlight = item({
   favorite: true,
 });
 
-/** No metadata record at all: the shape an un-post-processed recording arrives in. */
 const bare = item({ fileName: 'session-bare.mp4' });
 
 function renderLibrary(items: ContentItem[], onOpen?: (item: ContentItem, resultItems: ContentItem[]) => void) {
@@ -114,8 +104,6 @@ describe('LibraryView grid', () => {
   });
 
   it('renders an item with no metadata at all, with honest fallbacks', () => {
-    // The point of the test: a missing game/date/duration/size must cost the item chips, never its
-    // place in the grid.
     renderLibrary([bare]);
     const card = screen.getByRole('button', { name: 'Open session-bare.mp4' });
     expect(within(card).getByText('Unknown game')).toBeTruthy();
@@ -133,8 +121,6 @@ describe('LibraryView grid', () => {
     expect(images[0].getAttribute('src')).toBe('http://localhost:8893/api/thumbnail/sessions/cs2.mp4');
     expect(images.filter((image) => image.getAttribute('loading') === 'eager')).toHaveLength(1);
     expect(images[0].getAttribute('fetchpriority')).toBe('high');
-    // Everything else: a library is unbounded, and a thousand cards must not become a thousand
-    // requests on mount.
     expect(images.slice(1).every((image) => image.getAttribute('loading') === 'lazy')).toBe(true);
     expect(images.slice(1).every((image) => image.getAttribute('fetchpriority') === 'low')).toBe(true);
   });
@@ -143,13 +129,10 @@ describe('LibraryView grid', () => {
     renderLibrary([session]);
     expect(screen.queryByTestId('content-card-placeholder')).toBeNull();
 
-    // `GET /api/thumbnail/...` answers 204 No Content when there is no thumbnail; an <img> given no
-    // image data fires `error`, which is the only signal the element offers.
     fireEvent.error(screen.getByRole('presentation'));
 
     expect(screen.getByTestId('content-card-placeholder')).toBeTruthy();
     expect(screen.queryByRole('presentation')).toBeNull();
-    // The card is still a card: the title and chips never depended on the thumbnail.
     expect(screen.getByRole('button', { name: 'Open Ranked win' })).toBeTruthy();
   });
 
@@ -278,8 +261,6 @@ describe('LibraryView filters and sorting', () => {
   });
 
   it('keeps a selected game as an option after a content push removes its last item', () => {
-    // A select whose value matches none of its options renders blank, which reads as a broken control
-    // rather than as a filter that now matches nothing.
     const view = render(
       <LibraryView client={mockClient()} items={[session, clip]} nowSeconds={NOW} />,
     );
@@ -291,7 +272,6 @@ describe('LibraryView filters and sorting', () => {
     const games = screen.getByLabelText('Game') as HTMLSelectElement;
     expect(games.value).toBe('Rocket League');
     expect([...games.options].map((option) => option.label)).toContain('Rocket League');
-    // And the grid explains itself rather than looking empty for no reason.
     expect(screen.getByTestId('library-empty-filtered')).toBeTruthy();
   });
 
@@ -333,13 +313,11 @@ describe('LibraryView filters and sorting', () => {
     expect((screen.getByLabelText('Sort') as HTMLSelectElement).value).toBe('oldest');
     expect((screen.getByLabelText('Search') as HTMLInputElement).value).toBe('');
     expect(screen.getByRole('radio', { name: 'All', checked: true })).toBeTruthy();
-    // The affordance only exists while something is being filtered.
     expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull();
   });
 });
 
 describe('LibraryView pagination', () => {
-  /** 25 dated sessions — two pages after the three-card recent shelf. */
   const many = Array.from({ length: 25 }, (_, index) =>
     item({
       fileName: `s-${index}.mp4`,
@@ -353,7 +331,6 @@ describe('LibraryView pagination', () => {
     renderLibrary(many);
     expect(screen.getAllByTestId('content-card')).toHaveLength(15);
     expect(screen.getByTestId('library-page').textContent).toBe('Page 1 of 2');
-    // The top shelf is fixed at three recordings; the latest item grid pages the remaining items.
     expect(screen.getByTestId('library-range').textContent).toBe('25 sessions · 25 items');
     expect(screen.getByRole('button', { name: 'Previous page' })).toHaveProperty('disabled', true);
 
@@ -378,7 +355,6 @@ describe('LibraryView pagination', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
     expect(screen.getByTestId('library-page').textContent).toBe('Page 2 of 2');
 
-    // Three items match — page 3 stops existing. The grid must show the matches, not an empty page.
     fireEvent.change(screen.getByLabelText('Game'), { target: { value: 'Counter-Strike 2' } });
     expect(screen.getAllByTestId('content-card')).toHaveLength(3);
     expect(screen.queryByTestId('library-page')).toBeNull();
@@ -399,8 +375,6 @@ describe('LibraryView empty states', () => {
     renderLibrary([]);
     const empty = screen.getByTestId('library-empty').textContent ?? '';
     expect(empty).toContain('Nothing recorded yet');
-    // Detection is automatic and the game list ships seeded, so the copy sets an expectation rather
-    // than asking the user to configure anything.
     expect(empty).not.toMatch(/add a game/i);
     expect(screen.getByRole('button', { name: 'Record now' })).toBeTruthy();
     expect(screen.queryByTestId('library-empty-filtered')).toBeNull();
@@ -413,7 +387,6 @@ describe('LibraryView empty states', () => {
 
     const empty = screen.getByTestId('library-empty-filtered');
     expect(empty.textContent).toContain('None of your 2 items matches these filters');
-    // This is the whole point of the distinction: a way out is visible.
     fireEvent.click(within(empty).getByRole('button', { name: 'Clear filters' }));
     expect(screen.getAllByTestId('content-card')).toHaveLength(2);
     expect(screen.queryByTestId('library-empty-filtered')).toBeNull();
@@ -427,7 +400,6 @@ describe('LibraryView empty states', () => {
 });
 
 describe('LibraryView delete and selection', () => {
-  /** The commands a mock client saw, so the wire shape can be asserted rather than assumed. */
   function recordingClient(): { client: IpcClient; sent: { method: string; parameters?: unknown }[] } {
     const sent: { method: string; parameters?: unknown }[] = [];
     return {
@@ -488,7 +460,6 @@ describe('LibraryView delete and selection', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: 'Trash (1)' }));
     expect(screen.getByText('Deleted run')).toBeTruthy();
-    // The live catalogue is not mixed in with what was deleted.
     expect(screen.queryByText('Ranked win')).toBeNull();
   });
 
@@ -512,7 +483,6 @@ describe('LibraryView delete and selection', () => {
     fireEvent.click(screen.getByTestId('confirm-delete-confirm'));
 
     expect(sent).toEqual([
-      // `fileName` is the root-relative path from the item's `filePath`, never the bare file name.
       { method: 'DeleteContent', parameters: { contentType: 'clip', fileName: 'clips/clip-1.mp4' } },
     ]);
   });
@@ -595,9 +565,6 @@ describe('LibraryView delete and selection', () => {
   });
 
   it('excludes favourited highlights from the trash count, matching the cascade', () => {
-    // The session links two automatic highlights, one favourited and one not. The backend cascade
-    // keeps the favourited one, so the notice must count the session plus only the non-favourited
-    // highlight — never the favourited one it cannot remove.
     const favourite = {
       contentType: 'clip' as const,
       fileName: 'highlight-fav.mp4',
@@ -664,8 +631,6 @@ describe('LibraryView delete and selection', () => {
   });
 
   it('offers no card checkboxes until selection mode is entered, and drops them again on Done', () => {
-    // Scoped to the cards: the toolbar's "Favourites only" toggle is a checkbox too, and a
-    // page-wide query would count it.
     const cardCheckboxes = () => document.querySelectorAll('.content-card-select');
     renderWith([session, clip]);
     expect(cardCheckboxes()).toHaveLength(0);
@@ -685,7 +650,6 @@ describe('LibraryView delete and selection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
     expect(screen.getByTestId('library-selection-count').textContent).toBe('2 selected');
-    // The affordance flips once the page is covered, so it is never a no-op.
     fireEvent.click(screen.getByRole('button', { name: 'Deselect page' }));
     expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
   });
@@ -711,7 +675,6 @@ describe('LibraryView delete and selection', () => {
         },
       },
     ]);
-    // The cards go when the `content` push arrives; the selection must not still claim them.
     expect(screen.getByTestId('library-selection-count').textContent).toBe('0 selected');
   });
 
@@ -775,7 +738,6 @@ describe('LibraryView delete and selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select page' }));
     expect(screen.getByTestId('library-selection-count').textContent).toBe('2 selected');
 
-    // A push after someone else deleted the clip. The selection must follow the list, not lag it.
     view.rerender(<LibraryView client={client} items={[session]} nowSeconds={NOW} />);
     expect(screen.getByTestId('library-selection-count').textContent).toBe('1 selected');
     expect(
@@ -833,7 +795,6 @@ describe('LibraryView recent sessions and groups', () => {
     renderLibrary([newest]);
     const recent = screen.getByTestId('library-recent');
     expect(within(recent).queryByRole('button', { name: /Highlights/ })).toBeNull();
-    // No placeholder, no "no clips yet": the recording card remains the only open affordance.
     expect(within(recent).queryByTestId('recording-group-clips')).toBeNull();
   });
 
@@ -877,12 +838,9 @@ describe('LibraryView sessions surface', () => {
       item({ fileName: 'c.mp4', title: 'Session C', startTime: NOW - 3 * HOUR }),
       item({ fileName: 'd.mp4', title: 'Session D', startTime: NOW - 4 * HOUR, videoMissing: true }),
     ]);
-    // The shelf is a sessions surface: it keeps its placeholders, in place.
     const recent = screen.getByTestId('library-recent');
     expect(within(recent).getByRole('button', { name: 'Open Session A' })).toBeTruthy();
     expect(within(recent).queryByRole('button', { name: 'Open Session D' })).toBeNull();
-    // Session D is fourth, so the shelf does not explain its absence from the Latest grid: the
-    // placeholder filter does.
     expect(screen.queryByTestId('library-latest')).toBeNull();
   });
 

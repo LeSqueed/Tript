@@ -6,10 +6,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The desktop layer the recording scene keeps under the game capture. Its only job is that a game
-// capture which never attaches records the desktop instead of a black rectangle, so what matters is
-// that an id is picked on every platform that has one and that a platform with none is a reported
-// state rather than a crash.
 public sealed class DisplayCaptureFallbackTests
 {
     private static readonly string[] WindowsInputTypes =
@@ -30,8 +26,6 @@ public sealed class DisplayCaptureFallbackTests
             LinuxInputTypes,
             ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: false)));
 
-    // xshm_input stays registered under Wayland but captures the Xwayland root rather than the
-    // session, so the portal source wins where one is registered.
     [Fact]
     public void OnWayland_ThePortalSourceIsPreferredOverXshm()
     {
@@ -41,14 +35,11 @@ public sealed class DisplayCaptureFallbackTests
             registered,
             ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: true)));
 
-        // And it degrades to xshm when the portal source is not loaded.
         Assert.Equal("xshm_input", ObsCaptureSource.SelectDisplayCaptureId(
             ["xshm_input"],
             ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: true)));
     }
 
-    // A runtime with no display capture at all is a documented degraded state: the scene keeps its
-    // colour background and the recording is black until the game capture hooks.
     [Fact]
     public void ARuntimeWithNoDisplayCapture_ReportsNoIdRatherThanGuessing()
     {
@@ -61,9 +52,6 @@ public sealed class DisplayCaptureFallbackTests
             ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: false)));
     }
 
-    // The Windows and Linux preferences must not overlap: a Linux id picked on Windows would create
-    // a source type win-capture never registered, which obs_source_create answers with a
-    // placeholder that renders nothing — the same black frame this whole layer exists to prevent.
     [Fact]
     public void ThePlatformPreferences_ShareNoIds()
     {
@@ -75,7 +63,6 @@ public sealed class DisplayCaptureFallbackTests
         Assert.Empty(windows.Intersect(linux));
     }
 
-    // The preference is a ranking, not a set: the same ids in the other order must pick differently.
     [Fact]
     public void SelectionFollowsThePreferenceOrderRatherThanTheRegistrationOrder()
     {

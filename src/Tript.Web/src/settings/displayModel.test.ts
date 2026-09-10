@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// displayModel tests: what the monitor picker offers, what a pick sends, and how the three states of
-// `availableDisplays` (a list, an empty list, null) differ — plus the warning's wording and the
-// per-monitor dismissal that keeps a later warning from being suppressed by an earlier dismissal.
 
 import { describe, expect, it } from 'vitest';
 import type { DisplayInfo } from './settingsModel';

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 import type { SettingsPageName } from '../useSettings';
 import type {
@@ -35,7 +34,6 @@ interface SourceOption {
   deviceId?: string;
 }
 
-/** Build the known source set: mic, system output, game audio — plus every known device. */
 export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[] {
   const options: SourceOption[] = [
     { id: 'mic', label: 'Microphone', kind: 'Input' },
@@ -52,9 +50,6 @@ export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[
       deviceOptions.push({
         id: device.id,
         label: device.name,
-        // A device's direction decides the capture type it routes to: an output endpoint is a
-        // render device (speaker/headset) captured by wasapi_output_capture on that device, not
-        // an input capture. Absent direction (an older backend) stays an Input.
         kind: device.direction === 'Output' ? 'Output' : 'Input',
         deviceId: device.id,
       });
@@ -67,7 +62,6 @@ export function buildSourceOptions(devices: AudioDeviceSetting[]): SourceOption[
   return [...options, ...deviceOptions];
 }
 
-/** The device behind a source, if any — resolved by id against the device list. */
 function deviceForSource(source: AudioSource, devices: AudioDeviceSetting[]): AudioDeviceSetting | null {
   if (source.deviceId) {
     const device = devices.find((d) => d.id === source.deviceId);
@@ -84,8 +78,6 @@ function makeSource(option: SourceOption): AudioSource {
     kind: option.kind,
     label: option.label,
     volume: 1,
-    // The stable routing key: the device id when this is a device selection, else the built-in
-    // source id (mic/system/game). Used to prevent a source being routed twice in one track.
     sourceKey: option.deviceId ?? option.id,
   };
   if (option.deviceId) {

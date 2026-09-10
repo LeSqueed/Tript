@@ -8,10 +8,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// Renaming a piece of content. A recording's title lives on its RecordingMetadata record; a clip has
-// no such record and keeps its title in ClipTitleStore. RenameContent wrote a RecordingMetadata
-// record whatever it was handed, so a renamed clip got a record nothing ever reads back — the
-// library kept showing the file name.
 public sealed class RenameContentTests : IDisposable
 {
     private readonly string _contentRoot;
@@ -63,8 +59,6 @@ public sealed class RenameContentTests : IDisposable
         Assert.Equal("The clutch", item.Title);
     }
 
-    // The wire's contentType is advisory — it defaults to "recording" whether or not the caller meant
-    // it, and the read side classifies by path. Where the title lands has to follow the read side.
     [Fact]
     public void RenamingAClip_WithTheDefaultContentType_StillLandsInTheClipRecord()
     {
@@ -79,8 +73,6 @@ public sealed class RenameContentTests : IDisposable
         Assert.Equal("The clutch", Assert.Single(_host.ListContent()).Title);
     }
 
-    // A clip's record also carries its measured duration; a rename must read-modify-write, not
-    // replace.
     [Fact]
     public void RenamingAClip_KeepsTheDurationAlreadyOnItsRecord()
     {
@@ -100,7 +92,6 @@ public sealed class RenameContentTests : IDisposable
         Assert.Equal(12.5, record?.DurationSeconds);
     }
 
-    // The recording path is unchanged.
     [Fact]
     public void RenamingARecording_StillWritesItsMetadataRecord()
     {
@@ -118,7 +109,6 @@ public sealed class RenameContentTests : IDisposable
         Assert.Equal("The clutch", Assert.Single(_host.ListContent()).Title);
     }
 
-    // A recording's record carries its game and bookmarks; renaming must not trade them for a title.
     [Fact]
     public void RenamingARecording_KeepsItsGameAndBookmarks()
     {

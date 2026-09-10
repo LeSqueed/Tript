@@ -7,13 +7,8 @@ using Tript.TestSupport;
 
 namespace Tript.App.Tests;
 
-// The desktop shell's Linux audio-sink preflight. WebKitGTK aborts its render process when
-// GStreamer has no autoaudiosink, and the symptom is a window that appears frozen while the host is
-// healthy, so the shell refuses to open the window and prints the package to install instead.
 public sealed class WebviewAudioSinkTests
 {
-    // A probe that finds nothing, and an environment with no GStreamer variables set: the starting
-    // point for the interesting cases, where the filesystem cannot answer the question.
     private static string? NoEnvironment(string _) => null;
 
     private static bool NothingExists(string _) => false;
@@ -21,8 +16,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void OnWindows_TheSinkIsPresentWithoutProbingAnything()
     {
-        // Windows renders with WebView2; GStreamer is irrelevant there, so the check must not even
-        // look — a stat storm or a process launch on the Windows startup path would be pure cost.
         var probed = false;
         var inspected = false;
 
@@ -40,8 +33,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void WhenThePluginLibraryExists_TheSinkIsPresentAndNoProcessIsLaunched()
     {
-        // The cheap answer: libgstautodetect.so sitting in a plugin directory is proof enough, and
-        // it keeps a process launch off the startup path of every healthy install.
         var inspected = false;
 
         var present = WebviewAudioSink.IsPresent(
@@ -57,8 +48,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void WhenNothingIsOnDiskAndGstInspectSaysNo_TheSinkIsMissing()
     {
-        // The only way to fail: no plugin anywhere we know to look, and gst-inspect-1.0 — which
-        // reads the registry this machine actually uses — positively reports no such element.
         Assert.False(WebviewAudioSink.IsPresent(
             isWindows: false,
             NoEnvironment,
@@ -69,8 +58,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void WhenNothingIsOnDiskAndGstInspectSaysYes_TheSinkIsPresent()
     {
-        // An unfamiliar plugin layout (a vendored GStreamer, a distro path we do not carry) is not
-        // an absence: gst-inspect-1.0 knows better than the path list does.
         Assert.True(WebviewAudioSink.IsPresent(
             isWindows: false,
             NoEnvironment,
@@ -81,9 +68,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void WhenTheAnswerIsUnknown_TheCheckFailsOpen()
     {
-        // No plugin found and no usable answer from gst-inspect-1.0 (not installed, timed out,
-        // refused to launch): "present", because being wrong here must never block a working
-        // install. This is the single most important assertion in the file.
         Assert.True(WebviewAudioSink.IsPresent(
             isWindows: false,
             NoEnvironment,
@@ -96,14 +80,11 @@ public sealed class WebviewAudioSinkTests
     {
         var candidates = WebviewAudioSink.CandidatePluginLibraries(NoEnvironment);
 
-        // Arch/CachyOS and Fedora, plus Debian/Ubuntu's multiarch directory: the three layouts the
-        // README's install instructions target.
         Assert.Contains("/usr/lib/gstreamer-1.0/" + WebviewAudioSink.PluginLibrary, candidates);
         Assert.Contains("/usr/lib64/gstreamer-1.0/" + WebviewAudioSink.PluginLibrary, candidates);
         Assert.Contains("/usr/lib/x86_64-linux-gnu/gstreamer-1.0/" + WebviewAudioSink.PluginLibrary,
             candidates);
 
-        // Every candidate is a path to the plugin itself, not a directory: the probe is File.Exists.
         Assert.All(candidates,
             path => Assert.EndsWith("/" + WebviewAudioSink.PluginLibrary, path, StringComparison.Ordinal));
         Assert.Equal(candidates.Distinct().Count(), candidates.Count);
@@ -112,9 +93,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void TheCandidatePaths_HonourGStreamersPluginPathVariables()
     {
-        // GST_PLUGIN_PATH is how a relocated GStreamer (a flatpak runtime, a self-built stack) is
-        // found at all, it holds several ':'-separated directories, and it is searched before the
-        // system layouts.
         var candidates = WebviewAudioSink.CandidatePluginLibraries(
             variable => variable == "GST_PLUGIN_PATH" ? "/opt/gst/plugins:/opt/extra " : null);
 
@@ -126,8 +104,6 @@ public sealed class WebviewAudioSinkTests
     [Fact]
     public void TheCandidatePaths_IgnoreEmptyVariables()
     {
-        // An empty or whitespace-only variable must not turn into a bogus candidate (Path.Combine
-        // with an empty directory yields the bare filename, which would probe the process's cwd).
         var candidates = WebviewAudioSink.CandidatePluginLibraries(_ => "  ");
 
         Assert.All(candidates, path => Assert.StartsWith("/", path, StringComparison.Ordinal));
@@ -136,14 +112,10 @@ public sealed class WebviewAudioSinkTests
 
     [Fact]
     public void Inspect_WithNoSuchProgram_IsUnknown() =>
-        // gst-inspect-1.0 missing from PATH is a normal state (a machine with no GStreamer CLI
-        // tools), and it must read as "cannot tell", never as "the element is missing".
+
         Assert.Null(WebviewAudioSink.Inspect(
             "tript-no-such-gst-inspect", WebviewAudioSink.Element, TimeSpan.FromSeconds(1)));
 
-    // The guard exists to remove a hang, so it must not be able to introduce one: a child that
-    // does not answer in time is killed and the answer is "unknown" (startup continues).
-    // Linux only: /bin/sleep stands in for a wedged gst-inspect-1.0.
     [LinuxFact]
     public void Inspect_ThatOutstaysItsTimeout_IsKilledAndUnknown()
     {

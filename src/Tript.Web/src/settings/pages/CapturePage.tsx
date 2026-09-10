@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The capture page: which capture path supplies the picture, and which monitor the display layer
-// uses. The monitor matters under `Auto` as well as `Display`, because `Auto` shows the display
-// layer until game capture takes over, so the picker is hidden only for `Game`, which has no
-// display layer at all. The game-capture timeout now lives here too: it is the one knob about how
-// game capture behaves, so it sits in this page's advanced disclosure and patches the `game` page.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
@@ -39,7 +33,6 @@ export function CapturePage({
   game: GameSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
   page: SettingsPageName;
-  /** null = the host could not enumerate; [] = it did and found none. See `displayFieldMode`. */
   availableDisplays?: DisplayInfo[] | null;
   externalPushCount: number;
 }) {
@@ -50,7 +43,6 @@ export function CapturePage({
 
   const [timeoutSeconds, setTimeoutSeconds] = useState<string>(String(game.gameCaptureTimeout));
 
-  // Re-sync only on an external push. A delayed self echo must not erase a newer draft.
   useEffect(() => {
     setTimeoutSeconds(String(game.gameCaptureTimeout));
   }, [externalPushCount]);
@@ -98,8 +90,6 @@ export function CapturePage({
           <TextField
             data-testid="capture-display-input"
             value={settings.display ?? ''}
-            // The label is dropped with the id it named: nothing here can supply a name for a typed id,
-            // and keeping the old one would let a warning name the wrong monitor.
             onChange={(value) => update(page, { display: value || null, displayLabel: null })}
             placeholder="e.g. DP-1"
           />

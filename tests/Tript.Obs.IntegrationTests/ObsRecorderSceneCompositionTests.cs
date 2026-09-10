@@ -7,11 +7,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The recording scene the recorder session composes, read back off the output channel against the
-// real library. Two things here decide whether a recording has a picture at all, and neither shows
-// up as an error when it is wrong: the layer order (a capture that has not attached is 0x0 and
-// draws nothing, so whatever is under it is what gets recorded) and the scene-item bounds (an
-// unbounded item draws at its own resolution in the corner of the canvas).
 public sealed class ObsRecorderSceneCompositionTests
 {
     private const string ColourSourceId = "color_source";
@@ -33,8 +28,6 @@ public sealed class ObsRecorderSceneCompositionTests
         Assert.Equal(ObsCaptureSource.FindDisplayCaptureId(), layers[1]);
     }
 
-    // Every layer is fitted to the mix's base canvas rather than drawn at its own size. The bounds
-    // are applied when the output is built, because that is where the canvas size is known.
     [SkippableFact]
     public void EveryLayer_IsFittedToTheCanvasOnceTheOutputIsBuilt()
     {
@@ -65,8 +58,6 @@ public sealed class ObsRecorderSceneCompositionTests
         }
     }
 
-    // Linux has no game_capture, so the hook probe has nothing to report — the state a recorder
-    // reads to decide whether it is recording the game or the desktop.
     [SkippableFact]
     public void WithoutAGameCaptureSource_TheHookStateIsFalseRatherThanUnknown()
     {
@@ -104,7 +95,6 @@ public sealed class ObsRecorderSceneCompositionTests
         }
     }
 
-    // Bottom first, which is the order EnumerateItems answers in and the order the layers are drawn.
     private static IReadOnlyList<ObsSceneItem> EnumerateSceneItems(ObsSession session)
     {
         using var placed = session.Runtime.GetOutputSource(0);

@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// What to say when the control socket is down, given what the UI host answered about this page's
-// launch key (ipc/hostProbe.ts).
-//
-// The remedy for a rejected key is NOT "reload". The key is in this page's own URL, so a reload
-// presents the same stale key and the host answers the plain-text refusal instead of the app — a
-// worse place to be than this banner. What recovers is the address the running host printed, which
-// carries the key it minted this time.
 
 import type { HostReachability } from '../ipc/hostProbe';
 

@@ -8,8 +8,6 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace Tript.Detection;
 
-// Structural facts read from an ONNX model. EventDefinition remains the source of application
-// behaviour; this type only describes what the exported graph can accept and produce.
 public sealed class OnnxModelMetadata
 {
     public required string ModelPath { get; init; }
@@ -49,8 +47,6 @@ public static class OnnxModelInspector
 {
     private const int YoloBoxChannels = 4;
 
-    // Ultralytics stores names as a Python dict literal in metadata_props. The JSON parser below
-    // also accepts exporters that write an object or an array instead.
     private static readonly Regex ClassNamePattern = new(
         @"(?<id>\d+)\s*:\s*(?:'(?<name>[^']*)'|""(?<name>[^""]*)"")",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);

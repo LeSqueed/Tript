@@ -397,7 +397,7 @@ internal sealed class GameModelManager : IDisposable
             "ocr_model.onnx",
             "ocr_dict.txt",
         };
-        // Only the ONNX graphs may exceed the small-file cap.
+
         var modelGraphs = new HashSet<string>(
             ["model.onnx", "ocr_model.onnx", "ocr_detector.onnx"], StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);

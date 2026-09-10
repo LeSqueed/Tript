@@ -1,94 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The local IPC wire contract.
-//
-// Casing convention (a deliberate fix of the reference's inconsistent casing):
-//   - Frontend → backend commands: PascalCase method names, camelCase parameter fields.
-//   - Backend → frontend messages: lowercase method names.
-// This is a greenfield contract, so the convention is applied everywhere uniformly.
 
 import type { RecordingMode } from '../settings/settingsModel';
 
-// ---------------------------------------------------------------------------
-// Envelope
-// ---------------------------------------------------------------------------
-
-/**
- * Frontend → backend envelope. Commands with no arguments send NO `parameters` field at all —
- * not an empty object. Callers must omit it (the serialiser never emits it).
- */
 export interface CommandEnvelope {
   method: CommandName;
   parameters?: CommandParameters;
 }
 
-/**
- * Backend → frontend envelope. The frontend narrows on `method`.
- */
 export interface MessageEnvelope {
   method: MessageName;
   content?: unknown;
 }
 
-// ---------------------------------------------------------------------------
-// The cause on settings/state pushes
-// ---------------------------------------------------------------------------
-
-/**
- * What triggered a settings or state push. The UI distinguishes its own edits echoing back
- * (via `cause` — e.g. a command it just sent) from changes originating elsewhere, so it can
- * avoid fighting the user's typing. Unknown causes are tolerated rather than rejected.
- */
 export type ChangeCause = string;
 
-// ---------------------------------------------------------------------------
-// Content model (the fields the frontend needs to build content-server URLs)
-// ---------------------------------------------------------------------------
-
-/** Content-type discriminator. */
 export type ContentType = 'recording' | 'clip' | 'highlight' | 'buffer';
 
-/**
- * One item in the backend's content list. EVERY field but the three the content server cannot serve
- * without (`contentType`, `fileName`, `filePath`) is optional, and that is not defensive decoration
- * — it is the observed shape of the wire.
- */
 export interface ContentItem {
   contentType: ContentType;
   fileName: string;
   filePath: string;
   title?: string;
   favorite?: boolean;
-  /**
-   * When the recording started, in Unix epoch SECONDS (not milliseconds). Absent when the item has
-   * no metadata record.
-   */
   startTime?: number;
   endTime?: number;
-  /**
-   * The game the item was recorded from, as the backend detected it. Nullable *and* optional: null
-   * from a backend that looked and found nothing, absent from one that does not report it.
-   */
   game?: string | null;
   gameId?: string | null;
-  /**
-   * The audio tracks the file carries, in stream order, named as the user named them in settings.
-   * Absent when nothing knows the layout — an imported file, or a session recorded before one was
-   * written. `index` is the position in the file, which is what the clip engine keys adjustments by;
-   * the settings Guid is deliberately not on the wire, because it is not persisted per recording.
-   */
   audioTracks?: { index: number; name: string }[];
-  /**
-   * The item's length in seconds, from its metadata record. A DECLARED length: good enough for a
-   * chip on a card, never good enough to bound a clip segment — see player/clipModel.ts, which
-   * documents a record declaring 100s in front of a 9.13s file.
-   */
   durationSeconds?: number;
-  /** The file's size in bytes, when the backend reports it. */
   fileSizeBytes?: number;
-  /** Bookmark events inside a recording. Absent (never empty) on clips. */
   bookmarks?: BookmarkItem[];
-  /** True when the recording has at least one event the automatic-highlights pipeline would cut. */
   hasAutomaticClipCandidates?: boolean;
   automated?: boolean;
   sourceSessionPath?: string;
@@ -98,13 +39,9 @@ export interface ContentItem {
   automaticClipsPaused?: boolean;
   automaticClipsCompleted?: number;
   automaticClipsTotal?: number;
-  /** True when this recording is synthetic because its source video no longer exists. */
   videoMissing?: boolean;
-  /** True when this synthetic recording represents a session made only from linked highlights. */
   highlightsOnly?: boolean;
-  /** True only for the session the active recording is writing right now. */
   recording?: boolean;
-  /** True for PQ/HLG video; absent means HDR status is not established. */
   isHdr?: boolean;
 }
 
@@ -112,7 +49,6 @@ export interface BookmarkItem {
   id: string;
   type: string;
   subtype?: string;
-  /** Time offset into the recording, in seconds. */
   time: number;
   label?: string;
 }
@@ -124,11 +60,6 @@ export interface GameInfo {
   [key: string]: unknown;
 }
 
-// ---------------------------------------------------------------------------
-// Settings and state
-// ---------------------------------------------------------------------------
-
-/** A partial settings object — UpdateSettings accepts a partial; the settings message is full. */
 export interface Settings {
   [key: string]: unknown;
 }
@@ -136,28 +67,12 @@ export interface Settings {
 export interface SettingsMessage {
   settings: Settings;
   cause?: ChangeCause;
-  /**
-   * The H.264 encoder ids this machine's runtime actually registered. A SIBLING of `settings`, not
-   * a field inside it: it is not a persisted setting but a property of the running machine, so it
-   * is never written back by UpdateSettings.
-   */
   availableEncoders?: string[] | null;
-  /**
-   * The primary display's pixel size. A SIBLING of `settings` for the same reason
-   * `availableEncoders` is one: it describes the machine, not the configuration, so it must never be
-   * written back by UpdateSettings. Null when the host could not read a display from the platform.
-   */
   displayResolution?: { width: number; height: number } | null;
-  /**
-   * The monitors attached right now. A SIBLING of `settings` like the two above — machine, not
-   * configuration — so UpdateSettings never writes it back.
-   */
   availableDisplays?: DisplayInfo[] | null;
-  /** Set when `capture.display` names a monitor that is not attached and the recorder fell back. */
   displayFallbackWarning?: DisplayFallbackWarning | null;
 }
 
-/** One monitor on the wire. `id` is the stable id `capture.display` stores. */
 export interface DisplayInfo {
   id: string;
   name: string;
@@ -168,7 +83,6 @@ export interface DisplayInfo {
 
 export interface DisplayFallbackWarning {
   requestedId: string;
-  /** From `capture.displayLabel`. */
   requestedLabel: string | null;
   usingId: string | null;
   usingLabel: string | null;
@@ -179,11 +93,6 @@ export interface RecordingState {
   activeRecordingMode?: RecordingMode | null;
   game?: GameInfo | null;
   activeModelGameId?: string | null;
-  /**
-   * When the current recording started, in unix SECONDS, or null when nothing is recording. Present
-   * so a UI that connects mid-session shows a true elapsed time rather than counting from the
-   * moment it connected — which for an 8-hour recording is a confidently wrong number.
-   */
   startedAt?: number | null;
   automaticClips?: {
     active: boolean;
@@ -192,7 +101,6 @@ export interface RecordingState {
     completed: number;
     total: number;
   } | null;
-  /** Audio routing status per track, when multi-track recording is active. */
   audioTracks?: { id: string; device: string; muted: boolean; volume: number }[];
   [key: string]: unknown;
 }
@@ -220,7 +128,6 @@ export interface GameModelStatus {
   message?: string;
 }
 
-/** Complete model-status snapshot. Entries omitted from a later message are no longer current. */
 export interface ModelStatusMessage {
   models: GameModelStatus[];
 }
@@ -237,10 +144,6 @@ export interface AvailableRecordingModel {
 export interface AvailableRecordingModelsMessage {
   models: AvailableRecordingModel[];
 }
-
-// ---------------------------------------------------------------------------
-// Import / update progress
-// ---------------------------------------------------------------------------
 
 export interface ImportProgressMessage {
   id: string;
@@ -306,7 +209,6 @@ export interface SettingsUpdateResultMessage {
   error?: string | null;
 }
 
-/** A fullscreen application that is not a known or custom game, offered as an add-game candidate. */
 export interface GameCandidateMessage {
   pid: number;
   executable: string;
@@ -321,10 +223,6 @@ export interface GameCandidateActionResultMessage {
   error?: string | null;
 }
 
-/**
- * The `error` push content. Sent when a user action could not be persisted — e.g. a bookmark,
- * title or delete could not be saved because the recording folder is unwritable.
- */
 export interface ErrorMessage {
   message: string;
 }
@@ -332,10 +230,6 @@ export interface ErrorMessage {
 export interface WarningMessage {
   message: string;
 }
-
-// ---------------------------------------------------------------------------
-// Model training
-// ---------------------------------------------------------------------------
 
 export interface TrainingEventDefinition {
   id: number;
@@ -452,9 +346,7 @@ export interface TrainingMessage {
   };
   model?: TrainingModelInfo | null;
   trainingActive?: boolean;
-  /** Active run's phase so a client connecting mid-run renders the right state. */
   trainingPhase?: 'exporting' | 'training' | null;
-  /** Last training settings used for this game (local to the machine, absent until the first run). */
   preferences?: {
     epochs: number; device: string; augmentCopies: number;
     ocrEpochs?: number;
@@ -481,7 +373,6 @@ export interface TrainingProgressMessage {
   message: string;
   percent?: number | null;
   requestId?: string | null;
-  /** Per-epoch heartbeat from the training run (epoch progress, loss, mAP50). */
   details?: { epoch: number; epochs: number; loss: number | null; map50: number | null } | null;
 }
 
@@ -530,39 +421,22 @@ export interface TrainingLabelSuggestionsMessage {
   requestId?: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Trash
-// ---------------------------------------------------------------------------
-
-/**
- * One item sitting in the trash. `id` is opaque and only stable while the entry exists — a restored
- * and re-deleted item may come back under a different one.
- */
 export interface TrashEntry {
   id: string;
   contentType: ContentType;
-  /** The original file name, e.g. session-20260818-101112123.mp4. */
   fileName: string;
   title?: string;
   game?: string | null;
   durationSeconds?: number;
   fileSizeBytes?: number;
-  /** Epoch SECONDS, like every other time on this wire. */
   deletedAt: number;
-  /** Epoch SECONDS, or 0 when retention is disabled and nothing will auto-purge. */
   purgeAt: number;
 }
 
-/** The `trash` push content: the whole trash, plus how long the backend keeps an entry. */
 export interface TrashMessage {
   entries: TrashEntry[];
-  /** Hours; <= 0 means entries are never auto-purged. */
   retentionHours: number;
 }
-
-// ---------------------------------------------------------------------------
-// Command parameter shapes
-// ---------------------------------------------------------------------------
 
 export interface CreateClipParameters {
   id: string;
@@ -603,11 +477,8 @@ export interface ClipSegment {
 
 export interface DeleteContentParameters {
   contentType: ContentType;
-  /** The video's path RELATIVE to the content root (e.g. `sessions/session-1.mp4`), not the bare file name. */
   fileName: string;
-  /** Omitted/false moves the item to the trash; true unlinks it immediately. */
   permanent?: boolean;
-  /** Apply the same operation to eligible automatic highlights linked to this recording. */
   deleteLinkedHighlights?: boolean;
 }
 
@@ -621,7 +492,6 @@ export interface RestoreTrashParameters {
 }
 
 export interface PurgeTrashParameters {
-  /** Omitted empties the whole trash. */
   entryIds?: string[];
 }
 
@@ -660,7 +530,6 @@ export interface ApplyClipPresetParameters {
 }
 
 export interface UpdateSettingsParameters {
-  /** A partial settings object. `gameIntegrations` is an observed key. */
   settings: Partial<Settings>;
   requestId: string;
 }
@@ -680,14 +549,12 @@ export interface ResolveGameSearchParameters {
   input: string;
 }
 
-/** Add a fullscreen-suggested (or manually chosen) executable as a persisted custom game. */
 export interface AddGameCandidateParameters {
   requestId: string;
   name?: string;
   executablePath: string;
 }
 
-/** Dismiss the add-game suggestion for an executable for the rest of the session. */
 export interface IgnoreGameCandidateParameters {
   requestId: string;
   executablePath: string;
@@ -796,11 +663,8 @@ export interface StartTrainingParameters {
   epochs?: number;
   device?: string;
   baseModel?: string | null;
-  /** Extra mildly-distorted copies of every training crop; validation is never augmented. */
   augmentCopies?: number;
-  /** "all" (default), "object", or "ocr" — retrain just one kind on a game that has both. */
   scope?: 'all' | 'object' | 'ocr';
-  /** Override epochs/device for the OCR recogniser step; fall back to epochs/device when unset. */
   ocrEpochs?: number;
 }
 
@@ -811,12 +675,10 @@ export interface PublishTrainingModelParameters {
   password: string;
 }
 
-/** The protocol version carried on NewConnection. */
 export interface NewConnectionParameters {
   protocolVersion: number;
 }
 
-/** Union of every command's parameter shape. */
 export type CommandParameters =
   | StartRecordingParameters
   | CreateClipParameters
@@ -857,15 +719,7 @@ export type CommandParameters =
   | PublishTrainingModelParameters
   | NewConnectionParameters;
 
-// ---------------------------------------------------------------------------
-// Command and message name unions
-// ---------------------------------------------------------------------------
-
-/**
- * Frontend → backend commands. PascalCase, exactly as on the wire.
- */
 export type CommandName =
-  // Recording and lifecycle
   | 'StartRecording'
   | 'StopRecording'
   | 'NewConnection'
@@ -875,7 +729,6 @@ export type CommandName =
   | 'RefreshStorageStats'
   | 'OpenLogsLocation'
   | 'MigrateContent'
-  // Content
   | 'ListContent'
   | 'ListGames'
   | 'BrowseTrainingFolder'
@@ -894,7 +747,6 @@ export type CommandName =
   | 'ImportFile'
   | 'AddBookmark'
   | 'DeleteBookmark'
-  // Settings and presets
   | 'ListSettings'
   | 'UpdateSettings'
   | 'SetVideoLocation'
@@ -907,14 +759,11 @@ export type CommandName =
   | 'GameRecordingConfirm'
   | 'ApplyVideoPreset'
   | 'ApplyClipPreset'
-  // Shell and OS integration
   | 'OpenFileLocation'
   | 'CopyFileToClipboard'
   | 'OpenInBrowser'
-  // Confirmations
   | 'StorageWarningConfirm'
   | 'RecoveryConfirm'
-  // Model training
   | 'ListTraining'
   | 'ImportTrainingAssets'
   | 'CaptureTrainingSample'
@@ -931,11 +780,6 @@ export type CommandName =
   | 'ListAvailableRecordingModels'
   | 'ActivateRecordingModel';
 
-/**
- * Backend → frontend messages, all lowercase. The reference contract split these between lowercase
- * (`settings`, `state`, `importProgress`) and PascalCase (`UpdateProgress`, `ReleaseNotes`,
- * `ShowModal`).
- */
 export type MessageName =
   | 'settings'
   | 'state'

@@ -5,10 +5,6 @@ using Tript.Obs.Interop;
 
 namespace Tript.Obs;
 
-// libobs's obs_data_array_t: an ordered list of settings objects, and the only container type a
-// settings bag can hold besides a nested object. Its ownership rules match ObsSettings —
-// refcounted, independent of the OBS context, and holding references to its elements rather than
-// copies.
 public sealed class ObsSettingsArray : IDisposable
 {
     private readonly ObsSettingsArrayHandle _handle;
@@ -35,9 +31,6 @@ public sealed class ObsSettingsArray : IDisposable
 
     public int Count => checked((int)ObsNative.obs_data_array_count(Pointer));
 
-    // The caller owns the returned object and disposes it. libobs answers an out-of-range index with
-    // null rather than a fault; the range is checked here so the mistake is reported where it was
-    // made instead of surfacing as a null two calls later.
     public ObsSettings this[int index]
     {
         get
@@ -48,8 +41,6 @@ public sealed class ObsSettingsArray : IDisposable
         }
     }
 
-    // Returns the index the item landed at. The array takes its own reference, so the caller keeps
-    // ownership of what it passed in and may dispose it immediately.
     public int Add(ObsSettings item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -64,7 +55,6 @@ public sealed class ObsSettingsArray : IDisposable
         ObsNative.obs_data_array_insert(Pointer, (nuint)index, item.Pointer);
     }
 
-    // Appends references to the other array's elements, not copies of them.
     public void AddRange(ObsSettingsArray other)
     {
         ArgumentNullException.ThrowIfNull(other);

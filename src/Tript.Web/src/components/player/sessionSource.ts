@@ -1,42 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The player's data seam. The player reads from a `SessionSource`; the real implementation is
-// IPC-backed (player/ipcSessionSource.ts — fed by the control socket's `content` push). The stub
-// below is the alpha placeholder, kept for tests and as a reference for the seam's shape.
 
 import type { BookmarkItem, ContentItem } from '../../ipc/protocol';
 
 export interface SessionSource {
-  /** All sessions in the current context, ordered. The player navigates this list. */
   getSessions(): ContentItem[];
-  /** Bookmarks for a session. `time` is a seconds offset into the session. */
   getBookmarks(item: ContentItem): BookmarkItem[];
-  /**
-   * Optional push seam. The IPC-backed source is driven by the `content` push and calls `onChange`
-   * to make consumers re-read.
-   */
   observeSessions?(onChange: () => void): () => void;
-  /**
-   * Optional monotonic version, incremented whenever the source's content changes externally. The
-   * IPC-backed source implements it; consumers subscribe via `observeSessions` and use `getVersion`
-   * as the `useSyncExternalStore` snapshot. A static source has no external updates and omits it.
-   */
   getVersion?: () => number;
-  /** Manual clips and automated highlights in list order. The IPC-backed source implements it. */
   getClips?: () => ContentItem[];
-  /**
-   * The WHOLE content list in the backend's own order, sessions and clips interleaved. The library
-   * grid needs this: it renders one list over both types, and `getSessions()` concatenated with
-   * `getClips()` is not the same list — the concatenation loses the backend's ordering across the
-   * two types, which is the order the default "newest first" sort starts from.
-   */
   getItems?: () => ContentItem[];
 }
 
-/** Fallback session length before video metadata arrives (placeholder data has no media files). */
 export const DEFAULT_SESSION_SECONDS = 120;
 
-/** PLACEHOLDER — the alpha session source. Data is fabricated; only the shape is meaningful. */
 export const stubSessionSource: SessionSource = {
   getSessions(): ContentItem[] {
     return [

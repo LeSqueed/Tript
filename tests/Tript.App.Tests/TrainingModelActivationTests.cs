@@ -209,8 +209,6 @@ public sealed class TrainingModelActivationTests
         File.Copy(Path.Combine(shipped, "model.onnx"), Path.Combine(bundle, "model.onnx"));
         File.Copy(Path.Combine(shipped, "events.json"), Path.Combine(bundle, "events.json"));
 
-        // The workspace and the install destination live under the real config directory, as they
-        // do in production. The id is unique per run, so cleanup never touches a real game.
         var workspace = TrainingWorkspace.ForGame(gameId);
         var installedRoot = TrainingWorkspace.ForGame(gameId, TrainingPaths.InstalledModelsPath).RootPath;
         Directory.CreateDirectory(workspace.DatasetPath);
@@ -230,9 +228,7 @@ public sealed class TrainingModelActivationTests
             FakeRecorder = true,
         }, store, runtime: null, new RecordingSessionTracker());
         ModelService.ConfigureModelRoots(modelRoot);
-        // The fake recorder never brings up the libobs video pipeline, so no frame source exists;
-        // register an inert one so the detector can start and hold the model reference the install
-        // path has to release.
+
         FrameSourceRegistry.SetResolver(() => new InertFrameSource());
         try
         {
@@ -240,15 +236,14 @@ public sealed class TrainingModelActivationTests
             host.ActivateRecordingModel(gameId);
             Assert.Equal(gameId, ActiveDetectionGameId(host));
             Assert.Equal(gameId, host.CurrentGameId);
-            // The active detector holds the session, so invalidating without stopping it fails.
-            // This is the state the install path must walk through.
+
             Assert.Throws<InvalidOperationException>(() => ModelService.InvalidateModel(gameId));
 
             var result = host.InstallTrainingModel(gameId, modelSource);
 
             Assert.True(File.Exists(result.ModelPath));
             Assert.Equal(File.ReadAllBytes(modelSource), File.ReadAllBytes(result.ModelPath));
-            // Detection is back on the activated model, not on the recording game.
+
             Assert.Equal(gameId, ActiveDetectionGameId(host));
         }
         finally

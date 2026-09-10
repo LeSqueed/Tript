@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The selection model, tested without a DOM. The load-bearing behaviour is what happens when the
-// list moves under the selection — a `content` push after a delete, a filter that hides items — and
-// the naming helper the confirmation prompt leans on.
 
 import { describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
@@ -70,7 +66,6 @@ describe('selection set helpers', () => {
     const keys = [selectionKey(a), selectionKey(b)];
     expect(allSelected(keys, keys)).toBe(true);
     expect(allSelected(keys, [selectionKey(a)])).toBe(false);
-    // An empty page is not "all selected" — otherwise the toggle offers to deselect nothing.
     expect(allSelected([], [])).toBe(false);
   });
 });
@@ -78,7 +73,6 @@ describe('selection set helpers', () => {
 describe('pruneSelection', () => {
   it('drops keys whose items have left the list', () => {
     const selected = [selectionKey(a), selectionKey(b)];
-    // `b` was deleted; the push that removed its card must not leave it in the selection.
     expect(pruneSelection(selected, new Set([selectionKey(a)]))).toEqual([selectionKey(a)]);
   });
 

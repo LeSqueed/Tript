@@ -8,10 +8,6 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// The settings UI is split into logical pages — general, recording, buffer/replay, audio, capture, game
-// — and each page is addressed and saved
-// independently. These tests pin that the five pages exist, that each persists its own fields,
-// and that editing one page does not disturb another.
 public class LogicalPagesTests : IDisposable
 {
     private readonly string _dir;
@@ -64,7 +60,6 @@ public class LogicalPagesTests : IDisposable
         general.Load().StartupVisibility = StartupVisibility.Tray;
         recording.Save();
 
-        // Editing the recording page left the buffer page's value intact in the saved file.
         var reloaded = new SettingsStore(_provider).Load();
         Assert.Equal(RecordingMode.Session, reloaded.Recording.Mode);
         Assert.True(reloaded.Buffer.Enabled);
@@ -160,12 +155,10 @@ public class LogicalPagesTests : IDisposable
         settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
         _store.Save();
 
-        // A later session edits only the capture page and saves.
         var laterStore = new SettingsStore(_provider);
         laterStore.Load().Capture.Method = DisplayCaptureMethod.Display;
         laterStore.Save();
 
-        // The audio page's track survived, because the whole model is serialized on save.
         var reloaded = new SettingsStore(_provider).Load();
         Assert.Equal("Mic", Assert.Single(reloaded.Audio.Tracks).Name);
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);

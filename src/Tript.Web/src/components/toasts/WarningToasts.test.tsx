@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// WarningToasts tests exercise the user-visible result of warning IPC pushes: one warning at a
-// time (a new push replaces the old in place), an empty or null push takes it down.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';

@@ -37,7 +37,6 @@ function renderPage(settings: RecordingSettings = SETTINGS, buffer: BufferSettin
   return update;
 }
 
-/** Set a control's value and commit it (React's controlled-input quirk: fire change then blur). */
 function changeInput(label: RegExp, value: string) {
   const input = screen.getByLabelText(label);
   fireEvent.change(input, { target: { value } });
@@ -56,7 +55,6 @@ describe('recording page layout', () => {
     expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
     expect(screen.getByLabelText(/^HDR/)).toBeTruthy();
     expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
-    // CQP reads a quality profile, not a bitrate.
     expect(screen.queryByLabelText(/^Bitrate/)).toBeNull();
   });
 

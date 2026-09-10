@@ -5,13 +5,8 @@ using Tript.Detection;
 
 namespace Tript.Recorder;
 
-// The detector seam the detection host drives: start it for a game, stop it, and observe the
-// detections it emits. Split out so the host's wiring can be unit-tested against a fake detector
-// instead of a real one, which needs a frame source, an ONNX model and a background thread.
 public interface IVisualEventDetector : IDisposable
 {
-    // Raised on the detector's own thread, one batch per detection cycle. Empty batches are
-    // significant because the host uses every cycle to update each event's net count.
     event Action<DetectionBatch>? DetectionsAvailable;
 
     void Start(string gameId);
@@ -19,8 +14,6 @@ public interface IVisualEventDetector : IDisposable
     void Stop();
 }
 
-// Adapts the detection pipeline's VisualEventDetector to the seam. The adapter exists so the host
-// depends on the seam, not the concrete detector; Tript.Detection is untouched.
 internal sealed class VisualEventDetectorAdapter : IVisualEventDetector
 {
     private readonly VisualEventDetector _inner;

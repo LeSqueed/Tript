@@ -3,8 +3,6 @@
 
 namespace Tript.Obs.IntegrationTests;
 
-// The encoder settings keys each plugin reads, transcribed so the binding can be driven from them
-// rather than from whatever a test author remembered. None of these keys is in libobs.
 public sealed record EncoderSettingKey
 {
     public required string Family { get; init; }
@@ -13,21 +11,15 @@ public sealed record EncoderSettingKey
 
     public required ObsSettingsValueType Type { get; init; }
 
-    // Deliberately not the specified default, so a round-trip cannot pass by coincidence on an
-    // object that happens to be pre-populated.
     public required object Sample { get; init; }
 
-    // The value the plugin falls back on, where one is known.
     public object? SpecifiedDefault { get; init; }
 
-    // For keys the plugin validates against a fixed list. Every one of these has to survive
-    // marshalling byte for byte: several are compared case-sensitively on the plugin side.
     public IReadOnlyList<string> AcceptedValues { get; init; } = [];
 }
 
 public static class EncoderSettingsKeyTable
 {
-    // Ids, not versions. Named here so a family label is traceable to the thing that reads the keys.
     public const string NvencTexture = "NVENC texture (obs_nvenc_h264_tex, obs_nvenc_hevc_tex, obs_nvenc_av1_tex)";
     public const string NvencLegacy = "NVENC legacy (jim_nvenc, ffmpeg_nvenc)";
     public const string Amf = "AMD AMF (h264_texture_amf, h265_texture_amf, av1_texture_amf)";
@@ -38,10 +30,6 @@ public static class EncoderSettingsKeyTable
 
     public static IReadOnlyList<EncoderSettingKey> All { get; } =
     [
-        // ---- NVENC, modern texture encoders ----
-        // The default rate control is written lowercase "cbr", while "CQP" and "lossless" are the
-        // two values the plugin compares case-sensitively. Both facts are only expressible if the
-        // binding moves these strings without touching their case.
         new()
         {
             Family = NvencTexture, Key = "rate_control", Type = ObsSettingsValueType.String,
@@ -88,10 +76,6 @@ public static class EncoderSettingsKeyTable
         new() { Family = NvencTexture, Key = "force_cuda_tex", Type = ObsSettingsValueType.Boolean, Sample = true },
         new() { Family = NvencTexture, Key = "disable_scenecut", Type = ObsSettingsValueType.Boolean, Sample = true },
 
-        // ---- NVENC, legacy reroute stubs ----
-        // preset2 rather than preset, psycho_aq rather than adaptive_quantization, gpu rather than
-        // device. Writing preset2 to a modern id is silently ignored, which is the whole reason the
-        // two families are separate rows here rather than one merged set.
         new()
         {
             Family = NvencLegacy, Key = "rate_control", Type = ObsSettingsValueType.String,
@@ -118,9 +102,6 @@ public static class EncoderSettingsKeyTable
         new() { Family = NvencLegacy, Key = "repeat_headers", Type = ObsSettingsValueType.Boolean, Sample = true },
         new() { Family = NvencLegacy, Key = "disable_scenecut", Type = ObsSettingsValueType.Boolean, Sample = true },
 
-        // ---- AMD AMF ----
-        // No max_bitrate, no tune, no look-ahead and no adapter index. The QVBR quality level rides
-        // on cqp, and "highQuality" is the one camel-cased value in any of these tables.
         new()
         {
             Family = Amf, Key = "rate_control", Type = ObsSettingsValueType.String,
@@ -149,10 +130,6 @@ public static class EncoderSettingsKeyTable
         new() { Family = Amf, Key = "ffmpeg_opts", Type = ObsSettingsValueType.String, Sample = "MaxNumRefFrames=4 HighMotionQualityBoostEnable=1" },
         new() { Family = Amf, Key = "repeat_headers", Type = ObsSettingsValueType.Boolean, Sample = true },
 
-        // ---- Intel QSV ----
-        // The B-frame key is bframes here and bf everywhere else, target_usage carries the
-        // speed/quality dial with no preset key at all, and __ver is a marker OBS stamps into the
-        // settings object itself.
         new()
         {
             Family = Qsv, Key = "rate_control", Type = ObsSettingsValueType.String,
@@ -192,15 +169,11 @@ public static class EncoderSettingsKeyTable
         new() { Family = Qsv, Key = "bframes", Type = ObsSettingsValueType.Number, Sample = 0L, SpecifiedDefault = 3L },
         new() { Family = Qsv, Key = "bf", Type = ObsSettingsValueType.Number, Sample = 2L },
         new() { Family = Qsv, Key = "__ver", Type = ObsSettingsValueType.Number, Sample = 2L },
-        // Read once and then erased by the plugin, which rewrites them into latency. Present so the
-        // table is a complete account of what the plugin reads; nothing should write them.
+
         new() { Family = Qsv, Key = "async_depth", Type = ObsSettingsValueType.Number, Sample = 4L },
         new() { Family = Qsv, Key = "la_depth", Type = ObsSettingsValueType.Number, Sample = 40L },
         new() { Family = Qsv, Key = "repeat_headers", Type = ObsSettingsValueType.Boolean, Sample = true },
 
-        // ---- x264 ----
-        // No lossless rate control and no vbv key: VBV is bitrate plus use_bufsize plus buffer_size.
-        // profile and tune both default to the empty string, which is a value rather than an absence.
         new()
         {
             Family = X264, Key = "rate_control", Type = ObsSettingsValueType.String,
@@ -246,7 +219,6 @@ public static class EncoderSettingsKeyTable
     public static IReadOnlyList<EncoderSettingKey> For(string family) =>
         All.Where(key => key.Family == family).ToArray();
 
-    // Writes the sample with the type the key expects.
     public static void Write(ObsSettings settings, EncoderSettingKey key, object value)
     {
         switch (key.Type)

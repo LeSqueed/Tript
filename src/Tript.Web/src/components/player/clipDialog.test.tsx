@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The clip dialog tests. The dialog is a pure renderer over its controller, so the state logic
-// (default region, region list updates, combine/separate payload grouping, importProgress surface)
-// is exercised through the real `useClipDialog` hook mounted in a probe component, with a `send`
-// callback captured to assert the CreateClip payloads.
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
@@ -27,17 +22,8 @@ interface SentCommand {
   params?: unknown;
 }
 
-/**
- * The measured media length these tests run against, seconds. It matches `session.endTime` on
- * purpose — the tests below check region/payload logic, not bounds provenance — but it is passed in
- * as the *measured* length, because that is the only kind the controller accepts.
- */
 const MEASURED_SECONDS = 100;
 
-/**
- * Mount the real hook + dialog. Returns `dialog()` (the live controller, re-read after every
- * state change) and the commands the seam owner would send over the socket.
- */
 function probe(
   send?: (method: string, params?: unknown) => void,
   currentTime = 0,
@@ -49,7 +35,6 @@ function probe(
   const ref: { dialog: ClipDialogController | null } = { dialog: null };
   function Probe() {
     const dialog = useClipDialog(MEASURED_SECONDS);
-    // Keep the ref fresh across re-renders so the test reads the live controller.
     ref.dialog = dialog;
     return <ClipDialog dialog={dialog} currentTime={currentTime} />;
   }
@@ -60,8 +45,6 @@ function probe(
     }
     return ref.dialog;
   };
-  // The seam owner sends `client.send('CreateClip', payload)`. The hook's handler receives the
-  // payload directly; the default probe records the same shape the real owner would send.
   const sendFn =
     send ??
     ((method: string, params?: unknown) => {
@@ -129,7 +112,6 @@ describe('clip dialog — region list', () => {
 describe('clip dialog — marking segments (the in/out path from the player)', () => {
   it('keeps segments marked before the dialog was ever opened, instead of reseeding a proposal', () => {
     const { dialog } = probe();
-    // The player attaches the session as it plays, then the user marks with I/O.
     act(() => dialog().attachSession(session));
     act(() => dialog().markRegion(10, 20));
     act(() => dialog().openDialog(session, 42));
@@ -171,14 +153,12 @@ describe('clip dialog — marking segments (the in/out path from the player)', (
   it('marking orders and clamps the points, and refuses a span with no length', () => {
     const { dialog } = probe();
     act(() => dialog().attachSession(session));
-    // Out point before the in point, and past the session end.
     act(() => dialog().markRegion(70, 60));
     act(() => dialog().markRegion(95, 500));
     expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([
       [60, 70],
       [95, 100],
     ]);
-    // Both points on the same frame — nothing to clip.
     act(() => dialog().markRegion(30, 30));
     expect(dialog().regions).toHaveLength(2);
   });
@@ -287,7 +267,6 @@ describe('clip dialog — adjusting a region', () => {
     act(() => dialog().markRegion(10, 20));
     act(() => dialog().markRegion(60, 70));
     const first = dialog().regions[0].id;
-    // Dragged/typed right across the second region: an edit is not a mark, so it merges nothing away.
     act(() => dialog().updateRegion(first, 55, 80));
     expect(dialog().regions).toHaveLength(2);
     expect(dialog().regions[0]).toMatchObject({ id: first, start: 55, end: 80 });
@@ -402,15 +381,6 @@ describe('clip dialog — importProgress surface', () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// The clippable duration: the bound the controller holds its regions inside.
-//
-// The player resolves it from the media itself and passes it in. Until it does, the length in force
-// is provisional — the session's declared `endTime`, or nothing at all — so the controller has to do
-// two things when the real one arrives: stop allowing edits beyond it, and correct the regions that
-// were marked before it was known.
-
-/** A probe whose clippable duration can change under the controller, as the media's metadata does. */
 function boundedProbe(initialDuration: number): {
   dialog: () => ClipDialogController;
   setDuration(seconds: number): void;
@@ -451,7 +421,6 @@ function boundedProbe(initialDuration: number): {
 
 describe('clip dialog — the clippable duration', () => {
   it('clamps marks to the media length even when the session claims to be longer', () => {
-    // The record says 100s (see `session`); the media reported 8s, and the media is what gets cut.
     const { dialog } = boundedProbe(8);
     act(() => dialog().attachSession(session));
     act(() => dialog().markRegion(2, 50));
@@ -468,7 +437,6 @@ describe('clip dialog — the clippable duration', () => {
     expect(dialog().regions).toHaveLength(3);
 
     setDuration(8);
-    // Straddling the real end → truncated; entirely beyond it → dropped, not squashed to a sliver.
     expect(dialog().regions.map((region) => [region.start, region.end])).toEqual([
       [1, 3],
       [5, 8],
@@ -501,7 +469,6 @@ describe('clip dialog — the clippable duration', () => {
     act(() => dialog().markRegion(10, 20));
     act(() => dialog().addRegion(10, 20));
     expect(dialog().regions).toHaveLength(0);
-    // Opening the dialog seeds a default proposal only when it can be placed inside the media.
     act(() => dialog().openDialog(session, 42));
     expect(dialog().regions).toHaveLength(0);
     act(() => dialog().create());

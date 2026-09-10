@@ -38,7 +38,6 @@ public sealed class OcrSegmentDefinition
     public float Height { get; set; } = 1;
 }
 
-// Defaults sized for the host's ~1 s cycle; per-event events.json overrides them.
 public sealed class OcrTrackingDefinition
 {
     public int ConfirmationFrames { get; set; } = 2;
@@ -65,13 +64,10 @@ public class EventDefinition
     public int ClassId { get; set; }
     public OcrEventDefinition? Ocr { get; set; }
     public int? SubtractsEventId { get; set; }
-    // Without the converter these read as numbers and events.json's "Kill"/"Assist" throw.
+
     [JsonConverter(typeof(BookmarkTypeConverter))]
     public BookmarkType? BookmarkType { get; set; }
 
-    // Whether bookmarks from this event should produce an automated session clip. This is kept on
-    // the event definition rather than inferred from BookmarkType: a game may use the same bookmark
-    // vocabulary for positive and negative moments.
     public bool IncludeInAutoClips { get; set; }
 
     public float? ScreenRegionX { get; set; }

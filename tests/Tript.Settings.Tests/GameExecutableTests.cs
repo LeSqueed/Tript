@@ -7,10 +7,6 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// GameSetting.Name used to be both the display name and the process name, so a game whose window
-// title differs from its executable ("Counter-Strike 2" / cs2.exe) could not be listed at all.
-// Executable splits them; the fallback is what keeps every settings file written before it reading
-// exactly as it did.
 public class GameExecutableTests
 {
     [Fact]
@@ -30,7 +26,6 @@ public class GameExecutableTests
         Assert.Equal("Counter-Strike 2", game.Name);
     }
 
-    // A blank value is a user who cleared the field, not a user who set it to nothing.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -41,8 +36,6 @@ public class GameExecutableTests
         Assert.Equal("Overwatch", game.EffectiveExecutable);
     }
 
-    // A settings file written before the field existed has no `executable` key. It must deserialize
-    // to the old behaviour rather than to an empty executable that matches no process.
     [Fact]
     public void ASettingsFileWithoutTheKey_KeepsTheOldBehaviour()
     {
@@ -79,12 +72,9 @@ public class GameExecutableTests
         var entry = document.RootElement.GetProperty("game").GetProperty("gameList")[0];
         Assert.Equal("cs2.exe", entry.GetProperty("executable").GetString());
 
-        // EffectiveExecutable is computed, so it must not appear in the file as a second, stale copy.
         Assert.False(entry.TryGetProperty("effectiveExecutable", out _));
     }
 
-    // The default entry a fresh install ships with has no executable, and the detector has to keep
-    // watching for Overwatch on first launch.
     [Fact]
     public void TheDefaultGameListEntry_StillResolvesAnExecutable()
     {

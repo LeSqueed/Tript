@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// ConnectionToasts tests: the reachability state maps onto one permanent toast, and a resolution
-// (back to null) is what takes it down. The message logic itself is covered by
-// connectionNotice.test.ts; this pins the toast wiring.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';

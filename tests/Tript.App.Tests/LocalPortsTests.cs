@@ -6,13 +6,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The three loopback ports. The control socket's Origin allowlist is the app's only authentication,
-// and it used to name the UI host's port as a literal string while UiHost owned it as a private
-// const — so moving the UI port locked the app out of its own socket: 403 at the handshake, and a UI
-// that reconnects forever. These tests pin the derivation, not the numbers.
-//
-// IpcOriginTests covers which origins the allowlist accepts; this covers where the allowlist comes
-// from.
 public class LocalPortsTests
 {
     [Fact]
@@ -23,8 +16,6 @@ public class LocalPortsTests
             LocalPorts.UiOrigins);
     }
 
-    // The consequence, stated the way it bites: whatever the UI port is, the socket accepts a page
-    // served from it.
     [Theory]
     [InlineData("http://localhost:{0}")]
     [InlineData("http://127.0.0.1:{0}")]
@@ -38,8 +29,6 @@ public class LocalPortsTests
         Assert.Equal(ports.Length, ports.Distinct().Count());
     }
 
-    // The frontend cannot share a constant across the language boundary, so its copies are pinned
-    // here instead. A port moved on one side and not the other is a UI that cannot reach the app.
     [SkippableFact]
     public void TheFrontendsCopies_MatchTheseConstants()
     {
@@ -51,8 +40,6 @@ public class LocalPortsTests
         Assert.Contains($"http://localhost:{LocalPorts.Content}/", text, StringComparison.Ordinal);
     }
 
-    // Walks up from the test assembly looking for the repository layout. Returns null when the test
-    // runs from a package rather than the tree.
     private static string? RepoFile(string relativePath)
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(typeof(LocalPortsTests).Assembly.Location)!);

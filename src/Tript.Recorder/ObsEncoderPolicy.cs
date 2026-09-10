@@ -10,7 +10,6 @@ internal static class ObsEncoderPolicy
 {
     private const string X264Id = "obs_x264";
 
-    // The settings model's placeholder for "the backend decides"; the real software id is obs_x264.
     private const string X264DefaultId = "x264";
 
     private const string BitrateKey = "bitrate";
@@ -31,7 +30,6 @@ internal static class ObsEncoderPolicy
     internal const int MaxBitrateKbps = 100_000;
     internal const int DefaultBitrateKbps = 15_000;
 
-    // An explicit user choice wins while it is still registered; the placeholder does not count.
     internal static string? ResolveVideoEncoderId(string? configuredEncoder)
     {
         if (IsUsableId(configuredEncoder))
@@ -42,7 +40,6 @@ internal static class ObsEncoderPolicy
                ?? usable.FirstOrDefault();
     }
 
-    // Wrong mode strings can crash obs-ffmpeg, so the mode/key pair is chosen by encoder family.
     internal static (string RateControl, string QualityKey) ResolveRateControlKeys(string encoderId)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -51,7 +48,6 @@ internal static class ObsEncoderPolicy
         return (ConstantQualityModeString(family), QuantiserKey(family));
     }
 
-    // Offered UI modes, kept to the families whose key sets are known here.
     internal static IReadOnlyList<RateControlMode> SupportedRateControlModes(string encoderId)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -66,7 +62,6 @@ internal static class ObsEncoderPolicy
         };
     }
 
-    // Settings files travel between machines; the selected encoder has the final say.
     internal static RateControlMode CoerceRateControlMode(string encoderId, RateControlMode requested)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -76,7 +71,6 @@ internal static class ObsEncoderPolicy
             : ConstantQualityMode(ClassifyFamily(encoderId));
     }
 
-    // A null key means the mode does not read that dial on this encoder family.
     internal static EncoderRateControl ResolveRateControl(string encoderId, RateControlMode requested)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);
@@ -89,10 +83,8 @@ internal static class ObsEncoderPolicy
             RateControlMode.Crf or RateControlMode.Cqp =>
                 new EncoderRateControl(ConstantQualityModeString(family), QuantiserKey(family), null, null),
 
-            // CBR needs no ceiling: max_bitrate is VBR-only and AMF has no ceiling key.
             RateControlMode.Cbr => new EncoderRateControl("CBR", null, BitrateKey, null),
 
-            // x264 VBR is a CRF target with a VBV cap; hardware VBR reads bitrate only.
             RateControlMode.Vbr => new EncoderRateControl(
                 "VBR",
                 family == EncoderFamily.X264 ? QuantiserKey(family) : null,
@@ -103,9 +95,6 @@ internal static class ObsEncoderPolicy
         };
     }
 
-    // The settings UI hides encoders this machine cannot actually use. Include the codecs used by
-    // the HDR planner as well as H.264, otherwise a valid selection such as av1_texture_amf is
-    // displayed as a misleading custom value and is ignored when planning a recording.
     internal static IReadOnlyList<string> EnumerateUsableEncoderIds()
     {
         var ids = new List<string>();
@@ -120,7 +109,6 @@ internal static class ObsEncoderPolicy
         return ids;
     }
 
-    // H.264 first preserves the SDR default; HEVC and AV1 are also exposed for HDR-capable hardware.
     internal static IReadOnlyList<VideoEncoderCandidate> EnumerateVideoEncoderCandidates()
     {
         var candidates = new List<VideoEncoderCandidate>();
@@ -146,7 +134,6 @@ internal static class ObsEncoderPolicy
         return candidates;
     }
 
-    // The app's 1..20 quality scale maps onto H.264's inverted 0..51 quantiser scale.
     internal static int MapQualityToQuantiser(int quality)
     {
         var clamped = Math.Clamp(quality, QualityAnchors[0].Quality, QualityAnchors[^1].Quality);
@@ -178,7 +165,6 @@ internal static class ObsEncoderPolicy
         return Math.Clamp(ceiling, target, MaxBitrateKbps);
     }
 
-    // x264 must match exactly; hardware families each ship several ids, so those match by substring.
     private static EncoderFamily ClassifyFamily(string encoderId)
     {
         if (string.Equals(encoderId, X264Id, StringComparison.Ordinal))
@@ -205,7 +191,6 @@ internal static class ObsEncoderPolicy
     private static string ConstantQualityModeString(EncoderFamily family) =>
         family == EncoderFamily.X264 ? "CRF" : "CQP";
 
-    // VAAPI names the quantiser qp; x264 uses crf; NVENC, AMF and QSV use cqp.
     private static string QuantiserKey(EncoderFamily family) => family switch
     {
         EncoderFamily.X264 => "crf",
@@ -213,7 +198,6 @@ internal static class ObsEncoderPolicy
         _ => "cqp"
     };
 
-    // Only NVENC and QSV document a max_bitrate key.
     private static string? MaxBitrateKey(EncoderFamily family) => family switch
     {
         EncoderFamily.Nvenc or EncoderFamily.Qsv => "max_bitrate",
@@ -231,11 +215,9 @@ internal static class ObsEncoderPolicy
         (codec is "h264" or "hevc" or "av1") &&
         ObsEncoder.GetType(id) == ObsEncoderType.Video;
 
-    // H.264's quantiser range; the clamp keeps future presets inside plugin bounds.
     private const int MinQuantiser = 0;
     private const int MaxQuantiser = 51;
 
-    // Unknown is valid: third-party H.264 encoders still get conservative settings.
     private enum EncoderFamily
     {
         X264,
@@ -247,7 +229,6 @@ internal static class ObsEncoderPolicy
     }
 }
 
-// A null key means the mode does not read that dial on this family.
 internal readonly record struct EncoderRateControl(
     string Mode,
     string? QuantiserKey,

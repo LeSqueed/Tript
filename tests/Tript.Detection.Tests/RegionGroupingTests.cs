@@ -43,8 +43,6 @@ public class RegionGroupingTests
     [Fact]
     public void Transitive_overlaps_merge_regardless_of_order()
     {
-        // A overlaps B, B overlaps C, but A does not overlap C. A first-match-wins pass
-        // resolves this differently depending on which is seen first.
         var a = Region(0, 0.00f, 0.0f, 0.20f, 0.1f);
         var b = Region(1, 0.15f, 0.0f, 0.20f, 0.1f);
         var c = Region(2, 0.30f, 0.0f, 0.20f, 0.1f);
@@ -84,12 +82,6 @@ public class RegionGroupingTests
     [Fact]
     public void Overwatch_groups_match_the_golden_test_fixture()
     {
-        // ReferenceImplementations.OverwatchGroups is a hand-written literal that the
-        // preprocessing golden tests crop against. Nothing else ties it to the real
-        // algorithm, so a change to merging could silently leave those tests exercising
-        // rectangles production no longer uses. Compared as integer crop rects because
-        // group 1's width computes as 0.21669999f against the literal 0.2167f — a
-        // 1.5e-08 artifact of 0.1028f + 0.1236f - 0.0097f that truncates away.
         var fromAlgorithm = CropRects(DetectionFramePreprocessor.BuildRegionGroups(OverwatchDefinitions()));
 
         var fromFixture = ReferenceImplementations.OverwatchGroups

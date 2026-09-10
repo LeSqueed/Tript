@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The toast provider: the stack's clocks and the pointer contract. Fake timers throughout, the
-// same convention as the rest of the suite.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -52,16 +49,16 @@ describe('ToastProvider', () => {
 
   it('reads a timed toast at 60 ms per character, then takes it down on its own', () => {
     const { push } = renderProvider();
-    push({ kind: 'info', message: 'x'.repeat(100) }); // 6000 ms
+    push({ kind: 'info', message: 'x'.repeat(100) });
     const toast = screen.getByRole('status');
 
     act(() => vi.advanceTimersByTime(5999));
     expect(screen.getByRole('status')).toBe(toast);
 
-    act(() => vi.advanceTimersByTime(1)); // the time is up: the exit plays
+    act(() => vi.advanceTimersByTime(1));
     expect(screen.getByRole('status')).toBe(toast);
 
-    act(() => vi.advanceTimersByTime(200)); // the exit is done: it is gone
+    act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByRole('status')).toBeNull();
   });
 
@@ -97,14 +94,14 @@ describe('ToastProvider', () => {
     const toast = screen.getByRole('status');
 
     fireEvent.pointerEnter(toast);
-    act(() => vi.advanceTimersByTime(2000)); // the time is up, but the pointer is over it
+    act(() => vi.advanceTimersByTime(2000));
     expect(screen.getByRole('status')).toBe(toast);
 
     fireEvent.pointerLeave(toast);
-    act(() => vi.advanceTimersByTime(399)); // the grace has not run
+    act(() => vi.advanceTimersByTime(399));
     expect(screen.getByRole('status')).toBe(toast);
 
-    act(() => vi.advanceTimersByTime(1)); // the grace is up
+    act(() => vi.advanceTimersByTime(1));
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -118,7 +115,7 @@ describe('ToastProvider', () => {
     act(() => vi.advanceTimersByTime(2000));
     fireEvent.pointerLeave(toast);
     act(() => vi.advanceTimersByTime(100));
-    fireEvent.pointerEnter(toast); // back on time
+    fireEvent.pointerEnter(toast);
 
     act(() => vi.advanceTimersByTime(4000));
     expect(screen.getByRole('status')).toBe(toast);
@@ -159,15 +156,14 @@ describe('ToastProvider', () => {
 
   it('restarts the clock when a replacement changes the message', () => {
     const { push } = renderProvider();
-    push({ key: 'a', kind: 'info', message: 'x'.repeat(100) }); // 6000 ms
+    push({ key: 'a', kind: 'info', message: 'x'.repeat(100) });
     act(() => vi.advanceTimersByTime(5000));
-    push({ key: 'a', kind: 'info', message: 'short' }); // clamped to 4000 ms, fires at t = 9000
+    push({ key: 'a', kind: 'info', message: 'short' });
 
-    // Past the old clock, plus its exit: a clock that was not re-armed would be gone by now.
     act(() => vi.advanceTimersByTime(1001 + 200));
     expect(screen.getByText('short')).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(9000 - 6201)); // t = 9000: the new clock is up
+    act(() => vi.advanceTimersByTime(9000 - 6201));
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -191,7 +187,6 @@ describe('ToastProvider', () => {
     act(() => {
       api.dismiss('a');
     });
-    // The exit has played but not finished.
     expect(screen.getByText('bye')).toBeTruthy();
 
     push({ key: 'a', kind: 'info', message: 'back', duration: 0 });

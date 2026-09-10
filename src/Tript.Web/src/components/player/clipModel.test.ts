@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The clipping domain model tests. The dialog logic is pure, so the default-region rule, the
-// region-list bookkeeping, the combine/separate payload shapes and the units (all seconds) are
-// pinned without any DOM.
 
 import { describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
@@ -42,7 +38,6 @@ const region = (id: string, start: number, end: number): TimelineRegion => ({ id
 
 describe('buildDefaultRegion', () => {
   it('proposes a default region centred on the playbar cursor', () => {
-    // currentTime 42, default length 10 → [37, 47].
     const r = buildDefaultRegion(42, 100, 'r1');
     expect(r).toEqual({ id: 'r1', start: 37, end: 47 });
   });
@@ -104,10 +99,6 @@ describe('addRegion / removeRegion', () => {
   });
 });
 
-// The geometry behind every adjustment: the timeline drag (body / left edge / right edge), the typed
-// bounds and the snap-to-playhead buttons all reduce to these three functions, so the clamping rules
-// are pinned here once rather than through the DOM.
-
 describe('moveRegionBy — dragging a region body', () => {
   it('slides the region and preserves its length', () => {
     expect(moveRegionBy(region('a', 30, 40), 5, 100)).toEqual(region('a', 35, 45));
@@ -156,7 +147,6 @@ describe('resizeRegionStart / resizeRegionEnd — dragging an edge', () => {
   });
 
   it('leaves a region with no room at the session end untouched', () => {
-    // The start already sits within the minimum length of the session end: nothing can be resized.
     expect(resizeRegionEnd(region('a', 99.9, 100), 50, 100)).toEqual(region('a', 99.9, 100));
   });
 
@@ -272,7 +262,6 @@ describe('combine vs separate payloads', () => {
         'mutedAudioTracks',
       ].sort(),
     );
-    // All times are in seconds.
     expect(payload.startTime).toBe(10);
     expect(payload.endTime).toBe(20);
     expect(payload.segments[0].startTime).toBe(10);
@@ -295,32 +284,13 @@ describe('overlap / inside', () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// The bounds invariant, property-style.
-//
-// The user's requirement is a single sentence — a segment can never sit outside the clip length, at
-// either end, including the default 10s one — so it is worth checking as a property over a range of
-// durations and adversarial inputs rather than only at the handful of points the examples above pick.
-//
-// Two things are asserted, and the split matters. Every helper is allowed to *refuse* an edit (it
-// returns its input untouched: a NaN time, no usable duration, a stale region with nowhere to go), so
-// the general property is "changed ⇒ in bounds". Fed a region that was already in bounds — the state
-// the rest of the module guarantees — the helpers must return something in bounds unconditionally.
-// The payload builders get no refusal: they clamp and drop, so their segments are checked outright.
-
-/** Durations worth checking: nothing, unusably short, shorter than the default 10s region, normal. */
 const DURATIONS = [0, 0.1, 0.25, 1, 3, 8, 10, 100];
 
-/** Times a caller can produce: outside both ends, on the boundaries, and non-finite. */
 const TIMES = [
   -1000, -0.1, 0, 0.05, 0.25, 2.5, 7.9, 8, 9.99, 100, 1_000_000,
   Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY,
 ];
 
-/**
- * Regions a caller can hold, including the ones the fallback-duration bug produced: spans marked
- * against a provisional 120s length that the real media does not reach.
- */
 const ADVERSARIAL_REGIONS: TimelineRegion[] = [
   region('inside', 10, 20),
   region('at-zero', 0, MIN_REGION_SECONDS),
@@ -336,7 +306,6 @@ const ADVERSARIAL_REGIONS: TimelineRegion[] = [
   region('infinite-end', 10, Number.POSITIVE_INFINITY),
 ];
 
-/** Slack for the length comparison only: the parked bounds are computed by subtraction. */
 const EPSILON = 1e-9;
 
 function expectInBounds(subject: TimelineRegion, duration: number, label: string): void {
@@ -348,7 +317,6 @@ function expectInBounds(subject: TimelineRegion, duration: number, label: string
   expect(subject.end - subject.start, detail).toBeGreaterThanOrEqual(MIN_REGION_SECONDS - EPSILON);
 }
 
-/** Whether the helper refused the edit and handed the caller's own region back. */
 function unchanged(before: TimelineRegion, after: TimelineRegion): boolean {
   return (
     Object.is(before.start, after.start) &&
@@ -357,7 +325,6 @@ function unchanged(before: TimelineRegion, after: TimelineRegion): boolean {
   );
 }
 
-/** The regions that are legitimately inside a given duration — what the module guarantees it holds. */
 function inBoundsRegionsFor(duration: number): TimelineRegion[] {
   return [
     region('whole', 0, duration),
@@ -441,10 +408,8 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
         const proposal = buildDefaultRegion(cursor, duration, 'd');
         if (duration >= MIN_REGION_SECONDS) {
           expectInBounds(proposal, duration, `buildDefaultRegion(${cursor}, ${duration})`);
-          // Full length when there is room, the whole media when there is not — never longer.
           expect(proposal.end - proposal.start).toBeCloseTo(Math.min(DEFAULT_REGION_SECONDS, duration), 9);
         } else {
-          // No usable length: the empty region, which every commit path refuses.
           expect(proposal).toEqual({ id: 'd', start: 0, end: 0 });
         }
       }
@@ -461,7 +426,6 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
         title: 'X',
       });
       if (payload === null) {
-        // Nothing survived; nothing is sent.
         expect(duration).toBeLessThan(MIN_REGION_SECONDS);
         continue;
       }
@@ -473,7 +437,6 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
           `combine segment (duration ${duration})`,
         );
       }
-      // The payload's own span agrees with its segments.
       expect(payload.startTime).toBe(payload.segments[0].startTime);
       expect(payload.endTime).toBe(payload.segments[payload.segments.length - 1].endTime);
       expectInBounds({ id: 'p', start: payload.startTime, end: payload.endTime }, duration, 'combine span');
@@ -514,17 +477,11 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
 
 describe('the bug the invariant was violated by — a duration that was a placeholder', () => {
   it('a stale oversized region is not edited into another oversized one', () => {
-    // The region was marked while the player still believed the session was 120s long (the fallback
-    // for a recording with no metadata record). The media turns out to be 100s.
     const stale = region('stale', 200, 300);
-    // The region lies entirely beyond the media, so there is nowhere honest to put it: the edit is
-    // refused (the caller keeps what it had) rather than the region being relocated into the media.
-    // The reconciliation the controller runs on the same duration change drops it outright.
     expect(resizeRegionStart(stale, 50, 100)).toEqual(stale);
     expect(resizeRegionEnd(stale, 50, 100)).toEqual(stale);
     expect(moveRegionBy(stale, -5, 100)).toEqual(stale);
     expect(reconcileRegion(stale, 100)).toBeNull();
-    // ...and nothing of it reaches a payload.
     expect(regionsToSegments([stale], 100)).toEqual([]);
   });
 
@@ -535,8 +492,6 @@ describe('the bug the invariant was violated by — a duration that was a placeh
   });
 
   it('a duration that is not a number bounds nothing, so every edit is refused', () => {
-    // NaN made every comparison false, which turned each clamp into a pass-through; Infinity was the
-    // controller's literal default for a session with no declared length.
     for (const duration of [Number.NaN, Number.POSITIVE_INFINITY, 0, -10]) {
       expect(normalizeRegionBounds(10, 20, duration)).toBeNull();
       expect(resizeRegionStart(region('a', 10, 20), 15, duration)).toEqual(region('a', 10, 20));
@@ -564,7 +519,6 @@ describe('reconcileRegion(s) — what happens when the real duration is shorter'
 
   it('drops a region beyond the real end instead of squashing it into a sliver', () => {
     expect(reconcileRegion(region('a', 37, 47), 8)).toBeNull();
-    // Exactly at the end, and close enough to it that nothing usable survives, are both drops.
     expect(reconcileRegion(region('a', 8, 20), 8)).toBeNull();
     expect(reconcileRegion(region('a', 7.9, 20), 8)).toBeNull();
   });
@@ -588,15 +542,12 @@ describe('reconcileRegion(s) — what happens when the real duration is shorter'
 
 describe('resolveClipBounds — which duration is authoritative', () => {
   it('prefers the media over the metadata record, because the file is what gets cut', () => {
-    // The two disagree when the record was written by a different code path than the file (a
-    // recording cut short, a re-encode, an imported record).
     expect(resolveClipBounds(8, 100)).toEqual({ seconds: 8, known: true });
     expect(resolveClipBounds(140, 100)).toEqual({ seconds: 140, known: true });
   });
 
   it('falls back to the metadata record until the media reports its length', () => {
     expect(resolveClipBounds(undefined, 100)).toEqual({ seconds: 100, known: false });
-    // NaN is what a <video> reports before its metadata loads; Infinity is an open-ended stream.
     expect(resolveClipBounds(Number.NaN, 100)).toEqual({ seconds: 100, known: false });
     expect(resolveClipBounds(Number.POSITIVE_INFINITY, 100)).toEqual({ seconds: 100, known: false });
   });
@@ -609,50 +560,38 @@ describe('resolveClipBounds — which duration is authoritative', () => {
 });
 
 describe('markableDuration — only a measured length bounds a segment', () => {
-  // MEASURED: a content record declaring 100s in front of a file that is really 9.13s long. The
-  // declared length reaches `resolveClipBounds` flagged `known: false`; nothing read the flag, so it
-  // was clamped against as if the media had vouched for it. These cases pin the flag being read.
   const declaredSeconds = 100;
   const realSeconds = 9.13;
 
   it('is the media length once the media has reported one', () => {
     expect(markableDuration(resolveClipBounds(realSeconds, declaredSeconds))).toBe(realSeconds);
-    // Longer than declared is still measured, and still the bound: the file is what gets cut.
     expect(markableDuration(resolveClipBounds(140, declaredSeconds))).toBe(140);
   });
 
   it('is 0 while only the declared length is known, however plausible it looks', () => {
     expect(markableDuration(resolveClipBounds(undefined, declaredSeconds))).toBe(0);
-    // NaN is what a <video> reports before its metadata loads; Infinity is an open-ended stream.
     expect(markableDuration(resolveClipBounds(Number.NaN, declaredSeconds))).toBe(0);
     expect(markableDuration(resolveClipBounds(Number.POSITIVE_INFINITY, declaredSeconds))).toBe(0);
     expect(markableDuration(resolveClipBounds(undefined, undefined))).toBe(0);
   });
 
   it('leaves no marking gesture able to reach past the real media length', () => {
-    // The three gestures, all run against the bound in force while only the declaration is known.
     const bound = markableDuration(resolveClipBounds(undefined, declaredSeconds));
 
-    // Mark 10s at 0:95 — the one-click gesture the bug was reported through. Against the declared
-    // length this proposed [90, 100], i.e. an end 91s past the last frame that exists.
     const proposal = buildDefaultRegion(95, bound, 'r1');
     expect(proposal.end - proposal.start).toBeLessThan(MIN_REGION_SECONDS);
     expect(proposal.end).toBeLessThanOrEqual(realSeconds);
-    // Which is refused rather than committed: nothing survives the gate every mark goes through.
     expect(normalizeRegionBounds(proposal.start, proposal.end, bound)).toBeNull();
 
-    // Mark in / mark out at the same two playhead positions: same answer, same reason.
     expect(normalizeRegionBounds(90, 100, bound)).toBeNull();
     expect(clampTime(95, bound)).toBe(0);
 
-    // And a region that somehow existed against the declaration cannot be edited or sent.
     expect(reconcileRegion(region('r1', 90, 100), bound)).toBeNull();
     expect(regionsToSegments([region('r1', 90, 100)], bound)).toEqual([]);
   });
 
   it('bounds the same gestures by the media length once it is measured', () => {
     const bound = markableDuration(resolveClipBounds(realSeconds, declaredSeconds));
-    // The fixed 10s proposal shrinks to the whole media rather than running past its end.
     expect(buildDefaultRegion(95, bound, 'r1')).toEqual({ id: 'r1', start: 0, end: realSeconds });
     expect(normalizeRegionBounds(90, 100, bound)).toBeNull();
     expect(normalizeRegionBounds(5, 100, bound)).toEqual({ start: 5, end: realSeconds });

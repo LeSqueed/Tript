@@ -24,8 +24,6 @@ internal sealed class PaddleOcrRecognizer : IDisposable
         if (!File.Exists(modelPath)) throw new FileNotFoundException("PaddleOCR model not found.", modelPath);
         if (!File.Exists(dictionaryPath)) throw new FileNotFoundException("PaddleOCR dictionary not found.", dictionaryPath);
 
-        // use_space_char: the space class is always appended, even when the dict file already ends
-        // with a space line — the model's class count was exported expecting that.
         var lines = File.ReadAllLines(dictionaryPath)
             .Select(line => line.TrimEnd('\r', '\n'))
             .Where(line => line.Length > 0)
@@ -89,7 +87,7 @@ internal sealed class PaddleOcrRecognizer : IDisposable
         var dimensions = output.Dimensions;
         if (dimensions.Length != 3 || dimensions[0] != 1)
             throw new InvalidDataException("PaddleOCR recognition output must use shape [1,T,C].");
-        // Backed by memory the result owns; decode before the using ends.
+
         var span = output is DenseTensor<float> dense ? dense.Buffer.Span : output.ToArray().AsSpan();
         return DecodeCtc(span, dimensions[1], dimensions[2], _characters);
     }
@@ -170,7 +168,7 @@ internal sealed class PaddleOcrRecognizer : IDisposable
     private static double ToProbability(ReadOnlySpan<float> values, int offset, int count, int selected)
     {
         var value = values[offset + selected];
-        // Already a probability when softmax is baked into the exported graph.
+
         if (value is >= 0 and <= 1) return value;
 
         var maximum = float.NegativeInfinity;

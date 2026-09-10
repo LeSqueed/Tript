@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The unknown-fullscreen game suggestion, as a permanent keyed toast with its two actions. The
-// candidate state, the pending action and a correlated failure all live here and are projected
-// into one toast: a new candidate or a changed result replaces it in place, a cleared candidate
-// takes it down.
 
 import { useCallback, useEffect, useState } from 'react';
 import type { IpcClient } from '../../ipc/websocketClient';

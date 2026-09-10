@@ -1,19 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The playback transport row: play/pause, the timecode, speed, volume and fullscreen. This is the
-// player's entire control surface — the video carries no `controls` attribute, which would paint
-// browser chrome over the picture. Controls sit below the video, never on it.
-//
-// Icon-led rather than worded: a row of text buttons reads as a toolbar, not a player. Every icon
-// button keeps its aria-label, so nothing is lost to assistive tech.
 
 import { Button, SelectField, Slider } from '../ui/controls';
 import { formatTime } from './timelineModel';
 
-/**
- * Review speeds, either side of normal. Slow matters as much as fast here: a fight worth clipping is
- * often decided in a second, and 0.25× is what makes it readable.
- */
 export const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 const RATE_OPTIONS = PLAYBACK_RATES.map((rate) => ({ value: String(rate), label: `${rate}×` }));
@@ -22,7 +11,6 @@ export interface TransportBarProps {
   playing: boolean;
   currentTime: number;
   duration: number;
-  /** 0..1. Shown as zero while muted; restoring a level on unmute is the caller's job. */
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -31,7 +19,6 @@ export interface TransportBarProps {
   onVolumeChange(volume: number): void;
   onToggleMute(): void;
   onPlaybackRateChange(rate: number): void;
-  /** Session navigation. Absent when there is only one thing to play. */
   onPrevious?(): void;
   onNext?(): void;
   canNavigatePrevious?: boolean;
@@ -82,8 +69,6 @@ export function TransportBar({
         size="icon"
         icon={playing ? 'pause' : 'play'}
         onClick={onTogglePlayPause}
-        // The name says what pressing it will do, the way native controls do — and it is the only
-        // thing carrying that state now the button has no text.
         aria-label={playing ? 'Pause' : 'Play'}
         />
         {onNext && (

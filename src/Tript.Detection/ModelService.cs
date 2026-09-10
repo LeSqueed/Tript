@@ -10,16 +10,12 @@ namespace Tript.Detection;
 
 public static class ModelService
 {
-    // "models" rather than "training": these are the shipped runtime assets, not a training workspace.
     public static readonly string BasePath = Path.Combine(AppContext.BaseDirectory, "data", "models");
 
     public static readonly string SharedOcrPath = Path.Combine(AppContext.BaseDirectory, "data", "ocr");
 
     private static string[] _userModelRoots = [];
 
-    // An InferenceSession is ~10 MB of native memory shared by every detector on the same game, so
-    // it is refcounted rather than owned by whoever asked last. Lazy gives exactly one construction
-    // (GetOrAdd's factory could race and drop one undisposed), the count exactly one disposal.
     private sealed class ModelHandle
     {
         public required Lazy<InferenceSession> Session { get; init; }
@@ -97,8 +93,6 @@ public static class ModelService
         var gamePath = FindGameDirectory(gameId);
         if (gamePath == null)
         {
-            // Debug, not Warning: most games legitimately have no model. Listing what is on disk is
-            // what turns a casing mismatch from a silent no-op into something a log can explain.
             Log.Debug("No model directory matching {GameId} under {BasePath}; available directories: {AvailableGameIds}",
                 gameId, BasePath, GetAvailableGameIds());
             return false;
@@ -117,8 +111,6 @@ public static class ModelService
     public static bool HasDetectionBundleForGame(string gameId)
         => FindDetectionDirectory(gameId) is not null;
 
-    // Takes a reference on the game's session. Every successful call must be paired with exactly
-    // one UnloadModel; the session stays alive until the last of those calls.
     public static InferenceSession LoadModel(string gameId)
     {
         var key = CanonicalGameId(gameId);
@@ -143,15 +135,12 @@ public static class ModelService
 
         try
         {
-            // Outside the lock: construction reads a 10 MB file and runs ORT's graph optimizer.
             var session = handle.Session.Value;
             Log.Debug("ONNX model for game {GameId} now has {RefCount} user(s)", key, refCount);
             return session;
         }
         catch
         {
-            // Lazy caches failures forever, so the poisoned entry goes with the reference: a
-            // half-written model should be retried next recording, not replayed for the process.
             lock (_modelsLock)
             {
                 if (--handle.RefCount <= 0
@@ -164,8 +153,6 @@ public static class ModelService
         }
     }
 
-    // Releases one reference taken by LoadModel. Stopping one detector must not free native memory
-    // another detector on the same game is still running inference against.
     public static void UnloadModel(string gameId)
     {
         var key = CanonicalGameId(gameId);
@@ -175,8 +162,6 @@ public static class ModelService
         {
             if (!_models.TryGetValue(key, out var handle))
             {
-                // Unbalanced release (or a detector that never got a session). Definitions are
-                // still dropped so a re-read picks up an edited events.json.
                 _definitions.TryRemove(key, out _);
                 Log.Debug("No loaded ONNX model to unload for game {GameId}", key);
                 return;
@@ -192,18 +177,14 @@ public static class ModelService
             _models.Remove(key);
             _definitions.TryRemove(key, out _);
 
-            // Nothing to dispose when the only user never got past a failed construction.
             if (handle.Session.IsValueCreated)
                 released = handle.Session.Value;
         }
 
-        // Outside the lock: native teardown must not block another game's load.
         released?.Dispose();
         Log.Information("Unloaded ONNX model for game {GameId}", key);
     }
 
-    // Test seam. The reference count is the whole point of the cache and is not observable from
-    // the InferenceSession callers get back.
     internal static int GetSessionRefCount(string gameId)
     {
         var key = CanonicalGameId(gameId);
@@ -218,8 +199,6 @@ public static class ModelService
         if (!File.Exists(modelPath))
             throw new FileNotFoundException($"ONNX model not found for game {gameId}", modelPath);
 
-        // ORT defaults to one intra-op thread per physical core and spins them after every
-        // Run. Disabling spin and capping threads keeps idle CPU near zero.
         using var options = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
@@ -241,14 +220,8 @@ public static class ModelService
         return directory is null ? gameId : Path.GetFileName(directory)!;
     }
 
-    // Directories ship with the game's own casing ("Overwatch") but the id reaching us can be
-    // spelled any way. Windows papers over the mismatch; ext4 and the Flatpak runtime do not, and a
-    // File.Exists miss would silently no-op the whole ML feature.
     private static string? FindGameDirectory(string gameId)
     {
-        // Guard rather than let EnumerateDirectories throw: a trimmed or misbuilt package has no
-        // data/training at all, and the only production caller runs inside GameIntegrationService's
-        // lock on every recording start, where an exception would break recording entirely.
         if (!ModelRoots().Any(Directory.Exists))
             return null;
 
@@ -300,8 +273,6 @@ public static class ModelService
         => File.Exists(Path.Combine(directory, "model.onnx"))
             && File.Exists(Path.Combine(directory, "events.json"));
 
-    // Memoise the events.json parse the bundle-completeness checks repeat; the write time + length
-    // stamp retires the entry on any real edit.
     private static readonly ConcurrentDictionary<string, ((DateTime WriteTimeUtc, long Length) Stamp,
         List<EventDefinition> Definitions)> _eventsFileCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -382,8 +353,6 @@ public static class ModelService
     {
         try
         {
-            // Materialize inside the try: enumeration is lazy and can fail after Directory.Exists
-            // if a removable/network root disappears or loses permission during the walk.
             return Directory.Exists(root) ? Directory.EnumerateDirectories(root).ToArray() : [];
         }
         catch (Exception exception) when (exception is DirectoryNotFoundException
@@ -403,8 +372,6 @@ public static class ModelService
 
     public static string GetGamePath(string gameId)
     {
-        // Falls back to the literal id so SaveEventDefinitions can still create a directory for a
-        // game that has none yet; only lookups of existing directories need the on-disk casing.
         return FindGameDirectory(gameId) ?? Path.Combine(BasePath, gameId);
     }
 
@@ -457,9 +424,6 @@ public static class ModelService
             _rejectedBundles.Clear();
     }
 
-    // Rejects the currently selected bundle for this process and reports whether a lower-priority
-    // complete bundle can take over. Used when runtime contract validation finds that a custom
-    // bundle is internally inconsistent; the files remain available for training and repair.
     internal static bool RejectCurrentBundle(string gameId, out string rejectedPath)
     {
         var directory = FindGameDirectory(gameId);
@@ -501,5 +465,3 @@ public static class ModelService
         released?.Dispose();
     }
 }
-
-

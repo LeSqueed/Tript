@@ -13,10 +13,6 @@ using Xunit.Sdk;
 
 namespace Tript.App.Tests;
 
-// The content catalogue and its metadata store. The library the frontend lists is rebuilt from the
-// recording root on every push; this suite pins how the catalogue classifies sessions vs clips,
-// where the metadata records live, how user bookmarks and titles round-trip through the store
-// rather than next to the video, and which fields the library grid is drawn from.
 [Collection(AppHostCollection.Name)]
 public sealed class ContentCatalogueTests : IDisposable
 {
@@ -36,8 +32,6 @@ public sealed class ContentCatalogueTests : IDisposable
     public void Dispose()
     {
     }
-
-    // ---- clip naming ----
 
     [SkippableFact]
     public void BuildClipOutputPath_Combine_UsesSourceBaseNameAndClipId_UnderClipsDir()
@@ -71,8 +65,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(Path.Combine(_contentRoot, "clips"), path);
     }
 
-    // ---- the store, directly ----
-
     [SkippableFact]
     public void MetadataRecord_LandsInMetadataTree_NotNextToTheVideo()
     {
@@ -87,7 +79,6 @@ public sealed class ContentCatalogueTests : IDisposable
             Bookmarks = { new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(12) } },
         });
 
-        // The record lives under <root>/metadata/, keyed by the video's file name.
         var record = Path.Combine(root, "metadata", "session-20260817-083000.mp4.metadata.json");
         Assert.True(File.Exists(record), "the metadata record must live in metadata/, not next to the video");
         Assert.False(File.Exists(Path.Combine(root, "sessions", "session-20260817-083000.mp4.metadata.json")),
@@ -118,15 +109,9 @@ public sealed class ContentCatalogueTests : IDisposable
             "deleting a video's metadata record must remove the record");
     }
 
-    // A write failure (read-only media, disk full, permissions) must be reported to the caller:
-    // Save/Delete return false instead of only logging to stderr, so a user bookmark or title
-    // that failed to persist is never silently lost.
     [SkippableFact]
     public void MetadataStore_SaveAndDelete_ReturnFalse_WhenTheWriteFails()
     {
-        // The metadata root sits on a path whose parent is a regular file, so creating the
-        // metadata directory (and writing a record under it) fails with IOException. Deterministic
-        // across platforms, unlike chmod-based read-only dirs.
         var root = _contentRoot;
         var fileAsDirectory = Path.Combine(root, "a-file");
         File.WriteAllText(fileAsDirectory, "in the way");
@@ -138,8 +123,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.False(store.Delete("session-1.mp4"),
             "Delete must report a failed delete instead of swallowing it");
     }
-
-    // ---- the catalogue, over the wire ----
 
     [SkippableFact]
     public async Task ListContent_ClassifiesSessionsAndClips_WithRelativePaths()
@@ -233,10 +216,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A session deleted from the UI takes its metadata with it, leaving the placeholder with only its
-    // highlights to speak for it. In the per-game recording layout the game still lives in the path
-    // ("<gameId>/sessions/..."), so the placeholder must name it the way clips do; and its date is the
-    // earliest of the surviving highlights, the closest truth left on disk.
     [SkippableFact]
     public async Task ListContent_MissingAutomaticHighlightSource_InheritsGameAndDateFromItsHighlights()
     {
@@ -574,7 +553,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(sessions);
         await File.WriteAllTextAsync(Path.Combine(sessions, "with-record.mp4"), "session");
 
-        // A metadata record with a title, a start time and two bookmarks for one video.
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         store.Save(new RecordingMetadata
         {
@@ -589,7 +567,6 @@ public sealed class ContentCatalogueTests : IDisposable
             },
         });
 
-        // A second video with no record at all.
         await File.WriteAllTextAsync(Path.Combine(sessions, "no-record.mp4"), "session");
 
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
@@ -615,7 +592,7 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(34, bookmarks[1].GetProperty("time").GetDouble());
 
         var without = items.Single(i => i.GetProperty("fileName").GetString() == "no-record.mp4");
-        // A session with no metadata record still lists — empty bookmarks, no title field.
+
         Assert.True(without.TryGetProperty("bookmarks", out var emptyBookmarks));
         Assert.Empty(emptyBookmarks.EnumerateArray());
         Assert.Equal("no-record", without.GetProperty("title").GetString());
@@ -637,12 +614,9 @@ public sealed class ContentCatalogueTests : IDisposable
 
         var metadataPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
 
-        // Add a user bookmark to a finished recording (bookmark changes do not push content, so
-        // the record's appearance on disk is the completion signal).
         await host.SendAsync("""{"method":"AddBookmark","parameters":{"filePath":"sessions/session-1.mp4","id":"","time":5,"type":"manual"}}""");
         await WaitUntil(() => File.Exists(metadataPath));
 
-        // The bookmark landed in the metadata store, not next to the video.
         Assert.True(File.Exists(metadataPath), "the bookmark must be stored in the metadata/ tree");
         Assert.False(File.Exists(Path.Combine(sessions, "session-1.mp4.bookmarks.json")),
             "no bookmark sidecar may sit next to the video");
@@ -654,7 +628,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(BookmarkType.Manual, bookmark.Type);
         Assert.Equal("sessions/session-1.mp4", record.VideoPath);
 
-        // Delete it by id.
         var id = bookmark.Id.ToString();
         await host.SendAsync(
             $"{{\"method\":\"DeleteBookmark\",\"parameters\":{{\"filePath\":\"sessions/session-1.mp4\",\"id\":\"{id}\"}}}}");
@@ -674,8 +647,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A bookmark that cannot be persisted must reach the user: the host broadcasts an 'error'
-    // message carrying a human-readable message, instead of silently dropping the bookmark.
     [SkippableFact]
     public async Task AddBookmark_SaveFails_BroadcastsError()
     {
@@ -683,8 +654,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(sessions);
         await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
 
-        // A regular file where the metadata directory would be created forces the metadata write
-        // to fail, deterministically (the host creates the metadata root lazily on first save).
         File.WriteAllText(Path.Combine(_contentRoot, "metadata"), "in the way");
 
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
@@ -703,7 +672,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A bookmark whose deletion could not be persisted must reach the user the same way.
     [SkippableFact]
     public async Task DeleteBookmark_SaveFails_BroadcastsError()
     {
@@ -711,11 +679,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(sessions);
         await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
 
-        // A record exists on disk already; making it read-only then makes the post-delete save
-        // fail (UnauthorizedAccessException) while the record still loads. The ReadOnly attribute
-        // is honoured on both platforms: on Unix it clears the file's write bits, on Windows it
-        // sets the read-only flag, and File.WriteAllText rejects either with
-        // UnauthorizedAccessException.
         var recordPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         store.Save(new RecordingMetadata
@@ -743,8 +706,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A title that cannot be persisted must reach the user too — and the content list must not
-    // be pushed as if the rename had succeeded (the old title stays on screen).
     [SkippableFact]
     public async Task RenameContent_SaveFails_BroadcastsError_AndDoesNotPushContent()
     {
@@ -768,8 +729,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.NotNull(message);
         Assert.Contains("could not be saved", message, StringComparison.OrdinalIgnoreCase);
 
-        // The rename must not be echoed as a successful content change: only the error message
-        // is broadcast for the failed command.
         await host.ShutdownAsync();
     }
 
@@ -785,12 +744,10 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        // A rename broadcasts content; the push is the completion signal.
         await host.SendAsync("""{"method":"RenameContent","parameters":{"fileName":"sessions/session-1.mp4","title":"Renamed session"}}""");
         var (method, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("content", method);
 
-        // The title landed in the metadata store, not in a .title sidecar next to the video.
         var metadataPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
         Assert.True(File.Exists(metadataPath));
         Assert.False(File.Exists(Path.Combine(sessions, "session-1.mp4.title")),
@@ -804,8 +761,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The cascade-delete contract: deleting a session removes both the .mp4 and its metadata
-    // record, and leaves no stray record behind.
     [SkippableFact]
     public async Task DeleteContent_RemovesTheVideoAndItsMetadataRecord()
     {
@@ -827,7 +782,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        // A delete broadcasts content; the push is the completion signal.
         await host.SendAsync("""{"method":"DeleteContent","parameters":{"fileName":"sessions/session-1.mp4","contentType":"recording"}}""");
         var (method, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("content", method);
@@ -840,14 +794,12 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The cascade-delete contract also holds when the video file was removed out-of-band: a delete
-    // for a missing .mp4 must still drop the metadata record, so no orphan record accumulates.
     [SkippableFact]
     public async Task DeleteContent_RemovesTheMetadataRecord_WhenTheVideoIsAlreadyGone()
     {
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
-        // The .mp4 is deliberately absent: the video was deleted by hand (or a crash lost it).
+
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         store.Save(new RecordingMetadata
         {
@@ -862,7 +814,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        // A delete broadcasts content even when there is no video on disk to remove.
         await host.SendAsync("""{"method":"DeleteContent","parameters":{"fileName":"sessions/session-gone.mp4","contentType":"recording"}}""");
         var (method, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("content", method);
@@ -874,9 +825,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The exact payload the frontend sends: `fileName` is the item's root-relative path — including
-    // the nested date directory the recorder lays out — so the video itself is moved, its records
-    // follow, and the item leaves the next `content` push instead of surviving on the grid.
     [SkippableFact]
     public async Task DeleteContent_WithTheFrontendRootRelativePath_MovesTheVideo_DropsFromTheNextPush()
     {
@@ -915,9 +863,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A clip's user title (from the clip dialog) is stored in its own record in the metadata/
-    // tree, read back into the library list instead of the file-name-without-extension, and
-    // cascade-deleted with the clip.
     [SkippableFact]
     public async Task ClipTitle_RoundTripsThroughTheStore_AndDeletesWithTheClip()
     {
@@ -925,12 +870,9 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(clips);
         await File.WriteAllTextAsync(Path.Combine(clips, "session-1-clip-x.mp4"), "clip");
 
-        // A clip has no RecordingMetadata record; its title lives in a dedicated clip-title
-        // record, written the way the host writes it when a clip completes.
         var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
         Assert.True(clipTitles.Save("session-1-clip-x.mp4", "The clutch"));
 
-        // The record lands in metadata/, keyed by the clip's file name — never next to the .mp4.
         var recordPath = Path.Combine(_contentRoot, "metadata", "session-1-clip-x.mp4.title.json");
         Assert.True(File.Exists(recordPath), "the clip title record must live in metadata/, not next to the video");
         Assert.False(File.Exists(Path.Combine(clips, "session-1-clip-x.mp4.title.json")),
@@ -948,7 +890,6 @@ public sealed class ContentCatalogueTests : IDisposable
             .Single(i => i.GetProperty("contentType").GetString() == "clip");
         Assert.Equal("The clutch", clip.GetProperty("title").GetString());
 
-        // Cascade delete: deleting the clip removes its title record too.
         await host.SendAsync("""{"method":"DeleteContent","parameters":{"fileName":"clips/session-1-clip-x.mp4","contentType":"clip"}}""");
         var (method, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("content", method);
@@ -961,12 +902,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // ---- the fields the library grid needs ----
-
-    // The library is a grid of cards filtered by game and sorted by date, so every card needs a game,
-    // a date, a length and a size. The game comes from the recording's metadata record; the size is
-    // read while the directory is enumerated; the duration is the persisted one (no probe is needed
-    // when the record already carries it, which is the point of persisting it).
     [SkippableFact]
     public async Task ListContent_ProjectsGameSizeAndDuration_FromTheMetadataRecord()
     {
@@ -998,8 +933,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(137.5, withRecord.GetProperty("durationSeconds").GetDouble());
         Assert.Equal(4096, withRecord.GetProperty("fileSizeBytes").GetInt64());
 
-        // A recording with no record still lists, with no game. Its date falls back to the file's
-        // last-write time so the grid can still place the card.
         var without = items.Single(i => i.GetProperty("fileName").GetString() == "no-record.mp4");
         Assert.False(without.TryGetProperty("game", out var _noGame), "a recording with no record has no game");
         Assert.Equal(7, without.GetProperty("fileSizeBytes").GetInt64());
@@ -1009,9 +942,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A clip has no metadata record of its own, so it inherits its game from the session it was cut
-    // from — recognised by its file name, which both clip naming paths start with the source
-    // session's base name.
     [SkippableFact]
     public async Task ListContent_ClipInheritsItsGame_FromTheSourceSessionName()
     {
@@ -1021,11 +951,10 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(clips);
         await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
         await File.WriteAllTextAsync(Path.Combine(sessions, "session-10.mp4"), "session");
-        // The two shapes the two clip paths produce (AppController.BuildClipOutputPath for combine,
-        // ClipEngine.BuildFileName for separate mode).
+
         await File.WriteAllTextAsync(Path.Combine(clips, "session-1-clip-k2m3xq.mp4"), "clip");
         await File.WriteAllTextAsync(Path.Combine(clips, "session-10-clip-1-0s-10s.mp4"), "clip");
-        // A clip whose source is gone (or never had a game) has no game rather than a wrong one.
+
         await File.WriteAllTextAsync(Path.Combine(clips, "session-99-clip-x.mp4"), "clip");
         await File.WriteAllTextAsync(Path.Combine(clips, "generated-name.mp4"), "clip");
 
@@ -1045,7 +974,7 @@ public sealed class ContentCatalogueTests : IDisposable
         var items = content.GetProperty("content").EnumerateArray().ToList();
 
         Assert.Equal("Overwatch", GameOf(items, "session-1-clip-k2m3xq.mp4"));
-        // The boundary check: "session-1" must not claim a clip of "session-10".
+
         Assert.Equal("Deep Rock Galactic", GameOf(items, "session-10-clip-1-0s-10s.mp4"));
         Assert.Null(GameOf(items, "session-99-clip-x.mp4"));
         Assert.Equal("Overwatch", GameOf(items, "generated-name.mp4"));
@@ -1053,8 +982,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The clip record now carries the game itself, so an SDR-converted copy inherits the tag from
-    // its source record just like it inherits the title and the duration.
     [SkippableFact]
     public void ClipTitleStore_SaveGame_RoundTripsGameAndSurvivesSdrConversion()
     {
@@ -1072,9 +999,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal("Overwatch", converted.GameId);
     }
 
-    // A highlight that predates the game field still keeps it once it has been stored on the clip
-    // record itself — even when the source session is gone, because deletion cascades only the
-    // recording's own metadata record.
     [SkippableFact]
     public async Task ListContent_ClipKeepsItsStoredGame_WhenTheSourceSessionIsGone()
     {
@@ -1099,10 +1023,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // Older highlight records have no game field at all. The per-game recording layout puts the
-    // highlight at "<gameId>/highlights/<name>.mp4" and links it to "<gameId>/sessions/<name>.mp4",
-    // so even after the session is deleted the game can be named from the path and written onto the
-    // record once — keeping the tag for every later listing.
     [SkippableFact]
     public async Task ListContent_BackfillsGameOntoAnOldHighlight_FromItsPerGamePath()
     {
@@ -1131,9 +1051,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The frontend paginates over this list, so the order must be newest first and must be total —
-    // two items with the same timestamp may not swap places between two pushes (List.Sort is
-    // unstable, and the directory enumeration order is the file system's).
     [SkippableFact]
     public async Task ListContent_IsOrderedNewestFirst_Deterministically()
     {
@@ -1147,7 +1064,7 @@ public sealed class ContentCatalogueTests : IDisposable
         store.Save(new RecordingMetadata { VideoPath = "sessions/oldest.mp4", StartTime = baseTime });
         store.Save(new RecordingMetadata { VideoPath = "sessions/middle.mp4", StartTime = baseTime.AddHours(1) });
         store.Save(new RecordingMetadata { VideoPath = "sessions/newest.mp4", StartTime = baseTime.AddHours(2) });
-        // Two records sharing one timestamp: the relative path is the tiebreak.
+
         store.Save(new RecordingMetadata { VideoPath = "sessions/tied-a.mp4", StartTime = baseTime.AddMinutes(30) });
         store.Save(new RecordingMetadata { VideoPath = "sessions/tied-b.mp4", StartTime = baseTime.AddMinutes(30) });
 
@@ -1165,7 +1082,6 @@ public sealed class ContentCatalogueTests : IDisposable
             ["newest.mp4", "middle.mp4", "tied-a.mp4", "tied-b.mp4", "oldest.mp4"],
             order);
 
-        // The same list again is the same order: nothing about it depends on enumeration order.
         await host.SendAsync("""{"method":"ListContent"}""");
         var (_, second) = await host.ReceiveAsyncParsed();
         Assert.Equal(order, second.GetProperty("content").EnumerateArray()
@@ -1174,9 +1090,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The duration is read once per file and persisted, so it is not an ffprobe per item per push.
-    // With a real (probeable) source the first list fills the record in; the value on the wire is the
-    // container's duration.
     [SkippableFact]
     public async Task ListContent_ReadsTheDurationOnce_AndPersistsItOnTheRecord()
     {
@@ -1200,7 +1113,6 @@ public sealed class ContentCatalogueTests : IDisposable
         var duration = item.GetProperty("durationSeconds").GetDouble();
         Assert.InRange(duration, 1.5, 2.5);
 
-        // The value landed on a metadata record, which is what makes every later push free.
         var recordPath = Path.Combine(_contentRoot, "metadata", "probeable.mp4.metadata.json");
         Assert.True(File.Exists(recordPath), "the duration must be persisted on the record");
         var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
@@ -1212,11 +1124,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // ---- a record that exists but cannot be read ----
-
-    // The three states a load can find. The read path collapses two of them into null (an item lists
-    // either way, which is the point), so the store has to report them separately for the callers
-    // that write back — that is the whole defence against a blank record replacing a good one.
     [SkippableFact]
     public void MetadataStore_Read_TellsAnAbsentRecordFromAnUnreadableOne()
     {
@@ -1231,7 +1138,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal("Overwatch", loaded.Record!.Game);
         Assert.False(loaded.MustNotBeOverwritten);
 
-        // Garbage bytes: there is a file, and nothing in it can be recovered.
         Directory.CreateDirectory(metadataRoot);
         File.WriteAllText(Path.Combine(metadataRoot, "broken.mp4.metadata.json"), "{ this is not json");
         var unreadable = store.Read("broken.mp4");
@@ -1240,20 +1146,12 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.True(unreadable.MustNotBeOverwritten);
         Assert.False(string.IsNullOrWhiteSpace(unreadable.Failure), "the reason must be kept for the log line");
 
-        // A file holding the literal "null" parses without an exception and yields no record; there
-        // is still a file, so it counts as present, not absent.
         File.WriteAllText(Path.Combine(metadataRoot, "nulled.mp4.metadata.json"), "null");
         Assert.Equal(StoredRecordState.Unreadable, store.Read("nulled.mp4").State);
 
-        // The read path is unchanged: an unreadable record still loads as "no record", so the video
-        // keeps its entry in the library.
         Assert.Null(store.Load("broken.mp4"));
     }
 
-    // The library exposes whether a recording has cuttable detected events so the player can keep
-    // the "Create highlights" action disabled until there is something to cut. The flag mirrors the
-    // exact predicate CreateAutomaticClips uses: an explicit candidate flag (an event definition
-    // that opted in) or a legacy type that predates per-definition flagging.
     [SkippableFact]
     public async Task ListContent_FlagsAutomaticClipCandidates_OnTheRecording()
     {
@@ -1269,7 +1167,7 @@ public sealed class ContentCatalogueTests : IDisposable
             Bookmarks =
             {
                 new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(5) },
-                // Legacy: Kill is included in highlights by type.
+
                 new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) },
             },
         });
@@ -1278,7 +1176,6 @@ public sealed class ContentCatalogueTests : IDisposable
             VideoPath = "sessions/none.mp4",
             Bookmarks =
             {
-                // Explicitly opted out: an event definition that stays out of automatic clips.
                 new Bookmark { Type = BookmarkType.Death, Time = TimeSpan.FromSeconds(20) },
                 new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(30) },
                 new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(40), IsAutomaticClipCandidate = false },
@@ -1302,8 +1199,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await scope.ShutdownAsync();
     }
 
-    // A clip has no highlight-candidate flag at all: the "Create highlights" dimension does not
-    // apply to clips, so the wire must not suggest the action exists for them.
     [SkippableFact]
     public async Task ListContent_ClipsCarryNoAutomaticClipCandidateFlag()
     {
@@ -1326,10 +1221,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await scope.ShutdownAsync();
     }
 
-    // The bug this suite grew for. A record that exists but cannot be parsed used to be reported as
-    // null, which the duration-persisting path read as "there is no record" — so it wrote a fresh
-    // record holding a video path and a duration over a file that held the recording's game, title
-    // and bookmarks. The file's bytes must survive a list untouched, and the video must still list.
     [SkippableFact]
     public async Task ListContent_LeavesAnUnreadableRecordUntouched_AndStillListsTheVideo()
     {
@@ -1354,24 +1245,17 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.SendAsync("""{"method":"ListContent"}""");
         var (_, content) = await host.ReceiveAsyncParsed();
 
-        // The item lists — an unreadable record may not take the library entry down with it.
         var item = content.GetProperty("content").EnumerateArray()
             .Single(i => i.GetProperty("fileName").GetString() == "probeable.mp4");
         Assert.Equal("probeable", item.GetProperty("title").GetString());
 
-        // And the record is byte-for-byte what it was: the duration is recomputable, whatever is in
-        // this file is not.
         Assert.Equal(before, await File.ReadAllBytesAsync(recordPath));
 
-        // No half-written sibling left in the tree either (the write is a rename over the target).
         Assert.Empty(Directory.GetFiles(metadataRoot, "*.tmp"));
 
         await host.ShutdownAsync();
     }
 
-    // The regression test for the reported data loss: a record carrying a game, a user title and
-    // bookmarks goes through a ListContent that fills in the duration, and comes out with all three
-    // still in it.
     [SkippableFact]
     public async Task ListContent_PersistingADuration_KeepsTheGameTitleAndBookmarks()
     {
@@ -1382,7 +1266,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(sessions);
         GenerateTestVideo(ffmpeg, Path.Combine(sessions, "probeable.mp4"));
 
-        // Deliberately no DurationSeconds: this is the record the probe wants to write into.
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         Assert.True(store.Save(new RecordingMetadata
         {
@@ -1411,7 +1294,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal("Ranked win", item.GetProperty("title").GetString());
         Assert.InRange(item.GetProperty("durationSeconds").GetDouble(), 1.5, 2.5);
 
-        // On disk: the duration was added, and nothing else was traded for it.
         var recordPath = Path.Combine(_contentRoot, "metadata", "probeable.mp4.metadata.json");
         var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
             SettingsSerialization.Options)!;
@@ -1425,10 +1307,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A hand-written record, exactly as a user recovering a recording would type it: camelCase
-    // members, a content type by name, and a start time carrying a local offset. Every part of it
-    // loads (the offset form is the same one the app itself writes), so the game reaches the wire and
-    // the timestamp is not reset when the duration is filled in.
     [SkippableFact]
     public async Task ListContent_HandWrittenRecordWithAnOffsetTimestamp_KeepsItsGameAndStartTime()
     {
@@ -1461,14 +1339,11 @@ public sealed class ContentCatalogueTests : IDisposable
         var item = content.GetProperty("content").EnumerateArray()
             .Single(i => i.GetProperty("fileName").GetString() == "session-20260817-152046741.mp4");
 
-        // The instant the file names, not the machine's idea of it: the assertions compare
-        // DateTimeOffsets, so they hold in any time zone the tests run in.
         var written = new DateTimeOffset(2026, 8, 17, 15, 20, 46, TimeSpan.FromHours(2))
             .AddTicks(7558115);
         Assert.Equal("Overwatch", item.GetProperty("game").GetString());
         Assert.Equal(written.ToUnixTimeSeconds(), item.GetProperty("startTime").GetInt64());
 
-        // The record kept the game and the instant after the duration was written into it.
         var record = JsonSerializer.Deserialize<RecordingMetadata>(await File.ReadAllTextAsync(recordPath),
             SettingsSerialization.Options)!;
         Assert.Equal("Overwatch", record.Game);
@@ -1478,12 +1353,6 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A record is rewritten by a rename over the target rather than in place, because the host
-    // reads and writes these records from two threads: a finished clip pushes content from its own
-    // thread while the IPC thread may be listing, and a list both reads records and writes
-    // durations into them. Measured on the plain File.WriteAllText this replaced: 115041 of 506391
-    // concurrent reads (22.7%) threw JsonException, most often "The input does not contain any JSON
-    // tokens" — the window where the file has been truncated and not yet rewritten.
     [SkippableFact]
     public void MetadataStore_ARecordBeingRewritten_IsNeverReadHalfWritten()
     {
@@ -1528,11 +1397,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(0, unreadable);
     }
 
-    // A read-only record is still not written, now that the write is a rename over the target. This
-    // needs its own test because the rename does not check the destination's permissions at all: on
-    // Unix rename(2) only needs a writable directory, so an atomic write silently gained the ability
-    // to replace a record that the read-only bit exists to protect (DeleteBookmark_SaveFails_
-    // BroadcastsError depends on this, and it hung when the save unexpectedly succeeded).
     [SkippableFact]
     public void MetadataStore_AReadOnlyRecord_IsNotRewritten()
     {
@@ -1561,8 +1425,6 @@ public sealed class ContentCatalogueTests : IDisposable
         }
     }
 
-    // The clip record carries the user's clip title, so it gets the same protection: a record that
-    // cannot be read is not replaced by one holding just a duration.
     [SkippableFact]
     public void ClipStore_LeavesAnUnreadableRecordUntouched_AndReportsTheFailure()
     {
@@ -1581,7 +1443,6 @@ public sealed class ContentCatalogueTests : IDisposable
             "a title must not be written over a record that could not be read");
         Assert.Equal(before, File.ReadAllBytes(recordPath));
 
-        // A clip with no record at all is the normal case and still gets one.
         Assert.True(store.SaveDuration("session-2-clip-y.mp4", 9.13));
         Assert.Equal(9.13, store.LoadRecord("session-2-clip-y.mp4")!.DurationSeconds);
     }

@@ -4,7 +4,6 @@ using System.Security;
 
 namespace Tript.GameDiscovery;
 
-
 public sealed class SteamInventorySource(IDiscoveryFileSystem fileSystem, IDiscoveryRegistry registry) : IGameInventorySource
 {
     public GameStore Store => GameStore.Steam;

@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Typography invariants, verified mechanically. The redesign replaced a Georgia headline and a set
-// of wide-tracked micro-caps "eyebrow" labels — the two signals that made the app read as a
-// brochure — and this is what stops either coming back. Companion to contrast.test.ts.
-//
-// KNOWN_* below is a ratchet, not a permission slip: it lists the stylesheets still awaiting a
-// cleanup phase, and it must shrink to empty. Anything not listed fails immediately, so the suite
-// stays green commit by commit while the remaining debt stays visible.
 
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -15,10 +7,8 @@ import { stylesheetPaths } from './cssRules';
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
-/** Stylesheets still declaring a serif family. Empty this; do not add to it. */
 const KNOWN_SERIF: string[] = [];
 
-/** Stylesheets still shipping the tracked micro-caps eyebrow. Empty this; do not add to it. */
 const KNOWN_TRACKED: string[] = [];
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
@@ -35,10 +25,8 @@ function locate(file: string, css: string, pattern: RegExp): string[] {
   return hits;
 }
 
-/** Any serif face, wherever it is declared — font-family, the `font` shorthand, or a custom property. */
 const SERIF = /(Georgia|Times New Roman|(?<!sans-)\bserif\b)/i;
 
-/** Tracked micro-caps: uppercase plus deliberate letter-spacing, in em or px, any casing. */
 function isTrackedMicroCaps(block: string): boolean {
   if (!/text-transform\s*:\s*uppercase/i.test(block)) {
     return false;

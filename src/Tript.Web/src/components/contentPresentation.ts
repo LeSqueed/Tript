@@ -16,7 +16,6 @@ export function contentTypeLabel(contentType: ContentType): string {
   }
 }
 
-/** A content item's display name: its title, or the file name it was saved under. */
 export function contentLabel(title: string | undefined, fileName: string): string {
   const trimmed = title?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : fileName;

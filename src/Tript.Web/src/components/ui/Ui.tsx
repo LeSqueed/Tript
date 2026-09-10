@@ -3,12 +3,6 @@
 import type { ReactNode } from 'react';
 import { Button } from './controls';
 
-/**
- * The meta strip above a workspace surface — a range, a count, a retention notice.
- *
- * There is deliberately no heading in here. The shell's topbar already names the route, so a second
- * copy of the same word as an h2 with a tagline under it said nothing twice.
- */
 export function WorkspaceMeta({ children }: { children: ReactNode }) {
   return <div className="workspace-meta">{children}</div>;
 }
@@ -35,22 +29,14 @@ export function EmptyState({
   );
 }
 
-/**
- * The bar that sits above a list when a selection is live: a "N selected" count, the actions that
- * apply to the selection, and one action pushed to the far edge. The library's select mode and the
- * trash's toolbar are the same chrome, so they share this surface rather than restyling it twice.
- */
 export function ActionBar({
   leading,
   trailing,
   children,
   'data-testid': testId,
 }: {
-  /** The "N selected" count, or (in a mode-less variant) the range/count line. */
   leading: ReactNode;
-  /** The actions that apply to the current selection. */
   children?: ReactNode;
-  /** One action set apart from the rest, pushed to the trailing edge. */
   trailing?: ReactNode;
   'data-testid'?: string;
 }) {
@@ -63,12 +49,6 @@ export function ActionBar({
   );
 }
 
-/**
- * The empty state shown when content exists but the current filters hide all of it. Distinct from a
- * truly empty surface: without it a too-narrow filter is indistinguishable from a broken backend, and
- * the one useful instruction (clear the filters) would be invisible. The library, the sessions page
- * and the trash all show it, differing only in the noun for what is being counted.
- */
 export function FilterMismatchEmptyState({
   total,
   noun = 'item',

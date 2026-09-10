@@ -8,10 +8,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// FillInputTensor divides four pixels at a time through Vector128 and falls back to a scalar loop
-// for the tail and for hardware without vector acceleration. The optimisation is only legitimate if
-// it is bit-identical to the scalar loop, so every test here compares raw float bits rather than
-// values.
 public class InputTensorVectorTests
 {
     private static void AssertBitIdentical(float[] expected, float[] actual, string context)
@@ -32,8 +28,6 @@ public class InputTensorVectorTests
             $"{context}: output is not bit-identical to the reference.\n" + string.Join("\n", diverged));
     }
 
-    // 16x16 = 256 pixels holding each byte value exactly once, so one call covers the whole
-    // input domain. Anything the vector path rounds differently shows up here.
     private static byte[] EveryByteValueOnce()
     {
         var gray = new byte[256];
@@ -65,8 +59,6 @@ public class InputTensorVectorTests
         AssertBitIdentical(expected, actual, "scalar fallback, all 256 byte values");
     }
 
-    // The default entry point must agree with both explicit paths, otherwise the flag overload
-    // is testing something production never runs.
     [Fact]
     public void DefaultEntryPoint_AgreesWithBothExplicitPaths()
     {
@@ -83,9 +75,6 @@ public class InputTensorVectorTests
         AssertBitIdentical(scalar, vector, "vector path vs scalar");
     }
 
-    // pixels is a perfect square, so pixels % 4 is 0 for even sizes and 1 for odd ones: an odd
-    // inputSize is the only way to leave work for the tail. inputSize 1 is the degenerate case
-    // where the vector loop never runs at all and the tail does everything.
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
@@ -116,8 +105,6 @@ public class InputTensorVectorTests
         AssertBitIdentical(expected, scalar, $"scalar fallback at inputSize {inputSize}");
     }
 
-    // A tail of exactly one element, with every byte value taking a turn in that slot: the
-    // boundary between the vector loop and the scalar remainder must not round differently.
     [Fact]
     public void OneElementTail_CoversEveryByteValue()
     {
@@ -139,8 +126,6 @@ public class InputTensorVectorTests
         }
     }
 
-    // The vector path writes through unchecked stores, so it has to reject undersized buffers
-    // itself rather than relying on array bounds checks.
     [Fact]
     public void UndersizedBuffers_Throw()
     {
@@ -150,7 +135,6 @@ public class InputTensorVectorTests
             DetectionFramePreprocessor.FillInputTensor(new byte[16], new float[16 * 3 - 1], 4));
     }
 
-    // Production buffers come from ArrayPool and are routinely longer than the frame needs.
     [Fact]
     public void OversizedSourceBuffer_IsAccepted()
     {

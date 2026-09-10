@@ -42,8 +42,6 @@ export function PlaylistPanel({
     height: DEFAULT_HEIGHT,
   }));
   const window = playlistWindow(items.length, viewport.scrollTop, viewport.height);
-  // A nonce, not a scroll target: the effect below owns the math, and the button only asks it to
-  // run again — the same re-center the panel already does whenever the current item changes.
   const [recenterToken, setRecenterToken] = useState(0);
 
   useLayoutEffect(() => {

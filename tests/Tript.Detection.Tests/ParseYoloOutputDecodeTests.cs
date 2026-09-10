@@ -9,30 +9,11 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// YoloOutputStrideTests pins the shape of the tensor parser input. This file pins what
-// it does with it, on hand-built tensors whose every value is known.
-//
-// The decode is five independent decisions, and every one of them fails silently when it is wrong:
-//
-//   * the channel-major row offsets — cx = output[i], cy = output[n + i], w = output[2n + i],
-//     h = output[3n + i], conf(c) = output[(4 + c) * n + i];
-//   * the 0.7f confidence cutoff;
-//   * argmax over the class rows;
-//   * the centre-to-corner conversion, X = cx / inputSize - w / (2 * inputSize);
-//   * dividing box geometry by the model input size at all.
-//
-// Every read stays in range whichever offset is used, so a mutation to any of them — (3 + c) * n for
-// the class row, a swapped cx/cy, a dropped /2 — throws nothing and logs nothing. It returns boxes
-// in the wrong place, with the wrong class, for as long as nobody looks at a recording.
-//
 public class ParseYoloOutputDecodeTests
 {
     private static List<DetectionResult> Parse(ReadOnlySpan<float> output, int inputSize, int numClasses)
         => DetectionFramePreprocessor.ParseYoloOutputForInput(output, inputSize, inputSize, numClasses);
 
-    // Values are given per row, in the order the tensor stores them, so this builder describes the
-    // channel-major layout by concatenation rather than by repeating the parser's own index
-    // arithmetic — which would make any offset mutation agree with itself.
     private sealed record Anchor(float Cx, float Cy, float W, float H, float[] Confidences);
 
     private static float[] Tensor(params Anchor[] anchors)
@@ -55,10 +36,6 @@ public class ParseYoloOutputDecodeTests
         return rows.SelectMany(row => row).ToArray();
     }
 
-    // The whole decode on one tensor: three classes, five anchors, every box value distinct so a
-    // swapped or shifted row cannot land on the same number by accident. Two anchors are below the
-    // cutoff and must not appear at all, which also pins that surviving anchors keep their own
-    // geometry rather than the geometry of their position in the result list.
     [Fact]
     public void DecodesAnchorsAtTheChannelMajorRowOffsets()
     {
@@ -95,18 +72,16 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(0.04, results[2].Height, 4);
     }
 
-    // The offset that matters most, written out as a literal so it shares no arithmetic at all with
-    // the code under test. One class, two anchors, laid out row by row.
     [Fact]
     public void ReadsConfidencesFromRowFour_NotFromTheHeightRow()
     {
         float[] output =
         [
-            100f, 200f,   // cx
-            300f, 400f,   // cy
-            500f, 600f,   // w
-            800f, 900f,   // h
-            0.50f, 0.95f, // class 0 confidence
+            100f, 200f,
+            300f, 400f,
+            500f, 600f,
+            800f, 900f,
+            0.50f, 0.95f,
         ];
 
         var results = Parse(output, 1000, 1);
@@ -115,15 +90,12 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(0, only.ClassId);
         Assert.Equal(0.95, only.Confidence, 4);
 
-        // Anchor 1: cx 200, cy 400, w 600, h 900 over an input size of 1000.
         Assert.Equal(0.2 - 0.3, only.X, 4);
         Assert.Equal(0.4 - 0.45, only.Y, 4);
         Assert.Equal(0.6, only.Width, 4);
         Assert.Equal(0.9, only.Height, 4);
     }
 
-    // The cutoff is a strict "below 0.7 is dropped", so 0.7 exactly survives. All three anchors are
-    // identical apart from their confidence, which means the count is the only thing that can move.
     [Fact]
     public void DropsAnchorsBelowThePointSevenCutoff_AndKeepsThoseAtOrAbove()
     {
@@ -132,9 +104,6 @@ public class ParseYoloOutputDecodeTests
         Assert.Single(Parse(Tensor(new Anchor(50f, 50f, 10f, 10f, [0.71f])), 100, 1));
     }
 
-    // Confidence is not the first class over the cutoff, nor the last one, but the highest — and the
-    // reported Confidence is that maximum rather than the class-0 value or the running total. Each
-    // anchor puts its winner in a different column so a hardcoded index cannot pass.
     [Fact]
     public void SelectsTheHighestScoringClassAcrossAllClassRows()
     {
@@ -151,9 +120,6 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(0.97, results[2].Confidence, 4);
     }
 
-    // A tie goes to the lower class id: the scan keeps the first strict maximum. Nothing downstream
-    // depends on which one wins, but an unstable answer here would make a detection flicker between
-    // two event definitions frame to frame, so the behaviour is pinned rather than left open.
     [Fact]
     public void OnATie_KeepsTheLowestClassId()
     {
@@ -162,10 +128,6 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(1, Assert.Single(results).ClassId);
     }
 
-    // Boxes come out of the detect head as a centre plus a size in input pixels, and everything
-    // downstream — MapDetectionsToFullFrame, DetectionBatchCounter's overlap match — reads them as
-    // normalized top-left corners. Half the width is subtracted, not the whole width and not none
-    // of it, and the same input size divides both terms.
     [Fact]
     public void ConvertsCentreBoxesToNormalizedTopLeftCorners()
     {
@@ -173,7 +135,6 @@ public class ParseYoloOutputDecodeTests
             new Anchor(320f, 160f, 64f, 32f, [0.9f]),
             new Anchor(0f, 0f, 100f, 200f, [0.9f])), 640, 1);
 
-        // 320/640 - 64/1280 = 0.5 - 0.05.
         Assert.Equal(0.45, results[0].X, 4);
         Assert.Equal(0.225, results[0].Y, 4);
         Assert.Equal(0.1, results[0].Width, 4);
@@ -183,15 +144,9 @@ public class ParseYoloOutputDecodeTests
         Assert.Equal(-0.15625, results[1].Y, 6);
     }
 
-    // numDetections is derived as output.Length / (4 + numClasses) rather than passed in, so the
-    // two arguments are not independent: the same buffer decoded with a different class count is
-    // read at a different stride, which slides every row against the data. This is the failure
-    // ModelClassCountTests exists to prevent, shown end to end — an events.json entry added without
-    // retraining does not throw, it silently relocates everything.
     [Fact]
     public void AWrongClassCount_SilentlyDecodesTheSameBufferToRelocatedBoxes()
     {
-        // cx 10..15, cy 20..25, every w and h 2, class 0 confident on every anchor.
         var output = Tensor(
             new Anchor(10f, 20f, 2f, 2f, [0.9f, 0f, 0f]),
             new Anchor(11f, 21f, 2f, 2f, [0.9f, 0f, 0f]),
@@ -205,14 +160,10 @@ public class ParseYoloOutputDecodeTests
         var correct = Parse(output, 100, 3);
         var wrong = Parse(output, 100, 2);
 
-        // Stride 7: every anchor decodes where it was written. X = 10/100 - 2/200, Y = 20/100 - 2/200.
         Assert.Equal(6, correct.Count);
         Assert.Equal(0.09, correct[0].X, 4);
         Assert.Equal(0.19, correct[0].Y, 4);
 
-        // Stride 6: the cy row now starts at index 7 instead of 6, so anchor 0 reads the *second* cy
-        // (21, not 20) while its cx still reads 10. Same box, moved down by exactly one element's
-        // worth — and only two anchors still land on a confidence above the cutoff at all.
         Assert.Equal(2, wrong.Count);
         Assert.Equal(0.09, wrong[0].X, 4);
         Assert.Equal(0.20, wrong[0].Y, 4);

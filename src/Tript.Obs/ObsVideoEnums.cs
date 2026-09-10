@@ -3,9 +3,6 @@
 
 namespace Tript.Obs;
 
-// enum video_format, in declaration order. Only a handful are ever asked for as a mix format, but
-// the raw-frame callbacks still to come report whatever the source produced, so the full set has
-// to be nameable.
 public enum ObsVideoFormat
 {
     None = 0,
@@ -36,7 +33,6 @@ public enum ObsVideoFormat
     R10L
 }
 
-// enum video_colorspace. Default is a request to resolve, not a value.
 public enum ObsColorSpace
 {
     Default = 0,
@@ -47,13 +43,6 @@ public enum ObsColorSpace
     Rec2100Hlg
 }
 
-// enum gs_color_space — what a SOURCE reports, and a different enum from ObsColorSpace above, which
-// is the video mix's video_colorspace. The two are easy to confuse and share no values.
-//
-// This is the one that answers "is the thing being captured HDR", because it describes the texture
-// the source hands over rather than the mode the monitor happens to be in. A game presenting an FP16
-// scRGB swap chain reports Scrgb709 whatever the desktop is doing, and an SDR game on an HDR desktop
-// still reports Srgb.
 public enum ObsSourceColorSpace
 {
     Srgb = 0,
@@ -62,9 +51,6 @@ public enum ObsSourceColorSpace
     Scrgb709
 }
 
-// enum video_range_type. Default resolves to Partial for YUV formats and Full otherwise; libobs
-// does that with a static inline that is not exported, so a consumer handed Default has been told
-// less than the compositor knows.
 public enum ObsVideoRange
 {
     Default = 0,
@@ -72,8 +58,6 @@ public enum ObsVideoRange
     Full
 }
 
-// enum obs_scale_type — the compositor's scaler. Note this is not enum video_scale_type from
-// media-io, which shares three member names in a different order.
 public enum ObsScaleType
 {
     Disable = 0,
@@ -84,18 +68,12 @@ public enum ObsScaleType
     Area
 }
 
-// enum obs_nix_platform_type. Value 0 is deliberately unnamed: it is OBS_NIX_PLATFORM_INVALID on
-// the runtimes we target and was a deprecated GLX platform before that — the only value in the
-// whole surface whose meaning changed rather than being appended to.
 public enum ObsNixPlatform
 {
     X11Egl = 1,
     Wayland = 2
 }
 
-// obs_reset_video's return codes. Mapped rather than reduced to a bool: "invalid parameter" and
-// "the adapter cannot do this" send an application down completely different paths, and the second
-// is the one a user will actually hit.
 public enum ObsVideoResetResult
 {
     Success = 0,

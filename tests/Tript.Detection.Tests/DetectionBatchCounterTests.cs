@@ -66,5 +66,4 @@ public sealed class DetectionBatchCounterTests
 
         Assert.Single(detections);
     }
-
 }

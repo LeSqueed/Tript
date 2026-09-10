@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// One toast: icon, text, optional actions, and the dismiss button. Timed toasts carry a ring
-// around the X that drains over the toast's lifetime, in the toast's own colour, so the countdown
-// is visible without reading a number.
 
 import type { CSSProperties } from 'react';
 import { Button } from '../controls';
@@ -23,7 +19,6 @@ const KIND_ICON: Record<ToastKind, IconName> = {
   info: 'infoCircle',
 };
 
-/** 2π × the ring's 9.5 radius, the dasharray the drain animation runs out over. */
 const RING_LENGTH = 59.69;
 
 export interface ToastProps {

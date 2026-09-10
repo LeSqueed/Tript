@@ -9,9 +9,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The trash as it appears on the control socket. The field names, the casing and the units are a
-// compatibility surface the frontend narrows on, so they are asserted through a real host rather
-// than against the in-process model.
 [Collection(AppHostCollection.Name)]
 public sealed class TrashWireTests
 {
@@ -65,14 +62,12 @@ public sealed class TrashWireTests
         Assert.Equal("Overwatch", entry.GetProperty("game").GetString());
         Assert.True(entry.GetProperty("fileSizeBytes").GetInt64() > 0);
 
-        // Epoch seconds, not milliseconds: the window between them is the retention exactly.
         var deletedAt = entry.GetProperty("deletedAt").GetInt64();
         var purgeAt = entry.GetProperty("purgeAt").GetInt64();
         Assert.InRange(deletedAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 120,
             DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120);
         Assert.Equal(deletedAt + 24 * 3600, purgeAt);
 
-        // ListTrash answers with the same push.
         await host.SendAsync("""{"method":"ListTrash"}""");
         var (listed, listedTrash) = await host.ReceiveAsyncParsed();
         Assert.Equal("trash", listed);
@@ -92,8 +87,6 @@ public sealed class TrashWireTests
         await host.ShutdownAsync();
     }
 
-    // PurgeTrash with no parameters at all empties the whole bin — the command has to survive the
-    // absent-parameters case rather than being dropped as malformed.
     [Fact]
     public async Task PurgeTrash_WithoutParameters_EmptiesTheBin()
     {
@@ -116,7 +109,6 @@ public sealed class TrashWireTests
         Assert.Equal("trash", method);
         Assert.Empty(trash.GetProperty("entries").EnumerateArray());
 
-        // The bin is gone from disk too, not just from the listing.
         Assert.Empty(Directory.GetDirectories(Path.Combine(_contentRoot, ".trash")));
 
         await host.ShutdownAsync();

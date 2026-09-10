@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Tests for the audio page: the plain default up front, the advanced disclosure carrying the
-// output mode, the source kind pills, and the track routing.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

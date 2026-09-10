@@ -67,10 +67,6 @@ internal static class TrainingLabelSuggestionFilter
             if (!definitionsByClass.TryGetValue(detection.ClassId, out var definition))
                 continue;
 
-            // A fixed-position event has one authoritative label geometry. The model only
-            // indicates presence; the inserted box must be the canonical one, never the
-            // detector's. An uninitialized fixed event has no geometry to trust yet, so skip it
-            // until a fixed position is set manually (otherwise a suggestion would seed it).
             TrainingLabel label;
             if (definition.FixedPosition && definition.FixedLabelCenterX is not null
                 && definition.FixedLabelCenterY is not null && definition.FixedLabelWidth is not null
@@ -101,10 +97,6 @@ internal static class TrainingLabelSuggestionFilter
                 };
             }
 
-            // An event's screen region is the exact area that becomes a training crop. A detection
-            // that bleeds outside it would accept a label the exporter cannot fit into the crop,
-            // producing out-of-bounds coordinates Ultralytics silently drops. Only offer boxes fully
-            // inside the event's region; an event without one crops the whole frame, so any box fits.
             regions.TryGetValue(detection.ClassId, out var region);
             if (region is not null && !TrainingRegionResolver.Contains(region.Value, label))
                 continue;
@@ -170,8 +162,6 @@ internal sealed class TrainingSampleRecord
 
     public List<TrainingOcrRegion> OcrRegions { get; set; } = [];
 
-    // Imported dataset images are already cropped to the model input. Keep them in the imported
-    // dataset instead of sending them through the full-frame crop exporter a second time.
     public string? DatasetImagePath { get; set; }
 }
 
@@ -226,9 +216,6 @@ internal static class TrainingLabelValidator
         return null;
     }
 
-    // Saves must never be blocked by crop containment: the user can deliberately place a label
-    // outside its effective region ("erroneous"), which training/export then skips as invalid.
-    // Only structural corruption (unknown class, unusable coordinates, out-of-frame) is fatal.
     internal static string? FindBlockingError(IReadOnlyList<TrainingLabel> labels,
         IReadOnlyList<EventDefinition> definitions)
     {
@@ -315,8 +302,6 @@ internal sealed class TrainingSampleStore
         if (imageWidth <= 0 || imageHeight <= 0)
             throw new ArgumentOutOfRangeException(nameof(imageWidth), "Image dimensions must be positive.");
 
-        // Captured frames start unlabeled and are completed in the sample editor. Dataset export
-        // still requires labels before a sample can be used for training.
         var labelError = TrainingLabelValidator.FindError(labels, definitions, requireLabel: false,
             regionGroups);
         if (labelError is not null)
@@ -369,7 +354,6 @@ internal sealed class TrainingSampleStore
             }
             catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
             {
-                // A workspace swap may remove a sample after enumeration. The next push retries it.
             }
         }
         return samples.OrderBy(sample => sample.Id, StringComparer.Ordinal).ToList();
@@ -481,10 +465,6 @@ internal sealed class TrainingSampleStore
         IReadOnlyDictionary<string, byte[]?> Originals,
         int RemovedLabelCount);
 
-    // Remaps surviving event class ids. When an event is deleted (its class missing from the
-    // mapping) its labels are stripped from every sample in the same transaction rather than
-    // rejecting the delete; dataset-backed label files stay in step. OCR regions carry no event
-    // reference, so a remap never touches them.
     internal RemapClassIdsResult RemapClassIds(IReadOnlyDictionary<int, int> mapping,
         IReadOnlyDictionary<int, TrainingLabel>? fixedPositions = null,
         Action<int, int>? progress = null)

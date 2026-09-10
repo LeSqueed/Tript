@@ -26,8 +26,6 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    // ---- clipping ----
-
     internal void CreateAutomaticClips(CreateAutomaticClipsParameters? parameters)
     {
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.FilePath))
@@ -67,9 +65,6 @@ internal sealed partial class AppHost
             PushError("Automatic highlights are already being created for another recording.");
     }
 
-    // What counts as an automatic-highlight candidate: an event definition that opted into clips,
-    // or a legacy bookmark type that predates the per-definition flag. Shared by the clip command
-    // and the library listing so "has highlights to create" never disagrees with "creates them".
     private static bool IsAutomaticClipCandidate(Bookmark bookmark) =>
         bookmark.IsAutomaticClipCandidate == true
         || (bookmark.IsAutomaticClipCandidate is null
@@ -195,9 +190,6 @@ internal sealed partial class AppHost
         return true;
     }
 
-    // Reports a clip that could not even be started — a source path that does not resolve inside the
-    // recording root. It reuses the importProgress "error" frame the engine's own failures use, which
-    // is what the clip dialog renders its failure state from.
     internal void PushClipError(string operationId, string message)
     {
         _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new

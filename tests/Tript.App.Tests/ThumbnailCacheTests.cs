@@ -10,9 +10,6 @@ using Xunit.Sdk;
 
 namespace Tript.App.Tests;
 
-// The thumbnail cache, without ffmpeg. The property that matters most here is that a cache hit does
-// not run the extractor: the library is a grid of cards, so a render asks for every visible
-// thumbnail at once and a cache that missed would spawn one decoder per card per render.
 public sealed class ThumbnailCacheTests : IDisposable
 {
     private readonly string _root;
@@ -52,8 +49,6 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.Equal(first, third);
         Assert.Equal(1, extractor.Calls);
 
-        // The image lands in the metadata tree, keyed by the video's file name — never next to the
-        // video, which keeps the sessions directory plain MP4s.
         Assert.Equal(Path.Combine(_root, "metadata", "thumbnails", "session-1.mp4.jpg"), first);
         Assert.True(File.Exists(first));
         Assert.False(File.Exists(Path.Combine(_root, "sessions", "session-1.mp4.jpg")));
@@ -70,14 +65,12 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.Null(store.GetOrQueue(video));
         await Task.Delay(100);
         Assert.Equal(1, extractor.Calls);
-        // No empty file is left behind for a later request to serve as a thumbnail.
+
         Assert.Empty(Directory.Exists(ThumbnailRoot)
             ? Directory.GetFiles(ThumbnailRoot)
             : []);
     }
 
-    // A machine with no ffmpeg is a supported state: the extractor factory returns null, every
-    // request answers "no thumbnail", and the factory is not retried per request.
     [SkippableFact]
     public async Task Ensure_ReturnsNull_AndAsksOnce_WhenThereIsNoExtractor()
     {
@@ -94,8 +87,6 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.Equal(1, factoryCalls);
     }
 
-    // A video replaced in place under the same name (a re-record, a restored backup) must not keep
-    // serving the previous file's frame.
     [SkippableFact]
     public async Task Ensure_RegeneratesWhenTheVideoIsNewerThanTheCachedImage()
     {
@@ -126,18 +117,14 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.True(store.Delete("session-1.mp4"));
         Assert.False(File.Exists(cached));
 
-        // Deleting a video with no cached thumbnail is not a failure.
         Assert.True(store.Delete("never-seen.mp4"));
     }
 
-    // An unwritable cache directory must not throw at the caller (the content server's worker
-    // thread): it is one more reason there is no thumbnail.
     [SkippableFact]
     public async Task Ensure_ReturnsNull_WhenTheCacheDirectoryCannotBeCreated()
     {
         var video = WriteVideo("session-1.mp4");
-        // A regular file where the cache directory would go: Directory.CreateDirectory then fails
-        // with IOException, deterministically on both platforms.
+
         var inTheWay = Path.Combine(_root, "blocked");
         File.WriteAllText(inTheWay, "in the way");
 
@@ -211,8 +198,6 @@ public sealed class ThumbnailCacheTests : IDisposable
             if (!Succeed)
                 return false;
 
-            // A real extractor writes a JPEG; the bytes are irrelevant to the cache, the length is
-            // not (a zero-length file counts as no thumbnail).
             File.WriteAllBytes(destinationPath, [0xFF, 0xD8, 0xFF, 0xD9]);
             return true;
         }
@@ -236,9 +221,6 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 }
 
-// The /api/thumbnail route against a running host, with a real ffmpeg-generated source. This is
-// where the status contract lives: 200 with a JPEG, 204 for every "no image" case so a grid of cards
-// never produces a console full of errors, and 403 for a path that escapes the recording root.
 [Collection(AppHostCollection.Name)]
 public sealed class ThumbnailRouteTests : IDisposable
 {
@@ -280,17 +262,14 @@ public sealed class ThumbnailRouteTests : IDisposable
 
         var bytes = await first.Content.ReadAsByteArrayAsync();
         Assert.True(bytes.Length > 0, "the thumbnail response carried no bytes");
-        // The JPEG SOI marker: the response is really an image, not a stray text body.
+
         Assert.Equal(0xFF, bytes[0]);
         Assert.Equal(0xD8, bytes[1]);
 
-        // Cached in the metadata tree, keyed by the video's file name.
         var cached = Path.Combine(_contentRoot, "metadata", "thumbnails", "source.mp4.jpg");
         Assert.True(File.Exists(cached), "the thumbnail was not cached under metadata/thumbnails");
         var written = File.GetLastWriteTimeUtc(cached);
 
-        // A second request is served from the cache: ffmpeg does not run again, so the cached file is
-        // not rewritten and the bytes are identical.
         using var second = await GetAsync(host, "sessions/source.mp4");
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal(bytes, await second.Content.ReadAsByteArrayAsync());
@@ -302,8 +281,6 @@ public sealed class ThumbnailRouteTests : IDisposable
     [SkippableFact]
     public async Task Thumbnail_route_answers_204_for_a_source_it_cannot_decode_or_find()
     {
-        // A text file with an .mp4 name: ffmpeg fails on it. The route must report "no thumbnail",
-        // never a 500 — and the host must stay up to answer the next request.
         var corrupt = Path.Combine(_contentRoot, "sessions", "corrupt.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(corrupt)!);
         await File.WriteAllTextAsync(corrupt, "this is not an mp4");
@@ -314,20 +291,15 @@ public sealed class ThumbnailRouteTests : IDisposable
         using (var response = await GetAsync(host, "sessions/corrupt.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
-        // A source that is not there at all is the same answer: the grid draws a placeholder.
         using (var missing = await GetAsync(host, "sessions/nope.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, missing.StatusCode);
 
-        // The host is still serving after both.
         using (var again = await GetAsync(host, "sessions/corrupt.mp4"))
             Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
 
         await host.ShutdownAsync();
     }
 
-    // The cascade-delete contract extended to the cache: a deleted recording must not leave its
-    // thumbnail behind, or the image would outlive the video it was taken from (and a new recording
-    // reusing the name would inherit it).
     [SkippableFact]
     public async Task DeleteContent_removes_the_cached_thumbnail()
     {
@@ -360,7 +332,6 @@ public sealed class ThumbnailRouteTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // With the launch's session token; the content server serves no thumbnail without it.
     private static Task<HttpResponseMessage> GetAsync(AppHostDriver host, string path)
         => SendAsync(new HttpRequestMessage(HttpMethod.Get,
             host.WithToken($"http://localhost:{host.ContentPort}/api/thumbnail/{path}")));
@@ -402,8 +373,6 @@ public sealed class ThumbnailRouteTests : IDisposable
         }
     }
 
-    // A two-second synthetic H.264 file. testsrc is a moving pattern, so the extracted frame is not
-    // a flat colour and the JPEG has real content.
     private static void GenerateTestVideo(string ffmpeg, string path)
     {
         var startInfo = new ProcessStartInfo

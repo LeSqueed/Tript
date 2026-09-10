@@ -8,20 +8,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The alpha smoke test. Starts the app host as a child process against a
-// temp content root, connects a WebSocket control-socket client, and asserts the six round trips
-// that define the alpha:
-//   1. NewConnection -> full push (state, settings, gameList)
-//   2. StartRecording -> state recording=true; a real MP4 on disk
-//   3. StopRecording -> state recording=false
-//   4. The content server serves the recorded file (range 206, right bytes) and refuses ".." (403)
-//   5. CreateClip -> importProgress (done or error; the round trip works)
-//   6. UpdateSettings -> settings push reflects the change
-//
-// The seam-level tests run with --fake-recorder (no libobs, no display server, no muxer helper).
-// The recorder round trip asserts the state machine and the output path; the fake does not write
-// bytes, so the "real MP4 on disk" assertion is covered by the real-recorder test class, which is
-// skipped when the machine cannot host a real recording.
 [Collection(AppHostCollection.Name)]
 public sealed class SmokeTests : IDisposable
 {
@@ -83,10 +69,6 @@ public sealed class SmokeTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // A configured recording output directory must be honoured by the host's output-path builder.
-    // BuildOutputPath creates the game/sessions/ directory unconditionally — flat, no date subfolder —
-    // so a fake-recorder StartRecording is enough to observe where the recording would land: no
-    // libobs, no real file.
     [Fact]
     public async Task StartRecording_withConfiguredOutputDirectory_createsIt()
     {
@@ -107,7 +89,7 @@ public sealed class SmokeTests : IDisposable
 
         var expected = Path.Combine(outputRoot, "sessions");
         Assert.True(Directory.Exists(expected), $"The configured output directory was not created: {expected}");
-        // Sessions are flat inside the game folder: the timestamp is in the file name, so there is no date subfolder.
+
         Assert.Empty(Directory.GetDirectories(expected));
 
         await host.ShutdownAsync();
@@ -232,7 +214,6 @@ public sealed class SmokeTests : IDisposable
         Assert.Equal("settings-1", result.GetProperty("requestId").GetString());
         Assert.True(result.GetProperty("success").GetBoolean());
 
-        // The change persisted to the settings file, not just the push.
         var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath));
         Assert.Equal(5, onDisk.RootElement.GetProperty("recording").GetProperty("quality").GetInt32());
 
@@ -247,9 +228,6 @@ public sealed class SmokeTests : IDisposable
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        // A fake source file for the clip engine to chew on. The engine runs real ffmpeg, so the
-        // clip may succeed or fail depending on the machine; the round trip is that importProgress
-        // arrives either way.
         var source = Path.Combine(_contentRoot, "sessions", "source.mp4");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
         File.WriteAllText(source, "not a real mp4 but the path is what matters");
@@ -265,7 +243,6 @@ public sealed class SmokeTests : IDisposable
             """;
         await host.SendAsync(request);
 
-        // importing always arrives first; done or error follows.
         var (m1, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("importProgress", m1);
 

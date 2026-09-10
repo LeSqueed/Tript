@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The sessions page: every session, one per row of the grid — including the main-video-less
-// placeholders the library's item views hide. It is the sessions half of the catalogue; the
-// library is the playable-items half.
 
 import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -38,17 +34,13 @@ const SESSIONS_QUERY: LibraryQuery = { ...DEFAULT_LIBRARY_QUERY, type: 'sessions
 
 export interface SessionsViewProps {
   client: IpcClient;
-  /** Everything the backend has, in its own order (newest-first), reactive via the shell's source. */
   items: ContentItem[];
-  /** Whether cards may create thumbnail requests while this mounted view is visible. */
   thumbnailLoadingActive?: boolean;
   connectionState?: ConnectionState;
   contentLoaded?: boolean;
-  /** The shell's player seam: called with the item the user opened and the page's result set. */
   onOpen?: (item: ContentItem, resultItems: ContentItem[]) => void;
   nowSeconds?: number;
   retentionHours?: number;
-  /** Current default used when a session deletion dialog is opened. */
   deleteLinkedHighlightsByDefault?: boolean;
 }
 

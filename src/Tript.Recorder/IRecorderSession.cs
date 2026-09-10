@@ -20,8 +20,6 @@ public interface IRecorderSession : IDisposable
 
     bool HasDisplayFallback { get; }
 
-    // True when the hook attached before the deadline; false when the deadline passed or the token
-    // was cancelled. warningAfter <= zero means no warning.
     bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
         Action clearWarning, CancellationToken cancellationToken);
 

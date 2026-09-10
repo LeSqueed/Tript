@@ -6,11 +6,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The milestone: a real ffmpeg_muxer output, a real x264 video encoder, a real ffmpeg_aac audio
-// encoder bound to mixer zero and a colour source on channel 0 — started, run for a couple of
-// keyframes, stopped — and a real, probeable file on disk. Plus the deliberate failures, which are
-// the other half of the contract: a failure must be reported, never swallowed, and a killed muxer
-// helper must not look like a successful recording.
 public sealed class ObsOutputRecordingTests
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
@@ -23,8 +18,6 @@ public sealed class ObsOutputRecordingTests
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "recording.mp4");
 
-        // One second at 30 fps with keyint_sec 1 is three keyframe intervals — enough that the
-        // file must contain keyframes even if the first interval is swallowed.
         var (verdict, exitCode) = ObsRecorderHarnessDriver.Run(file, durationSeconds: 1.0);
 
         Assert.Equal(ObsRecorderHarnessDriver.Verdict.Success, verdict);
@@ -35,10 +28,6 @@ public sealed class ObsOutputRecordingTests
         Cleanup(directory);
     }
 
-    // The container contract, proven from the file itself rather than from what the plugin said it
-    // would write: the file is a playable MP4 with H.264 video and one AAC track. A wrong settings
-    // key, a lost audio encoder or a muxer that never wrote its header would each break one of
-    // these assertions while the file still exists.
     [SkippableFact]
     public void TheRecording_IsAProbeableMp4WithH264VideoAndAacAudio()
     {
@@ -56,8 +45,7 @@ public sealed class ObsOutputRecordingTests
         var audio = root.GetProperty("audio");
         var format = root.GetProperty("format");
         Assert.Equal("h264", video.GetProperty("codec_name").GetString());
-        // width/height are numbers; the rate and bit-rate fields are strings because ffprobe
-        // stringifies them — probe-media.sh reports what ffprobe gave it, so both shapes appear.
+
         Assert.Equal(1280, video.GetProperty("width").GetInt32());
         Assert.Equal(720, video.GetProperty("height").GetInt32());
         Assert.Equal(1, root.GetProperty("audio_track_count").GetInt32());
@@ -67,10 +55,6 @@ public sealed class ObsOutputRecordingTests
         Cleanup(directory);
     }
 
-    // A silent AAC track is still a track: the audio encoder is bound to mixer zero, and the
-    // output is wired to carry it. A recording with no audio stream at all is the silent failure a
-    // "valid MP4" assertion would miss, which is exactly why the audio track count is asserted
-    // separately from the file being playable.
     [SkippableFact]
     public void TheRecording_HasAnAudioTrackEvenThoughTheSourceIsSilent()
     {
@@ -87,18 +71,12 @@ public sealed class ObsOutputRecordingTests
         var audio = root.GetProperty("audio");
         Assert.Equal(1, root.GetProperty("audio_track_count").GetInt32());
         Assert.Equal("aac", audio[0].GetProperty("codec_name").GetString());
-        // sample_rate is a string in the probe output (ffprobe stringifies it); parse it.
+
         Assert.Equal(48000, int.Parse(audio[0].GetProperty("sample_rate").GetString()!, System.Globalization.CultureInfo.InvariantCulture));
 
         Cleanup(directory);
     }
 
-    // The colour fields, which are the point of probe-media.sh's fixed field set: a clip that plays
-    // fine can still carry the wrong transfer or primaries, and a *wrong* binding can tag a
-    // recorded file with the wrong colour description without any of it looking broken. The
-    // assertion is that the fields exist and are non-"unspecified" — the exact values (bt709 etc.)
-    // are libobs's defaults, and the differential comparison is what pins the values, not a
-    // hard-coded expectation here.
     [SkippableFact]
     public void TheRecording_CarriesItsColourDescription()
     {
@@ -123,10 +101,6 @@ public sealed class ObsOutputRecordingTests
         Cleanup(directory);
     }
 
-    // ---- the deliberate failures: the failure is reported, never swallowed ----
-
-    // The synchronous failure channel, provoked with a bad path. The bad directory is deliberately
-    // unique so a stale directory from an earlier run cannot satisfy it.
     [SkippableFact]
     public void ABadPath_IsRefusedSynchronouslyWithANamedReason()
     {
@@ -141,10 +115,6 @@ public sealed class ObsOutputRecordingTests
         Assert.NotEqual(string.Empty, output.LastError);
     }
 
-    // The stop signal is reported rather than swallowed — provoked by killing the muxer helper mid-
-    // recording. The plugin cannot finalise the file: the stop signal fires, and what is on disk is
-    // not a playable MP4 (no moov atom — measured; ffprobe reports no codec, no audio track and no
-    // format).
     [SkippableFact]
     public async Task AKilledMuxerHelper_DoesNotLookLikeASuccessfulRecording()
     {
@@ -153,7 +123,6 @@ public sealed class ObsOutputRecordingTests
         var directory = CreateRecordingDirectory();
         var file = Path.Combine(directory, "killed.mp4");
 
-        // A long duration gives the parent time to kill the helper while the recording is running.
         var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = ObsRecorderHarnessDriver.HarnessPath,
@@ -168,7 +137,6 @@ public sealed class ObsOutputRecordingTests
 
         var stdoutTask = process!.StandardOutput.ReadToEndAsync();
 
-        // Give the harness time to start the output and spawn the helper, then kill it.
         await Task.Delay(TimeSpan.FromSeconds(2));
         ObsRecorderHarnessDriver.KillMuxerHelper();
 
@@ -176,9 +144,6 @@ public sealed class ObsOutputRecordingTests
         Assert.True(exited, "The harness did not exit after its muxer helper was killed.");
         ObsRecorderHarnessDriver.RequireHarnessFoundADisplay(process.ExitCode);
 
-        // The killed recording never wrote the moov atom — measured — so ffprobe reports no usable
-        // streams. Assert that the harness reported *some* verdict (not a hang and not a clean
-        // success with a valid file), and that the file is not a playable MP4.
         var stdout = await stdoutTask;
         var resultLine = stdout
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -192,11 +157,6 @@ public sealed class ObsOutputRecordingTests
         Cleanup(directory);
     }
 
-    // ---- helpers ----
-
-    // The shape a recorder actually starts: a muxer output with a video and an audio encoder wired,
-    // bound to the session's mixes. Without this, a bad path refuses with "no media" and names
-    // nothing — measured — so the tests that assert on the named reason wire encoders first.
     private static ObsOutput WithEncodersWired(ObsSession session, ObsOutput output)
     {
         session.Runtime.TryGetVideoHandle(out var video);
@@ -217,9 +177,6 @@ public sealed class ObsOutputRecordingTests
         output.SetVideoEncoder(videoEncoder);
         output.SetAudioEncoder(audioEncoder, 0);
 
-        // The encoders belong to the output for the duration of this test; the caller's references
-        // are kept alive by the output's own internal references, so disposal here only drops the
-        // wrapper.
         _ = videoEncoder;
         _ = audioEncoder;
         return output;
@@ -262,7 +219,6 @@ public sealed class ObsOutputRecordingTests
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A leftover recording in the temp directory is not worth failing a green suite over.
         }
     }
 }

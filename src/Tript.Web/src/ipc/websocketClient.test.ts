@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// IPC client tests: NewConnection on socket open, dispatch of incoming messages, reconnection
-// with backoff, and graceful failure when the backend is not running.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createIpcClient } from './websocketClient';
@@ -62,19 +59,16 @@ describe('createIpcClient', () => {
     expect(client.state).toBe('disconnected');
     expect(MockWebSocket.instances).toHaveLength(1);
 
-    // A new connection is attempted after 100ms. It opens and then closes, scheduling the next.
     vi.advanceTimersByTime(100);
     expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[1].serverOpen();
     MockWebSocket.instances[1].serverClose();
 
-    // Second retry after 200ms (doubled).
     vi.advanceTimersByTime(200);
     expect(MockWebSocket.instances).toHaveLength(3);
     MockWebSocket.instances[2].serverOpen();
     MockWebSocket.instances[2].serverClose();
 
-    // Third retry after 400ms (doubled again, capped at max).
     vi.advanceTimersByTime(400);
     expect(MockWebSocket.instances).toHaveLength(4);
 
@@ -89,7 +83,6 @@ describe('createIpcClient', () => {
     MockWebSocket.throwOnNextConstruct = true;
     client.connect();
 
-    // The first construction failed; a retry is scheduled.
     expect(MockWebSocket.instances).toHaveLength(0);
     vi.advanceTimersByTime(50);
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -104,7 +97,6 @@ describe('createIpcClient', () => {
     client.close();
     expect(client.state).toBe('disconnected');
 
-    // No further connections should be attempted.
     vi.advanceTimersByTime(1000);
     expect(MockWebSocket.instances).toHaveLength(1);
   });
@@ -116,7 +108,6 @@ describe('createIpcClient', () => {
 
     client.send('StartRecording');
     const ws = MockWebSocket.instances[0];
-    // Only NewConnection is sent once open; the pre-open StartRecording is dropped.
     ws.serverOpen();
     expect(ws.sent).toHaveLength(1);
     expect(JSON.parse(ws.sent[0]).method).toBe('NewConnection');
@@ -157,13 +148,10 @@ describe('createIpcClient', () => {
     second.serverMessage('{"method":"state","content":{"recording":true}}');
     expect(handler).toHaveBeenCalledTimes(1);
 
-    // A late frame from the first socket must be ignored.
     first.serverMessage('{"method":"state","content":{"recording":false}}');
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  // The handshake is the one request the browser will not let us put a header on, so the per-launch
-  // token has to be on the URL the client opens — including every reconnect.
   it('connects to a URL carrying the session token, and keeps it across a reconnect', () => {
     captureSessionToken('?k=deadbeef');
     try {

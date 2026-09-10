@@ -7,7 +7,6 @@ interface LoadingOverlayProps {
   description?: string;
   progress?: number | null;
   delayMs?: number;
-  /** When set with onCancel, renders a cancel action in the dialog. */
   cancelLabel?: string;
   onCancel?: () => void;
 }

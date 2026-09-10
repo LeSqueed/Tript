@@ -9,17 +9,12 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// A definition without a screen region makes BuildRegionGroups append a full-frame group.
-// Converting that group's crop per-group means converting every pixel in the frame, on top of
-// every other group's crop — more work than the whole-frame conversion the crop-before-greyscale
-// path replaced. These tests pin the strategy choice and prove both strategies stay byte-identical.
 public class FullFrameGroupTests
 {
     private const int W = 1920;
     private const int H = 1080;
     private const int ModelInput = 640;
 
-    // The 7 event definitions in data/training/Overwatch/events.json, the only shipped config.
     private static List<EventDefinition> OverwatchDefinitions() =>
     [
         Def(0, 0.2583f, 0.5101f, 0.5375f, 0.3161f),
@@ -43,7 +38,6 @@ public class FullFrameGroupTests
             ScreenRegionH = h
         };
 
-    // No ScreenRegionW, so BuildRegionGroups treats it as covering the whole frame.
     private static EventDefinition FullFrameDef(int classId) =>
         new() { Id = classId, ClassId = classId, Type = EventType.Trigger };
 
@@ -58,7 +52,6 @@ public class FullFrameGroupTests
         Assert.Equal(4, groups.Count);
         Assert.Contains(groups, g => g.X == 0f && g.Y == 0f && g.W == 1f && g.H == 1f);
 
-        // The three real groups survive alongside it rather than being absorbed.
         foreach (var (x, y, w, h) in ReferenceImplementations.OverwatchGroups)
         {
             Assert.Contains(groups, g =>
@@ -67,8 +60,6 @@ public class FullFrameGroupTests
         }
     }
 
-    // The regression guard. Greyscaling more pixels than the frame holds means the per-group
-    // path is doing strictly more work than converting the frame once would.
     [Theory]
     [InlineData(1920, 1080)]
     [InlineData(2560, 1440)]
@@ -97,8 +88,6 @@ public class FullFrameGroupTests
         Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
-    // The only shipped config must keep the per-group path; this fix is for the case it does
-    // not hit. 390,526 is the sum of the three real crop areas at 1920x1080.
     [Fact]
     public void Overwatch_config_keeps_the_per_group_path()
     {
@@ -109,7 +98,6 @@ public class FullFrameGroupTests
         Assert.Equal(390_526, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
-    // Overlapping groups can pass full coverage without any one of them being full-frame.
     [Fact]
     public void Coverage_above_the_frame_switches_strategy_without_a_full_frame_group()
     {
@@ -124,8 +112,6 @@ public class FullFrameGroupTests
         Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
-    // The same guarantee CropThenGray_equals_GrayThenCrop gives the real regions, extended to a
-    // group set containing (0, 0, 1, 1) — the case neither golden test covered.
     [Fact]
     public void Both_strategies_produce_identical_buffers_for_a_full_frame_group_set()
     {
@@ -154,8 +140,6 @@ public class FullFrameGroupTests
         }
     }
 
-    // The full-frame group is the one whose crop rectangle is the frame, so it is also the one
-    // where a clamping slip would go unnoticed by the existing region tests.
     [Fact]
     public void Full_frame_group_crops_the_entire_frame()
     {

@@ -15,8 +15,6 @@ const inputs = (overrides: Partial<Parameters<typeof deriveRecorderState>[0]> = 
 
 describe('deriveRecorderState', () => {
   it('reports disconnection above everything else', () => {
-    // A stale "Recording" would be a lie the moment the socket dropped, and nothing else on the bar
-    // can be acted on anyway.
     expect(
       deriveRecorderState(inputs({ connection: 'disconnected', recording: true, game: 'Overwatch' })),
     ).toEqual({ kind: 'disconnected' });
@@ -55,7 +53,6 @@ describe('deriveRecorderState', () => {
   it('does not claim an undetected game is running', () => {
     expect(deriveRecorderState(inputs({ game: 'Counter-Strike 2' }))).toEqual({ kind: 'idle' });
   });
-
 });
 
 describe('formatElapsed', () => {

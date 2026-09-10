@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The host-reachability state as a permanent toast: it says what is wrong while it is wrong, and
-// the backend resolving it (reachability back to null) is what takes it down. Permanent on purpose
-// — a connection problem that vanishes on its own in eight seconds would lie about itself.
 
 import { useEffect } from 'react';
 import type { HostReachability } from '../../ipc/hostProbe';

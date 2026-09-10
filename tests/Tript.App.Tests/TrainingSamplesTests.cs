@@ -371,11 +371,10 @@ public sealed class TrainingSamplesTests
         };
         var detections = new List<DetectionResult>
         {
-            // Fully inside the region.
             new() { ClassId = 1, Confidence = 0.9f, X = 0.55f, Y = 0.55f, Width = 0.1f, Height = 0.1f },
-            // Center inside but the box bleeds out of the region.
+
             new() { ClassId = 1, Confidence = 0.8f, X = 0.7f, Y = 0.5f, Width = 0.2f, Height = 0.1f },
-            // Entirely outside the region.
+
             new() { ClassId = 1, Confidence = 0.7f, X = 0.1f, Y = 0.1f, Width = 0.1f, Height = 0.1f },
         };
 
@@ -438,7 +437,6 @@ public sealed class TrainingSamplesTests
                 new TrainingOcrRegion { X = 0.2, Y = 0.3, Width = 0.4, Height = 0.1, Text = "KILL AMON" },
             ]);
 
-            // Deleting event id 2 drops class 1's label; the OCR region carries no class and stays.
             var remap = store.RemapClassIds(new Dictionary<int, int> { [0] = 0 });
             var updated = store.LoadById(sample.Id);
 

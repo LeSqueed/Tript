@@ -1,22 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Message dispatch — the receiving half of the IPC client. The frontend narrows on `method`.
 
 export type MessageHandler = (content: unknown) => void;
 
 export interface Dispatcher {
-  /** Register a handler for a method name. Returns an unsubscribe function. */
   on(method: string, handler: MessageHandler): () => void;
-  /** Register a handler for several method names at once (aliases for one concern). */
   onAny(methods: readonly string[], handler: MessageHandler): () => void;
-  /** Dispatch a parsed frame. Unknown methods are ignored. */
   dispatch(parsed: { method: string; content?: unknown }): void;
 }
 
-/**
- * Create a dispatcher. `knownMethods` is the canonical set this build understands — available to
- * callers for diagnostics (e.g. logging an unknown method without failing).
- */
 export function createDispatcher(_knownMethods: readonly string[] = []): Dispatcher {
   const handlers = new Map<string, Set<MessageHandler>>();
 
@@ -44,10 +35,8 @@ export function createDispatcher(_knownMethods: readonly string[] = []): Dispatc
   function dispatch(parsed: { method: string; content?: unknown }): void {
     const set = handlers.get(parsed.method);
     if (!set || set.size === 0) {
-      return; // unknown method — ignore, never error
+      return;
     }
-    // One handler throwing must not prevent the others from running: a broken UI listener must
-    // not take down the IPC client's message loop. Rethrow the first failure after the loop.
     let firstError: unknown = null;
     for (const handler of [...set]) {
       try {
@@ -66,7 +55,6 @@ export function createDispatcher(_knownMethods: readonly string[] = []): Dispatc
   return { on, onAny, dispatch };
 }
 
-/** Whether the given method name is one this build understands. */
 export function isKnownMethod(method: string, knownMethods: readonly string[]): boolean {
   return knownMethods.includes(method);
 }

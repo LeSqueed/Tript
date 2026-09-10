@@ -5,10 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Who holds a reference to what, and what survives which teardown order. Everything here is
-// asserted through two instruments libobs provides rather than through inspection: a weak
-// reference, which expires exactly when its source is destroyed, and the live bmem allocation
-// count.
 public sealed class ObsSourceLifetimeTests
 {
     private const string ColourSourceId = "color_source";
@@ -29,8 +25,6 @@ public sealed class ObsSourceLifetimeTests
         Assert.Null(weak.TryGetSource());
     }
 
-    // A second owning reference is what obs_source_get_ref is for, and it does exactly what it says:
-    // the source outlives the first handle's disposal.
     [SkippableFact]
     public void ASecondReference_KeepsTheSourceAliveAfterTheFirstIsDisposed()
     {
@@ -49,10 +43,6 @@ public sealed class ObsSourceLifetimeTests
         Assert.True(weak.IsExpired);
     }
 
-    // The rule that matters for a recorder: attaching a source to a scene hands the scene a
-    // reference of its own, so the caller may let go of its handle immediately. The holder is the
-    // scene *item*, not the scene, which is the part a signature cannot show: detaching the item is
-    // not enough while a handle to that item is still open.
     [SkippableFact]
     public void AttachingASourceToAScene_GivesTheSceneAReferenceOfItsOwn()
     {
@@ -96,9 +86,6 @@ public sealed class ObsSourceLifetimeTests
         Assert.True(weak.IsExpired);
     }
 
-    // A scene item handle is a reference of its own, taken because the pointer libobs hands back
-    // belongs to the scene. Removing the item from the scene therefore leaves this object usable,
-    // just detached.
     [SkippableFact]
     public void ASceneItemHandle_StaysUsableAfterItIsRemovedFromItsScene()
     {
@@ -117,15 +104,12 @@ public sealed class ObsSourceLifetimeTests
         Assert.False(item.IsAttached);
         Assert.Null(scene.FindItem("detached"));
 
-        // Detached from the scene, but still holding its source: the item's reference to what it
-        // places outlives its membership of a scene and is given up only when the item is.
         using (var stillThere = item.GetSource())
         {
             Assert.NotNull(stillThere);
             Assert.Equal("detached", stillThere.Name);
         }
 
-        // Removing twice is not an error; the second call finds nothing to detach.
         item.Remove();
     }
 
@@ -167,19 +151,15 @@ public sealed class ObsSourceLifetimeTests
 
         Assert.True(weak.IsExpired, $"the source survived disposal in the order: {order}");
 
-        // The weak reference itself is still live, and it is a bmem allocation of its own.
         Assert.InRange(ObsRuntime.LiveAllocationCount - before, 0, 4);
     }
 
-    // The cycle a recorder actually performs when the user switches what is being captured.
     [SkippableFact]
     public void RepeatedAttachAndDetachCycles_LeakNothing()
     {
         using var session = ObsSession.StartWithSourceTypes();
         using var scene = ObsScene.CreatePrivate("recycled");
 
-        // Warm-up cycles first: the first attachments of a source type allocate things the type then
-        // keeps, and counting those as a leak would make the assertion meaningless.
         RunCycles(scene, 10);
         session.Runtime.WaitForDestroyQueue();
         var before = ObsRuntime.LiveAllocationCount;
@@ -202,9 +182,6 @@ public sealed class ObsSourceLifetimeTests
         }
     }
 
-    // The measured asymmetry between the two ways of creating a scene: a findable one is held by the
-    // OBS core as well as by its caller, so disposal has to make the core let go too. Without that
-    // this test finds the scene still there.
     [SkippableFact]
     public void DisposingAFindableScene_LeavesItNeitherFindableNorAlive()
     {
@@ -225,8 +202,6 @@ public sealed class ObsSourceLifetimeTests
         Assert.True(weak.IsExpired);
     }
 
-    // The intermediate source reference has to be gone before the scene's lifetime is asserted on,
-    // or it is this test keeping the scene alive.
     private static ObsWeakSource WeakReferenceTo(ObsScene scene)
     {
         using var source = scene.AsSource();
@@ -242,9 +217,6 @@ public sealed class ObsSourceLifetimeTests
         Assert.Null(ObsSource.FindByName("private scene"));
     }
 
-    // libobs frees every source at shutdown whether or not a caller still holds a reference, so the
-    // pointer in a handle that outlives the context refers to nothing. Releasing it would be a
-    // use-after-free; the handle has to notice and decline.
     [SkippableFact]
     public void AHandleThatOutlivesTheContext_DeclinesToRelease()
     {
@@ -254,13 +226,10 @@ public sealed class ObsSourceLifetimeTests
 
         session.Dispose();
 
-        // Both of these would be a release against freed memory if the handle did not check.
         source.Dispose();
         scene.Dispose();
     }
 
-    // A weak reference is the opposite case, and for the same reason as a settings object: its
-    // control block is bmem's, it survives obs_shutdown, and declining to release it would leak it.
     [SkippableFact]
     public void AWeakReferenceDisposedAfterTheContextIsGone_IsReleasedRatherThanLeaked()
     {
@@ -282,9 +251,6 @@ public sealed class ObsSourceLifetimeTests
             "disposing a weak reference after shutdown should still free its control block");
     }
 
-    // Measured on 32.2.1 and documented nowhere: obs_shutdown crashes — a segmentation fault inside
-    // libobs, not a leak — when a scene the caller still references still has items attached. This
-    // test leaks exactly that arrangement on purpose.
     [SkippableFact]
     public void ASceneStillHoldingItemsAtShutdown_DoesNotTakeTheProcessDown()
     {
@@ -295,7 +261,6 @@ public sealed class ObsSourceLifetimeTests
         var item = scene.AddSource(source);
         Assert.NotNull(item);
 
-        // Deliberately no disposal of the scene, the item or the source.
         session.Dispose();
 
         Assert.False(ObsRuntime.IsInitialized);

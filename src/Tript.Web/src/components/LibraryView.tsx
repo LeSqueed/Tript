@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The library — ONE grid over everything the backend has: sessions and clips together. There is no
-// separate clips page any more.
 
 import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -54,11 +51,6 @@ import { TrashList } from './trash/TrashList';
 import { filterTrashEntries } from './trash/trashModel';
 import { useWatchedGames } from './recorder/useWatchedGames';
 
-/**
- * The type filters. Trash is one of them because deleted content is the same catalogue in a
- * different state, not another destination — and it carries its count, so a full trash is visible
- * without going there first.
- */
 function typeFilters(trashCount: number): { value: ContentTypeFilter; label: string }[] {
   return [
     { value: 'all', label: 'All' },
@@ -71,34 +63,14 @@ function typeFilters(trashCount: number): { value: ContentTypeFilter; label: str
 
 export interface LibraryViewProps {
   client: IpcClient;
-  /** Everything the backend has, in its own order (newest-first), reactive via the shell's source. */
   items: ContentItem[];
-  /** Whether cards may create thumbnail requests while this mounted library is visible. */
   thumbnailLoadingActive?: boolean;
   connectionState?: ConnectionState;
   contentLoaded?: boolean;
-  /**
-   * The shell's player seam. `origin` says what the player's playlist is built from: a session
-   * entry point (the recent shelf) plays the session's own list; a library card plays the result
-   * list the card came from, even when the card is a session.
-   */
   onOpen?: (item: ContentItem, resultItems: ContentItem[], origin: 'library' | 'session') => void;
-  /**
-   * The clock the date filter measures its trailing window against, in epoch seconds. Injectable so
-   * a test can put "now" somewhere fixed relative to its fixtures instead of racing the real clock.
-   */
   nowSeconds?: number;
-  /**
-   * The trash, which the library lists under its own type filter rather than a separate route:
-   * deleted content is the same catalogue in a different state.
-   */
   trash?: TrashController;
-  /**
-   * How long the backend keeps a trashed item, from the `trash` push. The delete confirmation quotes
-   * it; the default only stands until the first push arrives.
-   */
   retentionHours?: number;
-  /** Current default used when a recording deletion dialog is opened. */
   deleteLinkedHighlightsByDefault?: boolean;
 }
 export function LibraryView({
@@ -116,25 +88,17 @@ export function LibraryView({
   const [query, setQuery] = useState<LibraryQuery>(DEFAULT_LIBRARY_QUERY);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selected, setSelected] = useState<SelectionKey[]>([]);
-  // The items a confirmed delete will act on, captured when the dialog opens.
   const [pendingDelete, setPendingDelete] = useState<ContentItem[] | null>(null);
-  // Default to the real clock, read at render time. The date window only needs second-level accuracy,
-  // so re-reading it per render is cheaper and simpler than keeping a ticking clock in state.
   const now = nowSeconds ?? Date.now() / 1000;
   const showingTrash = query.type === 'trash';
   const typeSegments = useMemo(() => typeFilters(trash?.entries.length ?? 0), [trash?.entries.length]);
   const view = useMemo(() => deriveLibrary(items, query, now), [items, query, now]);
-  // Grouping is for the "everything" view. Asking for only recordings or only clips is asking for a
-  // flat list of one kind, and grouping a clips-only view would put every clip under one headless
-  // group — the flat grid with a heading on top of it.
   const grouped = query.type === 'all';
   const groupView = useMemo(
     () => (grouped ? deriveGroupedLibrary(items, query, now) : null),
     [grouped, items, query, now],
   );
   const watchedGames = useWatchedGames(client);
-  // The two views paginate over different things — items, or groups — so the chrome reads its page
-  // numbers from whichever one is rendering rather than from `view` unconditionally.
   const page = groupView?.page ?? view.page;
   const pageCount = groupView?.pageCount ?? view.pageCount;
   const games = useMemo(
@@ -147,11 +111,6 @@ export function LibraryView({
     [trash, query, now],
   );
 
-  /**
-   * Change a filter or the sort. Page goes back to 1 for BOTH: a filter changes which items exist
-   * and a sort changes which ones are near the front, so in either case "page 4" no longer means
-   * what the user was looking at.
-   */
   const updateQuery = useCallback((patch: Partial<LibraryQuery>) => {
     setQuery((previous) => ({ ...previous, ...patch, page: 1 }));
   }, []);
@@ -161,7 +120,6 @@ export function LibraryView({
   }, []);
 
   const clearFilters = useCallback(() => {
-    // The sort survives: it is not a filter, and it is not what emptied the grid.
     setQuery((previous) => ({
       ...DEFAULT_LIBRARY_QUERY,
       type: showingTrash ? 'trash' : 'all',
@@ -170,8 +128,6 @@ export function LibraryView({
     }));
   }, [showingTrash]);
 
-  // Applied on the way OUT rather than stored pruned: a `content` push replaces the item array, and
-  // the selection must not name something that has since left the list even for one render.
   const liveKeys = useMemo(() => new Set(items.map(selectionKey)), [items]);
   const selection = useMemo(() => pruneSelection(selected, liveKeys), [selected, liveKeys]);
   const pageKeys = useMemo(() => view.items.map(selectionKey), [view.items]);
@@ -233,16 +189,12 @@ export function LibraryView({
             : {}),
         }),
       );
-      // `permanent` is omitted rather than sent false — the contract reads omitted/false as "trash",
-      // and the quieter frame is the one that cannot be misread.
       const flag = permanent ? { permanent: true } : {};
       if (parameters.length === 1) {
         client.send('DeleteContent', { ...parameters[0], ...flag });
       } else if (parameters.length > 1) {
         client.send('DeleteMultipleContent', { items: parameters, ...flag });
       }
-      // Drop just what was sent. The rest of the selection is still valid, and the `content` push
-      // that follows is what actually removes the cards.
       setSelected((previous) => removeSelection(previous, targets.map(selectionKey)));
       setPendingDelete(null);
     },
@@ -254,9 +206,6 @@ export function LibraryView({
       return null;
     }
     const names = pendingDelete.map(itemLabel);
-    // Count what the button really moves, not what the dialog named. A missing-video placeholder
-    // session names itself but deletes nothing on its own; checked cascades add the non-favourited
-    // highlights the listing would otherwise hide.
     const physicalTargets = pendingDelete.reduce(
       (count, item) => count + (
         item.contentType === 'recording' && (item.videoMissing === true || item.highlightsOnly === true) ? 0 : 1
@@ -294,14 +243,8 @@ export function LibraryView({
     const options: SelectOption[] = [
       { value: ANY_GAME, label: 'All games' },
       ...games.names.map((name) => ({ value: name, label: name })),
-      // Only offered when something actually lacks a game — an option that can only ever match
-      // nothing is worse than no option.
       ...(games.hasUnknown ? [{ value: NO_GAME, label: UNKNOWN_GAME_LABEL }] : []),
     ];
-    // The selected game can leave the list under the user: a `content` push deletes its last item
-    // and the option derived from the items goes with it. It is kept while it is still selected,
-    // because a `<select>` whose value matches none of its options renders BLANK — which reads as a
-    // broken control, when what actually happened is a filter that now matches nothing.
     if (!options.some((option) => option.value === query.game)) {
       options.push({
         value: query.game,
@@ -312,15 +255,11 @@ export function LibraryView({
   }, [games, query.game]);
 
   const allGroups = groupView && !groupView.filtered ? groupByRecording(groupView.resultItems) : [];
-  // The flat grids (the Latest shelf and the ungrouped view) show a recording next to its clips like
-  // groupings do, so their cards need the same clips/highlights counts the recording groups carry.
   const recordingCounts = useMemo(() => recordingChildCounts(items), [items]);
   const recentGroups = groupView && !groupView.filtered
     ? allGroups.filter((group) => group.recording !== null).slice(0, 3)
     : [];
   const recentRecordingPaths = new Set(recentGroups.map((group) => group.recording!.filePath));
-  // The Recent shelf is a sessions surface and keeps its placeholder sessions; the item grid below
-  // it lists actual playable items, so placeholders do not repeat there.
   const allLatestItems = groupView
     ? groupView.resultItems.filter(
         (item) => !recentRecordingPaths.has(item.filePath) && !lacksMainVideo(item),
@@ -339,12 +278,9 @@ export function LibraryView({
 
   return (
     <section className="library-view">
-      {/* A plain div, not a <header>: the shell's recorder bar is the page's banner landmark, and a
-          second header element muddies that (some accessibility mappings promote any <header> to
-          banner) for a row that is only a count. */}
+      {}
 
-      {/* Deleted content is the same catalogue in a different state, so its useful filters remain
-          available while the Trash type is selected. */}
+      {}
       {showingTrash && trash ? (
         <>
           <LibraryToolbar
@@ -385,8 +321,6 @@ export function LibraryView({
           <ActionBar
             data-testid="library-selection"
             leading={
-              // A live region: the count is the only feedback a checkbox click gives, and a user who
-              // cannot see the highlighted cards has nothing else to go on.
               <span className="action-bar-count" data-testid="library-selection-count" aria-live="polite">
                 {selectedCount} selected
               </span>
@@ -410,8 +344,7 @@ export function LibraryView({
             </Button>
             {view.matchCount > 0 && (
               <span className="library-range muted small" data-testid="library-range">
-                {/* A grouped page holds a variable number of items — pagination is over groups so
-                    that a session is never split from its clips — so it counts sessions. */}
+                {}
                 {groupView
                   ? `${groupView.groupCount} session${groupView.groupCount === 1 ? '' : 's'} · ${groupView.matchCount} item${groupView.matchCount === 1 ? '' : 's'}`
                   : `Showing ${view.firstIndex}–${view.lastIndex} of ${view.matchCount}`}
@@ -439,14 +372,6 @@ export function LibraryView({
           />
         </div>
       ) : view.totalCount === 0 ? (
-        // No content at all. Worded as an expectation rather than an error: a fresh install and a
-        // backend that is not answering look identical here, and the connection badge in the recorder
-        // bar is what tells those apart.
-        //
-        // It must NOT ask the user to add a game. Detection is automatic and the game list ships
-        // seeded, so the only true instruction is "play". The watched names come from the live list,
-        // never a hard-coded "Overwatch", so the line stays true as more games are supported — and it
-        // is the same phrasing the idle recorder status uses, so the two agree.
         <div data-testid="library-empty">
           <EmptyState
             title="Nothing recorded yet"
@@ -463,9 +388,6 @@ export function LibraryView({
           />
         </div>
       ) : view.matchCount === 0 ? (
-        // Content exists but the filters hide all of it. This is the state that MUST be distinguishable
-        // from the one above: without the distinction, a too-narrow filter is indistinguishable from a
-        // broken backend, and the user's next move (clear the filters) is invisible.
         <div data-testid="library-empty-filtered">
           <FilterMismatchEmptyState total={view.totalCount} onClearFilters={clearFilters} />
         </div>

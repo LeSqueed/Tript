@@ -22,7 +22,6 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         Directory.CreateDirectory(_root);
         var settingsPath = Path.Combine(_root, "settings.json");
 
-        // Both cases opt into automatic clips; only the mode differs, and that is what the gate keys on.
         _store = new SettingsStore(new SettingsFileProvider(settingsPath));
         _store.Load().Recording.AutomaticClipsEnabled = true;
         _store.Save();
@@ -36,8 +35,6 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         }, _store, runtime: null, new RecordingSessionTracker(),
             recorderStopTimeout: TimeSpan.FromMilliseconds(50));
 
-        // Drive the automatic-clip worker through a recording engine, so a queued job is observed as a
-        // CreateClips call rather than an ffmpeg run against a file the fake recorder never produced.
         _clipEngine = new RecordingClipEngine();
         typeof(AppHost).GetField("_clipEngine", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(_host, _clipEngine);
@@ -124,14 +121,10 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         _store.Load().Capture.Method = DisplayCaptureMethod.Game;
         _store.Save();
 
-        // Game-only capture without a detected process is refused before the recorder starts.
         Assert.False(_host.StartRecording(gameId: null));
         Assert.False(SessionStartGate());
     }
 
-    // Starts a recording in the given mode, leaves one unsaved bookmark in it, materializes the output
-    // file the fake recorder never writes, and stops. The only variable is the mode, which decides the
-    // start-of-session effective flag the post-stop gate keys on.
     private void RecordAndStopInMode(RecordingMode mode)
     {
         _store.Load().Recording.Mode = mode;
@@ -139,21 +132,16 @@ public sealed class AutomaticClipStopGateTests : IDisposable
 
         Assert.True(_host.StartRecording("Overwatch"));
 
-        // The post-stop gate cuts clips only for a recording that exists on disk, so materialize the
-        // output path: that leaves the start-of-session flag as the only thing under test.
         var outputPath = (string)typeof(AppHost).GetField("_activeOutputPath",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
         File.WriteAllText(outputPath, string.Empty);
 
-        // A bookmark recorded during the session but not already saved as a live highlight.
         var bookmarks = (List<Bookmark>)typeof(AppHost).GetField("_automaticClipBookmarks",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
         bookmarks.Add(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
 
         Assert.True(_host.StopRecording());
 
-        // The automatic-clip worker runs on the thread pool; wait for it to finish so the CreateClips
-        // count is final rather than a race against the job tearing itself down.
         var jobField = typeof(AppHost).GetField("_automaticClipJob",
             BindingFlags.Instance | BindingFlags.NonPublic)!;
         Assert.True(SpinWait.SpinUntil(() => jobField.GetValue(_host) is null, TimeSpan.FromSeconds(5)));
@@ -163,8 +151,6 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         (bool)typeof(AppHost).GetField("_liveHighlightsEnabledAtSessionStart",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
 
-    // Records how many times the automatic-clip worker asked to cut, which is set synchronously when the
-    // job is queued and therefore reflects the gate's decision, not ffmpeg's success.
     private sealed class RecordingClipEngine : IClipEngine
     {
         private int _createClipsCalls;

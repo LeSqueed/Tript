@@ -6,8 +6,6 @@ using Tript.Core;
 
 namespace Tript.App;
 
-// The UI host. Serves the built frontend from the dist
-// directory.
 internal sealed class UiHost : IDisposable
 {
     private readonly int _port;
@@ -72,15 +70,6 @@ internal sealed class UiHost : IDisposable
     {
         try
         {
-            // Gated like the other two listeners, and for the sharpest reason: this host serves the
-            // SPA, so an ungated UI host hands the frontend — and with it the app's whole behaviour
-            // — to anything that asks for the page.
-            //
-            // The document request carries ?k=; on success it is answered with a cookie, so the
-            // assets it pulls in need no token in their URLs. AuthorisesUi also accepts the
-            // same-origin document referrer for embedded profiles that do not replay the cookie.
-            // Nothing is served either way without one, and the refusal never repeats what was
-            // presented.
             if (!_token.AuthorisesUi(context.Request))
             {
                 Refuse(context);
@@ -93,8 +82,6 @@ internal sealed class UiHost : IDisposable
             if (path == "/")
                 path = "/index.html";
 
-            // A simple traversal guard, same discipline as the content server: nothing outside the
-            // web root is ever served, and ".." never reaches the file system.
             var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
             if (relative.Contains("..", StringComparison.Ordinal))
             {
@@ -113,9 +100,6 @@ internal sealed class UiHost : IDisposable
 
             if (!File.Exists(candidate))
             {
-                // SPA fallback applies only to extensionless routes. Returning index.html for a
-                // missing script or stylesheet makes the browser report a misleading module MIME
-                // error and leaves the shell looking like a white page.
                 if (Path.HasExtension(relative))
                 {
                     context.Response.StatusCode = 404;
@@ -123,7 +107,6 @@ internal sealed class UiHost : IDisposable
                     return;
                 }
 
-                // An unknown extensionless route serves the shell, which decides what to render.
                 candidate = Path.Combine(_webRoot, "index.html");
                 if (!File.Exists(candidate))
                 {
@@ -135,9 +118,6 @@ internal sealed class UiHost : IDisposable
 
             if (setCookie)
             {
-                // HttpOnly so no script can read it back out, SameSite=Strict so another site's
-                // navigation never carries it, and no Max-Age so it dies with the browser session —
-                // the token is per launch and must not outlive one.
                 context.Response.AppendHeader("Set-Cookie",
                     $"{SessionToken.CookieName}={_token.Value}; Path=/; HttpOnly; SameSite=Strict");
             }
@@ -161,7 +141,6 @@ internal sealed class UiHost : IDisposable
         }
     }
 
-    // A short plain-text refusal, never the SPA and never an echo of what was presented.
     private static void Refuse(HttpListenerContext context)
     {
         var body = "Tript: this page is served only to the session that launched the app.\n"u8.ToArray();
@@ -207,8 +186,6 @@ internal sealed class UiHost : IDisposable
         }
         catch
         {
-            // See IpcServer.Dispose: a Close racing the listener's teardown can throw; the process
-            // is exiting.
         }
     }
 }

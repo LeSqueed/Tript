@@ -3,8 +3,6 @@
 
 namespace Tript.Detection;
 
-// The model delivery contract for the fixed tensors and YOLO decoder used by
-// VisualEventDetector. Null means the model can be consumed by model API v1.
 public static class ModelApiV1Compatibility
 {
     public const int Version = 1;

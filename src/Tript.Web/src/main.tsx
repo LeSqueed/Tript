@@ -11,8 +11,6 @@ import './components/ui/controls.css';
 import './components/ui/ui.css';
 import './components/ui/toast/toast.css';
 import './components/RecorderBar.css';
-// LibraryView.css also carries the shared primitives (.panel/.btn/.muted) and the player overlay's
-// chrome — the overlay is the library's own way of showing the player, so its styles live with it.
 import './components/LibraryView.css';
 import './components/PlayerView.css';
 import './components/player/clipDialog.css';
@@ -26,7 +24,6 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Install Photino's native message bridge before React announces readiness.
 type PhotinoWindow = Window & {
   external?: PhotinoExternal & {
     sendMessage?: (message: string) => void;

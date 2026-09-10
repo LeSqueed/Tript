@@ -5,11 +5,6 @@ using System.Diagnostics;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Drives the Tript.RecorderHarness executable as a child process. The harness exists because the
-// ffmpeg_muxer plugin spawns its obs-ffmpeg-mux helper next to the *actual binary* of the process
-// (os_get_executable_path_ptr resolves /proc/self/exe, measured), and under `dotnet test` the
-// process that would start the output is dotnet itself, which cannot have a helper dropped beside
-// it.
 internal sealed class ObsRecorderHarnessDriver
 {
     private const string HarnessFileName = "Tript.RecorderHarness";
@@ -29,14 +24,8 @@ internal sealed class ObsRecorderHarnessDriver
         Failed
     }
 
-    // Ensures the helper sits next to the harness binary. The harness is built into the same output
-    // directory as the test assembly, and the helper is copied there when the build layout does not
-    // already satisfy the plugin — see ObsMuxerHelper.
     internal static bool EnsureHelperPresent() => ObsMuxerHelper.TryDeploy(HarnessDirectory);
 
-    // The prerequisite every recording test shares, as a skip rather than an assertion. A machine
-    // with no OBS ffmpeg plugin installed cannot record at all, and reporting that as a failed test
-    // is how a broken muxer lookup passed for a working machine's problem for weeks.
     internal static void RequireHelper()
     {
         if (EnsureHelperPresent())
@@ -47,10 +36,6 @@ internal sealed class ObsRecorderHarnessDriver
             + $"found beside this machine's obs-ffmpeg plugin, and none could be placed in {HarnessDirectory}.");
     }
 
-    // The harness's own exit code for "no X server reachable" — the same missing prerequisite as
-    // ObsTestEnvironment.XDisplay, only measured in the child process. It bails out before printing
-    // a verdict, so a test that starts the harness itself has to ask as well. Every other exit code
-    // is a result the test still has to judge.
     internal static void RequireHarnessFoundADisplay(int exitCode, string stderr = "")
     {
         if (exitCode != HarnessNoDisplayExitCode)
@@ -63,16 +48,9 @@ internal sealed class ObsRecorderHarnessDriver
     internal static (Verdict Verdict, int ExitCode) Run(string outputPath, double durationSeconds) =>
         RunCore(outputPath, durationSeconds, multiTrackCount: null, useRecorder: false);
 
-    // The recorder round-trip: the harness drives the T3 recorder state machine (Recorder over
-    // ObsRecorderSession) rather than the raw binding. The parent asserts the file and the
-    // recorder's verdict — the state machine's Idle -> Recording -> Stopping -> Idle against a real
-    // muxer.
     internal static (Verdict Verdict, int ExitCode) RunRecorder(string outputPath, double durationSeconds) =>
         RunCore(outputPath, durationSeconds, multiTrackCount: null, useRecorder: true);
 
-    // The multi-track round-trip: the harness wires the audio path through the routing service with
-    // trackCount tracks, records, and reports success. The track count is verified from the file by
-    // the caller's probe, not from the harness.
     internal static (Verdict Verdict, int ExitCode) RunMultiTrack(string outputPath, double durationSeconds, int trackCount) =>
         RunCore(outputPath, durationSeconds, multiTrackCount: trackCount, useRecorder: false);
 
@@ -103,7 +81,6 @@ internal sealed class ObsRecorderHarnessDriver
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("The recorder harness could not be started.");
 
-        // Read to the end on another thread so a large log cannot deadlock the child.
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
 
@@ -112,8 +89,6 @@ internal sealed class ObsRecorderHarnessDriver
 
         RequireHarnessFoundADisplay(process.ExitCode, stderr.Result);
 
-        // The harness prints a RESULT line for every outcome it recognises, so a missing one means
-        // it bailed out earlier — and its own reason on stderr is the only useful thing to report.
         var resultLine = stdout.Result
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .FirstOrDefault(line => line.StartsWith("RESULT:", StringComparison.Ordinal))
@@ -130,9 +105,6 @@ internal sealed class ObsRecorderHarnessDriver
         _ => Verdict.Failed
     };
 
-    // Kills every running obs-ffmpeg-mux helper. Only the helper started by the current recording
-    // can be running: the tests are serial (assembly-level parallelization is off), so this cannot
-    // reach a helper from a different test.
     internal static void KillMuxerHelper()
     {
         var startInfo = new ProcessStartInfo

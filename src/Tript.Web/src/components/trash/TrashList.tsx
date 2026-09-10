@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The trash — the third route, and the reason a delete in the library is recoverable at all. Every
-// row states the same three facts in the same order: what it was, when it went, and when it stops
-// being recoverable.
 
 import { useCallback, useMemo, useState } from 'react';
 import type { TrashEntry } from '../../ipc/protocol';
@@ -28,12 +24,10 @@ import type { TrashController } from './useTrash';
 import { ActionBar, EmptyState, FilterMismatchEmptyState } from '../ui/Ui';
 import { Button, Checkbox } from '../ui/controls';
 
-/** What a confirmed action does once the modal says yes. */
 type PendingPurge = { entries: TrashEntry[]; whole: boolean };
 
 export interface TrashViewProps {
   trash: TrashController;
-  /** The clock the "deleted / purges in" phrases are measured against, in epoch seconds. */
   nowSeconds?: number;
   entries?: TrashEntry[];
   filtered?: boolean;
@@ -129,9 +123,6 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
           <FilterMismatchEmptyState total={sourceEntries.length} noun="deleted item" onClearFilters={onClearFilters} />
         </div>
       ) : entries.length === 0 ? (
-        // "Nothing here" is the good state for a trash, so it is worded as reassurance rather than as
-        // an absence — and it says what would put something here, which is the only thing a user
-        // arriving at an empty trash by accident actually wants to know.
         <div className="trash-empty" data-testid="trash-empty">
           <EmptyState
             title="Trash is empty"
@@ -147,8 +138,6 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
                 {selection.length} selected
               </span>
             }
-            // Empty trash is intentionally global; name every entry in the confirmation even when
-            // the list is currently filtered, so hidden items cannot be purged by surprise.
             trailing={<Button variant="danger" onClick={() => setPending({ entries: sourceEntries, whole: true })}>Empty trash</Button>}
           >
             <Button variant="ghost" onClick={toggleAll}>
@@ -196,14 +185,14 @@ export function TrashList({ trash, nowSeconds, entries: visibleEntries, filtered
                   </div>
                   <div className="trash-row-actions">
                     <Button variant="ghost"
-                      
+
                       onClick={() => restoreOne(entry)}
                       aria-label={`Restore ${label}`}
                     >
                       Restore
                     </Button>
                     <Button variant="danger"
-                      
+
                       onClick={() => setPending({ entries: [entry], whole: false })}
                       aria-label={`Delete ${label} permanently`}
                     >

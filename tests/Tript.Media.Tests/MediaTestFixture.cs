@@ -7,15 +7,10 @@ using Tript.Media;
 
 namespace Tript.Media.Tests;
 
-// Builds the synthetic media fixtures the clip tests run against, with ffmpeg itself so the suite
-// is self-contained. Every fixture is created fresh in a per-run temp directory; nothing here reads
-// a checked-in media file.
 internal static class MediaTestFixture
 {
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(60);
 
-    // The ffmpeg/ffprobe the engine will shell out to. Located through the real locator so the
-    // tests exercise the same discovery path the product uses.
     internal static readonly (string Ffmpeg, string Ffprobe) Binaries = Locate();
 
     private static (string, string) Locate()
@@ -24,7 +19,6 @@ internal static class MediaTestFixture
         return locator.Locate();
     }
 
-    // A shared scratch root, one per test-run process.
     internal static readonly string ScratchRoot =
         Path.Combine(Path.GetTempPath(), "tript-media-tests", Guid.NewGuid().ToString("N"));
 
@@ -45,7 +39,6 @@ internal static class MediaTestFixture
         }
         catch (IOException)
         {
-            // Best-effort cleanup of generated media fixtures.
         }
     }
 
@@ -85,10 +78,6 @@ internal static class MediaTestFixture
         return (stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult(), process.ExitCode);
     }
 
-    // A stand-in for the ffmpeg binary that exits 0 and writes either nothing or an empty file at
-    // `writesEmptyFileAt`. Real ffmpeg reaches the same states (an out-of-range seek, a refused
-    // overwrite) but only through argument shapes the engine's own validation rejects first, so the
-    // stub is the only way to drive the exit-0-without-output path from a test.
     internal static string CreateStubFfmpeg(string name, string? writesEmptyFileAt = null)
     {
         if (OperatingSystem.IsWindows())
@@ -107,9 +96,6 @@ internal static class MediaTestFixture
         return script;
     }
 
-    // An ffmpeg stand-in that appends its argument line to invocationLog on every run, so a test can
-    // count and inspect the runs, and optionally writes a non-empty "frame" so a run counts as a
-    // successful extraction.
     internal static string CreateCountingStubFfmpeg(string name, string invocationLog, string? writesFrameAt = null)
     {
         if (OperatingSystem.IsWindows())
@@ -128,13 +114,8 @@ internal static class MediaTestFixture
         return script;
     }
 
-    // Quotes a single argument for the old string-based Arguments path. Kept for the fixture
-    // builders that join args into one string; the probe helpers below use ArgumentList instead.
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
-    // A plain SDR MP4 with a testsrc2 pattern and N audio tracks, each a distinct sine tone. The
-    // video uses 1s keyframe interval (g=30 @ 30fps) so non-keyframe cut points exist. Returns the
-    // path.
     internal static string CreateSdrSource(string name, double durationSeconds = 6, int audioTracks = 1)
     {
         var path = Path.Combine(ScratchRoot, name);
@@ -171,9 +152,6 @@ internal static class MediaTestFixture
         return path;
     }
 
-    // A lossless SDR source (x264 qp 0) so an exact-time cut can be verified by comparing the
-    // output's first frame hash to the source's frame at the cut time — lossless re-encode means
-    // the hash comparison is exact.
     internal static string CreateLosslessSource(string name, double durationSeconds = 6)
     {
         var path = Path.Combine(ScratchRoot, name);
@@ -189,9 +167,6 @@ internal static class MediaTestFixture
         return path;
     }
 
-    // A 10-bit HEVC fixture tagged as HDR (PQ/smpte2084, bt2020). The VUI colour params are forced
-    // through x265's own options because the generic -color_trc flag alone does not make libx265
-    // write the transfer/primaries into the bitstream (measured).
     internal static string CreateHdrSource(string name, double durationSeconds = 3)
     {
         var path = Path.Combine(ScratchRoot, name);
@@ -210,13 +185,8 @@ internal static class MediaTestFixture
         return path;
     }
 
-    // Probing helpers the tests share. These go through ffprobe directly so assertions are about
-    // the file's actual contents, not about what the engine chose to believe.
-
     internal static string ProbeValue(string ffprobe, string path, string streamSelector, string key)
     {
-        // streamSelector is "v:0", "a:0", or "format". -show_entries uses "stream=..." for stream
-        // keys and "format=..." for container keys; -select_streams narrows which stream.
         var args = streamSelector == "format"
             ? new[] { "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path }
             : new[] { "-v", "error", "-select_streams", streamSelector, "-show_entries", $"stream={key}", "-of", "default=nw=1:nk=1", path };
@@ -224,7 +194,6 @@ internal static class MediaTestFixture
         return RunCaptured(ffprobe, args).Stdout.Trim();
     }
 
-    // The first frame's MD5 hash, for exact-time content comparisons on lossless sources.
     internal static string FirstFrameHash(string ffmpeg, string path)
     {
         var stdout = RunCaptured(ffmpeg,
@@ -243,10 +212,6 @@ internal static class MediaTestFixture
         throw new InvalidOperationException($"No frame hash in framemd5 output: {stdout}");
     }
 
-    // PSNR in dB between the first frame of `pathA` and the first frame the source produces when
-    // seeking to `seekSeconds`. Both first frames are extracted as raw yuv420p (single frames,
-    // lossless), so the comparison is between decoded pixels — unaffected by how each file is
-    // compressed.
     internal static double FirstFramePsnrDb(string ffmpeg, string pathA, string seekSeconds,
         string sourcePath, string scratchFilePrefix, int width = 320, int height = 240)
     {
@@ -268,9 +233,6 @@ internal static class MediaTestFixture
         return RawPsnrDb(ffmpeg, frameA, frameB, width, height);
     }
 
-    // PSNR between the first decoded frame of each file, extracted as raw yuv420p. Used to compare a
-    // clip's first frame against a reference produced by running a known filter chain directly on the
-    // source — a correct chain yields ~40+ dB, a wrong one substantially less.
     internal static double FirstFrameVsRawPsnrDb(string ffmpeg, string pathA, string pathB,
         int width, int height, string scratchFilePrefix)
     {
@@ -316,7 +278,6 @@ internal static class MediaTestFixture
         throw new InvalidOperationException($"No PSNR in output: {stderr}");
     }
 
-    // A single audio stream's RMS level in dB, or double.NegativeInfinity for silence.
     internal static double AudioRmsDb(string ffmpeg, string path, int audioStreamIndex)
     {
         var stderr = RunCaptured(ffmpeg,

@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// One recording and the clips cut from it.
-//
-// The library is recording-centric because that is the shape of the work: you play, Tript records,
-// and then you cut the moments worth keeping out of what it caught. A flat grid put a recording and
-// its own clips in arbitrary positions relative to each other, sorted by time like strangers.
-//
-// Recent groups form a compact landing shelf. Every other group renders as an archive row.
 
 import type { ContentItem } from '../../ipc/protocol';
 import { linkedAutomaticHighlights, type RecordingGroup as Group } from './libraryModel';
@@ -87,9 +79,6 @@ export function RecordingGroup({
     );
   }
 
-  // A clip whose recording is gone. It renders as itself, with no head and no explanation: that the
-  // source was deleted is not something the user can act on, and a card that announces it would draw
-  // the eye to the one item on the screen that needs nothing.
   if (!recording) {
     return null;
   }

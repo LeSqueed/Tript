@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The zoomed timeline — the precision level of the dual timeline. Shows a window of the session
-// with bookmark/event icons in detail, region marks (the T9 seam) and a time ruler.
 
 import { useRef, useState } from 'react';
 import type { BookmarkItem } from '../../ipc/protocol';
@@ -25,18 +22,10 @@ export interface ZoomedTimelineProps {
   bookmarks: BookmarkItem[];
   regions: TimelineRegion[];
   selectedRegionId: string | null;
-  /**
-   * The pending in point (set at the playhead, waiting for its out point), drawn as a marker so the
-   * half-finished mark is visible on the timeline rather than only in the transport row.
-   */
   markInTime?: number | null;
   onWindowChange(window: WindowState): void;
   onSeek(time: number): void;
   onRegionSelect(region: TimelineRegion): void;
-  /**
-   * Commit new bounds for a region. Absent (the read-only region seam) regions stay
-   * click-to-select only and no drag handlers are attached at all.
-   */
   onRegionChange?(id: string, bounds: { start: number; end: number }): void;
 }
 
@@ -45,19 +34,16 @@ interface Bubble {
   text: string;
 }
 
-/** Which part of a region the pointer grabbed. */
 type RegionDragMode = 'move' | 'start' | 'end';
 
 interface RegionDrag {
   pointerId: number;
   mode: RegionDragMode;
-  /** The bounds at pointerdown — every frame is computed from these, so the drag cannot drift. */
   origin: TimelineRegion;
   originClientX: number;
   moved: boolean;
 }
 
-/** Slop before a press becomes a drag — the same discipline as the track's pan threshold. */
 const REGION_DRAG_SLOP_PX = 3;
 
 export function ZoomedTimeline({
@@ -77,7 +63,6 @@ export function ZoomedTimeline({
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const dragRef = useRef<{ pointerId: number; lastClientX: number; dragging: boolean } | null>(null);
   const regionDragRef = useRef<RegionDrag | null>(null);
-  // A drag that actually moved must not also toggle the loop selection when the click lands.
   const regionDragMovedRef = useRef(false);
   const [draggingRegionId, setDraggingRegionId] = useState<string | null>(null);
 
@@ -97,7 +82,6 @@ export function ZoomedTimeline({
 
   function onPointerDown(event: React.PointerEvent): void {
     const target = event.target as HTMLElement;
-    // A bookmark or region click is handled by its own element and jumps the playhead.
     if (target.closest('[data-jump]')) {
       return;
     }
@@ -106,7 +90,6 @@ export function ZoomedTimeline({
       return;
     }
     if (event.shiftKey) {
-      // Shift-click pans the window so the clicked point lands at the left edge.
       const targetTime = positionToTime(event.clientX, rect, window.start, window.seconds);
       onWindowChange({ start: Math.max(0, targetTime), seconds: window.seconds });
       return;
@@ -125,7 +108,6 @@ export function ZoomedTimeline({
       return;
     }
     if (!drag.dragging) {
-      // A click still jumps the playhead on pointerup; a drag pans the window instead.
       drag.dragging = Math.abs(event.clientX - drag.lastClientX) > 3;
     }
     if (drag.dragging) {
@@ -149,14 +131,12 @@ export function ZoomedTimeline({
     }
   }
 
-  /** The bounds a pointer position implies for the grabbed region, already clamped. */
   function regionBoundsForPointer(
     drag: RegionDrag,
     clientX: number,
     rect: { left: number; width: number },
   ): TimelineRegion {
     if (drag.mode === 'move') {
-      // Pixels → a signed delta in seconds, the same ratio panning uses.
       const deltaSeconds = (clientX - drag.originClientX) * (window.seconds / rect.width);
       return moveRegionBy(drag.origin, deltaSeconds, duration);
     }
@@ -180,10 +160,7 @@ export function ZoomedTimeline({
       moved: false,
     };
     regionDragMovedRef.current = false;
-    // Capture on the region itself: the pointer keeps addressing this region even when it leaves it.
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-    // The track's handler already ignores [data-jump] targets; stopping propagation makes the region
-    // the sole owner of the gesture regardless of what the track grows into later.
     event.stopPropagation();
   }
 
@@ -198,7 +175,6 @@ export function ZoomedTimeline({
     }
     if (!drag.moved) {
       if (Math.abs(event.clientX - drag.originClientX) <= REGION_DRAG_SLOP_PX) {
-        // Still a click, not a drag — a steady hand must not nudge the bounds by a pixel.
         return;
       }
       drag.moved = true;
@@ -219,12 +195,10 @@ export function ZoomedTimeline({
     try {
       (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
     } catch {
-      // The capture was already released (or never granted) — nothing to undo.
     }
   }
 
   const rect = trackRef.current?.getBoundingClientRect() ?? null;
-  // Before layout exists the playhead is drawn at the window start.
   const playheadLeft = rect
     ? `${timeToPosition(currentTime, rect, window.start, window.seconds) - rect.left}px`
     : '0px';
@@ -244,7 +218,6 @@ export function ZoomedTimeline({
           return;
         }
         event.preventDefault();
-        // Wheel up zooms in, wheel down zooms out; the cursor stays anchored.
         zoomAtClientX(event.clientX, event.deltaY > 0 ? 1.25 : 0.8);
       }}
     >
@@ -292,7 +265,6 @@ export function ZoomedTimeline({
             }}
             onClick={() => {
               if (regionDragMovedRef.current) {
-                // The pointer moved: the gesture was an adjustment, not a selection.
                 regionDragMovedRef.current = false;
                 return;
               }
@@ -349,8 +321,7 @@ export function ZoomedTimeline({
         <div className="timeline-playhead" style={{ left: playheadLeft }} />
       </div>
 
-      {/* Only while zoomed in. At full extent the window's edges are the ruler's first and last
-          tick, so the row said the same times twice. */}
+      {}
       {window.seconds < duration - 0.01 && (
         <div className="timeline-scale">
           <span>{formatTime(window.start)}</span>

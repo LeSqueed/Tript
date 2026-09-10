@@ -9,9 +9,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// That the binding can call into libobs at all: the library loads, every entry point it declares
-// exists, and the structs it mirrors have the layout a C compiler gives them. No OBS concepts and
-// no context — nothing here starts one.
 public sealed class ObsInteropTests
 {
     [SkippableFact]
@@ -25,9 +22,6 @@ public sealed class ObsInteropTests
         Assert.Equal(handle, ObsLibrary.EnsureLoaded());
     }
 
-    // Tript ships its own OBS runtime, so where it is loaded from is a decision the application
-    // makes once at startup. Once the library is mapped the decision cannot be revisited, and
-    // saying so is better than appearing to accept a new directory that changes nothing.
     [SkippableFact]
     public void ChangingTheRuntimeDirectory_IsRefusedOnceTheLibraryIsLoaded()
     {
@@ -45,20 +39,12 @@ public sealed class ObsInteropTests
 
         var version = ObsRuntime.Version;
 
-        // Two entry points that must agree, and this is the only place they meet: Version decodes
-        // the packed obs_get_version(), VersionString is obs_get_version_string() verbatim. A wrong
-        // shift in the decode would go unnoticed everywhere else.
         Assert.StartsWith($"{version.Major}.{version.Minor}.", ObsRuntime.VersionString, StringComparison.Ordinal);
 
-        // Linux uses the installed runtime, while Windows uses the separately pinned bundle. The
-        // durable cross-platform contract is the documented API floor, not the current bundle patch.
         Assert.True(version >= new Version(30, 1),
             $"OBS {ObsRuntime.VersionString} is below the supported 30.1 minimum.");
     }
 
-    // The point of the exercise: a declared entry point that does not exist fails at the moment it
-    // is first called, which may be deep in a recording session. Resolving all of them up front
-    // turns that into one loud failure naming every offender.
     [SkippableFact]
     public void EveryDeclaredEntryPoint_ResolvesAgainstTheLoadedRuntime()
     {
@@ -67,7 +53,6 @@ public sealed class ObsInteropTests
         var handle = ObsLibrary.EnsureLoaded();
         var declarations = DeclaredEntryPoints().ToArray();
 
-        // Guards against the test passing because reflection found nothing.
         Assert.True(declarations.Length >= 30,
             $"Expected the binding to declare at least 30 libobs entry points, found {declarations.Length}.");
 
@@ -91,13 +76,9 @@ public sealed class ObsInteropTests
             .Distinct()
             .ToArray();
 
-        // A second native dependency would not go through our resolver, so it would silently bind
-        // to whatever the system happens to have.
         Assert.Empty(strays);
     }
 
-    // The layouts the binding mirrors, checked against the sizes and offsets a C compiler produces
-    // for the same headers on this platform. A wrong offset here corrupts every field after it.
     [Fact]
     public void ObsVideoInfo_MatchesTheNativeStructLayout()
     {
@@ -110,8 +91,6 @@ public sealed class ObsInteropTests
         Assert.Equal(32, (int)Marshal.OffsetOf<ObsVideoInfoNative>(nameof(ObsVideoInfoNative.OutputFormat)));
         Assert.Equal(36, (int)Marshal.OffsetOf<ObsVideoInfoNative>(nameof(ObsVideoInfoNative.Adapter)));
 
-        // The one-byte C bool and the three bytes of padding behind it. A managed bool would take
-        // four bytes here and push ColorSpace, Range and ScaleType off by one field each.
         Assert.Equal(40, (int)Marshal.OffsetOf<ObsVideoInfoNative>(nameof(ObsVideoInfoNative.GpuConversion)));
         Assert.Equal(44, (int)Marshal.OffsetOf<ObsVideoInfoNative>(nameof(ObsVideoInfoNative.ColorSpace)));
         Assert.Equal(48, (int)Marshal.OffsetOf<ObsVideoInfoNative>(nameof(ObsVideoInfoNative.Range)));
@@ -125,8 +104,6 @@ public sealed class ObsInteropTests
         Assert.Equal(4, (int)Marshal.OffsetOf<ObsAudioInfoNative>(nameof(ObsAudioInfoNative.Speakers)));
     }
 
-    // The scene-item transform, which is passed by pointer into libobs in both directions: a field
-    // at the wrong offset here is read as the next one, silently.
     [Fact]
     public void ObsTransformInfo_MatchesTheNativeStructLayout()
     {
@@ -142,27 +119,17 @@ public sealed class ObsInteropTests
         Assert.Equal(28, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.BoundsAlignment)));
         Assert.Equal(32, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Bounds)));
 
-        // The trailing one-byte C bool, and the three bytes of tail padding behind it that keep the
-        // struct a multiple of its four-byte alignment.
         Assert.Equal(40, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.CropToBounds)));
     }
 
-    // The raw-frame callback structures. struct video_data is passed to the callback by pointer,
-    // and struct video_scale_info is the subscription's conversion request; a wrong offset here
-    // corrupts every plane after the first. The encoder ROI struct is included with the group
-    // because it shares the compact four-uint-plus-float shape.
     [Fact]
     public unsafe void VideoIoStructs_MatchTheNativeLayout()
     {
-        // data[8] as nint + linesize[8] as uint + timestamp. 8 bytes padding after the linesizes
-        // aligns the 8-byte uint64_t. (The binding models the pointer array as long, which is the
-        // same width as nint on the platforms this runs on.)
         Assert.Equal(104, Marshal.SizeOf<VideoDataNative>());
         Assert.Equal(0, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Data)));
         Assert.Equal(64, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Linesize)));
         Assert.Equal(96, (int)Marshal.OffsetOf<VideoDataNative>(nameof(VideoDataNative.Timestamp)));
 
-        // format (int) + width + height + range + colorspace, all four bytes.
         Assert.Equal(20, Marshal.SizeOf<VideoScaleInfoNative>());
         Assert.Equal(0, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Format)));
         Assert.Equal(4, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Width)));
@@ -170,10 +137,6 @@ public sealed class ObsInteropTests
         Assert.Equal(12, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Range)));
         Assert.Equal(16, (int)Marshal.OffsetOf<VideoScaleInfoNative>(nameof(VideoScaleInfoNative.Colorspace)));
 
-        // name (nint) + format + fps_num + fps_den + width + height (six uint32s) then the size_t
-        // cache_size. The six uint32s end at byte 28, and the size_t must sit at an 8-byte
-        // boundary, so four bytes of padding separate height from cache_size. colorspace and range
-        // follow at 40 and 44, and the tail padding rounds the struct out to 48.
         Assert.Equal(48, Marshal.SizeOf<VideoOutputInfoNative>());
         Assert.Equal(0, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Name)));
         Assert.Equal(8, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Format)));
@@ -192,17 +155,12 @@ public sealed class ObsInteropTests
     [Fact]
     public void VaList_MatchesTheSystemVStructLayout()
     {
-        // __va_list_tag: two 32-bit offsets then two pointers. 24 bytes on x86-64, and the reason
-        // the log handler cannot treat its third argument as a pointer to copy.
         Assert.Equal(24, Marshal.SizeOf<VaListSystemV>());
         Assert.Equal(4, (int)Marshal.OffsetOf<VaListSystemV>(nameof(VaListSystemV.FpOffset)));
         Assert.Equal(8, (int)Marshal.OffsetOf<VaListSystemV>(nameof(VaListSystemV.OverflowArgArea)));
         Assert.Equal(16, (int)Marshal.OffsetOf<VaListSystemV>(nameof(VaListSystemV.RegSaveArea)));
     }
 
-    // A bmem allocation round-trips through the binding's owned-string path and is freed on libobs's
-    // heap. Non-ASCII throughout, compared as bytes rather than as strings, because a comparison of
-    // two strings that were both mangled the same way passes.
     [SkippableFact]
     public unsafe void AnOwnedString_RoundTripsByteIdenticallyAndIsFreedOnLibobsHeap()
     {
@@ -211,8 +169,6 @@ public sealed class ObsInteropTests
         const string original = "café — 日本語 — Ω — 🎮 — ünïcödé";
         var expected = Encoding.UTF8.GetBytes(original);
 
-        // Reached through the already-loaded handle rather than a second DllImport, so the test
-        // cannot accidentally pull in a different copy of libobs than the binding is using.
         var bmemdup = (delegate* unmanaged[Cdecl]<nint, nuint, nint>)
             NativeLibrary.GetExport(ObsLibrary.EnsureLoaded(), "bmemdup");
 
@@ -226,7 +182,6 @@ public sealed class ObsInteropTests
             Marshal.Copy(copied, actual, 0, expected.Length);
             Assert.Equal(expected, actual);
 
-            // ReadOwned frees through bfree, so the count returns to where it started.
             var before = ObsRuntime.LiveAllocationCount;
             Assert.Equal(original, Utf8Marshal.ReadOwned(copied));
             Assert.Equal(before - 1, ObsRuntime.LiveAllocationCount);
@@ -237,12 +192,6 @@ public sealed class ObsInteropTests
         }
     }
 
-    // The binding keeps every symbol in one table so the test above can find them by reflection,
-    // which means the table necessarily holds a few the loaded runtime cannot export. Desktop
-    // duplication is DXGI and exists only in the Windows build — verified: the Linux libobs exports
-    // obs_enter_graphics and obs_set_video_levels but no gs_duplicator_* at all. The nix platform
-    // hooks are the mirror image. Excluded by name rather than by letting the assertion be weakened,
-    // so a symbol that goes missing on its OWN platform still fails loudly.
     private static bool IsPlatformSpecific(string entryPoint) =>
         OperatingSystem.IsWindows()
             ? entryPoint.Contains("nix_platform", StringComparison.Ordinal)

@@ -3,8 +3,6 @@
 
 namespace Tript.Media;
 
-// Converts eligible event times into non-overlapping pre/post-roll regions. Keeping this separate
-// from recording and ffmpeg makes the chain rule deterministic and testable without media binaries.
 public static class AutomaticClipPlanner
 {
     public static IReadOnlyList<ClipRegion> Plan(
@@ -24,7 +22,6 @@ public static class AutomaticClipPlanner
         var current = RegionFor(candidates[0], preRoll, postRoll);
         foreach (var candidate in candidates.Skip(1))
         {
-            // Merge whenever the candidate's pre-roll reaches the current region.
             if (RegionFor(candidate, preRoll, postRoll).Start <= current.End)
             {
                 current = current with { End = candidate + postRoll };

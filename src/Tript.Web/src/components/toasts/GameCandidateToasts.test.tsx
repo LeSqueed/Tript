@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// GameCandidateToasts tests: the suggestion appears only for a well-formed gameCandidate push,
-// clears on gameCandidateCleared, both actions hand the backend the executable path, a correlated
-// failure is reported under the message, and a success takes the toast down.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -103,7 +99,6 @@ describe('GameCandidateToasts', () => {
       parameters: { requestId, name: CANDIDATE.executable, executablePath: CANDIDATE.executablePath },
     });
     expect(screen.getByRole('status').textContent).toContain(CANDIDATE.executablePath);
-    // The action is in flight, so neither button may fire twice.
     expect((screen.getByRole('button', { name: 'Add as custom game' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Ignore' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -149,7 +144,6 @@ describe('GameCandidateToasts', () => {
 
     expect(screen.getByRole('status').textContent).toContain(CANDIDATE.executablePath);
     expect(screen.getByRole('alert').textContent).toBe('Could not persist the ignored executable.');
-    // The failure does not take the suggestion down: the actions are offered again.
     expect((screen.getByRole('button', { name: 'Add as custom game' }) as HTMLButtonElement).disabled).toBe(false);
   });
 

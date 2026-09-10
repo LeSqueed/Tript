@@ -9,10 +9,6 @@ using RecorderStateMachine = Tript.Recorder.Recorder;
 
 namespace Tript.App.Tests;
 
-// The recorder's own state is reached from three threads: the IPC dispatch pool, the game detector's
-// timer, and the hook probe's timer. StartRecording is a check-then-act with a rebuild in the middle,
-// so without a gate the losing thread drives a disposed session into libobs or two starts cross their
-// metadata over one file.
 public sealed class RecorderLifecycleTests : IDisposable
 {
     private readonly string _root;
@@ -45,8 +41,6 @@ public sealed class RecorderLifecycleTests : IDisposable
         }
     }
 
-    // Concurrent starts must not both win. Exactly one recording exists, so exactly one start may
-    // report success — the loser has to see a recorder that is no longer Idle.
     [Fact]
     public void ConcurrentStarts_OnlyOneWins()
     {
@@ -75,7 +69,6 @@ public sealed class RecorderLifecycleTests : IDisposable
         Assert.True(_host.IsRecording);
     }
 
-    // And the same for stops, so two threads cannot both write the metadata record for one session.
     [Fact]
     public void ConcurrentStops_OnlyOneWins()
     {
@@ -106,8 +99,6 @@ public sealed class RecorderLifecycleTests : IDisposable
         Assert.False(_host.IsRecording);
     }
 
-    // Start and stop hammered together must leave the host in a coherent state rather than a
-    // half-torn-down one, and must not throw out of either entry point.
     [Fact]
     public void StartAndStopFromManyThreads_LeaveACoherentState()
     {
@@ -141,7 +132,6 @@ public sealed class RecorderLifecycleTests : IDisposable
 
         Assert.Equal(0, Volatile.Read(ref failures));
 
-        // Whatever it settled on, the two views of "is a recording running" must agree.
         _host.StopRecording();
         Assert.False(_host.IsRecording);
     }

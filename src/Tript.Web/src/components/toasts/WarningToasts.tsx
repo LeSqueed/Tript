@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Backend warning pushes as keyed toasts: one live warning at a time (a new push replaces the old
-// in place), and an empty or null push takes it back down, exactly as the banner did.
 
 import { useEffect } from 'react';
 import type { IpcClient } from '../../ipc/websocketClient';

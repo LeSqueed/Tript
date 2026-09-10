@@ -26,12 +26,8 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    // ---- trash ----
-
     private int RetentionHours => _settingsStore.Load().Recording.TrashRetentionHours;
 
-    // The bin as the wire spells it. purgeAt is derived from the retention in force right now, so
-    // changing the setting re-dates every entry instead of pinning it to the old window.
     internal List<TrashEntry> TrashEntries()
     {
         var retentionHours = RetentionHours;
@@ -75,8 +71,6 @@ internal sealed partial class AppHost
 
             if (result.Renamed)
             {
-                // The name changed, so the metadata record's own link back to the video has to change
-                // with it — and the user has to be told which name to look for.
                 if (RelinkRestoredMetadata(result.FileName!, result.RestoredAs!))
                     PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
                 else
@@ -95,9 +89,6 @@ internal sealed partial class AppHost
         PushTrash();
     }
 
-    // Points a restored recording's metadata record back at the file it came back as. The record
-    // has already moved to the new key; only the videoPath inside it is stale. An unreadable record
-    // is left exactly as it is — a rewritten one would cost the game and the bookmarks.
     private bool RelinkRestoredMetadata(string originalFileName, string restoredFileName)
     {
         lock (_metadata.WriteGate)
@@ -119,14 +110,9 @@ internal sealed partial class AppHost
 
     internal void PurgeTrash(PurgeTrashParameters? parameters)
     {
-        // Null is a frame whose parameters could not be parsed, never "no parameters" — the dispatch
-        // substitutes an explicit object for that. Refusing it matters more here than anywhere else:
-        // this is the one command whose empty case is destructive.
         if (parameters is null)
             return;
 
-        // No entryIds at all means the whole bin; an explicit (possibly empty) list means exactly
-        // those entries.
         var entryIds = parameters.EntryIds ?? _trash.List().Select(entry => entry.Id).ToList();
 
         foreach (var entryId in entryIds)
@@ -141,8 +127,6 @@ internal sealed partial class AppHost
         PushTrash();
     }
 
-    // Drops every entry whose retention window has closed. A retention of zero or less disables it
-    // altogether: the bin then keeps what it holds until it is emptied by hand.
     internal void PurgeExpiredTrash()
     {
         try
@@ -169,7 +153,6 @@ internal sealed partial class AppHost
         }
         catch (Exception exception)
         {
-            // This runs on a timer thread; an escape here would be an unhandled exception.
             Log.Warning("the trash could not be swept: {Reason}", exception.Message);
         }
     }
@@ -186,19 +169,12 @@ internal sealed partial class AppHost
         var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
         var fileName = Path.GetFileName(target);
 
-        // Which store the title lands in is decided by the path, not by the wire's contentType.
-        // ListContent classifies the same way and reads a clip's title from ClipTitleStore, so a
-        // clip renamed into a RecordingMetadata record would write something nothing ever reads —
-        // and the wire's contentType defaults to "recording" whether or not the caller meant it.
         if (TopLevelDirectory(relative) is "clips" or "highlights")
         {
             RenameClip(fileName, parameters.Title);
             return;
         }
 
-        // The title is stored on the video's metadata record; a video with no record yet gets one.
-        // A record that exists but could not be READ is not a record to replace — writing a fresh
-        // one would trade the recording's game and bookmarks for a title.
         lock (_metadata.WriteGate)
         {
         var existing = _metadata.Read(fileName);
@@ -218,8 +194,6 @@ internal sealed partial class AppHost
 
         if (!_metadata.Save(metadata))
         {
-            // Surface the failure and leave the list as it was — no content push, so the old title stays on
-            // screen rather than a title that was never saved.
             PushError("The recording title could not be saved — check the recording folder is writable.");
             return;
         }
@@ -231,8 +205,6 @@ internal sealed partial class AppHost
     {
         lock (_clipTitles.WriteGate)
         {
-        // Same discipline as the recording path: a record that exists and could not be read is left
-        // alone rather than replaced, because the record also carries the clip's measured duration.
         var existing = _clipTitles.Read(fileName);
         if (existing.MustNotBeOverwritten)
         {
@@ -285,7 +257,6 @@ internal sealed partial class AppHost
 
     private string? ResolveContentFile(string fileName)
     {
-        // Names are safe by construction here, but the same traversal discipline applies anyway.
         var candidate = _content.ResolveWithinRoot(fileName);
         if (candidate is null || !File.Exists(candidate))
             return null;

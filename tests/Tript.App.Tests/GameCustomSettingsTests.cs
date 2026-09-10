@@ -16,9 +16,6 @@ using Tript.TestSupport;
 
 namespace Tript.App.Tests;
 
-// The custom-game contract: exact-path matching, atomic validation of the whole game list, and the
-// add-from-suggestion path that turns a fullscreen candidate into a persisted custom game. The
-// packaged catalogue stays immutable throughout.
 public sealed class GameCustomSettingsTests : IDisposable
 {
     private readonly string _contentRoot;
@@ -386,8 +383,6 @@ public sealed class GameCustomSettingsTests : IDisposable
         var exe = ExecutablePath("forza.exe");
         File.WriteAllText(exe, "not a real PE; only the path matters");
 
-        // A recording already listed under the custom game. Its metadata carries the display name
-        // and the stable custom GameId, the way a recording made before the rename does.
         var sessions = Path.Combine(_contentRoot, "sessions");
         Directory.CreateDirectory(sessions);
         File.WriteAllText(Path.Combine(sessions, "session-1.mp4"), "recording");
@@ -415,7 +410,6 @@ public sealed class GameCustomSettingsTests : IDisposable
             var before = Assert.Single(_host.ListContent(), item => item.GameId == "custom-forza");
             Assert.Equal("Forza", before.Game);
 
-            // The rename keeps the stable GameId; only the display name changes.
             Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
             {
                 game = new
@@ -430,8 +424,6 @@ public sealed class GameCustomSettingsTests : IDisposable
             var game = Assert.Single(_host.GameList, candidate => candidate.Id == "custom-forza");
             Assert.Equal("Forza Horizon 6", game.Name);
 
-            // Existing library items keep pointing at the renamed game, and now carry its current
-            // display name — a rename must propagate to every recording already tagged with it.
             var after = Assert.Single(_host.ListContent(), item => item.GameId == "custom-forza");
             Assert.Equal("Forza Horizon 6", after.Game);
         }
@@ -479,7 +471,6 @@ public sealed class GameCustomSettingsTests : IDisposable
                 },
             })));
 
-            // No game carries the id anymore; the item keeps the name it was last recorded under.
             var item = Assert.Single(_host.ListContent(), candidate => candidate.GameId == "custom-forza");
             Assert.Equal("Forza", item.Game);
         }
@@ -508,9 +499,6 @@ public sealed class GameCustomSettingsTests : IDisposable
                 },
             })));
 
-            // Opening the player surfaces ListTraining for the item's game. A custom game that has
-            // no event definitions (no model, never trained) must not error the whole action: it
-            // simply has no events yet.
             await _host.PushTraining("custom-game");
         }
         finally

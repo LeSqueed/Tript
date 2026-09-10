@@ -1,24 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// A small CSS rule scanner, used by the theme guard tests.
-//
-// It exists because the guards' first implementation matched brace pairs with a regex and treated
-// every `@` as opening a block. That failed *open*: a block-less at-rule (`@import 'x.css';`) made
-// it swallow the next real rule, and an `@` inside a url() turned a declaration into a bogus
-// selector — either way duplicate selectors went unreported and the guard passed. A guard that goes
-// quiet is worse than no guard, so this is a real (small) tokenizer, and it has its own tests.
 
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface CssRule {
-  /** Selector text, normalised: comma parts trimmed and sorted, so `.a,.b` and `.b, .a` are one key. */
   selector: string;
-  /** Enclosing at-rule / parent-rule preludes, outermost first. Empty at the top level. */
   context: string[];
-  /** 1-based line the selector starts on, so a failure can point somewhere. */
   line: number;
-  /** Declarations this rule makes, in source order. */
   declarations: { property: string; value: string }[];
 }
 
@@ -59,7 +47,6 @@ export function parseRules(css: string): CssRule[] {
     while (index < css.length) {
       const char = css[index];
 
-      // Comments carry no rules but do carry newlines.
       if (char === '/' && css[index + 1] === '*') {
         const close = css.indexOf('*/', index + 2);
         const stop = close === -1 ? css.length : close + 2;
@@ -70,7 +57,6 @@ export function parseRules(css: string): CssRule[] {
         continue;
       }
 
-      // Strings are opaque: braces, semicolons and @ inside them mean nothing.
       if (char === '"' || char === "'") {
         const quote = char;
         prelude += char;
@@ -96,8 +82,6 @@ export function parseRules(css: string): CssRule[] {
         continue;
       }
 
-      // A statement: a declaration, or a block-less at-rule such as @import / @charset. Neither is
-      // a rule, and crucially neither consumes what follows.
       if (char === ';') {
         index += 1;
         noteDeclaration(prelude);
@@ -107,7 +91,6 @@ export function parseRules(css: string): CssRule[] {
 
       if (char === '}') {
         index += 1;
-        // A final declaration needs no trailing semicolon.
         noteDeclaration(prelude);
         return;
       }
@@ -121,7 +104,6 @@ export function parseRules(css: string): CssRule[] {
           const selector = normaliseSelector(text);
           const rule: CssRule = { selector, context, line: preludeLine, declarations: [] };
           rules.push(rule);
-          // Nested rules belong to this one, so a repeat inside it is still a repeat.
           scanBlock([...context, selector], rule);
         } else {
           scanBlock(context);
@@ -143,13 +125,6 @@ export function parseRules(css: string): CssRule[] {
   return rules;
 }
 
-/**
- * Selectors declared more than once in the same scope, as `selector (Nx) @ line,line`.
- *
- * The key is the whole selector text, so `.a, .b {}` and a later `.b {}` are different keys and are
- * not reported. That is deliberate: a shared rule plus a specific override is ordinary CSS, and
- * flagging it would bury the appended-replacement-block smell this exists to catch.
- */
 export function duplicatesIn(css: string): string[] {
   const scopes = new Map<string, number[]>();
   for (const rule of parseRules(css)) {
@@ -164,11 +139,6 @@ export function duplicatesIn(css: string): string[] {
     .sort();
 }
 
-/**
- * Properties declared twice within a single rule. The first is always dead. `.settings-tab` carried
- * `border: none` immediately followed by `border: 1px solid transparent`, which neither duplicatesIn
- * (one rule, one selector) nor shadowedRules (one rule, nothing later) could see.
- */
 export function repeatedPropertiesIn(css: string): string[] {
   const found: string[] = [];
   for (const rule of parseRules(css)) {
@@ -187,11 +157,6 @@ export function repeatedPropertiesIn(css: string): string[] {
   return found.sort();
 }
 
-/**
- * The leading class of each selector part — the class a rule is "about". `.settings-row .input` is
- * about `.settings-row`, which is why positioning a control from a view does not count as styling
- * it (design-system §4 allows exactly that, and forbids restyling its interior).
- */
 export function styledClassesIn(css: string): Set<string> {
   const classes = new Set<string>();
   for (const rule of parseRules(css)) {
@@ -205,7 +170,6 @@ export function styledClassesIn(css: string): Set<string> {
   return classes;
 }
 
-/** Every stylesheet the app ships, as absolute paths. */
 export function stylesheetPaths(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -219,7 +183,6 @@ export function stylesheetPaths(root: string = join(import.meta.dirname, '..')):
   return found;
 }
 
-/** Every shipped component source (no tests), as absolute paths. */
 export function sourceFiles(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -233,7 +196,6 @@ export function sourceFiles(root: string = join(import.meta.dirname, '..')): str
   return found;
 }
 
-/** Every shipped plain module (no tests, no .tsx), as absolute paths. */
 export function moduleFiles(root: string = join(import.meta.dirname, '..')): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -247,11 +209,6 @@ export function moduleFiles(root: string = join(import.meta.dirname, '..')): str
   return found;
 }
 
-/**
- * Which longhand properties a shorthand resets. Deliberately conservative: an unlisted shorthand
- * simply covers nothing, so the shadow analysis below under-reports rather than accusing a live
- * rule of being dead. `border` is the one that needs care — it does NOT reset border-radius.
- */
 const COVERS: Record<string, (property: string) => boolean> = {
   border: (p) => /^border(-(top|right|bottom|left))?(-(color|width|style))?$/.test(p),
   background: (p) => p.startsWith('background'),
@@ -271,18 +228,6 @@ const isCovered = (property: string, by: string[]): boolean =>
 
 const partsOf = (selector: string): string[] => selector.split(',').map((part) => part.trim());
 
-/**
- * Rules every one of whose declarations is overridden by a later rule at the same specificity — so
- * the rule renders nothing and is pure dead weight.
- *
- * This is the case duplicatesIn cannot see: `.a, .b { background: x }` followed by `.a { background:
- * y }` and `.b { background: z }` uses three different selector keys, yet the group is inert. That
- * exact shape appeared in TrashView.css, where an appended "replacement" block sat ABOVE the rules
- * it meant to replace and therefore never rendered at all.
- *
- * Specificity is compared by identical selector-part text, so no specificity maths is needed: the
- * same part written the same way always has the same specificity.
- */
 export function shadowedRules(css: string): string[] {
   const rules = parseRules(css);
   const dead: string[] = [];

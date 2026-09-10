@@ -26,8 +26,6 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    // ---- recorder wiring ----
-
     private enum StartRecordingResult
     {
         Started,
@@ -38,8 +36,6 @@ internal sealed partial class AppHost
         RecorderRefused,
     }
 
-    // The dispatch entry points. StartRecording/StopRecording answer bool and every refusal returns
-    // before the state push, so a caller that drops the bool leaves the UI showing nothing happened.
     internal void StartRecordingOrReport(string? gameId, string? displayId = null, bool applyDisplay = false)
     {
         var result = TryStartRecording(gameId, displayId, applyDisplay);
@@ -93,14 +89,10 @@ internal sealed partial class AppHost
 
         lock (_recorderGate)
         {
-            // The detector is authoritative. A UI state push and its Record click can race a process
-            // exit; an id with no live owner must not select per-game settings, paths, metadata or models.
             effectiveGameId = processOwner is null ? null : gameId;
             if (processOwner is not null && effectiveGameId is not null)
                 EnsureManagedModel(effectiveGameId);
 
-            // Detector teardown owns the callback barrier; do not admit new recording starts while it is
-            // being dismantled.
             if (_shuttingDown)
                 return StartRecordingResult.ShuttingDown;
 
@@ -110,8 +102,6 @@ internal sealed partial class AppHost
             if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
                 return StartRecordingResult.AlreadyRunning;
 
-            // No previous session decision may survive into an attempt that fails before the recorder
-            // starts. A successful attempt writes its effective value after Start returns true.
             lock (_automaticClipGate)
                 _liveHighlightsEnabledAtSessionStart = false;
 
@@ -134,9 +124,6 @@ internal sealed partial class AppHost
 
             EnsureRecorderBuilt(resolved);
 
-            // Point the session's game-capture source at the detected game before the recording starts, so
-            // the recording shows the game rather than the background. win-capture keeps retrying the hook
-            // while the source is shown, so a game that appears mid-recording is still picked up.
             if (effectiveGameId is not null)
                 RetargetGameCapture(effectiveGameId);
 
@@ -163,8 +150,6 @@ internal sealed partial class AppHost
 
         try
         {
-            // The display layer bounds the wait: without one there is nothing to record until the
-            // hook attaches, so that wait is unbounded and only cancellation ends it.
             var hasFallback = hookWaitSession.HasDisplayFallback;
             var deadline = hasFallback ? hookWaitSession.Policy.GameCaptureTimeout : Timeout.InfiniteTimeSpan;
             var warningAfter = hasFallback ? TimeSpan.Zero : hookWaitSession.Policy.GameCaptureTimeout;
@@ -291,9 +276,6 @@ internal sealed partial class AppHost
 
     internal bool StopRecording()
     {
-        // StartRecording's hook wait runs with the recorder gate released, so publish the stop and
-        // cancel the wait before taking the gate: a start that is waiting ends the wait and refuses
-        // in its post-wait re-check instead of starting a recording that must be stopped again.
         Interlocked.Exchange(ref _recordingStopRequested, 1);
         _captureWaitCancellation?.Cancel();
         lock (_recorderGate)
@@ -394,10 +376,6 @@ internal sealed partial class AppHost
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
             WriteMetadataRecord(_pendingMetadata);
 
-            // Post-stop clips are gated by the same effective flag the session started with
-            // (AutomaticClipsEnabled AND the resolved mode uses the replay buffer), so plain Session
-            // mode never cuts automatic clips, and a mid-session settings edit cannot rewrite what
-            // this recording did.
             if (sourcePath is not null && _pendingMetadata.VideoPath.Length > 0
                 && automaticClipsWereLive)
             {
@@ -545,9 +523,6 @@ internal sealed partial class AppHost
         catch (Exception exception) { Log.Warning(exception, "AppHost: deferred OBS runtime disposal failed"); }
     }
 
-    // Persists the recording's metadata — game, start time, content type, audio tracks, the
-    // automatic bookmarks and the link key back to the video — so bookmarks survive the process.
-    // Written only when the recording actually exists.
     private void WriteMetadataRecord(RecordingMetadata metadata)
     {
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
@@ -559,8 +534,6 @@ internal sealed partial class AppHost
 
         lock (_metadata.WriteGate)
         {
-            // The one write allowed to replace whatever is on disk, because here the in-memory record
-            // is the authoritative one: this process just made the recording.
             if (metadata.DurationSeconds is null)
             {
                 var existing = _metadata.Read(Path.GetFileName(_activeOutputPath));
@@ -572,8 +545,6 @@ internal sealed partial class AppHost
         }
         PushContent();
     }
-
-    // ---- recorder construction ----
 
     private void EnsureRecorderBuilt(ResolvedRecorderSettings settings)
     {
@@ -590,9 +561,6 @@ internal sealed partial class AppHost
         var policy = CapturePolicy.From(settings);
         if (_recorder is not null)
         {
-            // The scene's layers are composed in the session's constructor, so a changed capture
-            // method or monitor needs a new session — otherwise the setting only takes effect at
-            // the next app start. Reached from Idle only (StartRecording refuses otherwise).
             if (_recorderSession is not ObsRecorderSession existing || existing.Policy == policy)
                 return;
 
@@ -607,8 +575,6 @@ internal sealed partial class AppHost
         if (_runtime is null)
             throw new InvalidOperationException("The real recorder needs a libobs runtime; none was started.");
 
-        // The plugin's default colour is white (0xFFFFFFFF), which would render recordings as a white
-        // canvas until a game is hooked.
         if (_colourSource is null)
         {
             using var colourSettings = new ObsSettings();
@@ -621,11 +587,6 @@ internal sealed partial class AppHost
         _recorder = new RecorderStateMachine(session, settings);
     }
 
-    // Re-points the session's game-capture source at the game being recorded. win-capture keys on the
-    // executable, so this is the catalogue's Executable (never the display name) with the platform
-    // extension put back — normalized first, because a settings entry may spell it either way and
-    // "cs2.exe.exe" hooks nothing. A no-op when the platform has no game capture (Linux) or the
-    // session is the fake.
     private void RetargetGameCapture(string gameId)
     {
         if (_recorderSession is not ObsRecorderSession session)
@@ -636,15 +597,12 @@ internal sealed partial class AppHost
         session.RetargetGame(new ObsGameCaptureTarget(null, null, executable));
     }
 
-    // The extension-free executable for a game, or the id itself when the catalogue does not list it.
     internal string GameCaptureName(string gameId)
     {
         var entry = GameList.FirstOrDefault(g => g.Id == gameId);
         return ExecutableNames.Normalize(entry is null ? gameId : ExecutableOf(entry));
     }
 
-    // New recordings are scoped under <effectiveRoot>/<game>/sessions/. Existing legacy recordings
-    // remain readable because catalogue classification accepts both layouts.
     private string BuildSessionPath(string? gameId, bool createDirectory = true)
     {
         var directory = string.IsNullOrWhiteSpace(gameId)
@@ -652,8 +610,7 @@ internal sealed partial class AppHost
             : Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
         if (createDirectory)
             Directory.CreateDirectory(directory);
-        // Millisecond resolution keeps two sessions started in the same second from colliding on one file
-        // name, which would overwrite the recording and its metadata record.
+
         var name = $"session-{DateTime.Now:yyyyMMdd-HHmmssfff}.mp4";
         return Path.Combine(directory, name);
     }

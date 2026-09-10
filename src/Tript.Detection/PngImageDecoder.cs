@@ -44,7 +44,7 @@ internal static class PngImageDecoder
             var dataLength = (int)length;
             var data = png.Slice(offset, dataLength);
             offset += dataLength;
-            offset += 4; // CRC is not needed after the structural bounds checks.
+            offset += 4;
 
             if (type.SequenceEqual("IHDR"u8))
             {

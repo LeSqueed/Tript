@@ -84,9 +84,6 @@ internal static class TrainingEventValidator
                 $"Training event '{invalid.Name}' references a missing region group.");
     }
 
-    // The fixed position is allowed to sit outside the event's crop region; like any out-of-crop
-    // label it is then counted invalid and skipped by training/export. Only structural errors are
-    // fatal here.
     internal static void ValidateFixedPositions(IReadOnlyList<EventDefinition> events)
     {
         foreach (var eventDefinition in events.Where(eventDefinition =>

@@ -8,9 +8,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The state machine contract: the transitions, the refusals, and the failure paths — a stop code
-// must surface as a reason, never be swallowed. The recorder is exercised through a fake session and
-// fake output, so these tests make no contact with libobs at all.
 public class RecorderStateMachineTests
 {
     private readonly FakeRecorderSession _session = new();
@@ -132,8 +129,6 @@ public class RecorderStateMachineTests
         Assert.Equal(0, _session.PlaceSourceCalls);
     }
 
-    // The stop code is never swallowed: a failure the output reports when it stops is surfaced as
-    // the reason, not reported as a clean user-requested end.
     [Fact]
     public void AnOutputFailure_SurfacesAsTheStopReason()
     {
@@ -151,9 +146,6 @@ public class RecorderStateMachineTests
     [Fact]
     public void ASynchronousStartRefusal_IsSurfacedWithTheReason()
     {
-        // The fake cannot refuse before the recorder asks it to start, so the recorder has to see
-        // a start refusal through the output's Start return. The fake session's default output
-        // starts fine; a second recorder whose fake output refuses is the direct route.
         var refusing = new FakeRecorderSession();
         var output = new FakeOutput { StartReturns = false, LastError = "bad path" };
         refusing.SetOutput(output);
@@ -212,8 +204,6 @@ public class RecorderStateMachineTests
         Assert.Equal(0, session.PlaceSourceCalls);
     }
 
-    // A wiring failure (encoder unavailable, no video mix) refuses the start synchronously with the
-    // exception's message as the reason.
     [Fact]
     public void AWiringFailure_RefusesTheStartWithTheExceptionMessage()
     {
@@ -229,8 +219,6 @@ public class RecorderStateMachineTests
         Assert.Equal(0, session.PlaceSourceCalls);
     }
 
-    // A stop that is neither user-requested nor a failure code: the game-ended path, which the
-    // auto-start coordinator drives. The reason must survive the stop signal.
     [Fact]
     public void AStopForGameEnd_CompletesWithGameStoppedAsTheReason()
     {
@@ -257,7 +245,6 @@ public class RecorderStateMachineTests
         Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
     }
 
-    // A snapshot read from a thread that is not the recorder thread must be immutable and readable.
     [Fact]
     public void Snapshot_IsReadableAcrossThreads()
     {
@@ -284,7 +271,6 @@ public class RecorderStateMachineTests
         Assert.Equal(RecorderStopReason.Disposed, recorder.Snapshot.LastStopReason);
         Assert.Equal(1, _session.ClearSourceCalls);
 
-        // Dispose is idempotent.
         recorder.Dispose();
     }
 }

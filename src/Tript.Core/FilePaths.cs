@@ -3,8 +3,6 @@
 
 namespace Tript.Core;
 
-// Host path semantics in one place: case sensitivity follows the OS, while both separator styles
-// are always understood because catalogue and settings data originate on Windows.
 public static class FilePaths
 {
     private static readonly char[] Separators = ['\\', '/'];

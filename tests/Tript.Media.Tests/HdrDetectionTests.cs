@@ -6,10 +6,6 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// HDR detection is by transfer characteristic: smpte2084 (PQ) or arib-std-b67 (HLG) is HDR,
-// anything else is SDR. The parser is the unit under test; the probe's job is to feed it the file's
-// actual transfer, and a missing transfer field must read as "unspecified" — the exact absence the
-// probe normalises.
 public class HdrDetectionTests
 {
     [Fact]
@@ -34,8 +30,6 @@ public class HdrDetectionTests
         Assert.False(info.IsHdr);
     }
 
-    // The load-bearing absence case: a file with no colour metadata at all (the common case for
-    // ordinary recordings) must read as SDR "unspecified", not throw.
     [Fact]
     public void Parse_NoColorMetadata_IsSdrUnspecified()
     {
@@ -66,7 +60,7 @@ public class HdrDetectionTests
     {
         var info = MediaProbe.Parse(StreamJson("bt709", "bt709", "bt709", frameRate: "60/2"), "fake.mp4");
         Assert.Equal(30.0, info.FrameRate.Value, 10);
-        // 60/2 and 30/1 are the same rate.
+
         Assert.True(Fraction.Same(info.FrameRate, new Fraction(30, 1)));
     }
 

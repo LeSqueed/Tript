@@ -7,10 +7,6 @@ using Tript.Core;
 
 namespace Tript.App.Content;
 
-// The on-disk thumbnail cache the library grid is drawn from. Cache hits are served directly, while
-// misses are placed on a bounded background queue. An HTTP request never waits for ffmpeg: keeping a
-// thumbnail response open can occupy every browser connection to the same origin and prevent the
-// player's range request from reaching the server at all.
 internal sealed class ThumbnailStore : IDisposable
 {
     private const string CacheVersion = "2";
@@ -68,9 +64,6 @@ internal sealed class ThumbnailStore : IDisposable
             return Path.Combine(_thumbnailRoot, $"{videoFileName}.jpg");
     }
 
-    // Returns a usable cache entry immediately. A miss is coalesced into the bounded background
-    // queue and returns null, whether it was accepted, already pending, or shed because the queue is
-    // full. All three outcomes deliberately release the browser connection at once.
     internal string? GetOrQueue(string videoPath)
         => GetOrQueue(videoPath, out _);
 
@@ -126,8 +119,6 @@ internal sealed class ThumbnailStore : IDisposable
         return null;
     }
 
-    // Test/support seam for callers that need the generated result rather than HTTP's immediate-miss
-    // contract. Production thumbnail requests use GetOrQueue and never await this completion.
     internal Task<string?> EnsureAsync(string videoPath)
     {
         var cached = GetOrQueue(videoPath, out var completion);
@@ -169,8 +160,6 @@ internal sealed class ThumbnailStore : IDisposable
                     }
                     else if (attempted && IsCurrent(job) && SourceMatches(job))
                     {
-                        // A corrupt file or unsupported codec must not launch ffmpeg once per card
-                        // retry. A changed source bypasses the cooldown because its stamp differs.
                         _failed[job.Key] = new FailedGeneration(
                             job.Source, DateTime.UtcNow + FailedExtractionCooldown);
                     }
@@ -197,8 +186,6 @@ internal sealed class ThumbnailStore : IDisposable
             if (!extractor.TryExtract(job.VideoPath, temporary))
                 return null;
 
-            // Delete/root changes and source replacement can happen while ffmpeg is running. The
-            // short state lock closes the check-to-publish race; extraction itself never holds it.
             lock (_stateGate)
             {
                 if (!IsCurrent(job) || !SourceMatches(job))
@@ -247,9 +234,6 @@ internal sealed class ThumbnailStore : IDisposable
         }
     }
 
-    // Prevents an extraction already in progress from publishing after the caller moves the source
-    // and its current cache entry elsewhere. A later request may enqueue a fresh generation if the
-    // source remains in place (for example, when a trash transaction fails).
     internal void Invalidate(string videoFileName)
     {
         lock (_stateGate)
@@ -262,7 +246,6 @@ internal sealed class ThumbnailStore : IDisposable
         _verifiedVersions.Remove(videoFileName);
     }
 
-    // Called under _stateGate.
     private bool IsFresh(string fileName, string cached, string videoPath)
     {
         try
@@ -283,9 +266,6 @@ internal sealed class ThumbnailStore : IDisposable
         }
     }
 
-    // The version marker is read from disk once per file per root. A grid render asks for every
-    // visible card at once, and the marker only changes when this store rewrites it, which is
-    // where the in-memory answer is refreshed.
     private bool HasCurrentVersion(string fileName, string cached)
     {
         if (_verifiedVersions.Contains(fileName))
@@ -335,8 +315,6 @@ internal sealed class ThumbnailStore : IDisposable
             _jobs.CompleteAdding();
         }
 
-        // The extractor has its own hard process timeout. Do not make app shutdown wait on it: this
-        // is a background cache and the worker is marked background specifically for that guarantee.
         if (_worker.Join(WorkerShutdownWait))
             _jobs.Dispose();
     }

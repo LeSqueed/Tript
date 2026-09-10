@@ -16,13 +16,11 @@ const SETTINGS: GameSettings = {
       name: 'Overwatch',
       executablePath: 'C:\\Program Files\\Overwatch\\Overwatch.exe',
       captureMethodOverride: { method: 'Game' },
-
     },
     {
       id: 'custom-existing',
       name: 'Existing game',
       executablePath: 'D:\\Games\\Existing\\game.exe',
-
     },
   ],
 };
@@ -68,7 +66,6 @@ function renderPage(
   return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, view };
 }
 
-/** A single packaged game, so the Before/After fields of its one row are unambiguous. */
 function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverride']) {
   return {
     gameCaptureTimeout: 10,
@@ -123,7 +120,6 @@ describe('custom games', () => {
         id: '01HRESOLVEDGAME000000000000',
         name: 'My Game',
         executablePath: 'C:\\Games\\My Game\\game.exe',
-
       },
     ]);
     expect(screen.getByTestId('custom-game-draft')).toBeTruthy();
@@ -154,7 +150,6 @@ describe('custom games', () => {
       id: 'custom-existing',
       name: 'Renamed game',
       executablePath: 'E:\\Renamed\\renamed.exe',
-
     });
   });
 
@@ -300,7 +295,6 @@ describe('automatic clip overrides', () => {
     expect(gameListFrom(update)[0]).toEqual({
       id: PACKAGED_ID,
       name: 'Overwatch',
-
     });
   });
 
@@ -458,7 +452,6 @@ describe('per-game override disclosure', () => {
     expect(details).toBeTruthy();
     expect(details?.querySelector('summary')?.textContent).toBe('Customize for this game');
     expect(screen.queryByText('modified')).toBeNull();
-    // The override controls stay in the DOM (and queryable) while the disclosure is closed.
     expect(screen.getByLabelText('Before (s)')).toBeTruthy();
     expect(screen.getByLabelText('After (s)')).toBeTruthy();
   });

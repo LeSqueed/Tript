@@ -13,20 +13,6 @@ using Tript.Settings;
 
 namespace Tript.App;
 
-// The app host: the process that assembles every component into a running product.
-//
-// Startup order:
-//   1. SettingsStore plus the primary display's resolution — both read before the libobs context,
-//      because the canvas and the frame rate come from the settings.
-//   2. libobs context — safe module allowlist, the display handed over explicitly (libobs cannot
-//      discover the display server on Linux), video and audio mixes reset, modules loaded.
-//   3. FrameSourceRegistry resolver, verified to exist before detection is asked to start.
-//   4. RecordingSessionTracker.Register() — the resolver the detection host writes bookmarks through.
-//   5. The three local IPC channels: WebSocket control socket, HTTP content server, UI host.
-//   6. READY on stdout.
-//
-// Startup never throws: each failure is written to stderr with a distinct exit code so the parent
-// can tell which layer refused to come up.
 internal static class Program
 {
     private static int Main(string[] args)
@@ -48,20 +34,12 @@ internal static class Program
         }
     }
 
-    // The desktop shell constructs its host through this same seam, so a windowed build and the
-    // headless launcher are the same host rather than two divergent copies.
     internal static AppHost BuildApp(AppOptions options)
     {
-        // First, and in the shared seam rather than in Main, so the desktop shell gets the same
-        // diagnostics the headless launcher does.
         AppLog.Configure();
 
-        // Here for the same reason, and it has to be early: the shell hosts libobs in its own
-        // process, and a DPI-unaware process cannot duplicate a desktop at all.
         DeclareDpiAwareness();
 
-        // Before the runtime, so the runtime can be initialised with the resolution and frame rate from
-        // the settings — both must affect the mix.
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
 
 #if TRIPT_TRAINING
@@ -70,33 +48,23 @@ internal static class Program
         ModelService.ConfigureUserModelRoot(GameModelPaths.ModelsRoot);
 #endif
 
-        // Detected once per launch: the fresh-install resolution default, and the "(display)" option the
-        // settings UI offers. The answer cannot change without a restart anyway — the canvas is fixed at
-        // startup (see StartObsRuntime).
         var primaryDisplay = PrimaryDisplay.Detect();
         ApplyFirstRunDefaults(store, primaryDisplay);
 
-        // Only when the recording path is real. --fake-recorder starts no libobs at all.
         ObsRuntime? runtime = null;
         if (!options.FakeRecorder)
         {
             runtime = StartRuntimeOnHostThread(store);
 
-            // ObsRuntime.Start installs the resolver; this verifies the registration is visible, so a
-            // detection failure later is never a silent "no frame source".
             _ = FrameSourceRegistry.Current;
         }
 
-        // The recorder and the detector agree on what is being recorded through the core registry.
         var tracker = new RecordingSessionTracker().Register();
 
         return new AppHost(options, store, runtime, tracker, primaryDisplay,
             enableModelDelivery: !options.FakeRecorder);
     }
 
-    // On Windows libobs's obs_startup calls CoInitializeEx(COINIT_APARTMENTTHREADED) and treats a
-    // refusal as failure, but the .NET main thread is already MTA — so the startup is moved onto a
-    // dedicated STA thread there. Linux has no COM and no constraint.
     private static ObsRuntime StartRuntimeOnHostThread(SettingsStore store)
     {
         var recording = store.Load().Recording;
@@ -127,9 +95,6 @@ internal static class Program
         return runtime!;
     }
 
-    // The fresh-install resolution default: the primary display's own size, so a first launch
-    // records at the resolution the user actually plays at. It lives in the host rather than on
-    // RecordingSettings for two reasons.
     internal static bool ApplyFirstRunDefaults(SettingsStore store, DisplaySize? primaryDisplay)
     {
         if (File.Exists(store.FilePath))
@@ -142,13 +107,10 @@ internal static class Program
             settings.Recording.ResolutionHeight = display.Height;
         }
 
-        // No detection: the model's own 1920x1080 stands, and the user can pick their own in the UI.
         store.Save();
         return true;
     }
 
-    // Platform-split. On Linux OBS is a system dependency and the runtime needs the display handed
-    // over explicitly; on Windows OBS is bundled and needs no X11. The reset and module load are shared.
     private static ObsRuntime StartObsRuntime(RecordingSettings recording)
     {
         var locations = ObsRuntimeLocator.Discover();
@@ -160,8 +122,6 @@ internal static class Program
         if (locations.RuntimeDirectory is not null)
             ObsRuntime.SetRuntimeDirectory(locations.RuntimeDirectory);
 
-        // The muxer helper must sit next to this executable (os_get_executable_path_ptr). Best-effort —
-        // a machine without it surfaces the failure at recording time.
         _ = MuxerHelper.EnsureNextToApp(locations.ModuleBinaryDir);
 
         ObsStartupOptions startup;
@@ -188,27 +148,17 @@ internal static class Program
 
         var runtime = ObsRuntime.Start(startup);
 
-        // The libobs context is started on a dedicated STA thread (StartRuntimeOnHostThread); log the
-        // apartment we actually landed on.
         if (OperatingSystem.IsWindows())
             Console.Error.WriteLine($"Tript.App: libobs startup on {Thread.CurrentThread.GetApartmentState()} thread");
 
-        // libobs resolves the graphics module by loading it straight off the process DLL search
-        // path (obs_reset_video -> obs_init_graphics -> gs_create -> os_dlopen, i.e. LoadLibraryExW
-        // with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS).
         if (OperatingSystem.IsWindows() && locations.RuntimeDirectory is not null)
             SetDllDirectoryW(locations.RuntimeDirectory);
 
-        // Paths before the resets, matching the ordering ObsRuntime documents. The data path has to
-        // be in place first: the first video reset loads libobs's effects through
-        // obs_find_data_file, which only knows the paths registered so far.
         if (locations.CoreDataDir is not null)
             runtime.AddDataPath(locations.CoreDataDir);
         if (locations.LibobsDataDir is not null)
             runtime.AddDataPath(locations.LibobsDataDir);
 
-        // A search root: libobs substitutes %module% and looks for the module's data under it.
-        // Windows uses the FLAT binary form, matching OBS's own registration.
         var binaryPattern = OperatingSystem.IsWindows()
             ? locations.ModuleBinaryDir!.Replace('\\', '/')
             : Path.Combine(locations.ModuleBinaryDir!, "%module%.so");
@@ -227,9 +177,6 @@ internal static class Program
         if (!runtime.ResetAudio(new ObsAudioSettings()))
             throw new InvalidOperationException("obs_reset_audio refused the default settings.");
 
-        // Platform-specific: the capture source differs (linux-capture vs win-capture) and so does the
-        // audio module (linux-pulseaudio vs win-wasapi). Adding the frontend's module would abort the
-        // process, because there is no frontend here.
         foreach (var module in SafeModules(OperatingSystem.IsWindows()))
             runtime.AddSafeModule(module);
 
@@ -251,8 +198,6 @@ internal static class Program
         return runtime;
     }
 
-    // Windows bring-up diagnostic: obs_init_graphics fails silently because the effect compile error
-    // string is never requested. Reproduce the graphics init directly and capture that error.
     private static void DumpGraphicsInitError(string runtimeDirectory)
     {
         try
@@ -331,8 +276,6 @@ internal static class Program
         }
     }
 
-    // The video mix the runtime is reset with: the canvas the compositor renders at, and its frame
-    // rate. THE CANVAS COMES FROM THE SETTINGS, not a constant.
     internal static ObsVideoSettings BuildVideoSettings(RecordingSettings recording)
     {
         var width = (uint)Math.Max(1, recording.ResolutionWidth);
@@ -344,24 +287,12 @@ internal static class Program
             BaseHeight = height,
             OutputWidth = width,
             OutputHeight = height,
-            // From the settings, so the FPS selector actually affects the recorded mix.
+
             FpsNumerator = (uint)Math.Max(1, recording.Fps),
             FpsDenominator = 1
         };
     }
 
-    // Declares the process per-monitor DPI aware, before anything else runs.
-    //
-    // This is what makes display capture work at all on Windows. A DPI-unaware process gets
-    // DXGI_ERROR_UNSUPPORTED from IDXGIOutput5::DuplicateOutput1 for EVERY output, so
-    // gs_duplicator_create returns null, monitor capture renders nothing, and the recording is
-    // whatever is underneath it. Microsoft's DuplicateOutput1 page does not document the
-    // requirement — it was found by running the identical call in a DPI-aware process, where every
-    // output duplicates, and a DPI-unaware one, where none do.
-    //
-    // Called first because the context can only be set before any window or DPI-dependent API in
-    // the process, and a later call fails. The return is not checked: false means something already
-    // set it, which is the outcome we wanted anyway.
     private static void DeclareDpiAwareness()
     {
         if (!OperatingSystem.IsWindows())
@@ -373,24 +304,18 @@ internal static class Program
         }
         catch (EntryPointNotFoundException)
         {
-            // Pre-1703 Windows. Nothing here can run on one, and display capture is already absent.
         }
     }
 
-    // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2.
     private static readonly nint PerMonitorAwareV2 = -4;
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetProcessDpiAwarenessContext(nint value);
 
-    // The module allowlist. Kept small: the x264 and hardware encoders, the capture source, the
-    // image source (for the colour/blank), and the platform audio source.
     internal static IReadOnlyList<string> SafeModules(bool isWindows) =>
         isWindows
-            // win-wasapi registers the wasapi_input_capture / wasapi_output_capture ids ObsAudioRoutingSink
-            // asks for; without it there is no audio at all. obs-nvenc and obs-qsv11 register their H.264 ids
-            // only when their hardware is present, and EnumerateUsableEncoderIds filters to what did register.
+
             ? new[] { "obs-x264", "obs-ffmpeg", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
             : new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" };
 
@@ -400,8 +325,6 @@ internal static class Program
     [DllImport("libX11.so.6")]
     private static extern int XInitThreads();
 
-    // Puts one directory on the process's DLL search path so libobs's os_dlopen can find the bundled
-    // graphics module. Windows-only; inert elsewhere because it is never invoked off Windows.
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern bool SetDllDirectoryW(string? directory);
 }

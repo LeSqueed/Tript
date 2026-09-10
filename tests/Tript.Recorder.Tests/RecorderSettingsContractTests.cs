@@ -7,9 +7,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The effective-settings consumption contract. The resolver produces the flat
-// ResolvedRecorderSettings the recorder consumes; the recorder must never depend on the settings
-// schema.
 public class RecorderSettingsContractTests
 {
     [Fact]
@@ -37,8 +34,6 @@ public class RecorderSettingsContractTests
         Assert.Equal("Game", track.Name);
     }
 
-    // The recorder clones the config it is given, so a caller mutating a resolved value after the
-    // start cannot change what the running recording uses.
     [Fact]
     public void Start_ConsumesTheResolvedConfigTheCallerHandedIt()
     {
@@ -50,7 +45,6 @@ public class RecorderSettingsContractTests
         {
             Assert.True(recorder.Start(settings));
 
-            // Mutating the caller's object after the start must not change the running recording.
             settings.ResolutionWidth = 640;
             settings.ResolutionHeight = 480;
         }

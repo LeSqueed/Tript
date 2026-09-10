@@ -6,16 +6,12 @@ using Tript.Obs.Interop;
 
 namespace Tript.Obs;
 
-// libobs's obs_sceneitem_t: one source's placement inside one scene. The source can appear in
-// several scenes, and twice in the same scene; each appearance is a separate item with its own
-// transform and its own id.
 public sealed class ObsSceneItem : IDisposable
 {
     private readonly ObsSceneItemHandle _handle;
 
     private ObsSceneItem(nint pointer) => _handle = new ObsSceneItemHandle(pointer);
 
-    // Takes the reference this object owns. The pointer libobs handed over stays the scene's.
     internal static ObsSceneItem FromBorrowedPointer(nint pointer)
     {
         if (pointer == nint.Zero)
@@ -39,28 +35,16 @@ public sealed class ObsSceneItem : IDisposable
 
     public void Dispose() => _handle.Dispose();
 
-    // ---- identity ----
-
-    // Unique within its scene and stable across reordering. Numbering starts at one.
     public long Id => ObsNative.obs_sceneitem_get_id(Pointer);
 
-    // An owning reference to the source this item places; the caller disposes it. Still answers
-    // after the item has been detached from its scene: the item's hold on its source is given up
-    // when the item itself is released, not when it leaves the scene.
     public ObsSource? GetSource()
     {
         var source = ObsNative.obs_sceneitem_get_source(Pointer);
         return source == nint.Zero ? null : ObsSource.FromOwnedPointer(ObsNative.obs_source_get_ref(source));
     }
 
-    // True while the item is still part of a scene. Removal leaves the item itself valid — this
-    // handle holds it — but detached, with no scene and no source.
     public bool IsAttached => ObsNative.obs_sceneitem_get_scene(Pointer) != nint.Zero;
 
-    // ---- transform ----
-
-    // The whole placement in one call. Preferred over the individual properties when more than one
-    // is changing: each individual setter recalculates the item's matrices on its own.
     public ObsTransform Transform
     {
         get
@@ -98,8 +82,6 @@ public sealed class ObsSceneItem : IDisposable
         }
     }
 
-    // In canvas pixels, from the scene's origin to the item's alignment point. Snapped to the
-    // nearest half-pixel on the way in.
     public Vector2 Position
     {
         get
@@ -114,14 +96,12 @@ public sealed class ObsSceneItem : IDisposable
         }
     }
 
-    // Degrees, clockwise. Kept exactly as given, including values past a full turn and negative ones.
     public float Rotation
     {
         get => ObsNative.obs_sceneitem_get_rot(Pointer);
         set => ObsNative.obs_sceneitem_set_rot(Pointer, value);
     }
 
-    // A multiplier per axis, not a size. A negative component mirrors the item on that axis.
     public Vector2 Scale
     {
         get
@@ -136,18 +116,12 @@ public sealed class ObsSceneItem : IDisposable
         }
     }
 
-    // Which point of the item Position refers to. libobs validates nothing here: bits outside the
-    // four alignment flags are stored and read back unchanged.
     public ObsAlignment Alignment
     {
         get => (ObsAlignment)ObsNative.obs_sceneitem_get_alignment(Pointer);
         set => ObsNative.obs_sceneitem_set_alignment(Pointer, (uint)value);
     }
 
-    // ---- bounds ----
-
-    // How the item is fitted into Bounds. None ignores the bounding box entirely. Unvalidated in the
-    // same way as Alignment: an undefined value round-trips rather than being rejected.
     public ObsBoundsType BoundsType
     {
         get => (ObsBoundsType)ObsNative.obs_sceneitem_get_bounds_type(Pointer);
@@ -160,7 +134,6 @@ public sealed class ObsSceneItem : IDisposable
         set => ObsNative.obs_sceneitem_set_bounds_alignment(Pointer, (uint)value);
     }
 
-    // The bounding box in canvas pixels. Snapped to the half-pixel grid like Position.
     public Vector2 Bounds
     {
         get
@@ -175,14 +148,12 @@ public sealed class ObsSceneItem : IDisposable
         }
     }
 
-    // Crops what falls outside the bounding box rather than scaling it in.
     public bool CropToBounds
     {
         get => ObsNative.obs_sceneitem_get_bounds_crop(Pointer);
         set => ObsNative.obs_sceneitem_set_bounds_crop(Pointer, value);
     }
 
-    // Pixels taken off each edge of the source before placement. Negative values are stored as zero.
     public ObsCrop Crop
     {
         get
@@ -201,10 +172,6 @@ public sealed class ObsSceneItem : IDisposable
         }
     }
 
-    // ---- ordering ----
-
-    // Zero is the bottom of the scene, drawn first and therefore behind everything else. A source
-    // added to a scene lands on top, with the highest position.
     public int OrderPosition
     {
         get => ObsNative.obs_sceneitem_get_order_position(Pointer);
@@ -213,15 +180,10 @@ public sealed class ObsSceneItem : IDisposable
 
     public void MoveInOrder(ObsOrderMovement movement) => ObsNative.obs_sceneitem_set_order(Pointer, (int)movement);
 
-    // ---- rendering ----
-
-    // Returns true when the value changed, false when it was already what was asked for — the way
-    // libobs reports "nothing to do" here, and not something the header states.
     public bool SetVisible(bool visible) => ObsNative.obs_sceneitem_set_visible(Pointer, visible);
 
     public bool IsVisible => ObsNative.obs_sceneitem_visible(Pointer);
 
-    // A frontend concern that libobs stores for it: a locked item is not protected from this API.
     public bool SetLocked(bool locked) => ObsNative.obs_sceneitem_set_locked(Pointer, locked);
 
     public bool IsLocked => ObsNative.obs_sceneitem_locked(Pointer);
@@ -230,8 +192,6 @@ public sealed class ObsSceneItem : IDisposable
 
     public bool IsSelected => ObsNative.obs_sceneitem_selected(Pointer);
 
-    // How the item is resampled when its scale is not 1. Disable is the default and means the
-    // scene's own scaling is used.
     public ObsScaleType ScaleFilter
     {
         get => (ObsScaleType)ObsNative.obs_sceneitem_get_scale_filter(Pointer);
@@ -250,15 +210,8 @@ public sealed class ObsSceneItem : IDisposable
         set => ObsNative.obs_sceneitem_set_blending_mode(Pointer, (int)value);
     }
 
-    // ---- attachment ----
-
-    // Detaches the item from its scene and releases the scene's reference to the item. The item's
-    // own reference to its source is not given up here — that happens when the item is destroyed —
-    // so a source stays alive while any handle to a detached item remains open.
     public void Remove() => ObsNative.obs_sceneitem_remove(Pointer);
 
-    // Batches several transform changes into one recalculation. Reads inside the scope see the new
-    // values immediately; it is the matrix work that is deferred, not the state.
     public IDisposable DeferUpdates()
     {
         ObsNative.obs_sceneitem_defer_update_begin(Pointer);

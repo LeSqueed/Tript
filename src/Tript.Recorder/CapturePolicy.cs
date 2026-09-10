@@ -5,10 +5,6 @@ using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// What the recording scene is made of, resolved from the capture settings. The display layer is
-// opt-in through the method rather than always present: it is the layer that makes an unhooked game
-// capture survivable, but it is also the layer that records the desktop when the user asked for the
-// game and only the game.
 public sealed record CapturePolicy(
     DisplayCaptureMethod Method,
     string? PreferredDisplayId,
@@ -24,8 +20,6 @@ public sealed record CapturePolicy(
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        // A nonsense timeout would warn immediately or never; the model's own default is the sane
-        // value to stand in.
         var timeout = settings.GameCaptureTimeout > TimeSpan.Zero
             ? settings.GameCaptureTimeout
             : Default.GameCaptureTimeout;

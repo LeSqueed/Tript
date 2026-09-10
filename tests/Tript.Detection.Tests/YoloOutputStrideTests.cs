@@ -12,41 +12,15 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// The YOLO parser reads the detect head as (4 + numClasses) contiguous rows of numDetections floats,
-// with numDetections derived as output.Length / (4 + numClasses):
-//
-//     cx = output[i]                        w  = output[2 * numDetections + i]
-//     cy = output[1 * numDetections + i]    h  = output[3 * numDetections + i]
-//     conf(c) = output[(4 + c) * numDetections + i]
-//
-// Every one of those reads is in range for any class count, so a wrong one does not throw — it
-// shifts the whole tensor and decodes each box to garbage in silence. Three things have to hold for
-// the stride to be right, and none of them is checked anywhere else:
-//
-//   * numClasses comes from the exported graph (ModelClassCountTests pins that), and the anchor
-//     count the length-based derivation recovers really is the graph's;
-//   * the span handed to the parser is exactly the tensor, not a longer pooled buffer — its
-//     length is the dividend of that derivation;
-//   * the layout is channel-major with the four box rows first, which is what makes row 4 onwards
-//     confidences rather than geometry.
-//
-// These run against the shipped model's real output, which is the only place that contract exists.
-// What the parser does once the stride is right — the row offsets, the cutoff, argmax, the
-// centre-to-corner conversion — is pinned on hand-built tensors in ParseYoloOutputDecodeTests.
-// Loads its own session rather than ModelService's cached one: test classes run in parallel and
-// ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
 public class YoloOutputStrideTests
 {
     private const string GameId = "57ZZVAZ0PJK8VQGPKB728QE57C";
     private const int ModelInput = 640;
 
-    // Mirrors the parser's own arithmetic, so a change to the row layout has to be made here too.
     private const int YoloBoxChannels = 4;
 
     private sealed record ShippedOutput(Tensor<float> Tensor, float[] Values, int NumClasses, int Anchors);
 
-    // Fail loudly rather than skip, matching InputTensorReuseTests: a guard that quietly disables
-    // itself where the model is absent is worse than no guard at all.
     private static string ModelPath()
     {
         var modelPath = ModelService.GetModelPath(GameId);
@@ -56,16 +30,10 @@ public class YoloOutputStrideTests
         return modelPath;
     }
 
-    // The body runs while the run results are still alive: the output tensor is backed by memory the
-    // results own, exactly as it is in RunInferenceOnGray, so reading it after disposal would be
-    // testing freed native memory rather than the contract.
     private static void WithShippedModelOutput(Action<ShippedOutput> body)
     {
         using var session = new InferenceSession(ModelPath());
 
-        // A real inference on a real frame-shaped input. Zeros would exercise the same layout, but a
-        // near-black frame is exactly what DetectionLoop refuses to run, so noise keeps the output
-        // representative of what the YOLO parser actually sees.
         var gray = new byte[ModelInput * ModelInput];
         new Random(7).NextBytes(gray);
 
@@ -92,9 +60,6 @@ public class YoloOutputStrideTests
         body(new ShippedOutput(tensor, tensor.ToArray(), numClasses, dimensions[2]));
     }
 
-    // numDetections is recovered by division rather than read from the shape, so the shape and the
-    // element count have to agree exactly — a length that is not a whole number of rows means every
-    // row after the first is read at the wrong offset.
     [Fact]
     public void DerivedDetectionCount_EqualsTheGraphsAnchorDimension()
     {
@@ -108,9 +73,6 @@ public class YoloOutputStrideTests
         });
     }
 
-    // The reason the class count may not be taken from events.json: an entry added or removed there
-    // does not change the tensor, it changes the divisor, and every row boundary moves with it. This
-    // pins that the damage is real for the shipped model rather than theoretical.
     [Fact]
     public void AnOffByOneClassCount_MovesEveryRowBoundary()
     {
@@ -123,10 +85,6 @@ public class YoloOutputStrideTests
         });
     }
 
-    // RunInferenceOnGray hands the YOLO parser dense.Buffer.Span when the output is a DenseTensor, to
-    // avoid copying the whole tensor per region per cycle. That shortcut is only equivalent to
-    // ToArray() while the buffer is exactly the tensor: a longer one would inflate output.Length and
-    // therefore numDetections, shifting every read.
     [Fact]
     public void OutputTensor_IsDenseAndItsBufferIsExactlyTheTensor()
     {
@@ -139,9 +97,6 @@ public class YoloOutputStrideTests
         });
     }
 
-    // The layout itself. Rows 4 and up are per-class confidences, which the detect head sigmoids,
-    // so every value in them sits within [0, 1]; the four rows before them are box geometry in
-    // input pixels, which is why the YOLO parser divides them by inputSize.
     [Fact]
     public void ClassRowsAreConfidences_AndBoxRowsAreInputPixels_AtTheDerivedStride()
     {
@@ -158,8 +113,6 @@ public class YoloOutputStrideTests
                 "Box rows are already normalized — the YOLO parser divides them by the model input " +
                 "size and would shrink every box to nothing.");
 
-            // One row early: the box row pulled in carries pixel-space values, so the bound above
-            // cannot hold at this offset.
             Assert.True(Max(output.Values.AsSpan((YoloBoxChannels - 1) * anchors)) > 1f,
                 "Reading the class rows at the wrong offset stayed within [0,1], so the bound above " +
                 "does not actually pin the row boundary.");

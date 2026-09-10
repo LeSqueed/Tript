@@ -6,11 +6,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The SetVideoLocation seam (the Browse button on the recording page). The host never opens a
-// dialog itself: it exposes a FolderPicker delegate that the desktop shell installs once the
-// Photino window exists, and RequestVideoLocation runs the picker (when one is installed), then
-// applies the picked directory through the ordinary UpdateSettings path — saving the settings file
-// and pushing the new value to every client, exactly as if the user had typed the path.
 public sealed class FolderPickerTests : IDisposable
 {
     private readonly string _contentRoot;
@@ -40,15 +35,11 @@ public sealed class FolderPickerTests : IDisposable
     [Fact]
     public void RequestVideoLocation_WithPicker_AppliesPickedDirectory()
     {
-        // A directory under the temp content root: the host creates it when the picked path
-        // becomes the effective root, so it must be a location this process may write.
         var picked = Path.Combine(_contentRoot, "picked-recordings");
         _host.FolderPicker = () => picked;
 
         _host.RequestVideoLocation();
 
-        // The picked path became the configured output directory, persisted to the settings file
-        // and effective immediately (the host's content root follows it).
         Assert.Equal(picked, _store.Load().Recording.OutputDirectory);
         Assert.Equal(picked, _host.EffectiveRoot);
         var onDisk = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_settingsPath));
@@ -59,7 +50,6 @@ public sealed class FolderPickerTests : IDisposable
     [Fact]
     public void RequestVideoLocation_Cancelled_LeavesSettingsUntouched()
     {
-        // A cancelled picker returns null; the current setting stays.
         _host.FolderPicker = () => null;
 
         _host.RequestVideoLocation();
@@ -71,8 +61,6 @@ public sealed class FolderPickerTests : IDisposable
     [Fact]
     public void RequestVideoLocation_WithoutPicker_IsANoOp()
     {
-        // The headless host has no window, so FolderPicker is never installed; the command must
-        // not throw and must not change anything.
         Assert.Null(_host.FolderPicker);
 
         _host.RequestVideoLocation();
@@ -83,8 +71,6 @@ public sealed class FolderPickerTests : IDisposable
     [Fact]
     public void RequestVideoLocation_PickerFailure_IsHandled()
     {
-        // A picker that throws (a refused dialog) must not take the host down; the user stays
-        // where they were.
         _host.FolderPicker = () => throw new InvalidOperationException("no native dialog");
 
         _host.RequestVideoLocation();

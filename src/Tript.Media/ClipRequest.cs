@@ -3,53 +3,29 @@
 
 namespace Tript.Media;
 
-// Everything the engine needs to turn part of a recorded session into one or more clip files. This
-// is the engine-facing surface of the CreateClip payload: the IPC handler maps the wire message
-// onto this and hands it over.
 public sealed class ClipRequest
 {
     public string OperationId { get; init; } = string.Empty;
 
-    // The finished recording being clipped.
     public required string SourcePath { get; init; }
 
-    // The source recording's root-relative path, when the request came from the library. Persisting
-    // this on the finished clip avoids relying on generated filenames to recover its session.
     public string? SourceSessionPath { get; init; }
 
-    // The marked regions, in timeline order. In Separate mode each becomes its own file; in Combine
-    // mode they are concatenated into one.
     public required IReadOnlyList<ClipRegion> Regions { get; init; }
 
     public required ClipMode Mode { get; init; }
 
-    // Where the clip(s) are written. In Separate mode this is a directory and one file per region
-    // is created inside it; in Combine mode this is the single output file path.
     public required string OutputPath { get; init; }
 
-    // Optional per-track adjustments applied via ffmpeg's volume filter. Indexed by the source
-    // file's audio track order (0-based among audio streams).
     public IReadOnlyList<AudioTrackAdjustment> AudioTrackAdjustments { get; init; } = [];
 
-    // The encoder family to target. Defaults to the generic software path, libx265, which can carry
-    // 10-bit and therefore preserves a uniform HDR source.
     public string EncoderFamily { get; init; } = "libx265";
 
-    // Forces HDR sources through the SDR tone-map path without changing the source file.
     public bool ForceSdr { get; set; }
 
-    // Replay-buffer highlights already contain encoded media. Automatic callers can use a
-    // stream-copy trim to avoid re-encoding the recording while it is still active.
     public bool PreferStreamCopy { get; init; }
 
-    // The user's clip title from the clip dialog ("The clutch"), carried through so the host can
-    // persist it against the finished clip(s). Empty means the user set no title and the clip
-    // falls back to its file-name-without-extension.
     public string Title { get; init; } = string.Empty;
 
-    // A low-latency "one line of ffmpeg stderr" channel, in the same spirit as the training
-    // surface's progress messages. Invoked on a Process event thread as ffmpeg streams output, not
-    // on the engine's worker thread, so it must be thread-safe; an exception thrown out of it is
-    // swallowed rather than allowed to fail the clip.
     public Action<ClipProgress>? Progress { get; init; }
 }

@@ -10,8 +10,6 @@ public interface ITrainingFrameExtractor
     bool TryExtract(string sourcePath, double timestampSeconds, string destinationPath);
 }
 
-// Unlike library thumbnails, training frames are never resized, cropped, colour-converted, or
-// compressed as JPEG. The complete decoded frame is the durable source for future preprocessing.
 public sealed class FfmpegTrainingFrameExtractor : ITrainingFrameExtractor
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
@@ -36,8 +34,6 @@ public sealed class FfmpegTrainingFrameExtractor : ITrainingFrameExtractor
         if (outcome.Succeeded && HasContent(destinationPath))
             return true;
 
-        // Fast seeking can land before a usable keyframe in recordings with long GOPs. Retry with
-        // accurate post-input seeking before reporting a capture failure.
         TryDelete(destinationPath);
         var accurateSeekArguments = BuildArguments(sourcePath, timestampSeconds, destinationPath, seekBeforeInput: false);
         outcome = FfmpegRunner.RunBounded(_ffmpegPath, accurateSeekArguments, Timeout);
@@ -99,7 +95,6 @@ public sealed class FfmpegTrainingFrameExtractor : ITrainingFrameExtractor
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A partial frame must never be mistaken for a valid sample.
         }
     }
 }

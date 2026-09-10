@@ -28,10 +28,7 @@ export function LibraryToolbar({
 }: LibraryToolbarProps) {
   return (
     <div className="library-toolbar">
-      {/* Content type is one-of-N. Favourites is an independent boolean and lives with the other
-          filters — inside this group it read, and was announced, as a fourth exclusive type. The
-          trash offers no favourites toggle: a deleted item's favourite flag is frozen, so the filter
-          would only ever hide things it cannot bring back. */}
+      {}
       <SegmentedControl
         label="Show"
         value={query.type}

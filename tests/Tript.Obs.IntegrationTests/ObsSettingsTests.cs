@@ -8,16 +8,8 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The settings object against the real runtime: what it stores, what it converts, what it refuses
-// to convert, and how long it lives. Most of these tests start no OBS context, and that is a
-// finding rather than a shortcut — obs_data turns out to be independent of it in both directions.
 public sealed class ObsSettingsTests
 {
-    // ---- lifetime ----
-
-    // The measurement that decided which safe-handle base this type uses. obs_data allocates on
-    // bmem and the OBS core keeps no registry of these objects, so nothing about them waits for
-    // obs_startup.
     [Fact]
     public void ASettingsObject_IsUsableWithNoObsContextRunning()
     {
@@ -29,10 +21,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(12000, settings.GetInt("bitrate"));
     }
 
-    // The other half of the same question, and the one that would have made a context-scoped handle
-    // wrong: a settings object created inside a context is still readable after obs_shutdown, and
-    // still has to be released by us. A handle that declined to release after shutdown would leak
-    // every one of them.
     [SkippableFact]
     public void ASettingsObject_OutlivesTheContextItWasCreatedIn()
     {
@@ -54,8 +42,6 @@ public sealed class ObsSettingsTests
     [Fact]
     public void RepeatedCreateAndRelease_LeavesNoLibobsAllocationsBehind()
     {
-        // One warm-up cycle first: the very first call through a generated stub allocates the
-        // marshalling machinery, which would otherwise be counted as a leak.
         Cycle();
 
         var before = ObsRuntime.LiveAllocationCount;
@@ -95,13 +81,6 @@ public sealed class ObsSettingsTests
         Assert.Throws<ObjectDisposedException>(() => settings.GetInt("bitrate"));
     }
 
-    // ---- string ownership ----
-
-    // The question the previous layer was caught out by: obs_reset_video keeps the caller's
-    // graphics-module pointer without copying it, so that string has to outlive the call. obs_data
-    // does the opposite — it copies both the key and the value — which is why nothing here is
-    // interned and why passing a marshalled temporary is safe. Proved by handing libobs a buffer we
-    // own, then destroying it before reading back.
     [Fact]
     public unsafe void ASettingsObject_CopiesBothTheKeyAndTheValueItIsGiven()
     {
@@ -118,8 +97,6 @@ public sealed class ObsSettingsTests
 
         setString(settings.Pointer, nativeName, nativeValue);
 
-        // Scribbled before the free so a reader that kept the pointer sees changed bytes rather
-        // than depending on the allocator to reuse the block.
         new Span<byte>((void*)nativeName, Encoding.UTF8.GetByteCount(name)).Fill(0x58);
         new Span<byte>((void*)nativeValue, Encoding.UTF8.GetByteCount(value)).Fill(0x59);
         Utf8Marshal.Free(nativeName);
@@ -140,8 +117,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(Encoding.UTF8.GetBytes(value), Encoding.UTF8.GetBytes(settings.GetString(key)));
         Assert.True(settings.HasUserValue(key));
     }
-
-    // ---- typed round trips ----
 
     [Fact]
     public void EveryValueType_RoundTripsThroughOneSettingsObject()
@@ -174,8 +149,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(1, readArray.Count);
     }
 
-    // libobs stores every number as long long. A binding that narrowed it to int would work for
-    // every value anyone tried by hand.
     [Theory]
     [InlineData(long.MinValue)]
     [InlineData(long.MaxValue)]
@@ -189,11 +162,6 @@ public sealed class ObsSettingsTests
 
         Assert.Equal(value, settings.GetInt("n"));
     }
-
-    // ---- type mismatch ----
-    //
-    // Integers and doubles share one storage slot and convert freely. Nothing else converts at all,
-    // and none of the failures is reported.
 
     [Fact]
     public void ANumber_ReadAsAString_IsEmptyRatherThanItsDigits()
@@ -215,9 +183,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(0.0, settings.GetDouble("bitrate"));
     }
 
-    // The sharpest of the three: no value of any other type is ever truthy, so a flag written as
-    // the integer 1 — the shape a configuration file round-tripped through another tool tends to
-    // take — reads as false.
     [Fact]
     public void ABoolean_ConvertsToAndFromNoOtherType()
     {
@@ -250,8 +215,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(9.0, settings.GetDouble("integer"));
     }
 
-    // Nothing distinguishes an absent key from one set to the zero value of its type, which is why
-    // HasUserValue exists and why every round-trip test above asserts on it.
     [Fact]
     public void AnAbsentKey_ReadsAsEmptyZeroAndFalse()
     {
@@ -279,8 +242,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(6000, settings.GetInt("Bitrate"));
     }
 
-    // A null string is stored as an empty one and still counts as configured — so it is not a way
-    // to unset a key. UnsetUserValue is.
     [Fact]
     public void ANullStringValue_IsStoredAsAnEmptyStringAndStillCountsAsConfigured()
     {
@@ -290,8 +251,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(string.Empty, settings.GetString("profile"));
         Assert.True(settings.HasUserValue("profile"));
     }
-
-    // ---- defaults ----
 
     [Fact]
     public void ADefault_IsReadUntilAUserValueShadowsIt()
@@ -327,9 +286,6 @@ public sealed class ObsSettingsTests
         Assert.False(settings.HasDefaultValue("bitrate"));
     }
 
-    // The trap worth knowing about before writing any encoder configuration. An entry holds one
-    // type, so writing a user value of a different type over a default does not shadow it — it
-    // destroys it.
     [Fact]
     public void WritingAUserValueOfADifferentType_DestroysTheDefaultRatherThanShadowingIt()
     {
@@ -346,7 +302,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(string.Empty, settings.GetString("preset"));
     }
 
-    // Which is not what happens when the types agree: then the default survives untouched.
     [Fact]
     public void WritingAUserValueOfTheSameType_LeavesTheDefaultIntact()
     {
@@ -374,9 +329,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(6000, settings.GetInt("bitrate"));
     }
 
-    // The defaults come back as a separate object in which they are user values, which is what
-    // makes them serialisable and diffable — the shape recommended for dumping an
-    // encoder's declared key set.
     [Fact]
     public void GetDefaults_ReturnsTheDefaultsAsAnObjectOfUserValues()
     {
@@ -391,8 +343,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(6000, defaults.GetInt("bitrate"));
         Assert.True(defaults.HasUserValue("rate_control"));
     }
-
-    // ---- nesting ----
 
     [Fact]
     public void ANestedObject_IsStoredByReferenceRatherThanCopied()
@@ -409,8 +359,6 @@ public sealed class ObsSettingsTests
         Assert.Equal("after", fetched.GetString("inner"));
     }
 
-    // The parent holds its own reference, so disposing ours does not take the child with it. This
-    // is what lets a caller build a settings tree and dispose the pieces as it goes.
     [Fact]
     public void ANestedObject_SurvivesTheCallerDisposingItsOwnReference()
     {
@@ -436,11 +384,6 @@ public sealed class ObsSettingsTests
         Assert.Contains("\"array\":[]", settings.ToJson(), StringComparison.Ordinal);
     }
 
-    // Serialising the null half of that asymmetry is a hard crash below OBS 32.1.0: obs_data_to_json
-    // recursed into the null child and dereferenced it, and 32.1.0 added the `if (!data) return
-    // json_null()` that produces the null this asserts. Reproduced in plain C against 30.0.2 with no
-    // binding involved, so it is not ours to fix — and it takes the whole test host with it, which
-    // is why it has to be refused before ToJson rather than left to fail.
     [SkippableFact]
     public void ANullNestedObject_StoresAJsonNull()
     {
@@ -455,8 +398,6 @@ public sealed class ObsSettingsTests
         Assert.Null(settings.GetObject("object"));
         Assert.Contains("\"object\":null", settings.ToJson(), StringComparison.Ordinal);
     }
-
-    // ---- arrays ----
 
     [Fact]
     public void AnArray_KeepsItsElementsInOrder()
@@ -502,8 +443,6 @@ public sealed class ObsSettingsTests
         Assert.Equal("first", remaining.GetString("id"));
     }
 
-    // libobs answers an out-of-range index with null rather than a fault, which would surface as a
-    // null reference somewhere else entirely.
     [Fact]
     public void AnArrayIndexOutOfRange_IsRefusedWhereItWasAsked()
     {
@@ -516,8 +455,6 @@ public sealed class ObsSettingsTests
         Assert.Throws<ArgumentOutOfRangeException>(() => array.RemoveAt(1));
     }
 
-    // Arrays are held by reference like nested objects are, so an edit after the fact is visible
-    // through the settings object that stored it.
     [Fact]
     public void AnArrayStoredInASettingsObject_ReflectsLaterEdits()
     {
@@ -538,11 +475,6 @@ public sealed class ObsSettingsTests
         Assert.Equal(2, fetched.Count);
     }
 
-    // ---- merging ----
-
-    // A shallow merge. A child object present on both sides is replaced whole rather than merged
-    // into, so keys the target had inside it are gone — which is the opposite of what "apply" reads
-    // like and is stated in no header.
     [Fact]
     public void Apply_OverwritesMatchingKeysAndReplacesNestedObjectsWholesale()
     {
@@ -579,8 +511,6 @@ public sealed class ObsSettingsTests
         Assert.False(merged.HasUserValue("lost"));
     }
 
-    // ---- serialisation ----
-
     [Fact]
     public void AJsonDocument_RoundTripsThroughASettingsObject()
     {
@@ -600,8 +530,6 @@ public sealed class ObsSettingsTests
         using var list = settings.GetArray("list");
         Assert.Equal(1, list!.Count);
 
-        // Everything parsed arrives as a user value, so a loaded configuration is distinguishable
-        // from a set of defaults.
         Assert.True(settings.HasUserValue("bitrate"));
         Assert.False(settings.HasDefaultValue("bitrate"));
     }
@@ -613,9 +541,6 @@ public sealed class ObsSettingsTests
         Assert.Null(ObsSettings.FromJsonFile("/nonexistent/tript-settings.json"));
     }
 
-    // libobs caches the serialised text on the object and the next serialisation of the same object
-    // frees the previous buffer. Two results held at once would leave the first reading freed
-    // memory, so the binding copies before returning — this is what proves it does.
     [Fact]
     public void SuccessiveJsonReads_EachReturnTheirOwnResult()
     {
@@ -623,8 +548,6 @@ public sealed class ObsSettingsTests
         settings.SetInt("bitrate", 45000);
         settings.SetDefaultString("preset", "veryfast");
 
-        // All three held at once, and all three different — which is what a binding handing back
-        // libobs's cached buffer could not manage, because the second call frees the first.
         var plain = settings.ToJson();
         var withDefaults = settings.ToJson(includeDefaults: true);
         var pretty = settings.ToJson(pretty: true);
@@ -635,9 +558,6 @@ public sealed class ObsSettingsTests
         Assert.DoesNotContain('\n', plain);
     }
 
-    // A key that only has a default does not appear in the plain serialisation and does in the one
-    // that includes defaults. That difference is what makes "was this configured?" answerable from a
-    // saved file as well as from a live object.
     [Fact]
     public void JsonWithDefaults_IncludesKeysThatOnlyHaveADefault()
     {
@@ -674,11 +594,6 @@ public sealed class ObsSettingsTests
         }
     }
 
-    // ---- iteration ----
-
-    // The route to an encoder's declared key set: obs_encoder_defaults returns an object carrying
-    // every key the plugin has a default for, and this is how it is read off. Entries that exist
-    // only as a default are included, which is the whole point.
     [Fact]
     public void Iteration_ReportsEveryEntryWithItsTypeAndWhereItsValueCameFrom()
     {

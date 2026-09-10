@@ -554,7 +554,6 @@ export function TrainingSampleEditor({
     setOcrRegionDraft({ index, text: ocrRegions[index]?.text ?? '' });
   };
 
-  // Dismissing the dialog for a region whose text was never committed discards the region.
   const closeOcrRegionDraft = () => {
     const draft = ocrRegionDraft;
     if (draft && !ocrRegions[draft.index]?.text.trim()) {

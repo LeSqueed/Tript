@@ -224,7 +224,6 @@ internal static class TrainingAssetImporter
         if (!eventById.ContainsKey(eventId))
             throw new InvalidDataException($"The full-frame sample filename references unknown event id {eventId}: {imagePath}");
 
-        // The source timestamp is an absolute tick value, while the editor field is video-relative.
         return 0;
     }
 
@@ -277,7 +276,6 @@ internal static class TrainingAssetImporter
         height = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20, 4));
         return width > 0 && height > 0;
     }
-
 }
 
 #endif

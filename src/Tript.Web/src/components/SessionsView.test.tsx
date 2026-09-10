@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The sessions page, rendered. The derivation is tested in libraryModel.test.ts (deriveSessions);
-// what needs a DOM here is the wiring: the grid lists sessions only, the open/favourite/delete
-// seams reach the shell and the backend, and the empty states stay distinguishable.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -10,7 +6,6 @@ import { SessionsView } from './SessionsView';
 import type { ContentItem } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
 
-/** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
 const HOUR = 3600;
 

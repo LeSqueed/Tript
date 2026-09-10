@@ -9,10 +9,6 @@ using Xunit;
 
 namespace Tript.Settings.Tests;
 
-// The bookmark vocabulary is a compatibility surface: five members in a fixed order, with Kill, Goal
-// and Assist marked as positive bookmark types. Event definitions decide automatic clip
-// inclusion per game. The on-file contract is the member name,
-// and the converter tolerates unknown values by falling back to Manual.
 public class BookmarkMetadataTests
 {
     [Fact]
@@ -35,8 +31,6 @@ public class BookmarkMetadataTests
         Assert.False(BookmarkType.Death.IsIncludedInHighlights());
     }
 
-    // Recording metadata serializes the bookmark vocabulary as member names, and the content type
-    // via its own tolerant converter. This is the on-file contract.
     [Fact]
     public void RecordingMetadata_RoundTripsThroughJson()
     {
@@ -74,7 +68,6 @@ public class BookmarkMetadataTests
         Assert.Equal(TimeSpan.FromSeconds(12), roundTripped.Bookmarks[0].Time);
     }
 
-    // The metadata converter writes the member name, not the ordinal.
     [Fact]
     public void RecordingMetadata_SerializesBookmarkTypeAsMemberName()
     {
@@ -89,8 +82,6 @@ public class BookmarkMetadataTests
         Assert.DoesNotContain("\"type\": 2", json);
     }
 
-    // One hand-edited bookmark in a metadata file used to fail deserialization of the entire
-    // file. The tolerant converter keeps the rest of the file readable.
     [Fact]
     public void RecordingMetadata_UnknownBookmarkType_DoesNotFailTheFile()
     {
@@ -103,8 +94,6 @@ public class BookmarkMetadataTests
         Assert.Equal(2, metadata.Bookmarks.Count);
     }
 
-    // The content-type converter behaves the same way: an unknown value falls back rather than
-    // failing the file.
     [Fact]
     public void RecordingMetadata_UnknownContentType_FallsBackToRecording()
     {
@@ -115,10 +104,6 @@ public class BookmarkMetadataTests
         Assert.Equal(ContentType.Recording, metadata.ContentType);
     }
 
-    // ---- how much a record may be off and still load ----
-
-    // The form the app itself writes: StartTime comes from DateTime.Now, which serializes with the
-    // local offset ("2026-08-17T15:20:46.7558115+02:00"). It reads back as the same instant.
     [Fact]
     public void RecordingMetadata_StartTimeWithAnOffset_RoundTripsAsTheSameInstant()
     {
@@ -138,16 +123,12 @@ public class BookmarkMetadataTests
         var expected = new DateTimeOffset(2026, 8, 17, 15, 20, 46, TimeSpan.FromHours(2)).AddTicks(7558115);
         Assert.Equal(expected, new DateTimeOffset(metadata.StartTime));
 
-        // And writing it again keeps the instant, in the same offset form.
         var again = JsonSerializer.Serialize(metadata, SettingsSerialization.Options);
         Assert.Equal(expected,
             new DateTimeOffset(JsonSerializer.Deserialize<RecordingMetadata>(again,
                 SettingsSerialization.Options)!.StartTime));
     }
 
-    // A record does not have to be perfect to be worth reading: what is in it (a game, a title, a
-    // bookmark list) cannot be recomputed, so anything unambiguous is accepted. Each case below threw
-    // JsonException before, which made the record count as garbage.
     [Fact]
     public void RecordingMetadata_ANearlyRightRecord_StillLoads()
     {
@@ -155,8 +136,6 @@ public class BookmarkMetadataTests
         Assert.Equal("Overwatch", Load("{\n// the game this belongs to\n\"videoPath\":\"a.mp4\",\"game\":\"Overwatch\"}").Game);
         Assert.Equal(9.13, Load("""{"videoPath":"a.mp4","game":"Overwatch","durationSeconds":"9.13"}""").DurationSeconds);
 
-        // PascalCase members used to parse into an empty record — no exception, and silently no
-        // videoPath and no game, which is worse than a failure.
         var pascal = Load("""{"VideoPath":"a.mp4","Game":"Overwatch"}""");
         Assert.Equal("a.mp4", pascal.VideoPath);
         Assert.Equal("Overwatch", pascal.Game);
@@ -165,10 +144,6 @@ public class BookmarkMetadataTests
             JsonSerializer.Deserialize<RecordingMetadata>(json, SettingsSerialization.Options)!;
     }
 
-    // A timestamp is the one field the library can do without — the list falls back to the video's
-    // last-write time — so an unreadable one degrades to no timestamp instead of failing the record
-    // and putting the game and the bookmarks at risk. Epoch seconds are read rather than dropped:
-    // they name the same instant unambiguously.
     [Fact]
     public void RecordingMetadata_AnUnreadableStartTime_DoesNotFailTheRecord()
     {

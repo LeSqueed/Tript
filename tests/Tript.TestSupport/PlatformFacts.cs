@@ -5,7 +5,6 @@ using Xunit;
 
 namespace Tript.TestSupport;
 
-// Platform-bound tests report as skipped instead of passing silently through an early return.
 public sealed class WindowsFactAttribute : FactAttribute
 {
     public WindowsFactAttribute()

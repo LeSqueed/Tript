@@ -31,8 +31,6 @@ internal sealed partial class AppHost
         new(StringComparer.Ordinal);
     private readonly HashSet<string> _resolvingCandidatePaths = new(FilePaths.Comparer);
 
-    // ---- detection ----
-
     private void WireAutoStart()
     {
         if (_options.FakeRecorder)
@@ -55,7 +53,6 @@ internal sealed partial class AppHost
         _fullscreenDetector.CandidateFound += OnFullscreenCandidateFound;
         _fullscreenDetector.CandidateCleared += OnFullscreenCandidateCleared;
         _fullscreenDetector.Start();
-
     }
 
     private void StartDiscoveryScan()
@@ -507,8 +504,7 @@ internal sealed partial class AppHost
         EnsureManagedModel(gameId);
         if (!ShouldAutoRecord(gameId))
             return;
-        // The start can block on the game-capture hook wait; the detector's callback thread must
-        // not stall behind it.
+
         ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(gameId, owner));
     }
 
@@ -604,15 +600,8 @@ internal sealed partial class AppHost
 
     private string? DetectedProcessFor(string gameId) => _detectedGames.LatestOwner(gameId);
 
-    // What the catalogue says this game runs as. Null Executable means the entry predates the field,
-    // where the display name was also the process name.
     private static string ExecutableOf(GameInfo game) => game.Executable ?? game.Name;
 
-    // The detector reports a normalized process name; every path downstream of StartRecording keys off
-    // a catalogue Id (per-game settings, the display name in the metadata record, the detection model).
-    // Translating here is what keeps those lookups working once an executable is not also the Id — the
-    // `?? gameId` fallbacks below only ever agreed with the process name by coincidence. An unmatched
-    // name is passed through unchanged, which is what a manual StartRecording for an unlisted game does.
     internal string ResolveDetectedGameId(string processName)
     {
         foreach (var game in GameList)
@@ -627,9 +616,6 @@ internal sealed partial class AppHost
         return processName;
     }
 
-    // Metadata written before stable GameId existed stored the display name only. Recover the
-    // catalogue identity when possible so old recordings participate in per-game training and clips
-    // inherit the same identity as new recordings.
     private string? ResolveLegacyGameId(string? gameName)
     {
         if (string.IsNullOrWhiteSpace(gameName))
@@ -649,9 +635,6 @@ internal sealed partial class AppHost
             ? ResolveLegacyGameId(gameName)
             : (ResolveLegacyGameId(storedId) ?? storedId);
 
-    // The game a clip cut from this session belongs to. The session's on-disk metadata record is
-    // authoritative; for the session being recorded right now the in-memory pending record is used,
-    // because the on-disk record is only written when the recording stops.
     private (string? Game, string? GameId) ResolveGameForSession(string sourceSessionPath)
     {
         var sessionFile = Path.GetFileName(sourceSessionPath);
@@ -681,9 +664,6 @@ internal sealed partial class AppHost
         return (null, null);
     }
 
-    // Persists the game attribution on freshly created clips so the tag survives the source session
-    // being deleted later. The on-disk session metadata is usually already present (highlights from a
-    // completed recording); the pending record covers the session that is being recorded live.
     private void AttachGameToClips(IEnumerable<string> clipFiles, string sourceSessionPath)
     {
         var (game, gameId) = ResolveGameForSession(sourceSessionPath);
@@ -911,8 +891,6 @@ internal sealed partial class AppHost
         }
         catch (OperationCanceledException)
         {
-            // A stop gives unsaved regions one final chance to come from the active replay buffer;
-            // anything that still fails is handled by the finished-session fallback.
         }
         catch (TimeoutException)
         {

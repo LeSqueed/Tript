@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The icon set. Inline SVG on a 24×24 grid, drawn in `currentColor` so an icon takes the colour of
-// whatever it sits in. No icon font and no dependency: a published build is offline and CSP-bound,
-// and unicode glyphs (which this replaces) render differently on every platform — `⌁` for Trash was
-// illegible at 15px, because it is a character, not an icon.
 
 import type { SVGProps } from 'react';
 
@@ -93,7 +88,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   folder: <path d="M3.5 7.5v10a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-7l-2-3h-4a2 2 0 0 0-2 2z" />,
-  // A touch bolder and wider than the set's default stroke so it holds its own inside the toast's ring.
   close: <path strokeWidth={2} d="M5.5 5.5l13 13M18.5 5.5l-13 13" />,
   monitor: (
     <>
@@ -132,11 +126,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: IconName;
-  /** Pixel size; icons are square. */
   size?: number;
-  /** Give this only when the icon is the sole label — otherwise it stays hidden from assistive tech. */
   label?: string;
-  /** `star` doubles as its own filled state rather than shipping two paths. */
   filled?: boolean;
 }
 

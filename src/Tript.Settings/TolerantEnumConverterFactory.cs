@@ -6,9 +6,6 @@ using System.Text.Json.Serialization;
 
 namespace Tript.Settings;
 
-// Settings files outlive the build that wrote them. An enum member added by a newer build should
-// not make an older build refuse the entire settings file; fall back to the enum's first defined
-// member and keep the rest of the model loadable.
 internal sealed class TolerantEnumConverterFactory : JsonConverterFactory
 {
     public override bool CanConvert(Type typeToConvert) => typeToConvert.IsEnum;

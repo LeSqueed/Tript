@@ -5,11 +5,6 @@ using Tript.Settings;
 
 namespace Tript.Recorder;
 
-// The audio routing service: takes the resolved audio tracks the recorder hands over (via
-// ResolvedRecorderSettings.AudioTracks) and produces the wired audio path — capture sources routed
-// into mixers, one encoder per track bound to its mixer and assigned to its output slot — plus the
-// track/source mapping the recording's metadata must carry. The recorder owns the output; this owns
-// the audio routing.
 public sealed class AudioRoutingService
 {
     private readonly IAudioRoutingSink _sink;
@@ -20,9 +15,6 @@ public sealed class AudioRoutingService
         _sink = sink;
     }
 
-    // Wires the whole audio path for a plan and returns the sources and encoders it created, plus
-    // the metadata layout describing what went where. The recorder holds onto the returned wiring
-    // for the life of the recording and disposes it when it stops.
     public AudioRouting Wire(AudioRoutingPlan plan, bool includeCaptureSources = true)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -100,9 +92,6 @@ public sealed class AudioRoutingService
         return new AudioRouting(_sink, sources, encoders, BuildMetadata(plan));
     }
 
-    // The track/source mapping the recording's metadata contract carries: which track holds which
-    // source, at which volume. A later stage reads this from the recording to reconstruct the
-    // layout after compression.
     public static RecordingMetadata BuildMetadata(AudioRoutingPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);

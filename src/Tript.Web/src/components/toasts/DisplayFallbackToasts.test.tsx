@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// DisplayFallbackToasts tests: the toast appears when a settings push carries a
-// `displayFallbackWarning`, names the missing monitor and the one in use, and stays dismissed only
-// for that monitor — a warning about a different one comes back. The IPC client is a fake that
-// captures the `settings` handler, so the wire shape is exercised without a socket.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';

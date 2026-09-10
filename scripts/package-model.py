@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Validate and package a Tript detection model for release publication."""
 
 import argparse
@@ -10,14 +11,11 @@ import re
 import sys
 import zipfile
 
-
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 LFS_HEADER = b"version https://git-lfs.github.com/spec/v1"
 
-
 def fail(message: str) -> None:
     raise ValueError(message)
-
 
 def file_metadata(path: Path) -> dict[str, object]:
     digest = hashlib.sha256()
@@ -28,12 +26,10 @@ def file_metadata(path: Path) -> dict[str, object]:
             digest.update(chunk)
     return {"sizeBytes": size, "sha256": digest.hexdigest()}
 
-
 def checked_id(value: str, label: str) -> str:
     if not SAFE_ID.fullmatch(value):
         fail(f"{label} must use only letters, digits, '.', '_' or '-' and be at most 64 characters")
     return value
-
 
 def append_github_outputs(values: dict[str, object]) -> None:
     output_path = os.environ.get("GITHUB_OUTPUT")
@@ -42,7 +38,6 @@ def append_github_outputs(values: dict[str, object]) -> None:
     with open(output_path, "a", encoding="utf-8") as output:
         for key, value in values.items():
             print(f"{key}={value}", file=output)
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -183,7 +178,6 @@ def main() -> int:
     append_github_outputs(result)
     print(json.dumps(result, indent=2, default=str))
     return 0
-
 
 if __name__ == "__main__":
     try:

@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// The clip engine against real files. Every fixture is generated with ffmpeg into a per-run temp
-// directory, so the suite is self-contained and exercises the full shell-out path.
 public class ClipEngineTests
 {
     private readonly (string Ffmpeg, string Ffprobe) _b = MediaTestFixture.Binaries;
@@ -17,8 +15,6 @@ public class ClipEngineTests
 
     private static string Probe(string entry, string key, string path) =>
         MediaTestFixture.ProbeValue(MediaTestFixture.Binaries.Ffprobe, path, entry, key);
-
-    // ---- Verification 1: a real clip is produced and playable ----
 
     [Fact]
     public void CreateClips_SingleRegion_ProducesPlayableMp4()
@@ -45,10 +41,8 @@ public class ClipEngineTests
         Assert.Equal("240", Probe("v:0", "height", clip));
 
         var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
-        Assert.InRange(duration, 1.9, 2.1); // 2.0s region
+        Assert.InRange(duration, 1.9, 2.1);
     }
-
-    // ---- Verification 2: exact-time cut, not keyframe-aligned ----
 
     [Fact]
     public void CreateClips_CutAtNonKeyframeTime_FirstFrameIsExactRequestedTime()
@@ -66,22 +60,16 @@ public class ClipEngineTests
         });
         var output = Assert.Single(paths);
 
-        // The source has keyframes at 0, 1, 2, 3s. The region starts at 2.233s, between the
-        // keyframes at 2.0 and 3.0.
         var ffmpeg = MediaTestFixture.Binaries.Ffmpeg;
         var psnrToCut = MediaTestFixture.FirstFramePsnrDb(ffmpeg, output, "2.233", source, "exact-cut");
         var psnrToKeyframe = MediaTestFixture.FirstFramePsnrDb(ffmpeg, output, "2.0", source, "exact-key");
 
-        // The cut-time frame is a lossy re-encode of the same frame: >30 dB is a clear match.
         Assert.True(psnrToCut > 30.0, $"clip first frame should match the frame at 2.233s, got {psnrToCut} dB");
-        // A keyframe-aligned cut would put the 2.0s frame here: <25 dB with the cut frame ~20 dB
-        // from it. Asserting a wide margin makes the test robust.
+
         Assert.True(psnrToKeyframe < 25.0, $"clip first frame should not match the frame at 2.0s, got {psnrToKeyframe} dB");
         Assert.True(psnrToCut - psnrToKeyframe > 10.0,
             $"cut-time frame ({psnrToCut} dB) must be clearly closer than keyframe frame ({psnrToKeyframe} dB)");
     }
-
-    // ---- Verification 3: combine produces one file, separate produces N ----
 
     [Fact]
     public void CreateClips_Combine_TwoRegions_ProduceOneFileWithSummedDuration()
@@ -104,7 +92,7 @@ public class ClipEngineTests
 
         var clip = Assert.Single(paths);
         var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
-        // 1.5 + 1.5 = 3.0s.
+
         Assert.InRange(duration, 2.9, 3.1);
     }
 
@@ -135,15 +123,12 @@ public class ClipEngineTests
         }
     }
 
-    // ---- Verification 4: audio track handling ----
-
     [Fact]
     public void CreateClips_Separate_VolumeAndMute_AreReflectedInAudioTracks()
     {
         var source = MediaTestFixture.CreateSdrSource("audio2.mp4", audioTracks: 2);
         var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-audio");
 
-        // Baseline RMS of the untouched source track 0.
         var baselineDb = MediaTestFixture.AudioRmsDb(MediaTestFixture.Binaries.Ffmpeg, source, 0);
 
         var engine = NewEngine();
@@ -161,18 +146,13 @@ public class ClipEngineTests
         });
         var output = Assert.Single(paths);
 
-        // Volume 0.5 is exactly -6.02 dB. The output track 0 must be ~6 dB below baseline.
         var outputTrack0Db = MediaTestFixture.AudioRmsDb(MediaTestFixture.Binaries.Ffmpeg, output, 0);
         Assert.InRange(outputTrack0Db, baselineDb - 7.0, baselineDb - 5.0);
 
-        // The muted track reads as silence (-inf).
         var outputTrack1Db = MediaTestFixture.AudioRmsDb(MediaTestFixture.Binaries.Ffmpeg, output, 1);
         Assert.Equal(double.NegativeInfinity, outputTrack1Db);
     }
 
-    // Regression: production sends an empty AudioTrackAdjustments list. default(AudioTrackAdjustment)
-    // has Volume=0, and FindFirst's default result used to put every unlisted track through
-    // "volume=0" — every clip came out digitally silent. Unlisted tracks must pass through.
     [Fact]
     public void CreateClips_Separate_NoAdjustments_AudioPassesThrough()
     {
@@ -193,7 +173,6 @@ public class ClipEngineTests
             Regions = [ClipRegion.FromSeconds(0.5, 2.5)],
             Mode = ClipMode.Separate,
             OutputPath = outputDir,
-            // Intentionally no AudioTrackAdjustments: the default empty list is the production path.
         });
         var output = Assert.Single(paths);
 
@@ -201,14 +180,13 @@ public class ClipEngineTests
         {
             var clipDb = MediaTestFixture.AudioRmsDb(ffmpeg, output, t);
             Assert.True(double.IsFinite(clipDb), $"clip track {t} must not be silent, got {clipDb:0.##} dB");
-            // The fixture tone is steady, so the re-encode should land within ~2 dB of the source.
+
             Assert.True(
                 Math.Abs(clipDb - baselineDb[t]) <= 2.0,
                 $"clip track {t} ({clipDb:0.##} dB) should match source ({baselineDb[t]:0.##} dB)");
         }
     }
 
-    // Same regression on the combine path, with two regions.
     [Fact]
     public void CreateClips_Combine_NoAdjustments_AudioPassesThrough()
     {
@@ -233,7 +211,6 @@ public class ClipEngineTests
             ],
             Mode = ClipMode.Combine,
             OutputPath = output,
-            // Intentionally no AudioTrackAdjustments: the default empty list is the production path.
         });
 
         for (var t = 0; t < 2; t++)
@@ -246,15 +223,12 @@ public class ClipEngineTests
         }
     }
 
-    // ---- Verification 5: HDR handling ----
-
     [Fact]
     public void CreateClips_HdrSource_ToneMapsToSdrBt709()
     {
         var source = MediaTestFixture.CreateHdrSource("hdr.mkv");
         var outputDir = Path.Combine(MediaTestFixture.ScratchRoot, "clips-hdr-tm");
 
-        // Confirm the fixture really is HDR before clipping it.
         Assert.Equal("smpte2084", Probe("v:0", "color_transfer", source));
         Assert.Equal("yuv420p10le", Probe("v:0", "pix_fmt", source));
 
@@ -265,24 +239,17 @@ public class ClipEngineTests
             Regions = [ClipRegion.FromSeconds(0.0, 2.0)],
             Mode = ClipMode.Separate,
             OutputPath = outputDir,
-            // A uniform HDR source preserves by default (libx265 carries 10-bit). To exercise the
-            // tone-map fallback, select a codec that cannot carry 10-bit — the same input
-            // that flips the decision in production when a non-HEVC encoder is used.
+
             EncoderFamily = "libx264",
         });
         var output = Assert.Single(paths);
 
-        // Tone-mapped to SDR: yuv420p, BT.709 tags.
         Assert.Equal("h264", Probe("v:0", "codec_name", output));
         Assert.Equal("yuv420p", Probe("v:0", "pix_fmt", output));
         Assert.Equal("bt709", Probe("v:0", "color_transfer", output));
         Assert.Equal("bt709", Probe("v:0", "color_primaries", output));
         Assert.Equal("bt709", Probe("v:0", "color_space", output));
 
-        // The tone-map chain's stage order is the part a rewrite is most likely to lose. Assert the
-        // output's pixels match a reference produced by the canonical five-stage chain, written here
-        // as an independent constant: if the engine's chain order is ever changed, this reference
-        // still encodes the correct order and the PSNR comparison fails.
         var reference = Path.Combine(MediaTestFixture.ScratchRoot, "hdr-tm-reference.mp4");
         MediaTestFixture.Run(MediaTestFixture.Binaries.Ffmpeg,
         [
@@ -344,8 +311,6 @@ public class ClipEngineTests
         Assert.True(File.Exists(source));
     }
 
-    // The preserve path needs a 10-bit-carrying codec. The engine's default software path is
-    // libx265 (carries 10-bit) — the only one this Linux box can exercise.
     [Fact]
     public void CreateClips_HdrSource_Preserves10BitWithTags()
     {
@@ -370,8 +335,6 @@ public class ClipEngineTests
         Assert.Equal("bt2020nc", Probe("v:0", "color_space", output));
     }
 
-    // ---- Verification 5b: SDR output is tagged BT.709 ----
-
     [Fact]
     public void CreateClips_SdrSource_TagsOutputBt709()
     {
@@ -393,7 +356,6 @@ public class ClipEngineTests
         Assert.Equal("bt709", Probe("v:0", "color_space", output));
     }
 
-    // Combine mode also applies per-track volume/mute across the joined audio.
     [Fact]
     public void CreateClips_Combine_VolumeAndMute_AreReflectedAcrossRegions()
     {
@@ -427,8 +389,6 @@ public class ClipEngineTests
         Assert.Equal(double.NegativeInfinity, outputTrack1Db);
     }
 
-    // The pipeline reports progress as it runs; a progress callback that fires is the observable
-    // contract.
     [Fact]
     public void CreateClips_ReportsProgress()
     {
@@ -450,8 +410,6 @@ public class ClipEngineTests
         Assert.Contains(stages, s => s.Contains("separate"));
     }
 
-    // ---- Verification 6: failure reporting ----
-
     [Fact]
     public void CreateClips_MissingSource_ThrowsClearError()
     {
@@ -467,11 +425,6 @@ public class ClipEngineTests
         Assert.Contains("does not exist", ex.Message);
     }
 
-    // A region that runs past the end of the recording is truncated at the end, not refused. It still
-    // names a real piece of the file, and ffmpeg cuts exactly this clip on its own for a straddling
-    // region — refusing the request turned a clip the user could have had into an error, which is what
-    // the frontend's 120 s placeholder duration produced for every recording whose metadata carried no
-    // endTime.
     [Fact]
     public void CreateClips_RegionStraddlingTheEnd_IsClampedToTheDuration()
     {
@@ -489,12 +442,10 @@ public class ClipEngineTests
 
         var clip = Assert.Single(paths);
         var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
-        // 1.0s of a 2.0s source survives the clamp; the requested 4.0s does not.
+
         Assert.InRange(duration, 0.9, 1.1);
     }
 
-    // Nothing survivable is left, so the request fails rather than reaching ffmpeg — which would
-    // report exit code 0 and write a 261-byte MP4 with no video stream (measured).
     [Fact]
     public void CreateClips_RegionWhollyBeyondDuration_ThrowsClearError()
     {
@@ -511,8 +462,7 @@ public class ClipEngineTests
         }));
 
         Assert.Contains("nothing to clip", ex.Message);
-        // The real length is in the message, because "past the end" is only actionable if the user is
-        // told where the end is.
+
         Assert.Contains("The recording is", ex.Message);
         Assert.Contains("long", ex.Message);
         Assert.False(Directory.Exists(neverClips), "no output directory may be created for a refused clip");
@@ -535,9 +485,6 @@ public class ClipEngineTests
         Assert.Contains("At least one region", ex.Message);
     }
 
-    // A swapped pair names exactly one interval, so it is ordered rather than refused: a timeline drag
-    // whose anchor ends up after its cursor produces one for ordinary reasons, and the only remedy a
-    // refusal could offer is "draw the same region the other way round".
     [Fact]
     public void CreateClips_RegionEndBeforeStart_IsOrderedAndClipped()
     {
@@ -555,12 +502,9 @@ public class ClipEngineTests
 
         var clip = Assert.Single(paths);
         var duration = MediaTestFixture.ProbeDuration(MediaTestFixture.Binaries.Ffprobe, clip);
-        Assert.InRange(duration, 1.9, 2.1); // 1.0s - 3.0s, the interval the swapped pair names
+        Assert.InRange(duration, 1.9, 2.1);
     }
 
-    // The swap does not rescue a degenerate pair: an equal start and end has no interval to order, and
-    // ffmpeg reads the resulting "-t 0" as "no limit" and returns the entire recording (measured), so
-    // it must never reach the argument builder.
     [Fact]
     public void CreateClips_ZeroLengthRegion_ThrowsClearError()
     {
@@ -580,7 +524,6 @@ public class ClipEngineTests
         Assert.False(Directory.Exists(neverClips), "no output directory may be created for a refused clip");
     }
 
-    // A missing ffmpeg binary must be a clear error, not a silent empty output.
     [Fact]
     public void CreateClips_MissingFfmpeg_ThrowsClearError()
     {
@@ -597,11 +540,6 @@ public class ClipEngineTests
         }));
     }
 
-    // ---- Verification 7: exit code 0 is not proof of an output file ----
-
-    // ffmpeg exits 0 on more than one path that leaves no usable file behind. Returning the path
-    // anyway hands the app a "clip" it will list, thumbnail and offer to play, all against a file
-    // that is not there.
     [Fact]
     public void CreateClips_FfmpegSucceedsButWritesNoFile_Throws()
     {
@@ -623,8 +561,6 @@ public class ClipEngineTests
         Assert.False(File.Exists(outputPath));
     }
 
-    // The same for a file that exists but is empty: a zero-byte mp4 is not a clip, and every
-    // consumer of the returned path treats existence as enough.
     [Fact]
     public void CreateClips_FfmpegSucceedsButWritesAnEmptyFile_Throws()
     {
@@ -647,11 +583,6 @@ public class ClipEngineTests
         Assert.Contains("empty file", ex.Message);
     }
 
-    // ---- Verification 8: two nearly identical regions are two clips ----
-
-    // Separate-mode names carry the region's times, and ffmpeg runs with -y. Times rounded coarsely
-    // enough that two distinct regions print the same put the second clip on top of the first: the
-    // user asked for two files and got one, silently.
     [Fact]
     public void CreateClips_RegionsMillisecondsApart_DoNotShareOneOutputName()
     {
@@ -667,8 +598,6 @@ public class ClipEngineTests
             OutputPath = outputDirectory,
         }).Single();
 
-        // 4 ms apart: closer than the two decimals the names used to carry, and a plausible
-        // adjustment to a region the user already clipped once.
         var first = Clip(1.0, 2.0);
         var second = Clip(1.004, 2.004);
 

@@ -3,9 +3,6 @@
 
 namespace Tript.Obs;
 
-// enum obs_output_flags — the capability bits an output *type* declares, from obs_output_info.flags
-// [obs-output.h:24-34]. Read per instance with obs_output_get_flags and per type with
-// obs_get_output_flags.
 [Flags]
 public enum ObsOutputFlags : uint
 {
@@ -21,9 +18,6 @@ public enum ObsOutputFlags : uint
     MultiTrackAv = MultiTrack | MultiTrackVideo
 }
 
-// The complete failure vocabulary of an output, delivered as the code field of the stop signal and
-// as the argument to obs_output_signal_stop [obs-defs.h:37-46]. SUCCESS is not an error; every
-// other member is a reason the recording or stream ended.
 public enum ObsOutputStopCode
 {
     Success = 0,
@@ -38,8 +32,6 @@ public enum ObsOutputStopCode
     HdrDisabled = -9
 }
 
-// obs_output_set_delay's flags. PRESERVE is the only member; the output keeps recording during a
-// delay so a short interruption does not truncate the file.
 [Flags]
 public enum ObsOutputDelayFlags : uint
 {
@@ -47,8 +39,6 @@ public enum ObsOutputDelayFlags : uint
     Preserve = 1 << 0
 }
 
-// Capacity constants [obs-output.h:36-37]. The audio-track slots and video-track slots an output
-// can carry; a slot index beyond these is a programming error that libobs will not check.
 public static class ObsOutputCapacity
 {
     public const int MaxAudioEncoders = 6;

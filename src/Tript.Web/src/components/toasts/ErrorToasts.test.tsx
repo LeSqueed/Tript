@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// ErrorToasts tests: an `error` push shows the backend's message as an alert toast that reads at
-// 60 ms per character and takes itself down; a dismiss click takes it down sooner. The IPC client
-// is a fake that captures the registered `error` handler, so the wire shape is exercised directly
-// without a socket.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -11,7 +6,6 @@ import { ErrorToasts } from './ErrorToasts';
 import { ToastProvider } from '../ui/toast/ToastProvider';
 import type { IpcClient } from '../../ipc/websocketClient';
 
-/** A fake IpcClient that captures the `error` handler so a test can fire it directly. */
 function fakeClient(): {
   client: IpcClient;
   emitError: (content: unknown) => void;
@@ -82,14 +76,14 @@ describe('ErrorToasts', () => {
     const { client, emitError } = fakeClient();
     renderBridge(client);
     act(() => {
-      emitError({ message: 'x'.repeat(80) }); // 80 × 60 = 4800 ms
+      emitError({ message: 'x'.repeat(80) });
     });
 
     act(() => vi.advanceTimersByTime(4799));
     expect(screen.getByRole('alert')).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(1)); // the time is up: the exit plays
-    act(() => vi.advanceTimersByTime(200)); // the exit is done: it is gone
+    act(() => vi.advanceTimersByTime(1));
+    act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

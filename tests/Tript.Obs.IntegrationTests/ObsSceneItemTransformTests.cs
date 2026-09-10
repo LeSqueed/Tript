@@ -6,9 +6,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Placement, read back numerically. Nothing here is judged by eye and nothing is asserted with a
-// tolerance except where libobs itself is not exact — and where that is so, the test says what the
-// inexactness is rather than hiding it in an epsilon.
 public sealed class ObsSceneItemTransformTests
 {
     private const string ColourSourceId = "color_source";
@@ -48,7 +45,6 @@ public sealed class ObsSceneItemTransformTests
         using var item = scene.AddSource(source);
         Assert.NotNull(item);
 
-        // A half-unit grid position, so this asserts the value and not the snapping below.
         item.Position = new Vector2(12.5f, -30.5f);
         item.Scale = new Vector2(2.25f, 0.125f);
         item.Rotation = 33.5f;
@@ -60,8 +56,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(ObsAlignment.Right | ObsAlignment.Bottom, item.Alignment);
     }
 
-    // Rotation is kept exactly as given: not wrapped into a single turn, not clamped, and not
-    // rounded — a value with no exact float representation comes back bit-identical.
     [SkippableFact]
     public void Rotation_IsKeptInDegreesWithoutWrappingOrRounding()
     {
@@ -81,7 +75,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(33.333332f, item.Rotation);
     }
 
-    // A negative scale is a mirror, not an error.
     [SkippableFact]
     public void ANegativeScale_IsStoredAsGiven()
     {
@@ -96,8 +89,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new Vector2(-1f, 1f), item.Scale);
     }
 
-    // Measured on 32.2.1 and stated in no header: a scene item's position lands on a half-unit
-    // grid. The grid is the same at any canvas size and any scale.
     [SkippableTheory]
     [InlineData(100.125f, 100.0f)]
     [InlineData(200.375f, 200.5f)]
@@ -140,7 +131,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.True(item.CropToBounds);
     }
 
-    // Bounds are snapped exactly as positions are.
     [SkippableFact]
     public void BoundsOffTheHalfUnitGrid_AreSnappedToIt()
     {
@@ -156,9 +146,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new Vector2(1280f, 721f), item.Bounds);
     }
 
-    // libobs validates neither of these: an undefined bounds type and alignment bits outside the
-    // four defined ones both round-trip. A binding that mapped a read back through a switch over
-    // known values would be inventing a guarantee.
     [SkippableFact]
     public void AnUndefinedBoundsTypeOrAlignment_IsStoredRatherThanRejected()
     {
@@ -189,7 +176,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new ObsCrop(1, 2, 3, 4), item.Crop);
     }
 
-    // Measured: a negative crop is neither refused nor kept. It becomes zero.
     [SkippableFact]
     public void ANegativeCrop_IsStoredAsZero()
     {
@@ -204,8 +190,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new ObsCrop(0, 0, 7, 8), item.Crop);
     }
 
-    // The whole transform in one struct, which is the call that has to mirror obs_transform_info's
-    // layout exactly: a field written at the wrong offset here lands in the next one.
     [SkippableFact]
     public void TheWholeTransform_RoundTripsThroughOneStruct()
     {
@@ -231,8 +215,6 @@ public sealed class ObsSceneItemTransformTests
 
         Assert.Equal(expected, item.Transform);
 
-        // And the individual getters agree with it, which is what proves the struct was not merely
-        // stored and handed back.
         Assert.Equal(expected.Position, item.Position);
         Assert.Equal(expected.Rotation, item.Rotation);
         Assert.Equal(expected.Scale, item.Scale);
@@ -255,8 +237,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new ObsTransform(), item.Transform);
     }
 
-    // Reads inside a deferred update see the new values immediately; it is the matrix work that is
-    // batched, not the state.
     [SkippableFact]
     public void DeferredUpdates_DoNotHideTheValuesBeingSet()
     {
@@ -276,7 +256,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(new Vector2(42f, 43f), item.Position);
     }
 
-    // The return value is libobs reporting whether anything changed, which the header does not say.
     [SkippableFact]
     public void SettingVisibilityOrLock_ReportsWhetherItChangedAnything()
     {
@@ -315,8 +294,6 @@ public sealed class ObsSceneItemTransformTests
         Assert.Equal(ObsBlendingType.Multiply, item.BlendingMode);
     }
 
-    // Two items over the same source have independent placements — the transform belongs to the
-    // item, not to the source.
     [SkippableFact]
     public void TwoItemsOverOneSource_CarryIndependentTransforms()
     {

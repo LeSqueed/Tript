@@ -5,9 +5,6 @@ using System.Text.Json;
 
 namespace Tript.App;
 
-// The app host's command-line surface. Real invocations run with defaults; the smoke tests pass a
-// temp content root and a temp settings file so nothing touches the developer's real config
-// directory, and --fake-recorder for the seam-level protocol tests that must not start libobs.
 internal sealed class AppOptions
 {
     public string ContentRoot { get; init; } = string.Empty;
@@ -16,13 +13,8 @@ internal sealed class AppOptions
 
     public string WebRoot { get; init; } = string.Empty;
 
-    // The recording path. When false the host wires a real ObsRecorderSession over the started
-    // runtime; when true it wires a fake recorder session so the IPC and protocol layers run
-    // without libobs (or a display server, or the muxer helper) present.
     public bool FakeRecorder { get; init; }
 
-    // Set by the Windows per-user startup entry so the shell can distinguish a login launch from a
-    // user opening the executable directly when those behaviors diverge later.
     public bool StartedByWindows { get; init; }
 
     public int UiPort { get; init; } = LocalPorts.Ui;
@@ -31,16 +23,10 @@ internal sealed class AppOptions
 
     public int ControlPort { get; init; } = LocalPorts.ControlSocket;
 
-    // The game-list source. When null the host uses its own catalogue; the tests override this to
-    // push a deterministic game list into the gameList broadcast.
     public string? GameListJson { get; init; }
 
     public static AppOptions? Parse(string[] args)
     {
-        // The content root doubles as the default recording location: recordings live under
-        // <contentRoot>/sessions/<date>/ and the UI lists and streams them from there. On a fresh
-        // install the default is the platform recordings directory (Videos/Tript), so sessions land
-        // somewhere the user can find them; --content-root overrides it for tests and headless runs.
         string contentRoot = Tript.Settings.RecordingLocations.DefaultDirectory();
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
         string webRoot = DefaultWebRoot();
@@ -109,9 +95,6 @@ internal sealed class AppOptions
         return options;
     }
 
-    // The default web root. In a published layout the built frontend ships as ./dist next to the
-    // executable (the Makefile assembles it there); in a dev checkout the source tree carries it at
-    // <repo>/src/Tript.Web/dist. Prefer the published layout when it exists, else the dev path.
     internal static string DefaultWebRoot()
     {
         var published = Path.Combine(AppContext.BaseDirectory, "dist");
@@ -132,11 +115,6 @@ internal sealed class AppOptions
             throw new ArgumentException("The IPC ports must be distinct values between 1 and 65535.");
     }
 
-    // The game list pushed on every NewConnection and broadcast when it changes. Stable game identity
-    // comes from the packaged project catalogue; settings provide display names, overrides, and the
-    // user's custom games. Packaged entries keep their catalogue executable and cannot be replaced by
-    // settings; custom entries are the settings entries whose IDs are not packaged, and they carry an
-    // exact executable path when the user chose one.
     internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
         string? overrideJson, out bool settingsMigrated)
     {
@@ -190,7 +168,6 @@ internal sealed class AppOptions
             }
             catch (JsonException)
             {
-                // A malformed override is a test harness problem, not a crash.
             }
         }
 

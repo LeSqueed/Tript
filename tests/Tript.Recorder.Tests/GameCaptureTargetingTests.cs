@@ -6,15 +6,8 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The rules that decide whether win-capture's game_capture ever attaches to anything. None of them
-// is visible at run time on Linux — there is no game_capture there — and all of them are silent
-// when wrong: the source is created, the recording starts, the audio is fine and the picture is a
-// black rectangle.
 public sealed class GameCaptureTargetingTests
 {
-    // The bug this pins. win-capture splits the "window" setting into title:class:exe, decodes an
-    // empty part to NULL, and ms_find_window returns NULL immediately when the class is NULL — so a
-    // "::game.exe" string matches no window at all however right the executable is.
     [Fact]
     public void AnExeOnlyTarget_NeverLeavesTheClassOrTitleEmpty()
     {
@@ -46,9 +39,6 @@ public sealed class GameCaptureTargetingTests
             new ObsGameCaptureTarget(null, "TankWindowClass", null)));
     }
 
-    // The separator has to survive: a title with a colon in it would otherwise split into four
-    // parts and the plugin would read the wrong field as the executable. '#' is escaped first
-    // because the plugin's decode replaces "#3A" before "#22".
     [Fact]
     public void ColonsAndHashesInATarget_AreEscapedTheWayTheDecodeExpects()
     {
@@ -59,8 +49,6 @@ public sealed class GameCaptureTargetingTests
         Assert.Equal(3, window.Split(':').Length);
     }
 
-    // An empty target is not a target: writing "*:*:*" would tell the plugin to hook the first
-    // window it can find.
     [Fact]
     public void AnEmptyTarget_IsReportedEmptyRatherThanBecomingAWildcardMatch()
     {
@@ -72,9 +60,6 @@ public sealed class GameCaptureTargetingTests
     public void BuildWindowMatchString_RejectsANullTarget() =>
         Assert.Throws<ArgumentNullException>(() => ObsCaptureSource.BuildWindowMatchString(null!));
 
-    // The executable is the identity the game detector actually has and the only part that survives
-    // a game re-creating its window, so it decides the match whenever it is known.
-    // The expectation is the raw window_priority number, because that is what the plugin compares.
     [Theory]
     [InlineData(null, null, "game.exe", 2)]
     [InlineData("Game", null, "game.exe", 2)]
@@ -87,7 +72,6 @@ public sealed class GameCaptureTargetingTests
             expected,
             (int)ObsCaptureSource.ResolveWindowPriority(new ObsGameCaptureTarget(title, windowClass, executable)));
 
-    // The values are win-capture's window_priority enum, compared by number in the plugin.
     [Fact]
     public void TheMatchPriorityValues_AreTheOnesWinCaptureNumbers()
     {
@@ -96,10 +80,6 @@ public sealed class GameCaptureTargetingTests
         Assert.Equal(2, (int)WindowPriority.Exe);
     }
 
-    // ---- capture_mode ----
-
-    // Left unset, capture_mode defaults to "any_fullscreen", which hooks whichever fullscreen
-    // window is in the foreground and ignores the window string entirely.
     [Fact]
     public void TheCaptureMode_IsTakenFromTheCaptureModePropertysOwnItems()
     {
@@ -108,8 +88,6 @@ public sealed class GameCaptureTargetingTests
         Assert.Equal("window", ObsRecorderSession.ResolveWindowCaptureMode(properties));
     }
 
-    // The window *list* also carries items spelled "window"; picking the first list that does would
-    // write the mode into the window selection instead.
     [Fact]
     public void TheCaptureMode_IsNotTakenFromAnotherListThatHappensToMentionWindow()
     {
@@ -131,8 +109,6 @@ public sealed class GameCaptureTargetingTests
         Assert.Equal("window", ObsRecorderSession.ResolveWindowCaptureMode(properties));
     }
 
-    // A plugin build that declares no capture_mode is reported rather than guessed at, so the
-    // caller can say so instead of silently recording in the wrong mode.
     [Fact]
     public void APropertySetWithoutTheCaptureMode_ResolvesToNothing()
     {
@@ -150,7 +126,6 @@ public sealed class GameCaptureTargetingTests
     public void ResolveWindowCaptureMode_RejectsANullPropertyList() =>
         Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.ResolveWindowCaptureMode(null!));
 
-    // The property set win-capture 32 declares, in its own order.
     private static IReadOnlyList<ObsSourceProperty> GameCaptureProperties() =>
     [
         new("capture_mode", ObsPropertyType.List,

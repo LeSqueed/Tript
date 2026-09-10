@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The playback hook's sample path: while playing, the playhead follows the element's position every
-// animation frame rather than waiting for the element's sparse `timeupdate` events.
 
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,7 +63,6 @@ describe('usePlayback', () => {
 
     expect(result.current.currentTime).toBe(20);
 
-    // While paused the element's own timeupdate (a seek, a frame step) still moves the playhead.
     act(() => {
       result.current.onVideoTimeUpdate(45);
     });
@@ -91,7 +87,6 @@ describe('usePlayback', () => {
       vi.advanceTimersByTime(50);
     });
 
-    // The seek wrote the element's position; the next sample reads it back rather than an old value.
     expect(video.currentTime).toBe(60);
     expect(result.current.currentTime).toBe(60);
   });

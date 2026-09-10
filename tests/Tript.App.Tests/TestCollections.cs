@@ -5,17 +5,12 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The smoke tests each start their own app host child process, and every host binds the same three
-// ports (8894 control socket, 8893 content server, 8892 UI host). Only one host can be up at a
-// time, so the whole suite is one collection: xunit serializes the classes inside it.
 [CollectionDefinition(Name)]
 public sealed class AppHostCollection : ICollectionFixture<AppHostCollectionFixture>
 {
     public const string Name = "app-host-smoke";
 }
 
-// A per-collection fixture that hands each test a unique temp directory. The fixture itself holds
-// no process; the driver is per-test so a failure cannot leak a host across tests.
 public sealed class AppHostCollectionFixture : IDisposable
 {
     private static readonly string SuiteRoot = Path.Combine(Path.GetTempPath(), "tript-app-tests");
@@ -54,8 +49,6 @@ public sealed class AppHostCollectionFixture : IDisposable
         }
         catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows())
         {
-            // Metadata copied from fixture trees can retain a read-only bit on Windows. Normalize
-            // attributes before retrying so collection cleanup does not turn passing tests red.
             foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
                 File.SetAttributes(file, FileAttributes.Normal);
             Directory.Delete(path, recursive: true);

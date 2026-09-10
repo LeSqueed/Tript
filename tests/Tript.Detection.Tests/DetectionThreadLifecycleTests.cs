@@ -11,13 +11,8 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// Start() needs a real ONNX model and a live OBS subscription, so the only path reachable from a
-// unit test is the never-started one through Stop() — the branch the Task -> Thread swap
-// introduced (_detectionThread == null).
 public class DetectionThreadLifecycleTests
 {
-    // Awaits the completed task so a faulted one rethrows here: WhenAny alone never throws, which
-    // let a Stop() that threw count as "completed within the timeout".
     private static async Task<bool> Completes(Task work, TimeSpan timeout)
     {
         if (await Task.WhenAny(work, Task.Delay(timeout)) != work)
@@ -63,8 +58,6 @@ public class DetectionThreadLifecycleTests
             "Dispose() on a never-started detector blocked");
     }
 
-    // ---- teardown against a frame callback that is still running ----
-
     private static readonly Type FrameDataType =
         typeof(VisualEventDetector).GetNestedType("FrameData", BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("VisualEventDetector.FrameData not found");
@@ -77,7 +70,6 @@ public class DetectionThreadLifecycleTests
         typeof(VisualEventDetector).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new InvalidOperationException($"VisualEventDetector.{name} not found");
 
-    // Queues a frame the way OnFrame does: a pooled buffer handed to the channel.
     private static object QueueFrame(VisualEventDetector detector, int size)
     {
         var frame = Activator.CreateInstance(FrameDataType, nonPublic: true)!;
@@ -89,7 +81,6 @@ public class DetectionThreadLifecycleTests
         return frame;
     }
 
-    // Stop must return queued pooled buffers rather than leaving them for a later generation.
     [Fact]
     public async Task Stop_DrainsAQueuedFrameRatherThanLeavingItsBufferRented()
     {
@@ -103,8 +94,6 @@ public class DetectionThreadLifecycleTests
         Assert.Empty((byte[])FrameDataBuffer.GetValue(frame)!);
     }
 
-    // The token source outlives every Start/Stop cycle otherwise, and its wait handle is a kernel
-    // object per cycle.
     [Fact]
     public void Stop_DisposesTheCancellationTokenSource()
     {
@@ -116,7 +105,6 @@ public class DetectionThreadLifecycleTests
 
         Assert.Throws<ObjectDisposedException>(() => cts.Token);
 
-        // And the field is cleared, so the next Stop() does not cancel a disposed source.
         detector.Stop();
     }
 }

@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The per-launch session token: parsed off the page's own query string, held in memory, appended to
-// every URL that leaves the page. The interesting cases are the absent token (the UI must be able to
-// tell), a token that must survive an already percent-encoded path, and the storage rule — a token
-// written to localStorage would outlive the launch it belongs to.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -52,8 +47,6 @@ describe('the captured token', () => {
     expect(hasSessionToken()).toBe(false);
   });
 
-  // The token dies with the launch that issued it; storage does not. A stale token in storage is a
-  // UI that looks connected and is refused by every listener.
   it('is not written to localStorage or sessionStorage', () => {
     captureSessionToken(`?k=${TOKEN}`);
 

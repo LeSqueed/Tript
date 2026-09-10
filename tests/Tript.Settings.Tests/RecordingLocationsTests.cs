@@ -8,10 +8,6 @@ using Tript.TestSupport;
 
 namespace Tript.Settings.Tests;
 
-// The default recording directory is the one place the host and the settings UI agree on where
-// recordings go when the user has not chosen a location. These tests pin the contract the rest of
-// the code relies on: it is non-empty on every platform, ends with the Tript directory name, and
-// honours the XDG videos variable on Linux.
 public class RecordingLocationsTests : IDisposable
 {
     private readonly string? _priorXdgVideos;
@@ -23,9 +19,6 @@ public class RecordingLocationsTests : IDisposable
 
     public void Dispose()
     {
-        // Restore the environment the test found, so a parallel sibling does not see a value we
-        // set. The tests below also set their own values before asserting, so the restore is a
-        // belt-and-braces courtesy rather than a correctness dependency.
         if (_priorXdgVideos is null)
             Environment.SetEnvironmentVariable("XDG_VIDEOS_DIR", null);
         else
@@ -38,8 +31,6 @@ public class RecordingLocationsTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(RecordingLocations.DefaultDirectory()));
     }
 
-    // The default is the platform videos folder joined with "Tript" — the contract the host and
-    // the UI hint both assume.
     [Fact]
     public void DefaultDirectory_EndsWithTript()
     {
@@ -48,7 +39,6 @@ public class RecordingLocationsTests : IDisposable
         Assert.Equal("Tript", leaf);
     }
 
-    // On Linux the XDG videos directory is honoured when the desktop sets it.
     [LinuxFact]
     public void DefaultDirectory_HonoursXdgVideosDir()
     {

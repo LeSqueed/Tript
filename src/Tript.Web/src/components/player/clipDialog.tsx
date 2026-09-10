@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 import { useState } from 'react';
 import { formatTime } from './timelineModel';
@@ -10,11 +9,6 @@ import { Button, Slider } from '../../components/ui/controls';
 
 export interface ClipDialogProps {
   dialog: ClipDialogController;
-  /**
-   * The playhead position, so a region bound can be snapped to it ("Start ←" / "End ←"). The dialog
-   * covers the timeline, so the readout on those buttons is the only place the user sees where the
-   * playhead is standing.
-   */
   currentTime?: number;
 }
 
@@ -22,9 +16,6 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
   if (!dialog.open || !dialog.session) {
     return null;
   }
-  // The Create button stays disabled while a job is in flight; the outcome itself is not rendered
-  // here (the shell toasts it) — the list below the player and the one here used to both say what
-  // the top bar already says.
   const inFlight = Object.values(dialog.progress).some(
     (entry) => entry !== undefined && entry.status === 'importing',
   );
@@ -67,7 +58,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
             </span>
             {dialog.regions.length > 0 && (
               <Button variant="ghost" size="small"
-                
+
                 onClick={dialog.clearRegions}
                 aria-label="Clear all clips">
                 Clear all
@@ -93,9 +84,6 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
                 region={region}
                 index={index}
                 dialog={dialog}
-                // The clippable length of the media, not the session's declared `endTime`: the two
-                // disagree when the file is shorter than its metadata claims, and the typed fields
-                // clamp against the file (see useClipDialog's note on the clippable duration).
                 duration={dialog.duration}
                 currentTime={currentTime}
               />
@@ -146,7 +134,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
 
         <div className="clip-actions">
           <Button variant="primary"
-            
+
             onClick={dialog.create}
             disabled={dialog.regions.length === 0 || inFlight}
           >
@@ -171,9 +159,6 @@ function RegionRow({
   duration: number;
   currentTime: number;
 }) {
-  // The typed fields are drafts: a half-typed number ("4" on the way to "42") must not be committed
-  // as a bound, so the region only changes on blur or Enter. No draft → the fields mirror the region,
-  // which is what keeps them live while the segment is dragged on the timeline.
   const [draft, setDraft] = useState<{ start: string; end: string } | null>(null);
   const startField = draft ? draft.start : secondsField(region.start);
   const endField = draft ? draft.end : secondsField(region.end);
@@ -188,9 +173,6 @@ function RegionRow({
     if (draft.start.trim() === '' || draft.end.trim() === '' || !Number.isFinite(start) || !Number.isFinite(end)) {
       return;
     }
-    // Apply the bounds through the same clamping helpers the timeline drag uses: out-of-session
-    // values are pulled back to the session, and a bound typed past the opposite one parks against
-    // it (MIN_REGION_SECONDS away) instead of inverting the region.
     const withStart = resizeRegionStart(region, start, duration);
     const withEnd = resizeRegionEnd(withStart, end, duration);
     dialog.updateRegion(region.id, withEnd.start, withEnd.end);
@@ -223,7 +205,7 @@ function RegionRow({
           </span>
         </Button>
         <Button variant="ghost" size="small"
-          
+
           onClick={() => dialog.removeRegion(region.id)}
           aria-label={`Remove region ${index + 1}`}
         >
@@ -252,7 +234,7 @@ function RegionRow({
           />
         </label>
         <Button variant="ghost" size="small"
-          
+
           onClick={() => snapTo('start')}
           aria-label={`Start clip ${index + 1} where you are`}
           title={`Start it where you are (${formatTime(currentTime)})`}
@@ -280,7 +262,7 @@ function RegionRow({
           />
         </label>
         <Button variant="ghost" size="small"
-          
+
           onClick={() => snapTo('end')}
           aria-label={`End clip ${index + 1} where you are`}
           title={`End it where you are (${formatTime(currentTime)})`}
@@ -292,7 +274,6 @@ function RegionRow({
   );
 }
 
-/** A bound as the numeric field shows it: seconds, at most two decimals, no trailing zeroes. */
 function secondsField(seconds: number): string {
   return String(Math.round(Math.max(0, seconds) * 100) / 100);
 }

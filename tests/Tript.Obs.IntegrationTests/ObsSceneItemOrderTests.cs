@@ -5,9 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Z-order. Position zero is the bottom of the scene — drawn first, and therefore behind everything
-// else — and a source added to a scene lands on top. Enumeration follows the same direction, which
-// is what lets an array taken from one be handed straight back to a reorder.
 public sealed class ObsSceneItemOrderTests
 {
     private const string ColourSourceId = "color_source";
@@ -95,8 +92,6 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(2, second.OrderPosition);
     }
 
-    // The bulk form, which is how a frontend applies a whole reordering at once. The array is bottom
-    // first, so index and order position are the same number.
     [SkippableFact]
     public void ReorderingTheWholeScene_AppliesTheGivenOrderBottomFirst()
     {
@@ -118,7 +113,6 @@ public sealed class ObsSceneItemOrderTests
             item.Dispose();
     }
 
-    // A partial ordering is refused rather than half-applied.
     [SkippableFact]
     public void ReorderingWithAnIncompleteList_IsRefusedAndChangesNothing()
     {
@@ -133,7 +127,6 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(1, second.OrderPosition);
     }
 
-    // Removing the item below closes the gap rather than leaving a hole.
     [SkippableFact]
     public void RemovingAnItem_RenumbersTheOnesAboveIt()
     {
@@ -151,8 +144,6 @@ public sealed class ObsSceneItemOrderTests
 
     private static ObsSceneItem Add(ObsScene scene, string sourceName)
     {
-        // The source is disposed straight away on purpose: the scene holds its own reference, so
-        // these tests only need the item.
         using var source = ObsSource.CreatePrivate(ColourSourceId, sourceName);
         var item = scene.AddSource(source);
         Assert.NotNull(item);

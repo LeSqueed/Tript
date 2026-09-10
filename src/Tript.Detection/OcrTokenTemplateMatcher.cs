@@ -18,9 +18,6 @@ public static class OcrTextNormalizer
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
 
-        // FormD splits accented letters into base + combining mark; dropping the marks folds
-        // player-name diacritics (SVA\u010cINA -> SVACINA) to the ASCII the dictionary can represent.
-        // Non-Latin letters have no ASCII form and become word breaks.
         var normalized = text.Normalize(NormalizationForm.FormD).ToUpperInvariant();
         var builder = new StringBuilder(normalized.Length);
         var pendingSpace = false;
@@ -57,9 +54,6 @@ public static class OcrTextNormalizer
 
 public static class OcrTokenTemplateMatcher
 {
-    // The per-event minimumConfidence gates a recognition before it is matched. On small in-game
-    // fonts a correct read routinely scores 0.5–0.7, so when the value is left near the default the
-    // template match is the real precision gate and a lower confidence is accepted.
     public static float EffectiveMinimumConfidence(float configured)
         => configured >= 0.5f ? 0.45f : configured;
 
@@ -67,11 +61,6 @@ public static class OcrTokenTemplateMatcher
     private const int MaximumTemplateTokens = 64;
     private const int MaximumCaptureTokens = 16;
 
-    // Older events.json bakes maximumEditDistance:1 / minimumScore:0.85, both too strict for small
-    // in-game fonts. A pattern still at those defaults is "unconfigured": the matcher then scales
-    // edit tolerance with literal length and caps the score gate. A pattern with any other values
-    // is honoured exactly. Relaxation is threaded as a negative maximumEditDistance sentinel so the
-    // recursive helpers keep their signatures.
     private const int RelaxSentinel = -1;
     private const double LiteralBudgetFraction = 0.35;
     private const int LiteralBudgetFloor = 2;
@@ -150,8 +139,6 @@ public static class OcrTokenTemplateMatcher
                 });
         }
 
-        // OCR routinely drops inter-word spaces, so the compact (space-insensitive) pass and the
-        // suffix anchor are tried every time, not only as a fallback.
         var compactBest = FindCompactMatch(templateTokens, normalizedText, editArg, minimumScore);
         var suffixBest = relax
             ? MatchAnchoredSuffix(templateTokens, normalizedText, editArg, minimumScore)
@@ -160,9 +147,6 @@ public static class OcrTokenTemplateMatcher
         var best = Pick(tokenBest, compactBest, suffixBest);
         if (best is null || best.Score < minimumScore) return null;
 
-        // The trailing literal run is the discriminator (e.g. "TURRET" in ELIMINATED {p} TURRET).
-        // A relaxed average can let a well-read "ELIMINATED" carry a barely-read tail, so require
-        // the tail to actually be present near the end of the text on its own.
         if (relax && templateTokens.Any(token => token is CaptureToken)
             && !TrailingLiteralRunReadable(templateTokens, normalizedText, editArg))
         {
@@ -199,8 +183,6 @@ public static class OcrTokenTemplateMatcher
         return false;
     }
 
-    // Highest score wins, but a candidate that captured the pattern's variables beats a bare
-    // literal/suffix match unless the latter scores much higher.
     private static MatchState? Pick(params MatchState?[] candidates)
     {
         MatchState? best = null;
@@ -231,10 +213,6 @@ public static class OcrTokenTemplateMatcher
         return best;
     }
 
-    // Matches only the template's trailing literal run (e.g. "STEEL TRAP") as a fuzzy end-of-text
-    // anchor, ignoring a mangled "ELIMINATED {player}" prefix. Requires the leading literal to
-    // appear earlier with real capture text between it and the tail, so an unrelated line that
-    // merely ends in the same words is not accepted.
     private static MatchState? MatchAnchoredSuffix(IReadOnlyList<TemplateToken> tokens,
         string normalizedText, int editArg, double minimumScore)
     {
@@ -278,7 +256,6 @@ public static class OcrTokenTemplateMatcher
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     }
 
-    // The end index (exclusive) of the best fuzzy occurrence of needle in haystack, or -1.
     private static int FuzzySpanEnd(string haystack, string needle, int editArg, double minimumSimilarity)
     {
         if (needle.Length < 3 || haystack.Length < 3) return -1;
@@ -356,8 +333,7 @@ public static class OcrTokenTemplateMatcher
                 if (distance > budget) continue;
 
                 var score = 1d - (double)distance / Math.Max(literal.Value.Length, candidate.Length);
-                // A single badly-mangled literal must not veto a run whose average still clears
-                // the gate applied to the completed match, so this floor is deliberately low.
+
                 if (score < CompactLiteralFloor) continue;
                 FindCompactMatches(templateTokens, text, maximumEditDistance, minimumScore, templateIndex + 1,
                     textIndex + length, literalScore + score, literalCount + 1, capturesValid, captures, onMatch);
@@ -384,9 +360,7 @@ public static class OcrTokenTemplateMatcher
                 var sourceEnd = text.SourceIndexes[end - 1] + 1;
                 captures[capture.Name] = text.Source[sourceStart..sourceEnd];
             }
-            // A required capture standing for a player name is implausible at one or two glyphs;
-            // without this, "ELIMINATED {p} MINE" matches every "ELIMINATED …" line by letting the
-            // capture eat almost nothing and fuzzy-matching MINE against noise.
+
             var enoughCapture = capture.MinimumTokens == 0 || capturedChars >= 3;
             FindCompactMatches(templateTokens, text, maximumEditDistance, minimumScore, templateIndex + 1,
                 end, literalScore, literalCount,

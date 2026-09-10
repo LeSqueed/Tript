@@ -482,7 +482,6 @@ describe('TrainingView training run feedback', () => {
     act(() => emit('trainingProgress', {
       gameId: 'game-1', status: 'exporting', message: 'Preparing the training dataset.',
     }));
-    // The overlay waits a short delay before appearing, so poll for it.
     const overlay = await screen.findByRole('dialog', { name: 'Preparing training data' });
 
     fireEvent.click(within(overlay).getByRole('button', { name: 'Cancel' }));
@@ -524,23 +523,18 @@ describe('TrainingView training run feedback', () => {
     }));
 
     expect(screen.getByText('Training in progress')).toBeTruthy();
-    // The epoch counter lives in the panel heading.
     expect(screen.getByText('Epoch 12/100')).toBeTruthy();
     const bar = screen.getByRole('progressbar');
     expect(bar.getAttribute('aria-valuenow')).toBe('12');
-    // Key numbers render as separate cells inside the panel.
     expect(screen.getByText('loss 0.8321')).toBeTruthy();
     expect(screen.getByText('mAP50 0.4231')).toBeTruthy();
-    // The per-epoch message itself no longer prints in the bottom progress line while active.
     expect(screen.queryByText('Epoch 12/100 · loss 0.8321 · mAP50 0.4231')).toBeNull();
-    // The view stays interactive while the model trains: no dataset-prep modal, start disabled.
     expect(screen.queryByRole('dialog', { name: 'Preparing training data' })).toBeNull();
     expect((screen.getByRole('button', { name: 'Start training' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('plots each epoch in the sparkline and paces the estimate from heartbeat times', () => {
     const { client, emit } = createClient();
-    // Deterministic heartbeat cadence: every epoch finishes 10s after the previous one.
     const clock = vi.spyOn(Date, 'now');
     let now = 1_000_000;
     clock.mockImplementation(() => (now += 10_000));
@@ -568,14 +562,12 @@ describe('TrainingView training run feedback', () => {
       }
 
       const chart = screen.getByRole('img', { name: 'Training metrics per epoch' });
-      // One polyline per available series: loss from epoch 1, mAP50 from epoch 2.
       expect(chart.querySelectorAll('polyline').length).toBe(2);
       expect(chart.querySelector('.training-sparkline-fill')).toBeTruthy();
       expect(chart.querySelectorAll('.training-sparkline-grid').length).toBe(4);
       expect(chart.querySelectorAll('.training-sparkline-tick').length).toBe(2);
       expect(screen.getByText('Epoch 3/4')).toBeTruthy();
       expect(screen.getByText('mAP50')).toBeTruthy();
-      // Three completed epochs at ~10s each, one of four left.
       expect(screen.getByText('30s elapsed')).toBeTruthy();
       expect(screen.getByText('~10s remaining')).toBeTruthy();
     } finally {
@@ -630,7 +622,6 @@ describe('TrainingView training run feedback', () => {
     }));
 
     expect(screen.getByText('Dataset exported: 84 train and 21 validation frames.')).toBeTruthy();
-    // While the run is active nothing prints in the bottom progress line.
     expect(view.container.querySelector('.training-progress')).toBeNull();
 
     act(() => emit('trainingProgress', {
@@ -670,7 +661,6 @@ describe('TrainingView training run feedback', () => {
 
     expect(screen.queryByRole('img', { name: 'Training metrics per epoch' })).toBeNull();
     expect(screen.queryByText('loss')).toBeNull();
-    // Pacing still works off the heartbeat times alone.
     expect(screen.getByText(/remaining/)).toBeTruthy();
   });
 

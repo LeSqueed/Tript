@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The game page: the known games and their per-game overrides. How capture works is a Capture-page
-// setting (including the game-capture timeout); this page only says which games depart from it.
-// Per-game overrides are collapsed behind a disclosure per row, marked "modified" when set.
 
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
@@ -10,7 +6,6 @@ import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settin
 import type { GameSearchResult, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import { Button, SelectField, TextField } from '../../components/ui/controls';
 
-/** True when a game departs from the global settings in any way its row exposes. */
 function hasOverrides(game: GameSetting): boolean {
   if (game.recordingModeOverride?.mode !== null && game.recordingModeOverride?.mode !== undefined) return true;
   if (game.captureMethodOverride?.method !== null && game.captureMethodOverride?.method !== undefined) return true;
@@ -30,7 +25,6 @@ function hasOverrides(game: GameSetting): boolean {
   return false;
 }
 
-// "" means inherit; the global lives on the Capture page.
 const CAPTURE_METHOD_OVERRIDES: { value: string; label: string }[] = [
   { value: '', label: 'Global' },
   { value: 'Auto', label: 'Auto' },
@@ -45,7 +39,6 @@ const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
   { value: 'ReplayBufferOnly', label: 'Replay buffer only' },
 ];
 
-/** The default highlight window the backend applies when a settings push carries no value. */
 const DEFAULT_CLIP_BEFORE_SECONDS = 5;
 const DEFAULT_CLIP_AFTER_SECONDS = 8;
 
@@ -60,7 +53,6 @@ export function GamePage({
   settings,
   update,
   page,
-  // Accepted for the shared page contract; this page keeps no push-resynced draft.
   externalPushCount: _externalPushCount,
   builtInGameIds,
   selectedGameExecutable,
@@ -87,16 +79,11 @@ export function GamePage({
   onSearchGames: (requestId: string, query: string) => void;
   resolvedGameSearch: ResolvedGameSearchMessage | null;
   onResolveGameSearch: (requestId: string, input: string) => void;
-  /**
-   * The recording page's automatic-clip window. Absent means an older backend push carried no
-   * value and the backend default is the inherit baseline.
-   */
   globalClipBeforeSeconds?: number;
   globalClipAfterSeconds?: number;
   globalRecordingMode: RecordingMode;
   automaticClipsEnabled: boolean;
 }) {
-  // The inherit baseline for each side: the global recording-page value, or the backend default.
   const clipBeforeSeconds = globalClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
   const clipAfterSeconds = globalClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
   const [draft, setDraft] = useState<CustomGameDraft | null>(null);
@@ -193,14 +180,6 @@ export function GamePage({
     update(page, { gameList: gameList.map((candidate, i) => i === index ? game : candidate) });
   }
 
-  /**
-   * Commit a per-game automatic-clip override side (null means inherit the global side). The
-   * effective pair is `override ?? global` for each side, and it must stay coherent: the effective
-   * after can never fall below the effective before, or the backend rejects the patch (task 10).
-   * When a new before outruns the effective after, after is raised to it in the same patch; a typed
-   * after below the effective before is clamped up. When both sides inherit, the override object is
-   * dropped entirely.
-   */
   function patchAutomaticClipOverride(
     index: number,
     game: GameSetting,

@@ -18,23 +18,17 @@ public class VisualEventDetector : IDisposable
     private const int ObsSubscribeWidth = 1920;
     private const int ObsSubscribeHeight = 1080;
 
-    // OCR of small in-game text (kill feed) needs more than 1080p — recall roughly doubles at the
-    // native canvas size. When a game has OCR events the frame is requested at the OBS output
-    // resolution instead, capped here to bound the per-frame copy and crop cost.
     private const int OcrSubscribeMaxWidth = 2560;
     private const int OcrSubscribeMaxHeight = 1440;
-    // Past this, the loop is assumed to still be inside session.Run.
+
     private const int StopJoinTimeoutSeconds = 3;
 
-    // Stop waits this long for the OCR worker to exit, then leaves it to tear itself down.
     private const int OcrStopJoinSeconds = 3;
 
-    // Past this a completed OCR pass is dropped rather than merged into further object cycles.
     private const int OcrSnapshotMaxAgeMs = 2500;
 
     private const int OcrPollIntervalMs = 100;
 
-    // Past this, a frame callback is assumed never to finish, and teardown stops waiting for it.
     private const int FrameCallbackQuiesceTimeoutMs = 1000;
 
     private readonly int _detectionIntervalMs;
@@ -49,8 +43,6 @@ public class VisualEventDetector : IDisposable
         },
         static dropped => dropped.ReturnBuffer());
 
-    // OCR runs on its own thread so a multi-second pass never sets the object cadence or blocks
-    // Stop. It pulls a frame only when idle, so OnFrame copies for it at the OCR rate, not capture.
     private readonly Channel<FrameData> _ocrFrameQueue = Channel.CreateBounded<FrameData>(
         new BoundedChannelOptions(1)
         {
@@ -101,8 +93,6 @@ public class VisualEventDetector : IDisposable
         public int Height { get; set; }
         public DateTime Timestamp { get; set; }
 
-        // Idempotent: returning the same array to the pool twice lets the pool hand it
-        // to two callers at once.
         public void ReturnBuffer()
         {
             var buffer = Interlocked.Exchange(ref _buffer, Array.Empty<byte>());
@@ -279,7 +269,6 @@ public class VisualEventDetector : IDisposable
 
                 if (ocrThreadStarted)
                 {
-                    // The OCR thread self-tears-down on cancel; leave its cts alive to observe it.
                     cts?.Cancel();
                 }
                 else
@@ -325,15 +314,12 @@ public class VisualEventDetector : IDisposable
             return;
         }
 
-        // Bounded, non-quarantining: a still-running OCR pass releases itself in the background.
         if (ocrThread is not null && !ocrThread.Join(TimeSpan.FromSeconds(OcrStopJoinSeconds)))
             Log.Warning("VisualEventDetector: OCR worker for {GameId} did not exit within {TimeoutSeconds}s; it will finish and release in the background",
                 _gameId, OcrStopJoinSeconds);
 
         DrainFrameQueue();
 
-        // A test or a failed setup can leave a cancellation source without a thread. Dispose that
-        // state here; a started run releases all of its resources from RunDetectionThread.
         lock (_lifecycleGate)
         {
             if (thread is null && _detectionThread is null)
@@ -363,9 +349,6 @@ public class VisualEventDetector : IDisposable
         }
         finally
         {
-            // Stop may have timed out while this thread was inside native inference. Once the loop
-            // finally exits, no consumer can touch queued frames, so return every remaining buffer
-            // before releasing the run's native resources.
             DrainFrameQueue();
 
             var ownsRun = false;
@@ -405,8 +388,6 @@ public class VisualEventDetector : IDisposable
         }
     }
 
-    // Runs the OCR pass off the object cadence and publishes a snapshot; owns its recogniser and
-    // clears _ocrThread (by thread identity) on exit.
     private void RunOcrThread(CancellationToken token,
         PaddleOcrRecognizer recognizer, IReadOnlyList<OcrRegionPlan> regionPlans)
     {
@@ -473,9 +454,6 @@ public class VisualEventDetector : IDisposable
             stale.ReturnBuffer();
     }
 
-    // The YOLO parser strides the tensor by (4 + numClasses), so a count disagreeing with the
-    // exported graph decodes every box to garbage, silently. The graph's shape is authoritative;
-    // hand-edited events.json is checked against it rather than believed.
     private static int ResolveClassCount(InferenceSession session, string outputName,
         List<EventDefinition> definitions, string gameId)
     {
@@ -484,7 +462,6 @@ public class VisualEventDetector : IDisposable
 
         if (!TryDeriveClassCount(dimensions, out var numClasses))
         {
-            // A dynamic axis exports as -1/0; arithmetic on it yields a plausible-looking stride.
             numClasses = definitions.Count(definition => definition.DetectionKind == DetectionKind.Object);
             Log.Warning("VisualEventDetector: output {OutputName} of model {GameId} has no static class dimension ({Dimensions}), falling back to {NumClasses} classes from events.json",
                 outputName, gameId, string.Join('x', dimensions), numClasses);
@@ -504,12 +481,9 @@ public class VisualEventDetector : IDisposable
         return numClasses;
     }
 
-    // A detect head outputs [batch, 4 + numClasses, numAnchors] — [1, 11, 8400] for the shipped
-    // 7-class model. Anything else is reported as underivable rather than guessed at.
     internal static bool TryDeriveClassCount(IReadOnlyList<int>? outputDimensions, out int numClasses)
         => OnnxModelInspector.TryDeriveClassCount(outputDimensions, out numClasses);
 
-    // Absent on models from other tooling, so a null map skips the name check; the shape check holds.
     private static IReadOnlyDictionary<int, string>? ReadModelClassNames(InferenceSession session)
     {
         try
@@ -528,8 +502,6 @@ public class VisualEventDetector : IDisposable
     internal static IReadOnlyDictionary<int, string>? ParseClassNames(string? names)
         => OnnxModelInspector.ParseClassNames(names);
 
-    // events.json keys bookmarks by classId; the model decides what each emitted classId means.
-    // Appended entries are safe for an older model, but removing or renaming its classes is not.
     internal static string? FindClassMapMismatch(IReadOnlyList<EventDefinition> definitions,
         int numClasses, IReadOnlyDictionary<int, string>? modelClassNames)
         => ModelEventCompatibility.FindMismatch(definitions, numClasses, modelClassNames);
@@ -572,8 +544,6 @@ public class VisualEventDetector : IDisposable
                 Timestamp = timestamp,
             });
 
-            // Independent copy for the OCR worker, only when it is idle and asking — never shared
-            // with the object pipeline's buffer.
             if (_ocrActive && _ocrHungry)
             {
                 var ocrBuffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
@@ -602,7 +572,6 @@ public class VisualEventDetector : IDisposable
                 Log.Information("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
                     _diagnosticFrameCount, width, height);
 
-            // DropOldest only refuses once the channel is completed, which nothing does today.
             if (!queued)
                 Log.Warning("VisualEventDetector: frame queue rejected a frame, dropping it");
         }
@@ -612,16 +581,11 @@ public class VisualEventDetector : IDisposable
         }
         finally
         {
-            // Ownership passes to the channel only on a successful write; GetPlane and CopyPlane
-            // both throw on a short plane.
             if (!queued && buffer != null) ArrayPool<byte>.Shared.Return(buffer);
             Interlocked.Exchange(ref _isProcessing, 0);
         }
     }
 
-    // Synchronous on purpose. An async loop resumes its continuations on the thread pool after
-    // the first await, so every iteration after that would run at the pool's Normal priority and
-    // the BelowNormal thread this runs on would sit blocked, achieving nothing.
     private void DetectionLoop(CancellationToken ct)
     {
         var session = _session;
@@ -631,7 +595,6 @@ public class VisualEventDetector : IDisposable
         {
             try
             {
-                // Returns true when the token is cancelled, false on timeout.
                 if (ct.WaitHandle.WaitOne(_detectionIntervalMs)) break;
 
                 if (!_frameQueue.Reader.TryRead(out var frameData))
@@ -648,20 +611,14 @@ public class VisualEventDetector : IDisposable
                     var fW = frameData.Width;
                     var fH = frameData.Height;
 
-                    // Skip near-black frames (loading screens, transitions) — they can produce NaN
-                    // in the model. Subsampled, so a lit region smaller than the 16px stride can
-                    // fall entirely between probes and be missed — at most a 15x15 blob.
                     if (DetectionFramePreprocessor.IsNearBlack(frameData.Buffer, fW, fH))
                     {
                         Log.Debug("DetectionLoop: skipping near-black frame");
-                        // A skipped frame is still a checked frame for the host's net-count state.
+
                         DetectionsAvailable?.Invoke(new DetectionBatch { FrameTimestamp = frameData.Timestamp });
                         continue;
                     }
 
-                    // Both branches feed byte-identical buffers to inference; they differ only in
-                    // how many pixels they convert. Chosen once at Start — the group set is fixed
-                    // for the session, so deciding per frame would re-derive the same answer.
                     var frameGray = session is not null
                         && _grayscaleStrategy == GrayscaleStrategy.WholeFrameOnce
                         ? DetectionFramePreprocessor.BgraToGray(frameData.Buffer, fW, fH)
@@ -730,7 +687,7 @@ public class VisualEventDetector : IDisposable
                         Log.Information("DetectionLoop: processed live frame {W}x{H}; inference returned no detections",
                             fW, fH);
                     }
-                    // Fold the latest OCR pass in so the host still gets object + OCR per batch.
+
                     DetectionsAvailable?.Invoke(new DetectionBatch
                     {
                         FrameTimestamp = frameData.Timestamp,
@@ -740,8 +697,6 @@ public class VisualEventDetector : IDisposable
                 }
                 finally
                 {
-                    // OnFrame owns _isProcessing and clears it in its own finally; resetting it
-                    // here could unlock an OnFrame still mid-copy.
                     frameData.ReturnBuffer();
                 }
             }
@@ -762,7 +717,7 @@ public class VisualEventDetector : IDisposable
 
     internal static List<OcrMatch> FreshMatches(List<OcrMatch>? matches, DateTime completedAtUtc,
         DateTime nowUtc, int maxAgeMs)
-        // Absolute age so a clock step in either direction retires the snapshot.
+
         => matches is not null && (nowUtc - completedAtUtc).Duration() <= TimeSpan.FromMilliseconds(maxAgeMs)
             ? matches
             : [];
@@ -811,18 +766,12 @@ public class VisualEventDetector : IDisposable
         return matches;
     }
 
-    // The divisor is relative to OBS's configured recording framerate, not the game's render rate:
-    // OBS composites its canvas at obs_video_info fps_num/fps_den, which Tript sets from the user's
-    // FrameRate setting (OBSService.ResetVideoSettings, called at OBSService.cs:873). A game
-    // rendering at 144fps recorded at 60fps still delivers 60 frames/sec to the callback.
     internal static int ComputeFrameRateDivisor(int outputFps)
     {
         if (outputFps <= 0) return FpsDivisor;
         return Math.Max(1, outputFps / TargetCaptureFps);
     }
 
-    // 1920x1080 unless the game has OCR events and OBS reports a larger output, in which case the
-    // native size (capped) is requested so small text survives the crop.
     private static (int Width, int Height) ResolveSubscribeSize(bool hasOcr)
     {
         if (!hasOcr) return (ObsSubscribeWidth, ObsSubscribeHeight);
@@ -843,7 +792,6 @@ public class VisualEventDetector : IDisposable
         return (ObsSubscribeWidth, ObsSubscribeHeight);
     }
 
-    // Returns 0 when the rate is unavailable, which ComputeFrameRateDivisor maps to the default.
     private static int GetConfiguredOutputFps()
     {
         try
@@ -855,8 +803,6 @@ public class VisualEventDetector : IDisposable
                 return 0;
             }
 
-            // OBS uses fractional rates (60000/1001 for 59.94), so the numerator alone is
-            // meaningless. Rounding keeps 59.94 at 60 rather than truncating to 59.
             var num = info.Value.FpsNumerator;
             var den = info.Value.FpsDenominator;
             if (num == 0 || den == 0) return 0;
@@ -885,7 +831,7 @@ public class VisualEventDetector : IDisposable
 
             using var results = session.Run(container, outputNames, runOptions);
             var tensor = results[0].AsTensor<float>();
-            // Backed by memory the result owns; parse it before the using ends.
+
             var span = tensor is DenseTensor<float> dense
                 ? dense.Buffer.Span
                 : tensor.ToArray().AsSpan();

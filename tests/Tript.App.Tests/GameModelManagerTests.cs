@@ -273,7 +273,6 @@ public sealed class GameModelManagerTests : IDisposable
         return output.ToArray();
     }
 
-    // A package with two entries of one name, to prove the extractor rejects it up front.
     private static byte[] BuildPackageWithDuplicateEntry(string gameId, int revision)
     {
         var sourceRoot = Path.Combine(AppContext.BaseDirectory, "data", "models",
@@ -304,7 +303,6 @@ public sealed class GameModelManagerTests : IDisposable
         return output.ToArray();
     }
 
-    // An OCR-only package whose recogniser graph exceeds the 10 MiB small-file cap.
     private static byte[] BuildOversizedOcrPackage(string gameId, int revision)
     {
         var events = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new[]

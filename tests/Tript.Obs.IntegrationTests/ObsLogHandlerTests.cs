@@ -8,9 +8,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The log handler is the one place the binding is handed a va_list, and a mistake there produces
-// plausible-looking wrong text rather than an error. These tests drive libobs's own printf with
-// argument lists this test builds by hand, so a wrong field in the struct shows up as garbage.
 public sealed class ObsLogHandlerTests
 {
     private const int LogInfo = 300;
@@ -32,9 +29,6 @@ public sealed class ObsLogHandlerTests
         Assert.Equal("tript plain message", entry.Message);
     }
 
-    // Formatting intact: a string, an integer and a double, substituted by libobs's printf from a
-    // System V argument list. If GpOffset, FpOffset or OverflowArgArea were wrong, this is where it
-    // would show — the values would come from the wrong place and the text would still arrive.
     [SkippableFact]
     public void MixedFormatArguments_AreSubstitutedThroughTheVaList()
     {
@@ -53,8 +47,6 @@ public sealed class ObsLogHandlerTests
         Assert.Equal("res 1920x1080 fps 60000/1001 scale 1.25 name nv12", Assert.Single(received));
     }
 
-    // Byte-identical, not merely equal as strings: both sides are compared as UTF-8 bytes so that a
-    // round trip which mangled the text symmetrically cannot pass.
     [SkippableFact]
     public void ANonAsciiArgument_RoundTripsByteIdentically()
     {
@@ -71,7 +63,6 @@ public sealed class ObsLogHandlerTests
         Assert.Equal(Encoding.UTF8.GetBytes(original), Encoding.UTF8.GetBytes(message));
     }
 
-    // A format string is itself UTF-8 and reaches libobs unchanged.
     [SkippableFact]
     public void ANonAsciiFormatString_SurvivesSubstitution()
     {
@@ -113,14 +104,11 @@ public sealed class ObsLogHandlerTests
             Assert.Throws<InvalidOperationException>(() => ObsLog.Install((_, _) => { }));
         }
 
-        // And the refusal did not consume the slot.
         using (ObsLog.Install((_, _) => { }))
         {
         }
     }
 
-    // An exception thrown by a handler must not cross back into libobs's frame; it would terminate
-    // the process rather than fail a test.
     [SkippableFact]
     public void AThrowingHandler_DoesNotPropagateIntoLibobs()
     {
@@ -131,10 +119,6 @@ public sealed class ObsLogHandlerTests
         }
     }
 
-    // Calls blogva with an argument list assembled the way the System V ABI describes an exhausted
-    // register save area: both offsets past their limits, so every argument is read from the
-    // overflow area in order. That is the only way to build a va_list from managed code, and it
-    // exercises exactly the struct the log handler has to copy.
     private static unsafe void Blogva(int level, string format, params VaArgument[] arguments)
     {
         var blogva = (delegate* unmanaged[Cdecl]<int, nint, nint, void>)
@@ -153,8 +137,6 @@ public sealed class ObsLogHandlerTests
             {
                 var list = new VaListSystemV
                 {
-                    // 48 is the size of the six general-purpose slots, 176 the whole save area.
-                    // At or past those, va_arg takes everything from the overflow area.
                     GpOffset = 48,
                     FpOffset = 176,
                     OverflowArgArea = (nint)overflow,
@@ -173,8 +155,6 @@ public sealed class ObsLogHandlerTests
         }
     }
 
-    // One 8-byte overflow slot per argument. A double occupies its slot as raw bits, which is what
-    // the ABI puts there once the floating-point registers are exhausted.
     private readonly record struct VaArgument(bool IsText, long Bits, string? Text)
     {
         internal static VaArgument Integer(long value) => new(false, value, null);

@@ -5,9 +5,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// The outputs surface against the real library: the availability probes, creation and identity, the
-// settings the muxer reads, wiring encoders to the output, state, statistics, and the three failure
-// channels. Recording to disk is ObsOutputRecordingTests — this class ends where a file begins.
 public sealed class ObsOutputTests
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
@@ -16,8 +13,6 @@ public sealed class ObsOutputTests
     private const string MpegtsMuxerId = "ffmpeg_mpegts_muxer";
     private const string ReplayBufferId = "replay_buffer";
 
-    // ---- availability ----
-
     [SkippableFact]
     public void TheOutputTypesThisMachineHas_AreRegistered()
     {
@@ -25,16 +20,12 @@ public sealed class ObsOutputTests
 
         var ids = ObsOutput.EnumerateTypeIds();
 
-        // All from obs-ffmpeg, which is in the safe module list, so all must register. Measured:
-        // the flv/rtmp streamers are NOT among them on this OBS build — they come from modules that
-        // are not loaded headless — which is exactly the "available on other machines" case.
         Assert.Contains(FfmpegMuxerId, ids);
         Assert.Contains(FfmpegOutputId, ids);
         Assert.Contains(HlsMuxerId, ids);
         Assert.Contains(MpegtsMuxerId, ids);
         Assert.Contains(ReplayBufferId, ids);
 
-        // The display name answers the same question directly, and agrees with the enumeration.
         Assert.NotNull(ObsOutput.GetTypeDisplayName(FfmpegMuxerId));
     }
 
@@ -43,10 +34,6 @@ public sealed class ObsOutputTests
     {
         using var session = ObsSession.StartWithSourceTypes();
 
-        // Unregistered — measured on this box: no module registers these ids, which is the point.
-        // obs_output_create would answer a *placeholder* for them rather than null — measured — so
-        // a null-check on the create result proves nothing. The display-name probe is the reliable
-        // one, exactly as the bindings for sources and encoders found.
         Assert.False(ObsOutput.IsTypeRegistered("tript_no_such_output"));
         Assert.Null(ObsOutput.GetTypeDisplayName("tript_no_such_output"));
         Assert.False(ObsOutput.IsTypeRegistered("flv_output"));
@@ -64,8 +51,6 @@ public sealed class ObsOutputTests
         Assert.DoesNotContain("flv_output", ids);
         Assert.DoesNotContain("rtmp_output", ids);
     }
-
-    // ---- creation ----
 
     [SkippableFact]
     public void CreatedWithTheRegisteredId_TheOutputReportsItBack()
@@ -88,8 +73,6 @@ public sealed class ObsOutputTests
         Assert.Contains("tript_no_such_output", failure.Message, StringComparison.Ordinal);
     }
 
-    // The instance reports the same flags its type declared, so the type probe is what a recorder
-    // leans on before it has an instance.
     [SkippableFact]
     public void TheInstanceFlags_MatchTheTypeFlags()
     {
@@ -102,8 +85,6 @@ public sealed class ObsOutputTests
         Assert.NotEqual(ObsOutputFlags.None, output.Flags);
     }
 
-    // The recorded muxer is a file output: it takes encoded packets and does not need a service.
-    // The flags are the measured 0x37 — video, audio and encoded, plus multi-track for both.
     [SkippableFact]
     public void TheFileMuxer_IsAnEncodedAvOutputThatDoesNotNeedAService()
     {
@@ -118,9 +99,6 @@ public sealed class ObsOutputTests
         Assert.True(flags.HasFlag(ObsOutputFlags.MultiTrack));
     }
 
-    // The other muxers on this machine are the shape of an output that does need a service: the
-    // mpegts and HLS muxers report OBS_OUTPUT_SERVICE alongside ENCODED (measured flags 0x1f).
-    // The generic ffmpeg_output does not — it is a *non-encoded* file output (measured 0x33).
     [SkippableFact]
     public void TheStreamingMuxers_AreTheServiceShapedOutputs()
     {
@@ -134,18 +112,11 @@ public sealed class ObsOutputTests
         Assert.True(hls.HasFlag(ObsOutputFlags.Encoded));
         Assert.True(hls.HasFlag(ObsOutputFlags.Service));
 
-        // And the generic ffmpeg_output is the non-encoded file-output shape, which is why an
-        // encoded recorder must not confuse it with the muxer.
         var generic = ObsOutput.GetTypeFlags(FfmpegOutputId);
         Assert.False(generic.HasFlag(ObsOutputFlags.Encoded));
         Assert.False(generic.HasFlag(ObsOutputFlags.Service));
     }
 
-    // ---- settings ----
-
-    // The path property is the whole key surface the muxer reads. Measured: it is a plain TEXT
-    // property on 32.2.1 (type 4), not a PATH picker — the plugin takes the path as a string and
-    // only the frontend's own recording UI offers the browse button.
     [SkippableFact]
     public void TheFileMuxer_DeclaresOnlyThePathProperty()
     {
@@ -158,9 +129,6 @@ public sealed class ObsOutputTests
         Assert.Equal(ObsPropertyType.Text, path.Type);
     }
 
-    // The defaults object is empty — measured — even though the path property exists. The plugin
-    // carries the path's default in the property itself, not in the defaults object, so a recorder
-    // that starts from GetTypeDefaults gets a blank object.
     [SkippableFact]
     public void TheFileMuxer_DefaultsAreEmpty()
     {
@@ -171,8 +139,6 @@ public sealed class ObsOutputTests
         Assert.NotNull(defaults);
         Assert.Empty(defaults.EnumerateEntries());
     }
-
-    // ---- wiring ----
 
     [SkippableFact]
     public void AnAudioEncoder_AssignedToASlot_ComesBackFromThatSlot()
@@ -189,14 +155,9 @@ public sealed class ObsOutputTests
         Assert.Equal("ffmpeg_aac", readBack!.Id);
         Assert.Equal("wiring audio", readBack.Name);
 
-        // Slots that were never assigned report nothing.
         Assert.Null(output.GetAudioEncoder(1));
     }
 
-    // obs_output_get_audio_encoder is a plain read of the slot and takes no reference. While the
-    // binding treated it as owned, each read-back disposed dropped one of the *output's* references:
-    // the test itself still passed and the process died later, inside obs_shutdown. Reading the slot
-    // repeatedly and disposing each result is the shape that fails while that is true.
     [SkippableFact]
     public void ReadingAnEncoderSlot_DoesNotConsumeTheOutputsOwnReference()
     {
@@ -228,8 +189,6 @@ public sealed class ObsOutputTests
         Assert.Equal("/tmp/nonexistent-directory/out.mp4", readBack.GetString("path"));
     }
 
-    // ---- state ----
-
     [SkippableFact]
     public void ANewOutput_IsNotActiveAndNotPaused()
     {
@@ -240,10 +199,6 @@ public sealed class ObsOutputTests
         Assert.False(output.IsPaused);
     }
 
-    // The muxer reports no reconnection vocabulary, which is the shape of a file output rather than
-    // a streamer. The connect-time field reports -1 (not 0) on a fresh, never-started output —
-    // measured — so it is -1 that means "no connection has ever been attempted", and the test pins
-    // that rather than assuming 0.
     [SkippableFact]
     public void AFileOutput_ReportsNoNetworkVocabulary()
     {
@@ -255,12 +210,6 @@ public sealed class ObsOutputTests
         Assert.Equal(-1, output.ConnectTimeMilliseconds);
     }
 
-    // ---- failure channels ----
-
-    // The synchronous channel, provoked with the output shaped the way a recorder shapes it: a bad
-    // path makes start refuse and names the reason. Measured: last_error is only set once encoders
-    // are wired — without them the refusal says "no media" and names nothing, so this is the shape
-    // that proves the reason is surfaced at all.
     [SkippableFact]
     public void ABadPath_MakesStartRefuseAndNameTheReason()
     {
@@ -273,8 +222,6 @@ public sealed class ObsOutputTests
         Assert.NotEqual(string.Empty, output.LastError);
     }
 
-    // The missing-encoder variant: start refuses without ever naming a reason, which is the second
-    // measured shape of the synchronous channel — the "no media" refusal names nothing.
     [SkippableFact]
     public void StartingWithoutEncoders_MakesStartRefuse()
     {
@@ -286,8 +233,6 @@ public sealed class ObsOutputTests
         Assert.Null(output.LastError);
     }
 
-    // The asynchronous channel, provoked: with a valid path but no encoders, start still refuses,
-    // and the refusal is synchronous — the stop signal must not fire, because nothing started.
     [SkippableFact]
     public void AFailedStart_DoesNotEmitAStopSignal()
     {
@@ -306,11 +251,6 @@ public sealed class ObsOutputTests
         Assert.Empty(stops);
     }
 
-    // ---- test helpers ----
-
-    // The shape a recorder actually starts: a muxer output with a video and an audio encoder wired,
-    // bound to the session's mixes. Without this, a bad path refuses with "no media" and names
-    // nothing — measured — so the tests that assert on the named reason wire encoders first.
     private static ObsOutput WithEncodersWired(ObsSession session, ObsOutput output)
     {
         session.Runtime.TryGetVideoHandle(out var video);
@@ -331,9 +271,6 @@ public sealed class ObsOutputTests
         output.SetVideoEncoder(videoEncoder);
         output.SetAudioEncoder(audioEncoder, 0);
 
-        // The encoders belong to the output for the duration of this test; the caller's references
-        // are kept alive by the output's own internal references, so disposal here only drops the
-        // wrapper.
         _ = videoEncoder;
         _ = audioEncoder;
         return output;

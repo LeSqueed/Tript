@@ -40,7 +40,6 @@ function renderPage(recording: RecordingSettings = BUFFER_MODE, buffer: BufferSe
   return update;
 }
 
-/** Set a control's value and commit it (React's controlled-input quirk: fire change then blur). */
 function changeInput(label: RegExp, value: string) {
   const input = screen.getByLabelText(label);
   fireEvent.change(input, { target: { value } });

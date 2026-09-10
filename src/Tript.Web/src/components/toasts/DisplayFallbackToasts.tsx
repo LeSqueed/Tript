@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The recorder falling back off the preferred monitor, as a permanent keyed toast. It rides the
-// `settings` push and is mounted in the shell rather than on the capture page, because the fallback
-// is happening whether or not the user is looking at that page. Dismissing it suppresses it only
-// for that monitor; a warning about a different one comes back.
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../../ipc/websocketClient';

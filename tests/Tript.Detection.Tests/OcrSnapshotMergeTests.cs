@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// The object loop folds in an OCR snapshot only while it is fresh.
 public class OcrSnapshotMergeTests
 {
     private static List<OcrMatch> OneMatch() =>

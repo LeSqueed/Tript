@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Creating, configuring and identifying sources against the real library. Lifetime and reference
-// counting are asserted separately, in ObsSourceLifetimeTests.
 public sealed class ObsSourceTests
 {
     private const string ColourSourceId = "color_source";
@@ -26,10 +24,6 @@ public sealed class ObsSourceTests
         Assert.False(source.IsScene);
     }
 
-    // libobs copies the strings it is handed, which is the opposite of obs_reset_video and is why
-    // nothing here is interned. The generated marshaller frees its UTF-8 buffer the moment the call
-    // returns, so a retained pointer would be reading freed memory by the time this reads the name
-    // back — and the name is built at run time so no literal can be sitting at that address.
     [SkippableFact]
     public void SourceCreation_CopiesTheNameRatherThanKeepingTheCallersBuffer()
     {
@@ -38,7 +32,6 @@ public sealed class ObsSourceTests
         var name = new StringBuilder("copied ").Append("name ").Append(Random.Shared.Next(1000, 9999)).ToString();
         using var source = ObsSource.Create(ColourSourceId, name);
 
-        // Churn the managed heap so that anything the marshaller left behind is unlikely to survive.
         GC.Collect();
         GC.WaitForPendingFinalizers();
         _ = new byte[1 << 20];
@@ -58,7 +51,6 @@ public sealed class ObsSourceTests
         Assert.NotEqual(first.Uuid, second.Uuid);
     }
 
-    // A name is not an identity: libobs accepts the duplicate and a lookup answers with the first.
     [SkippableFact]
     public void TwoSourcesMayShareAName_AndTheLookupFindsTheOlder()
     {
@@ -93,9 +85,6 @@ public sealed class ObsSourceTests
         Assert.Equal(source.Uuid, found.Uuid);
     }
 
-    // The one that would otherwise be discovered as a blank recording: libobs answers an
-    // unregistered id with a placeholder source rather than with null, so null-checking the result
-    // proves nothing.
     [SkippableFact]
     public void AnUnregisteredSourceId_IsRefusedRatherThanGivenAPlaceholder()
     {
@@ -128,8 +117,6 @@ public sealed class ObsSourceTests
         Assert.Equal(ObsSource.GetTypeOutputFlags(ScreenCaptureId), source.OutputFlags);
     }
 
-    // The settings object is shared with the source rather than copied into it — measured, and the
-    // reason a caller must not treat its own reference as private after creation.
     [SkippableFact]
     public void SettingsGivenAtCreation_RemainTheSourcesOwnSettingsObject()
     {
@@ -143,7 +130,6 @@ public sealed class ObsSourceTests
         Assert.Equal(100u, source.Width);
         Assert.Equal(50u, source.Height);
 
-        // Written through the caller's own reference, after creation, with no Update call.
         settings.SetInt("width", 640);
 
         using var readBack = source.GetSettings();
@@ -201,9 +187,6 @@ public sealed class ObsSourceTests
         Assert.False(source.IsEnabled);
     }
 
-    // Marking a source removed destroys nothing and unlists nothing: it raises a flag and signals
-    // whoever holds a reference to let go. The source is still there, and still findable, until they
-    // do.
     [SkippableFact]
     public void MarkingASourceRemoved_RaisesAFlagWithoutDestroyingOrUnlistingIt()
     {
@@ -223,8 +206,6 @@ public sealed class ObsSourceTests
     {
         using var session = ObsSession.StartWithSourceTypes();
 
-        // Not a nicety: obs_source_create dereferences the id without checking it, so a null id
-        // takes the process down rather than returning null.
         Assert.Throws<ArgumentNullException>(() => ObsSource.Create(null!, "named"));
         Assert.Throws<ArgumentException>(() => ObsSource.Create(string.Empty, "named"));
         Assert.Throws<ArgumentNullException>(() => ObsSource.Create(ColourSourceId, null!));

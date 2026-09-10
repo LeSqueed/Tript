@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Export full-frame Tript samples into the detector's cropped YOLO dataset format."""
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageOps
 
-
 @dataclass(frozen=True)
 class Region:
     x: float
@@ -29,7 +29,6 @@ class Region:
     @property
     def bottom(self) -> float:
         return self.y + self.h
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -58,8 +57,7 @@ def main() -> int:
             (dataset / "labels" / split).mkdir(parents=True)
 
         assignments = split_samples(samples, args.validation)
-        # The per-sample loop below is the whole run; without these lines the console window the
-        # host opens sits blank for minutes, so report the plan and then steady progress.
+
         total_samples = sum(len(value) for value in assignments.values())
         progress_step = max(1, total_samples // 20)
         print(
@@ -86,12 +84,7 @@ def main() -> int:
         if exported == 0:
             raise ValueError("no valid training crops were exported")
 
-        # JSON is also valid YAML, avoiding another parser dependency while preserving the standard
-        # Ultralytics dataset contract.
         dataset_config = {
-            # Ultralytics resolves `path` from the process working directory rather than from the
-            # directory containing dataset.yaml. Use the absolute staging path so the desktop
-            # release and a headless launch resolve the same images and labels.
             "path": str((workspace / "dataset").resolve()),
             "train": "images/train",
             "val": "images/val",
@@ -161,7 +154,6 @@ def main() -> int:
             shutil.rmtree(dataset)
         raise
 
-
 def load_events(path: Path) -> list[dict]:
     events = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(events, list) or not events:
@@ -181,7 +173,6 @@ def load_events(path: Path) -> list[dict]:
         raise ValueError("every event must have a non-empty name")
     return ordered
 
-
 def load_region_groups(path: Path) -> dict[int, dict]:
     if not path.is_file():
         return {}
@@ -199,7 +190,6 @@ def load_region_groups(path: Path) -> dict[int, dict]:
         result[group_id] = group
     return result
 
-
 def materialize_event_regions(events: list[dict], groups: dict[int, dict]) -> list[dict]:
     materialized = []
     for event in events:
@@ -215,7 +205,6 @@ def materialize_event_regions(events: list[dict], groups: dict[int, dict]) -> li
         materialized.append(copy)
     return materialized
 
-
 def validate_region(target: dict, description: str) -> None:
     keys = ("screenRegionX", "screenRegionY", "screenRegionW", "screenRegionH")
     values = [target.get(key) for key in keys]
@@ -230,7 +219,6 @@ def validate_region(target: dict, description: str) -> None:
     region = Region(*values)
     if region.w <= 0 or region.h <= 0 or region.x < 0 or region.y < 0 or region.right > 1 or region.bottom > 1:
         raise ValueError(f"{description} screen region must be inside the normalized frame")
-
 
 def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, int, list[str]]:
     samples_dir = workspace / "samples"
@@ -254,7 +242,7 @@ def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, 
         ]
         ocr_regions = sample.get("ocrRegions")
         if not labels and isinstance(ocr_regions, list) and ocr_regions:
-            # OCR-only sample: it feeds the recogniser export, not the object detector.
+
             continue
         if not labels or errors:
             skipped_samples += 1
@@ -266,7 +254,6 @@ def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, 
     if not samples:
         raise ValueError("workspace contains no valid labeled samples")
     return samples, invalid_labels, skipped_samples, warnings
-
 
 def label_inside_region(label: dict, region: Region) -> bool:
     epsilon = 0.000001
@@ -280,7 +267,6 @@ def label_inside_region(label: dict, region: Region) -> bool:
         and right <= region.right + epsilon
         and bottom <= region.bottom + epsilon
     )
-
 
 def label_error(label: object, events_by_class: dict[int, dict]) -> str | None:
     if not isinstance(label, dict):
@@ -307,7 +293,6 @@ def label_error(label: object, events_by_class: dict[int, dict]) -> str | None:
     if region is not None and not label_inside_region(label, region):
         return f"a '{events_by_class[class_id]['name']}' label lies outside its screen region"
     return None
-
 
 def split_samples(samples: list[dict], validation_fraction: float) -> dict[str, list[dict]]:
     shuffled_indices = list(range(len(samples)))
@@ -395,7 +380,6 @@ def split_samples(samples: list[dict], validation_fraction: float) -> dict[str, 
         "val": [samples[index] for index in shuffled_indices if index in validation],
     }
 
-
 def summarize_coverage(assignments: dict[str, list[dict]], events: list[dict]) -> tuple[list[dict], list[str]]:
     counts = {
         split: {
@@ -433,9 +417,7 @@ def summarize_coverage(assignments: dict[str, list[dict]], events: list[dict]) -
         warnings.append("The dataset has no validation frames.")
     return coverage, warnings
 
-
 AUGMENT_SEED = 0x7E57
-
 
 def export_sample(
     sample: dict, split: str, dataset: Path, events: list[dict], size: int, sequence: int, augment: int
@@ -470,7 +452,6 @@ def export_sample(
                     augmented += 1
     return emitted, augmented
 
-
 def augment_crop(image: Image.Image, sample_sequence: int, variant: int) -> Image.Image:
     """One deterministic mild distortion, seeded so every export of the same workspace agrees."""
     seed = AUGMENT_SEED
@@ -486,14 +467,11 @@ def augment_crop(image: Image.Image, sample_sequence: int, variant: int) -> Imag
         gamma = rng.uniform(0.85, 1.15)
         lookup = [round(255 * (pixel / 255) ** gamma) for pixel in range(256)]
         return image.convert("L").point(lookup).convert("RGB")
-    # Gentle pixelation, never worse than roughly "1080p downscaled to 720p": the crop is shrunk
-    # to at most 2/3 and no less than 0.9 of its size, then block-upscaled back. A small capture
-    # region is already soft after being upscaled, so any chunkier block size destroys it.
+
     scale = rng.uniform(2 / 3, 0.9)
     down = max(4, int(round(image.width * scale)))
     small = image.resize((down, down), Image.Resampling.NEAREST)
     return small.resize(image.size, Image.Resampling.NEAREST)
-
 
 def crop_groups(labels: list[dict], events: list[dict]) -> list[tuple[Region | None, list[dict]]]:
     by_class = {event["classId"]: event for event in events}
@@ -503,8 +481,6 @@ def crop_groups(labels: list[dict], events: list[dict]) -> list[tuple[Region | N
         region = event_region(event)
         groups.append((region, [label]))
 
-    # Merge until stable. A merged union can overlap a group that was checked earlier, so a single
-    # first-match pass does not match the detector's order-independent grouping.
     changed = True
     while changed:
         changed = False
@@ -524,7 +500,6 @@ def crop_groups(labels: list[dict], events: list[dict]) -> list[tuple[Region | N
                 break
     return groups
 
-
 def event_region(event: dict | None) -> Region | None:
     if event is None:
         raise ValueError("sample references an unknown class")
@@ -537,10 +512,8 @@ def event_region(event: dict | None) -> Region | None:
         raise ValueError("event screen region must be inside the normalized frame")
     return region
 
-
 def overlaps(left: Region, right: Region) -> bool:
     return left.x < right.right and right.x < left.right and left.y < right.bottom and right.y < left.bottom
-
 
 def merge_regions(left: Region | None, right: Region | None) -> Region | None:
     if left is None or right is None:
@@ -549,13 +522,11 @@ def merge_regions(left: Region | None, right: Region | None) -> Region | None:
     y = min(left.y, right.y)
     return Region(x, y, max(left.right, right.right) - x, max(left.bottom, right.bottom) - y)
 
-
 def crop_image(image: Image.Image, region: Region | None) -> Image.Image:
     if region is None:
         return image
     left, top, right, bottom = crop_bounds(image.size, region)
     return image.crop((left, top, right, bottom))
-
 
 def crop_bounds(size: tuple[int, int], region: Region) -> tuple[int, int, int, int]:
     width, height = size
@@ -566,7 +537,6 @@ def crop_bounds(size: tuple[int, int], region: Region) -> tuple[int, int, int, i
     if right <= left or bottom <= top:
         raise ValueError("event screen region is smaller than one source pixel")
     return left, top, right, bottom
-
 
 def write_labels(path: Path, labels: list[dict], region: Region | None) -> None:
     lines = []
@@ -581,7 +551,6 @@ def write_labels(path: Path, labels: list[dict], region: Region | None) -> None:
             height = label["height"] / region.h
         lines.append(f"{label['classId']} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

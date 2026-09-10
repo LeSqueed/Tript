@@ -9,9 +9,6 @@ using Tript.Detection;
 
 namespace Tript.App.Training;
 
-// One per-epoch heartbeat from the training script (dataset/progress.json), forwarded to the web
-// UI while the model trains. The file is rewritten atomically by the script, so a torn read is
-// impossible; a transient read failure still yields null and the poller retries on the next tick.
 internal sealed class TrainingProgressUpdate
 {
     public string Status { get; init; } = string.Empty;
@@ -94,9 +91,6 @@ internal sealed class TrainingRunner
                 "Augmented copies per crop must be non-negative.");
     }
 
-    // Phase one: build the dataset from the editable samples. This is the only phase that reads
-    // samples/, events.json and regionGroups.json, so the caller keeps the workspace gate for it —
-    // it is also the phase the UI shows the loading modal for.
     internal async Task PrepareDatasetAsync(TrainingWorkspace workspace, int imageSize,
         int augmentCopies, Action<string, TrainingProgressUpdate?> progress,
         CancellationToken cancellationToken)
@@ -121,8 +115,6 @@ internal sealed class TrainingRunner
         progress(exportSummary.ProgressMessage(), null);
     }
 
-    // OCR phase one: build the recogniser fine-tune crops. Reads samples/ (and an optional
-    // pre-conversion object-labelled sample dir), so the caller holds the workspace gate.
     internal async Task PrepareOcrDatasetAsync(TrainingWorkspace workspace, string? objectSamplesPath,
         Action<string> progress, CancellationToken cancellationToken)
     {
@@ -136,8 +128,6 @@ internal sealed class TrainingRunner
             throw new InvalidDataException("OCR dataset export produced no dataset/ocr directory.");
     }
 
-    // OCR phase two: fine-tune the recogniser. Reads dataset/ocr/ only, so the caller releases the
-    // gate. Produces dataset/ocr_model.onnx + dataset/ocr_dict.txt.
     internal async Task<string> TrainOcrModelAsync(TrainingWorkspace workspace, int epochs,
         string device, Action<string, TrainingProgressUpdate?> progress, CancellationToken cancellationToken)
     {
@@ -181,9 +171,6 @@ internal sealed class TrainingRunner
         return modelPath;
     }
 
-    // Phase two: train the model. The script only reads dataset/ and writes runs/, never the
-    // editable samples, so the caller releases the workspace gate for this phase — sample
-    // navigation and pushes keep working while the (possibly long) training runs.
     internal async Task<string> TrainModelAsync(TrainingWorkspace workspace, int imageSize,
         int epochs, string device, string? baseModel, Action<string, TrainingProgressUpdate?> progress,
         CancellationToken cancellationToken)
@@ -194,7 +181,6 @@ internal sealed class TrainingRunner
 
         var (python, _, trainScript) = ResolveTrainingEnvironment();
 
-        // A progress file left by a previous run would be reported as fresh activity for a moment.
         var progressPath = workspace.TrainingProgressPath;
         try
         {
@@ -203,7 +189,6 @@ internal sealed class TrainingRunner
         }
         catch (IOException)
         {
-            // The file vanished between the check and the delete; the script will recreate it.
         }
 
         var trainArguments = new List<string>
@@ -237,9 +222,6 @@ internal sealed class TrainingRunner
         return modelPath;
     }
 
-    // Phase three: validate the trained model against the event contract and the labeled samples.
-    // Read-only and short; the caller re-takes the workspace gate so a concurrent edit cannot land
-    // between validation and the install that follows it.
     internal void ValidateTrainingResult(TrainingWorkspace workspace, string modelPath,
         Action<string> progress)
     {
@@ -255,8 +237,6 @@ internal sealed class TrainingRunner
         progress($"VALIDATED input={metadata.InputWidth}x{metadata.InputHeight} classes={metadata.ClassCount}");
     }
 
-    // Resolves the Python interpreter and both scripts up front so a training-enabled build that is
-    // missing either script fails at start, not hours into the run.
     private static (PythonCommand Python, string ExportScript, string TrainScript) ResolveTrainingEnvironment()
     {
         var scriptsPath = Path.Combine(AppContext.BaseDirectory, "Training", "Scripts");
@@ -281,9 +261,6 @@ internal sealed class TrainingRunner
         return (FindOcrPython(), exportScript, trainScript);
     }
 
-    // The OCR fine-tune drives the vendored PaddleOCR from an isolated .venv-paddle (paddlepaddle
-    // conflicts with the object venv's stack). Prefer TRIPT_OCR_PYTHON, then .venv-paddle, then the
-    // object interpreter as a last resort so the export step still has Pillow.
     internal static PythonCommand FindOcrPython()
     {
         var configured = Environment.GetEnvironmentVariable("TRIPT_OCR_PYTHON");
@@ -296,9 +273,6 @@ internal sealed class TrainingRunner
         return File.Exists(venv) ? new PythonCommand(venv, []) : FindPython();
     }
 
-    // Fine-tune inputs resolved by convention next to the install: the vendored PaddleOCR checkout,
-    // the shipped config, the pretrained PP-OCRv4-en checkpoint (runtime infra, provisioned like the
-    // venvs), and the character dict the pretrained classifier was trained with.
     internal static (string PaddleRoot, string Config, string Pretrained, string Dict) ResolveOcrFinetuneInputs()
     {
         var appDir = AppContext.BaseDirectory;
@@ -309,8 +283,6 @@ internal sealed class TrainingRunner
             Path.Combine(appDir, "data", "ocr", "ocr_dict.txt"));
     }
 
-    // Forwards the script's dataset/progress.json heartbeat to the UI about once a second. The
-    // raw text is compared so a rewrite with unchanged content does not re-report.
     private static async Task PollTrainingProgressAsync(string progressPath,
         Action<string, TrainingProgressUpdate?> progress, CancellationToken cancellationToken)
     {
@@ -360,7 +332,6 @@ internal sealed class TrainingRunner
         }
         catch (OperationCanceledException)
         {
-            // The training run ended; the caller cancels the poller in its finally block.
         }
     }
 
@@ -427,7 +398,6 @@ internal sealed class TrainingRunner
             }
             catch (InvalidOperationException)
             {
-                // The process exited between the check and Kill.
             }
         }
     }
@@ -457,8 +427,7 @@ internal sealed class TrainingRunner
             {
                 FileName = python.FileName,
                 WorkingDirectory = workspace,
-                // Training is intentionally visible: Ultralytics owns the detailed progress display,
-                // while the web UI reports the high-level running state.
+
                 UseShellExecute = true,
                 CreateNoWindow = false,
                 WindowStyle = ProcessWindowStyle.Normal,

@@ -7,15 +7,10 @@ using System.Text.Json;
 
 namespace Tript.Media;
 
-// Probes a media file with ffprobe and parses the subset of stream information the clip decision
-// needs. HDR detection lives here: a file is HDR when its video transfer is smpte2084 (PQ) or
-// arib-std-b67 (HLG), and a file's HDR-ness never changes, so the probe result is cached per file.
 public sealed class MediaProbe
 {
     private readonly string _ffprobePath;
 
-    // Absolute paths of already-probed files. A file's HDR-ness and geometry do not change, so a
-    // session that clips several regions from one recording probes it once.
     private readonly Dictionary<string, MediaInfo> _cache = new(StringComparer.Ordinal);
 
     public MediaProbe(string ffprobePath)
@@ -35,8 +30,6 @@ public sealed class MediaProbe
         var info = ProbeUncached(absolute);
         lock (_cache)
         {
-            // Last writer wins; two threads probing the same file concurrently produce the same
-            // result anyway.
             _cache[absolute] = info;
         }
 
@@ -85,8 +78,6 @@ public sealed class MediaProbe
         var stream = FirstStream(root, "streams");
         var format = FirstObject(root, "format");
 
-        // ffprobe omits the colour fields entirely when the file does not carry them; that absence
-        // is normalised to "unspecified".
         var transfer = GetString(stream, "color_transfer") ?? "unspecified";
         var primaries = GetString(stream, "color_primaries") ?? "unspecified";
         var space = GetString(stream, "color_space") ?? "unspecified";
@@ -96,8 +87,6 @@ public sealed class MediaProbe
         var duration = double.TryParse(GetString(format, "duration"),
             NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : double.NaN;
 
-        // The audio stream count comes from the streams array: ffprobe with -select_streams v:0
-        // still lists every stream in the file, so the audio streams are present with an index.
         var audioCount = 0;
         if (root.TryGetProperty("streams", out var streams) && streams.ValueKind == JsonValueKind.Array)
         {
@@ -127,8 +116,6 @@ public sealed class MediaProbe
 
     private static Fraction ParseFrameRate(JsonElement stream)
     {
-        // avg_frame_rate is the one ffprobe computes reliably; r_frame_rate can disagree on VFR
-        // files. Both are rationals like "30/1" or "30000/1001".
         var raw = GetString(stream, "avg_frame_rate") ?? GetString(stream, "r_frame_rate") ?? "0/1";
         var parts = raw.Split('/');
         if (parts.Length == 2
@@ -148,8 +135,6 @@ public sealed class MediaProbe
             throw new KeyNotFoundException(property);
         foreach (var item in element.EnumerateArray())
         {
-            // The first stream is not necessarily video — pick the video stream for the geometry
-            // and colour fields, which is what this MediaInfo carries.
             if (GetString(item, "codec_type") == "video")
                 return item;
         }
@@ -176,7 +161,6 @@ public sealed class MediaProbe
         if (!element.TryGetProperty(name, out var value))
             throw new FormatException($"Expected integer '{name}', got nothing");
 
-        // ffprobe emits numbers as JSON numbers; be tolerant of the string form too.
         if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var asInt))
             return asInt;
         if (value.ValueKind == JsonValueKind.String
@@ -188,16 +172,8 @@ public sealed class MediaProbe
         throw new FormatException($"Expected integer '{name}', got '{value}'");
     }
 
-    // A probe of a local file answers in milliseconds. The cap is generous by three orders of
-    // magnitude because its job is not to be tight: the library listing probes every file on a
-    // request thread, and an ffprobe that never exits must not hold one open forever.
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
 
-    // Runs a process, capturing stdout and stderr. Both pipes are drained concurrently with the
-    // wait, so a chatty probe cannot block on a full pipe, and the wait is bounded, so a probe that
-    // never exits is killed instead of parking the caller. A timed-out run reports exit code -1,
-    // which reads to ProbeUncached as a failed probe.
-    // ArgumentList handles per-argument quoting for the platform.
     internal static (string Stdout, string Stderr, int ExitCode) Run(string fileName,
         IReadOnlyList<string> arguments, TimeSpan? timeout = null)
     {

@@ -37,8 +37,6 @@ const DEVICE_OPTIONS = [
   { value: 'cpu', label: 'CPU' },
 ];
 
-// One per-epoch heartbeat (loss/mAP50 plus arrival time) for the in-progress panel: it feeds the
-// sparkline and the elapsed/remaining pacing derived from when each epoch finished.
 interface TrainingEpochPoint {
   epoch: number;
   loss: number | null;
@@ -70,8 +68,6 @@ function trainingPace(history: TrainingEpochPoint[], totalEpochs: number): { ela
   };
 }
 
-// Each series is min/max-normalized on its own scale and aligned by epoch, so epochs without
-// validation metrics leave a gap instead of shifting the line.
 function TrainingSparkline({ points, totalEpochs }: { points: TrainingEpochPoint[]; totalEpochs: number }) {
   const width = 100;
   const height = 40;
@@ -146,8 +142,6 @@ export function TrainingView({ client }: TrainingViewProps) {
   const [trainingScope, setTrainingScope] = useState<'all' | 'object' | 'ocr'>('all');
   const [progress, setProgress] = useState<TrainingProgressMessage | null>(null);
   const [epochHistory, setEpochHistory] = useState<TrainingEpochPoint[]>([]);
-  // Latest non-epoch runner message (export console lines, coverage summary, ONNX export note),
-  // shown inside the in-progress panel while the run is active.
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [selectedSample, setSelectedSample] = useState<TrainingSampleMessage | null>(null);
   const [eventEditor, setEventEditor] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
@@ -208,8 +202,6 @@ export function TrainingView({ client }: TrainingViewProps) {
         if (push.updateKind === 'regionGroups' && push.requestId !== latestRegionGroupsRequestRef.current) return;
         if (push.updateKind === 'events') pendingEventsRef.current = null;
         if (push.updateKind === 'regionGroups') pendingRegionGroupsRef.current = null;
-        // Only the first push for a game restores the form; later re-pushes (samples, progress)
-        // must not clobber what the user is currently editing.
         const freshLoad = loadedTrainingGameIdRef.current !== message.gameId;
         loadedTrainingGameIdRef.current = message.gameId;
         setTraining({
@@ -360,8 +352,6 @@ export function TrainingView({ client }: TrainingViewProps) {
       setDeletePercent(null);
       setPreparingDataset(false);
     });
-    // The initial gameList push can happen before this route mounts. Request it again so the
-    // training picker is populated when the user navigates here later.
     client.send('ListGames');
     return () => {
       removeGames();
@@ -435,16 +425,11 @@ export function TrainingView({ client }: TrainingViewProps) {
   const displayDevice = willTrainObject ? device : 'cpu';
   const trainingIsActive = training.trainingActive
     || progress?.status === 'exporting' || progress?.status === 'progress';
-  // The dataset-prep phase locks the workspace, so it gets the modal — including for a client that
-  // connected mid-run and learned the phase from the training push.
   const exportingDataset = preparingDataset || training.trainingPhase === 'exporting';
   const epochDetails = progress?.details && progress.details.epoch > 0 ? progress.details : null;
   const pace = trainingPace(epochHistory, epochDetails?.epochs ?? displayEpochs);
-  // A series only earns its legend entry once a real value arrives; a run whose metrics never
-  // populate (e.g. DirectML skips validation) must not show an empty graph frame.
   const hasLoss = epochHistory.some((point) => point.loss != null);
   const hasMap50 = epochHistory.some((point) => point.map50 != null);
-  // The OCR run reuses the mAP50 slot for exact-match validation accuracy.
   const accuracyLabel = willTrainObject ? 'mAP50' : 'exact match';
   const ocrSampleCount = training.samples.filter((sample) => (sample.ocrRegions?.length ?? 0) > 0).length;
   const objectSampleCount = training.samples.filter((sample) => sample.labels.length > 0).length;
@@ -1059,9 +1044,7 @@ export function TrainingView({ client }: TrainingViewProps) {
             </Button>
           </section>
 
-          {/* While a run is active every message is mirrored into the in-progress panel above;
-              this line only surfaces terminal states (completed/cancelled/error) and the
-              non-training flows (import, event deletion). */}
+          {}
           {progress && !trainingIsActive && (
             <p className={`training-progress training-progress-${progress.status}`} role="status">
               <strong>{TERMINAL_STATUS_LABELS[progress.status] ?? progress.status}</strong>{' '}

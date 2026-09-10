@@ -6,9 +6,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// Which layers a recording scene has, per capture method. This is the table the whole capture
-// policy is: a display layer that is always there records the desktop when the user asked for the
-// game only, and one that keeps retrying when the game does not hook immediately.
 public sealed class CapturePolicyTests
 {
     [Fact]
@@ -38,8 +35,6 @@ public sealed class CapturePolicyTests
         Assert.False(policy.IncludesGameCapture);
     }
 
-    // Auto is the default in the settings model, and a session built without a policy must agree
-    // with it — otherwise the default recording behaviour depends on which constructor was used.
     [Fact]
     public void TheDefaultPolicy_IsTheSettingsModelsDefault()
     {
@@ -49,8 +44,6 @@ public sealed class CapturePolicyTests
         Assert.Equal(new GameSettings().GameCaptureTimeout, CapturePolicy.Default.GameCaptureTimeout);
     }
 
-    // The timeout the Game method waits is the one the settings model already carries; nothing else
-    // in the resolver participates.
     [Fact]
     public void ThePolicy_ComesFromTheResolvedSettings()
     {
@@ -66,7 +59,6 @@ public sealed class CapturePolicyTests
         Assert.Equal(TimeSpan.FromSeconds(25), policy.GameCaptureTimeout);
     }
 
-    // A zero or negative timeout would show the late-hook warning on the first probe.
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
@@ -79,8 +71,6 @@ public sealed class CapturePolicyTests
             CapturePolicy.From(SettingsResolver.Resolve(settings)).GameCaptureTimeout);
     }
 
-    // Only the method with nothing under the game capture waits on the user's timeout; the others
-    // are logging a line, not ending a recording, so they keep the longer fixed one.
     [Fact]
     public void OnlyTheGameMethod_UsesTheConfiguredTimeoutAsItsDeadline()
     {

@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The in-player clipping UI integration tests. These drive the real PlayerView (video + dual
-// timeline + the clip dialog + segment looping) and assert the clip payloads the dialog sends, the
-// loop decisions that seek the playhead, and the clip results the player reports to the shell.
-// jsdom has no
-// layout, so the same geometry stubs as PlayerView.test.tsx apply: every element is a 100px-wide
-// rect at x=0, so a pointer clientX maps one-to-one to a time in a 100-second session.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -73,7 +66,6 @@ function currentReadout(): string {
   return screen.getByTestId('transport-current').textContent ?? '';
 }
 
-/** Open the clip dialog through the real player's creation controls. */
 function openClipDialog(): void {
   const button = screen.queryByRole('button', { name: 'Open clip dialog' }) as HTMLButtonElement | null;
   if (!button || button.disabled) {
@@ -92,13 +84,11 @@ function openClipDialog(): void {
   });
 }
 
-/** The dialog's submit button, scoped to the dialog so it never matches the footer button. */
 function createButton(): HTMLElement {
   const dialog = screen.getByRole('dialog', { name: 'Create clip' });
   return within(dialog).getByRole('button', { name: /^Create (clip|1 clip)/ });
 }
 
-/** The media reports its length, as `durationchange` does once metadata loads. */
 function setVideoDuration(container: HTMLElement, seconds: number): void {
   const video = container.querySelector('video') as HTMLVideoElement;
   act(() => {
@@ -107,12 +97,6 @@ function setVideoDuration(container: HTMLElement, seconds: number): void {
   });
 }
 
-/**
- * Render the player and let the media report how long it is — which is what a real <video> element
- * does as soon as it has read the file's header, and what jsdom never does on its own. Every test
- * that marks a segment goes through here, because a segment can only be marked against a *measured*
- * length.
- */
 function renderPlayer(
   client: IpcClient = mockClient(),
   mediaSeconds = 100,
@@ -123,7 +107,6 @@ function renderPlayer(
   return container;
 }
 
-/** Drive the video element's position, as a timeupdate would. */
 function setVideoTime(container: HTMLElement, time: number): void {
   const video = container.querySelector('video') as HTMLVideoElement;
   act(() => {
@@ -132,24 +115,18 @@ function setVideoTime(container: HTMLElement, time: number): void {
   });
 }
 
-/** Seek the playhead by clicking the full-session bar at a session time. */
 function seekTo(container: HTMLElement, time: number): void {
   const bar = container.querySelector('.timeline-bar') as Element;
   fireEvent.pointerDown(bar, { clientX: time, pointerId: 1 });
   fireEvent.pointerUp(bar, { clientX: time, pointerId: 1 });
 }
 
-/** The marked segments as the zoomed timeline labels them ("Region 0:37–0:47"). */
 function regionLabels(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll('.timeline-region')).map(
     (element) => element.getAttribute('aria-label') ?? '',
   );
 }
 
-/**
- * Drag a marked segment on the zoomed timeline. The geometry stub makes every rect 100px wide at
- * x=0, and the default zoom window is the full 100s session, so one pixel is one second.
- */
 function dragRegion(
   container: HTMLElement,
   grip: 'body' | 'start' | 'end',
@@ -166,7 +143,6 @@ function dragRegion(
   });
 }
 
-/** Mark a 10s segment around the playhead through the player's own control. */
 function markDefaultSegment(): void {
   act(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' }));
@@ -185,14 +161,12 @@ describe('clip dialog — default region from the playbar', () => {
 
   it('opening the clip dialog proposes a default region centred on the playbar cursor', () => {
     const container = renderPlayer();
-    // Seek the playhead to 42s via the full-session bar.
     seekTo(container, 42);
     expect(currentReadout()).toBe('0:42');
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     expect(dialog).toBeTruthy();
     const row = within(dialog).getByRole('button', { name: /Deselect clip 1/ });
-    // Default 10s centred on 42 → [37, 47].
     expect(row.textContent).toContain('0:37 – 0:47');
   });
 
@@ -202,7 +176,6 @@ describe('clip dialog — default region from the playbar', () => {
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     const row = within(dialog).getByRole('button', { name: /Deselect clip 1/ });
-    // Cursor 98, default 10s, clamped to the session → [90, 100] → "1:30 – 1:40".
     expect(row.textContent).toContain('1:30 – 1:40');
   });
 });
@@ -230,7 +203,6 @@ describe('clip dialog — region list in the player', () => {
 
   it('the region list shows each region with start/end', () => {
     const container = renderPlayer();
-    // Seek the playhead to 42 so the default region is [37, 47].
     const bar = container.querySelector('.timeline-bar') as Element;
     fireEvent.pointerDown(bar, { clientX: 42, pointerId: 1 });
     fireEvent.pointerUp(bar, { clientX: 42, pointerId: 1 });
@@ -298,7 +270,6 @@ describe('marking segments from the player (in/out points)', () => {
     const hint = screen.getByTestId('player-clip-hint').textContent ?? '';
     expect(hint).toMatch(/press I/);
     expect(hint).toMatch(/then O/);
-    // Out has nothing to close yet.
     expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', true);
   });
 
@@ -308,7 +279,6 @@ describe('marking segments from the player (in/out points)', () => {
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Set the clip start' }));
     });
-    // The half-finished mark is visible on the timeline, and Out is now available.
     expect(screen.getByTestId('timeline-mark-in')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', false);
     seekTo(container, 40);
@@ -316,7 +286,6 @@ describe('marking segments from the player (in/out points)', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Set the clip end' }));
     });
     expect(regionLabels(container)).toEqual(['Region 0:20–0:40']);
-    // The in point is spent, and the hint now talks about adjusting.
     expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
     expect(screen.getByTestId('player-clip-hint').textContent).toMatch(/1 clip ready/);
   });
@@ -364,16 +333,13 @@ describe('marking segments from the player (in/out points)', () => {
       fireEvent.keyDown(title, { key: 'm' });
       fireEvent.keyDown(title, { key: 'o' });
     });
-    // No in point was set and nothing was marked: only the dialog's own proposal is on the timeline.
     expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
     expect(regionLabels(container)).toEqual(['Region 0:37–0:47']);
-    // The dialog suppresses player shortcuts even when a synthetic event targets the window.
     act(() => {
       fireEvent.keyDown(window, { key: 'i' });
     });
     expect(screen.queryByTestId('timeline-mark-in')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Close clip dialog' }));
-    // Once the modal closes, the same shortcut controls the player again.
     act(() => {
       fireEvent.keyDown(window, { key: 'i' });
     });
@@ -401,7 +367,6 @@ describe('marking segments from the player (in/out points)', () => {
     expect(regionLabels(container)).toEqual(['Region 0:15–0:25', 'Region 0:55–1:05']);
     openClipDialog();
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
-    // The dialog reviews the marks; it does not restart from its own proposal.
     expect(within(dialog).getAllByRole('button', { name: /(Select|Deselect) clip \d/ })).toHaveLength(2);
     expect(within(dialog).getByRole('button', { name: /(Select|Deselect) clip 1/ }).textContent).toContain(
       '0:15 – 0:25',
@@ -449,7 +414,6 @@ describe('marking segments from the player (in/out points)', () => {
     seekTo(container, 60);
     markDefaultSegment();
     openClipDialog();
-    // The mode control lives beside Create Clips, not in the dialog — one home for one setting.
     act(() => {
       fireEvent.click(screen.getByRole('radio', { name: 'Separate clips' }));
     });
@@ -474,7 +438,6 @@ describe('adjusting a marked segment with the mouse', () => {
     vi.useRealTimers();
   });
 
-  /** Mark [37, 47] with the playhead at 42 in the fully zoomed-out 100s window. */
   function markedPlayer(): HTMLElement {
     const container = renderPlayer();
     seekTo(container, 42);
@@ -485,7 +448,6 @@ describe('adjusting a marked segment with the mouse', () => {
 
   it('dragging the body slides the segment and preserves its length', () => {
     const container = markedPlayer();
-    // +6px → +6s.
     dragRegion(container, 'body', 37, 43);
     expect(regionLabels(container)).toEqual(['Region 0:43–0:53']);
   });
@@ -517,7 +479,6 @@ describe('adjusting a marked segment with the mouse', () => {
       fireEvent.pointerUp(region, { clientX: 51, pointerId: 7 });
       fireEvent.click(region);
     });
-    // Bounds untouched, and the click toggled the loop selection off (marking selected it).
     expect(regionLabels(container)).toEqual(['Region 0:37–0:47']);
     expect(region.className).not.toContain('selected');
   });
@@ -566,7 +527,6 @@ describe('adjusting a marked segment with the mouse', () => {
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     const endField = within(dialog).getByLabelText('Clip 1 end, seconds') as HTMLInputElement;
     expect(Number(endField.value)).toBe(54);
-    // Typing the same number is a no-op, which is the point: one seam, one result.
     fireEvent.change(endField, { target: { value: '54' } });
     fireEvent.blur(endField);
     expect(regionLabels(container)).toEqual(['Region 0:37–0:54']);
@@ -585,20 +545,15 @@ describe('segment looping in the player', () => {
 
   it('while playing inside a marked segment, crossing its end loops back to its start', () => {
     const container = renderPlayer();
-    // Seek to 42 so the proposed default region is [37, 47].
     seekTo(container, 42);
-    // Play state.
     const video = container.querySelector('video') as HTMLVideoElement;
     Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 42 });
     act(() => {
       fireEvent.play(video);
     });
-    // Open the dialog — the default region [37, 47] is selected.
     openClipDialog();
-    // Move the playhead inside the segment.
     setVideoTime(container, 46);
     expect(currentReadout()).toBe('0:46');
-    // Cross the segment end (47) as a small step — the loop seeks back to 37.
     setVideoTime(container, 47);
     expect(currentReadout()).toBe('0:37');
   });
@@ -612,10 +567,8 @@ describe('segment looping in the player', () => {
       fireEvent.play(video);
     });
     openClipDialog();
-    // Inside [37, 47] but NOT crossing the end → no loop.
     setVideoTime(container, 46);
     expect(currentReadout()).toBe('0:46');
-    // A deliberate seek past the end → normal playback, no loop.
     setVideoTime(container, 48);
     expect(currentReadout()).toBe('0:48');
   });
@@ -630,10 +583,8 @@ describe('segment looping in the player', () => {
   it('clicking a segment on the timeline toggles it as the loop target', () => {
     const container = renderPlayer();
     openClipDialog();
-    // The proposed region is selected by default (the row reads "Deselect").
     const dialog = screen.getByRole('dialog', { name: 'Create clip' });
     expect(within(dialog).getByRole('button', { name: /Deselect clip 1/ })).toBeTruthy();
-    // Clicking the region on the timeline deselects it.
     const regionButton = container.querySelector('.timeline-region') as HTMLElement;
     expect(regionButton).not.toBeNull();
     act(() => {
@@ -648,16 +599,12 @@ describe('segment looping in the player', () => {
     markDefaultSegment();
     expect(regionLabels(container)).toEqual(['Region 0:37–0:47']);
     const regionButton = container.querySelector('.timeline-region') as HTMLElement;
-    // Marking already armed the loop. Clicking turns it off — a deselect is not "review this
-    // segment", so the playhead stays exactly where the user left it.
     expect(regionButton.className).toContain('selected');
     act(() => {
       fireEvent.click(regionButton);
     });
     expect(regionButton.className).not.toContain('selected');
     expect(currentReadout()).toBe('0:42');
-    // Clicking again highlights the segment AND puts the playhead on its first frame, so the loop
-    // starts at the top instead of only engaging if playback happened to be inside already.
     act(() => {
       fireEvent.click(regionButton);
     });
@@ -700,11 +647,8 @@ describe('editing the looping segment moves the playhead with it', () => {
     act(() => {
       fireEvent.play(video);
     });
-    // Playing at 46, inside [37, 47]. The full-session window remains unchanged.
     setVideoTime(container, 46);
     expect(currentReadout()).toBe('0:46');
-    // Drag the out point back to 43 — behind the playhead. No end crossing will ever be sampled
-    // (the end moved through the playhead), so the loop has to close on the edit itself.
     dragRegion(container, 'end', 47, 43);
     expect(regionLabels(container)).toEqual(['Region 0:37–0:43']);
     expect(currentReadout()).toBe('0:37');
@@ -714,7 +658,6 @@ describe('editing the looping segment moves the playhead with it', () => {
     const container = renderPlayer();
     seekTo(container, 42);
     markDefaultSegment();
-    // The in point moves to 45, past the playhead, which would leave it outside the segment.
     dragRegion(container, 'start', 37, 45);
     expect(regionLabels(container)).toEqual(['Region 0:45–0:47']);
     expect(currentReadout()).toBe('0:45');
@@ -724,8 +667,6 @@ describe('editing the looping segment moves the playhead with it', () => {
     const container = renderPlayer();
     seekTo(container, 42);
     markDefaultSegment();
-    // Extending the segment backwards to 24 while watching at 42: the playhead is still inside, so
-    // yanking it to the new in point would fight the user.
     dragRegion(container, 'start', 37, 24);
     expect(regionLabels(container)).toEqual(['Region 0:24–0:47']);
     expect(currentReadout()).toBe('0:42');
@@ -737,11 +678,8 @@ describe('editing the looping segment moves the playhead with it', () => {
     markDefaultSegment();
     seekTo(container, 60);
     markDefaultSegment();
-    // The second mark is the loop target; the playhead now sits inside the FIRST segment.
     expect(regionLabels(container)).toEqual(['Region 0:15–0:25', 'Region 0:55–1:05']);
     seekTo(container, 20);
-    // The window is 0s..60s, so a clientX maps to x * 0.6: the first segment's in point moves to 24,
-    // past the playhead. It is not the looping segment, so the playhead does not follow.
     dragRegion(container, 'start', 25, 40);
     expect(regionLabels(container)).toEqual(['Region 0:24–0:25', 'Region 0:55–1:05']);
     expect(currentReadout()).toBe('0:20');
@@ -808,14 +746,6 @@ describe('clip creation handoff', () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// Segment bounds against the *real* media length.
-//
-// The player starts on a provisional length — the session's declared `endTime`, or a placeholder
-// constant when the content record carries none — and only learns the truth when the <video> element
-// reports its metadata. No segment may be marked against a provisional length, and any segment that
-// outlives the length it was marked against must be corrected, which is what these tests pin.
-
 function markInAtPlayhead(): void {
   act(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Set the clip start' }));
@@ -840,9 +770,6 @@ describe('segments stay inside the real media length', () => {
 
   it('reconciles marks the media then contradicts, and sends only what fits', () => {
     const client = mockClient();
-    // The media reports 100s and both marks are made against that. A duration is not a promise: the
-    // element revises it as it reads further (an estimate for a fragmented or streamed file), and a
-    // revision downwards leaves marks pointing past a last frame that turned out not to exist.
     const container = renderPlayer(client);
     seekTo(container, 5);
     markInAtPlayhead();
@@ -852,8 +779,6 @@ describe('segments stay inside the real media length', () => {
     markDefaultSegment();
     expect(regionLabels(container)).toEqual(['Region 0:05–0:15', 'Region 0:37–0:47']);
 
-    // The media revises its length down to 8 seconds. The straddling segment is truncated to the real
-    // end; the one lying entirely beyond it is dropped rather than squashed into a sliver.
     setVideoDuration(container, 8);
     expect(regionLabels(container)).toEqual(['Region 0:05–0:08']);
 
@@ -870,7 +795,6 @@ describe('segments stay inside the real media length', () => {
     const client = mockClient();
     const container = renderPlayer(client, 3);
     markDefaultSegment();
-    // The fixed 10s proposal shrinks to the whole media instead of running 7s past its end.
     expect(regionLabels(container)).toEqual(['Region 0:00–0:03']);
     openClipDialog();
     fireEvent.click(createButton());
@@ -902,7 +826,6 @@ describe('segments stay inside the real media length', () => {
     const container = renderPlayer(mockClient(), 8);
     markDefaultSegment();
     expect(regionLabels(container)).toEqual(['Region 0:00–0:08']);
-    // Drag the right edge far off the end of the timeline: it parks on the last frame.
     dragRegion(container, 'end', 90, 400);
     const labels = regionLabels(container);
     expect(labels).toHaveLength(1);
@@ -910,19 +833,12 @@ describe('segments stay inside the real media length', () => {
   });
 
   it('refuses all three marking gestures while only the DECLARED length is known', () => {
-    // MEASURED: the content record declares 100s (see `session`) for a file that is really 9.13s
-    // long. Records are written by a different code path than the file — a recording a crash cut
-    // short, a re-encode, an imported record — so the declared length can overstate the media by
-    // any amount, and this one overstates it by 91 seconds.
     const realSeconds = 9.13;
     const client = mockClient();
-    // No `renderPlayer` here on purpose: nothing has been measured yet, which is the whole case.
     const { container } = render(<PlayerView client={client} source={source} />);
     seekTo(container, 95);
     expect(currentReadout()).toBe('1:35');
 
-    // All three gestures are refused — the buttons are disabled, and the keys (which bypass the
-    // buttons) are refused by the model itself.
     expect(screen.getByRole('button', { name: 'Set the clip start' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Set the clip end' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' })).toHaveProperty(
@@ -940,13 +856,11 @@ describe('segments stay inside the real media length', () => {
     expect(regionLabels(container)).toEqual([]);
     expect(screen.getByTestId('player-clip-hint').textContent).toMatch(/Waiting for the video length/);
 
-    // Nor can the declared length be smuggled to the backend by creating before the media loads.
     openClipDialog();
     expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open clip dialog' })).toBeNull();
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
 
-    // The media reports the real length. Now the same gestures work, against 9.13s.
     setVideoDuration(container, realSeconds);
     seekTo(container, 95);
     markDefaultSegment();
@@ -966,9 +880,6 @@ describe('segments stay inside the real media length', () => {
   });
 
   it('with no length known at all, marking is refused and the player says why', () => {
-    // A recording with no metadata record: the player's own fallback length is a placeholder
-    // constant, and marking against it is exactly the bug. Nothing can be marked until the media
-    // reports how long it is.
     const noLength: SessionSource = {
       getSessions: () => [{ ...session(1, 'sessions/a.mp4'), endTime: undefined }],
       getBookmarks: () => [],
@@ -981,18 +892,15 @@ describe('segments stay inside the real media length', () => {
       true,
     );
     expect(screen.getByTestId('player-clip-hint').textContent).toMatch(/Waiting for the video length/);
-    // The keyboard shortcut is refused too, not just the buttons.
     act(() => {
       fireEvent.keyDown(window, { key: 'm' });
     });
     expect(regionLabels(container)).toEqual([]);
-    // Clip creation stays closed until the media has a usable duration and a segment exists.
     openClipDialog();
     expect(screen.queryByRole('dialog', { name: 'Create clip' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open clip dialog' })).toBeNull();
     expect(client.sent.filter((c) => c.method === 'CreateClip')).toHaveLength(0);
 
-    // Once the media reports its length, marking works against it.
     setVideoDuration(container, 12);
     expect(screen.getByRole('button', { name: 'Make a 10-second clip around where you are' })).toHaveProperty(
       'disabled',

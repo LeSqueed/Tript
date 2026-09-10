@@ -10,11 +10,6 @@ using System.Threading.Tasks;
 
 namespace Tript.Recorder.Tests;
 
-// The detection host's wiring, tested against fakes so no frame source, ONNX model or background
-// thread is involved: detections from the detector become bookmarks on the active recording, with
-// the right definition matched to the result, with bookmarks driven by net-count increases and never
-// from a definition without a BookmarkType. The fake detector records its Start/Stop calls so a
-// game switch is observable.
 [Collection(RecorderRecordingCollection.Name)]
 public sealed class DetectionHostTests
 {
@@ -87,18 +82,12 @@ public sealed class DetectionHostTests
         Timestamp = Origin,
     };
 
-    // Registers a live frame source (the recorder's setup) and returns a fresh detector backed by
-    // the given definitions.
     private static FakeDetector WithFrameSource(Dictionary<string, List<EventDefinition>> definitions)
     {
         FrameSourceRegistry.SetResolver(() => new FakeFrameSource());
         return new FakeDetector(definitions);
     }
 
-    // ---- recording-backed tests ----
-
-    // A detection with a matching trigger definition and an active recording writes a bookmark of
-    // the definition's type.
     [Fact]
     public void Detections_WithMatchingTriggerDefinition_WriteABookmarkOfTheDefinitionsType()
     {
@@ -119,9 +108,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // The bookmark time is an offset from the recording's start, not a wall-clock time: a session
-    // started now, with a detection now, carries a bookmark offset of (near) zero. A wall-clock
-    // timestamp would be the full epoch value, which is the failure this assertion catches.
     [Fact]
     public void Detections_BookmarkTimeIsAnOffsetFromTheRecordingStart()
     {
@@ -146,8 +132,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // The definition is matched by ClassId — the join key events.json already uses. A detection of
-    // class 0 must land on the class-0 definition's bookmark type, not a neighbouring class's.
     [Fact]
     public void Detections_MatchTheDefinitionByClassId_NotAnotherClass()
     {
@@ -165,15 +149,13 @@ public sealed class DetectionHostTests
         using (var host = new DetectionHost(detector, detector.DefinitionSource))
         {
             Assert.True(host.Start("Overwatch"));
-            detector.RaiseDetections(Box(0)); // an elimination icon
+            detector.RaiseDetections(Box(0));
 
             var bookmark = Assert.Single(recording.Bookmarks);
             Assert.Equal(BookmarkType.Kill, bookmark.Type);
         }
     }
 
-    // A detection whose definition has no BookmarkType is detected but never bookmarked — that is
-    // the design, not a bug.
     [Fact]
     public void Detections_WithNoBookmarkType_ProduceNoBookmark()
     {
@@ -193,7 +175,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // A stable count does not create another bookmark.
     [Fact]
     public void Detections_StableCount_CreatesOneBookmark()
     {
@@ -356,7 +337,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // A low-confidence misread of an exclusion pattern must not cancel a real object bookmark.
     [Fact]
     public void OcrExclusion_LowConfidenceMisread_DoesNotSuppressObjectTrigger()
     {
@@ -393,7 +373,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // An implausible burst of distinct detections for one event in a single cycle is clamped.
     [Fact]
     public void Detections_ImplausibleBurstInOneCycle_IsClamped()
     {
@@ -415,7 +394,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // An exclusion-type definition (no BookmarkType) fires without a bookmark.
     [Fact]
     public void Detections_ExclusionDefinition_ProduceNoBookmark()
     {
@@ -444,8 +422,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // An exclusion is a cycle-level veto, not merely an event that happens to carry no bookmark
-    // type. It suppresses a trigger detected in the same inference batch.
     [Fact]
     public void Detections_ExclusionInTheSameBatch_SuppressesTriggers()
     {
@@ -474,8 +450,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // Suppression is scoped to one detector batch. A clean trigger in the next cycle is still
-    // eligible for bookmarking.
     [Fact]
     public void Detections_ExclusionInAnEarlierBatch_DoesNotSuppressLaterTriggers()
     {
@@ -639,9 +613,6 @@ public sealed class DetectionHostTests
         }
     }
 
-    // A detection whose ClassId no definition covers is dropped before count processing:
-    // the model can emit classes events.json says nothing about, and there is no bookmark type to
-    // give them. This guard is DetectionHost's, and it shipped without a test.
     [Fact]
     public void Detections_WithNoDefinitionForTheirClass_AreDropped()
     {
@@ -660,8 +631,6 @@ public sealed class DetectionHostTests
             Assert.Empty(recording.Bookmarks);
         }
     }
-
-    // ---- lifecycle tests (no recording needed) ----
 
     [Fact]
     public void Start_WithNoModel_IsRefusedAndStartsNothing()
@@ -748,8 +717,6 @@ public sealed class DetectionHostTests
         Assert.Equal(1, detector.StopCount);
     }
 
-    // A game switch stops the old detector and starts the new — observable through the fake's
-    // Start/Stop counts.
     [Fact]
     public void Start_WithDifferentGameWhileRunning_StopsTheOldAndStartsTheNew()
     {
@@ -772,10 +739,6 @@ public sealed class DetectionHostTests
         Assert.Equal("Valorant", detector.StartedGameId);
     }
 
-    // A Start that declines still tears the previous game's run down. The teardown sits before the
-    // decision to start, so every refusing path — no model, no frame source — goes through it; a
-    // teardown reached only on the succeeding path would leave the old game's detector subscribed and
-    // writing its bookmarks into the new game's recording.
     [Fact]
     public void Start_ForAGameItRefuses_StillStopsThePreviousDetector()
     {
@@ -794,7 +757,6 @@ public sealed class DetectionHostTests
         Assert.Equal(1, detector.StopCount);
     }
 
-    // Starting the same game twice is idempotent — no restart, no double subscription.
     [Fact]
     public void Start_WithTheSameGameWhileRunning_LeavesTheDetectorRunning()
     {
@@ -813,7 +775,6 @@ public sealed class DetectionHostTests
         Assert.Equal(1, detector.StartCount);
     }
 
-    // Disposing the host stops the detector, like a Stop.
     [Fact]
     public void Dispose_StopsTheDetector()
     {
@@ -854,8 +815,6 @@ public sealed class DetectionHostTests
             await detection.WaitAsync(TimeSpan.FromSeconds(5));
         }
     }
-
-    // ---- the fakes ----
 
     private sealed class FakeDetector : IVisualEventDetector
     {

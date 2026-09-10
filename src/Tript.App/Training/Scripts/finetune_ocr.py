@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """Fine-tune PP-OCRv4-English on a workspace's OCR crops and export the result to ONNX.
 
 Reads ``dataset/ocr/{images,labels.tsv}`` built by export_ocr_dataset.py, drives the vendored
@@ -21,13 +22,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Fine-tuning from a pretrained recogniser does not need the full synthetic set - the model already
-# reads glyphs. Keeping it small keeps a CPU epoch to minutes.
 MAX_SYNTHETIC = 200
 
 EPOCH_LINE = re.compile(r"epoch:\s*\[\s*(\d+)\s*/\s*(\d+)\s*\].*?loss:\s*([0-9.eE+-]+)")
 EVAL_ACC = re.compile(r"cur metric.*?\bacc:\s*([0-9.eE+-]+)")
-
 
 def write_progress(path: Path, status: str, epoch: int, epochs: int,
                    loss: float | None = None, acc: float | None = None) -> None:
@@ -35,11 +33,10 @@ def write_progress(path: Path, status: str, epoch: int, epochs: int,
     if loss is not None:
         payload["loss"] = round(loss, 5)
     if acc is not None:
-        payload["map50"] = round(acc, 4)  # reuse the object heartbeat's accuracy slot
+        payload["map50"] = round(acc, 4)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload), encoding="utf-8")
     tmp.replace(path)
-
 
 def build_label_files(ocr_dir: Path, staging: Path) -> tuple[Path, Path, int]:
     rows = [ln.split("\t", 2) for ln in (ocr_dir / "labels.tsv").read_text(encoding="utf-8").splitlines()
@@ -50,22 +47,19 @@ def build_label_files(ocr_dir: Path, staging: Path) -> tuple[Path, Path, int]:
     if len(synthetic) > MAX_SYNTHETIC:
         synthetic = random.Random(0).sample(synthetic, MAX_SYNTHETIC)
     train = real_train + synthetic
-    # Validate on the held-out hand-labelled crops only. Synthetic is read near-perfectly, so a
-    # synthetic-heavy eval set makes "best accuracy" track synthetic, not the game text that matters.
+
     val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val" and is_real(rel)]
     if not train:
         raise SystemExit("the OCR dataset has no training crops")
     if not val:
         val = [f"{rel}\t{label}" for split, rel, label in rows if split == "val"][:16] or train[:8]
-    # PaddleOCR's eval divides by an accumulated timer that rounds to 0 on a one-batch set;
-    # repeat the held-out crops until eval runs a few batches.
+
     if len(val) < 64:
         val = (val * (64 // len(val) + 1))[:64]
     (staging / "train_list.txt").write_text("\n".join(train) + "\n", encoding="utf-8")
     (staging / "val_list.txt").write_text("\n".join(val) + "\n", encoding="utf-8")
     longest = max(len(r.split("\t", 1)[1]) for r in train + val)
     return staging / "train_list.txt", staging / "val_list.txt", min(60, max(25, longest + 5))
-
 
 def render_config(base_config: Path, staging: Path, max_text_length: int) -> Path:
     text = re.sub(r"(max_text_length:\s*&max_text_length\s*)\d+",
@@ -74,7 +68,6 @@ def render_config(base_config: Path, staging: Path, max_text_length: int) -> Pat
     run_config.write_text(text, encoding="utf-8")
     return run_config
 
-
 def stream(cmd: list[str], cwd: Path, env: dict,
            progress_path: Path | None, epochs: int) -> None:
     proc = subprocess.Popen([str(c) for c in cmd], cwd=str(cwd), env=env,
@@ -82,7 +75,7 @@ def stream(cmd: list[str], cwd: Path, env: dict,
                             encoding="utf-8", errors="replace", bufsize=1)
     epoch = 0
     loss: float | None = None
-    for line in proc.stdout:  # type: ignore[union-attr]
+    for line in proc.stdout:
         sys.stdout.write(line)
         sys.stdout.flush()
         if progress_path is None:
@@ -98,12 +91,11 @@ def stream(cmd: list[str], cwd: Path, env: dict,
     if proc.wait() != 0:
         raise SystemExit(f"{Path(cmd[1]).name} exited {proc.returncode}")
 
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--epochs", type=int, required=True)
-    parser.add_argument("--device", default="auto")  # accepted, ignored: Paddle is CPU here
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--paddle-root", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--pretrained", type=Path, required=True, help="checkpoint prefix, no extension")
@@ -150,8 +142,7 @@ def main() -> int:
                 *train_opts], args.paddle_root, env, progress_path, args.epochs)
 
         write_progress(progress_path, "exporting", args.epochs, args.epochs)
-        # PaddleOCR only writes best_accuracy when eval acc improves; a short run or a noisy
-        # held-out set can leave only the always-written latest checkpoint.
+
         trained = out_dir / "best_accuracy"
         if not (out_dir / "best_accuracy.pdparams").exists():
             trained = out_dir / "latest"
@@ -175,7 +166,6 @@ def main() -> int:
         return 0
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

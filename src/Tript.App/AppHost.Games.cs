@@ -101,8 +101,6 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
-    // ---- game list ----
-
     internal void ReloadGameList()
     {
         var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson,
@@ -134,8 +132,6 @@ internal sealed partial class AppHost
         }
     }
 
-    // The frontend sees where a packaged game is installed once the launcher inventory confirms it:
-    // the exact path is what the detection targets pin, so the wire list and the targets agree.
     private void AttachDiscoveredProcessPaths(List<GameInfo> games)
     {
         GameInventory inventory;
@@ -244,8 +240,6 @@ internal sealed partial class AppHost
         return true;
     }
 
-    // Reject invalid effective windows instead of silently relying on resolver clamping.
-    // SettingsModel avoids the Tript.Settings namespace collision in this file.
     internal static bool ValidateAutomaticClipWindows(SettingsModel settings, out string? failure)
     {
         failure = null;
@@ -272,11 +266,6 @@ internal sealed partial class AppHost
         return true;
     }
 
-    // A plain read. The getter used to reload whenever the catalogue was empty, which made a user who
-    // deleted every game entry re-read the settings file on every access — from every thread, while
-    // clearing and refilling the one list the other threads were enumerating. The catalogue is loaded
-    // at startup and reloaded when the settings that define it change, which is the only time it can
-    // differ.
     internal List<GameInfo> GameList
     {
         get

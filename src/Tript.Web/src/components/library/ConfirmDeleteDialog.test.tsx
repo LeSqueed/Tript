@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The delete confirmation's modal behaviour. Everything here is a safety property rather than a
-// look: focus cannot leave the dialog, Escape cancels rather than confirms, the destructive button
-// is never what focus lands on, and the sentence the user reads before pressing it says the truth
-// about where the items go — including when the host is configured never to auto-purge.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -127,7 +122,6 @@ describe('ConfirmDeleteDialog content', () => {
     renderDialog({ title: 'Delete 8 items?', names: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] });
     expect(screen.queryByTestId('confirm-delete-items')).toBeNull();
     expect(screen.getByTestId('confirm-delete-summary').textContent).toBe('a, b, c and 5 more');
-    // The count is still exact, even though the names are not all there.
     expect(screen.getByTestId('confirm-delete-notice').textContent).toContain('8 items');
   });
 
@@ -209,7 +203,6 @@ describe('ConfirmDeleteDialog affected count', () => {
   const checkbox = { label: 'Delete linked highlights (favourited highlights are kept)' };
 
   it('counts only physically-deleted targets', () => {
-    // The placeholder session names itself but its file is gone; the notice must not count it.
     renderDialog({ affectedCount: 0, checkbox });
     expect(screen.getByTestId('confirm-delete-notice').textContent).toBe(
       '0 items will be moved to the trash, where they can be restored for the next 1 day.',

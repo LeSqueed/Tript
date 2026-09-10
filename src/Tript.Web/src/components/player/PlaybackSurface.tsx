@@ -37,9 +37,6 @@ export function PlaybackSurface({
       <video
         ref={videoRef}
         className="video-element"
-        // No `controls`: the browser paints those over the picture. The transport row below the
-        // video is the control surface. tabIndex keeps the element keyboard-reachable, which
-        // `controls` used to provide — the overlay's focus trap matches it by tabindex.
         tabIndex={0}
         aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
         src={contentUrl(item.filePath)}

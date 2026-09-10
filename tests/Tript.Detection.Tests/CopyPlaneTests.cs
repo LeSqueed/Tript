@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// Both branches must produce byte-identical output. Which one runs against real OBS is
-// unverified here: it depends on whether libobs pads the plane stride for 1920x1080 BGRA.
 public class CopyPlaneTests
 {
     private const int Width = 64;
@@ -23,8 +21,7 @@ public class CopyPlaneTests
             {
                 src[y * stride + x] = (byte)((y * 31 + x * 7) & 0x7F);
             }
-            // Pattern is masked to 0x7F so this sentinel cannot occur in real pixel data,
-            // making its absence from the destination meaningful.
+
             for (int p = RowBytes; p < stride; p++)
             {
                 src[y * stride + p] = 0xEE;
@@ -72,7 +69,6 @@ public class CopyPlaneTests
         Assert.DoesNotContain((byte)0xEE, dst);
     }
 
-    // The whole point of the branch: same bytes either way.
     [Fact]
     public void BothBranchesAgree()
     {
@@ -87,8 +83,6 @@ public class CopyPlaneTests
         Assert.Equal(tightDst, paddedDst);
     }
 
-    // OnFrame rents from ArrayPool, which returns a buffer at least as large as requested and
-    // frequently larger. The tight-stride path must not depend on an exact-length destination.
     [Fact]
     public void ToleratesOversizedDestination()
     {

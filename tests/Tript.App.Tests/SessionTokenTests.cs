@@ -9,14 +9,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The per-launch session token. The Origin check on the control socket stops a malicious web page;
-// it cannot stop another user's process on the same machine (loopback is not user-scoped, and a
-// non-browser client sends no Origin at all), a browser extension with host permissions, or
-// anything whatsoever on the content server — which by design checks no Origin, because a <video>
-// element sends none. The token is what closes those, on all three listeners at once.
-//
-// IpcOriginTests covers the Origin allowlist itself; this covers the token, including the property
-// that matters most: the token is required IN ADDITION to the Origin check, never instead of it.
 [Collection(AppHostCollection.Name)]
 public sealed class SessionTokenTests : IDisposable
 {
@@ -25,9 +17,6 @@ public sealed class SessionTokenTests : IDisposable
     private readonly string _settingsPath;
     private readonly string _webRoot;
 
-    // A token of the right shape but not this launch's, and one of the wrong length. Both are
-    // refused, and the second is here because a comparison that stops at the first difference or
-    // trusts a length prefix would treat it differently from the first.
     private const string WrongToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string ShortToken = "0123";
 
@@ -37,8 +26,6 @@ public sealed class SessionTokenTests : IDisposable
         _contentRoot = fixture.NewContentRoot(nameof(SessionTokenTests));
         _settingsPath = fixture.NewSettingsPath(nameof(SessionTokenTests));
 
-        // The UI host serves whatever is in its web root; the suite runs from a tree where the
-        // built frontend is not next to the test assembly, so a two-file root stands in for it.
         _webRoot = Path.Combine(_contentRoot, "web");
         Directory.CreateDirectory(_webRoot);
         File.WriteAllText(Path.Combine(_webRoot, "index.html"), "<!doctype html><title>Tript</title>");
@@ -48,8 +35,6 @@ public sealed class SessionTokenTests : IDisposable
     public void Dispose()
     {
     }
-
-    // ---- the UI host ----
 
     [Fact]
     public async Task The_ui_host_serves_nothing_without_the_token()
@@ -64,7 +49,6 @@ public sealed class SessionTokenTests : IDisposable
             Assert.DoesNotContain("<!doctype html>", body, StringComparison.OrdinalIgnoreCase);
         }
 
-        // An asset is gated too: an ungated bundle is the SPA's whole behaviour served anyway.
         var (assetStatus, _) = await GetAsync($"http://localhost:{host.UiPort}/app.js");
         Assert.Equal(HttpStatusCode.Forbidden, assetStatus);
 
@@ -81,8 +65,6 @@ public sealed class SessionTokenTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Contains("<!doctype html>", body, StringComparison.OrdinalIgnoreCase);
 
-        // The cookie is how the assets the document pulls in are let through without the token
-        // being repeated in every URL the page requests.
         Assert.NotNull(setCookie);
         Assert.Contains("HttpOnly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SameSite=Strict", setCookie, StringComparison.OrdinalIgnoreCase);
@@ -107,8 +89,6 @@ public sealed class SessionTokenTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // ---- the content server ----
-
     [Fact]
     public async Task The_content_server_refuses_a_request_without_the_token()
     {
@@ -131,8 +111,6 @@ public sealed class SessionTokenTests : IDisposable
             Assert.Equal(HttpStatusCode.Forbidden, thumbStatus);
         }
 
-        // The same file, with this launch's token, is served — so the refusals above are the token
-        // and not a broken path.
         var (ok, served) = await GetAsync(
             host.WithToken($"http://localhost:{host.ContentPort}/api/content/sessions/clip.mp4"));
         Assert.Equal(HttpStatusCode.OK, ok);
@@ -140,8 +118,6 @@ public sealed class SessionTokenTests : IDisposable
 
         await host.ShutdownAsync();
     }
-
-    // ---- the control socket ----
 
     [Fact]
     public async Task The_control_socket_refuses_a_handshake_without_the_token()
@@ -162,8 +138,6 @@ public sealed class SessionTokenTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // The "in addition, not instead" property. A page on another origin that somehow learned the
-    // token — a log the user pasted, a screenshot of the terminal — is still not the app's own UI.
     [Fact]
     public async Task A_correct_token_from_a_foreign_origin_is_still_refused()
     {
@@ -174,7 +148,6 @@ public sealed class SessionTokenTests : IDisposable
             host.WithToken($"ws://localhost:{host.ControlPort}/"), origin: "https://evil.example");
         Assert.Equal(HttpStatusCode.Forbidden, refused);
 
-        // And the other half of "in addition": the app's own origin is not enough on its own.
         var untokened = await ConnectAsync(
             $"ws://localhost:{host.ControlPort}/", origin: $"http://localhost:{host.UiPort}");
         Assert.Equal(HttpStatusCode.Forbidden, untokened);
@@ -187,8 +160,6 @@ public sealed class SessionTokenTests : IDisposable
         await host.ShutdownAsync();
     }
 
-    // ---- the token itself ----
-
     [Fact]
     public void The_printed_url_carries_a_token_of_full_length()
     {
@@ -197,13 +168,10 @@ public sealed class SessionTokenTests : IDisposable
 
         Assert.StartsWith($"http://localhost:{host.UiPort}/?k=", host.UiUrl, StringComparison.Ordinal);
 
-        // 256 bits, hex: anything shorter is guessable by a process that can hammer loopback.
         Assert.Equal(64, host.Token.Length);
         Assert.All(host.Token, c => Assert.True(Uri.IsHexDigit(c), "the token must be URL-safe"));
     }
 
-    // Two launches must not share a token, or a token learned once outlives the launch it belonged
-    // to — the whole point of "per launch".
     [Fact]
     public async Task Every_launch_gets_its_own_token()
     {
@@ -223,8 +191,6 @@ public sealed class SessionTokenTests : IDisposable
         }
     }
 
-    // The comparison is constant-time. Asserted as "this is the API the code uses", not as a timing
-    // measurement: a timing assertion on a shared CI runner is a flaky test, not a security test.
     [SkippableFact]
     public void The_token_comparison_uses_a_fixed_time_api()
     {
@@ -237,8 +203,6 @@ public sealed class SessionTokenTests : IDisposable
         Assert.DoesNotContain("SequenceEqual", text, StringComparison.Ordinal);
     }
 
-    // ---- helpers ----
-
     private AppHostDriver Start() =>
         AppHostDriver.StartFake(_contentRoot, _settingsPath, gameListJson: null, webRoot: _webRoot);
 
@@ -248,8 +212,6 @@ public sealed class SessionTokenTests : IDisposable
         return (status, body);
     }
 
-    // A raw socket rather than HttpClient: the tests care about the exact status and the Set-Cookie
-    // header, and HttpClient's cookie container would quietly re-send a cookie between cases.
     private static async Task<(HttpStatusCode Status, string Body, string? SetCookie)> GetWithCookieAsync(
         string url, string? cookie, string? referrer = null)
     {
@@ -288,8 +250,6 @@ public sealed class SessionTokenTests : IDisposable
         return (status, body, setCookie);
     }
 
-    // Connects a WebSocket and returns the status the handshake was refused with, or null when it
-    // was accepted.
     private static async Task<HttpStatusCode?> ConnectAsync(string url, string? origin)
     {
         using var socket = new ClientWebSocket();

@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Desktop-shell settings: startup, window/tray behavior, native notifications, plus clip and trash
-// behaviour (HDR clip conversion, linked-highlight deletion default, trash retention). These values
-// persist on every platform, while only the desktop shell can apply Windows-specific effects. The
-// clip and trash fields live on the recording page in the model, so they are read from and written
-// back to `recording`.
 
 import type { SettingsPageName } from '../useSettings';
 import type { GeneralSettings, RecordingSettings } from '../settingsModel';
@@ -57,8 +51,6 @@ export function GeneralPage({
   }
 
   const storedTrashRetention = recording.trashRetentionHours ?? 24;
-  // The backend treats every non-positive value as disabled. Present that truthfully as Never
-  // rather than inventing a negative duration label for a legacy setting.
   const trashRetentionValue = String(storedTrashRetention <= 0 ? 0 : storedTrashRetention);
   const trashRetentionOptions = TRASH_RETENTION.some((option) => option.value === trashRetentionValue)
     ? TRASH_RETENTION

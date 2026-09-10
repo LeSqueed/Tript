@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -51,7 +50,6 @@ export function ConfirmDialog({
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        // Stop here: the dialog can be opened over other Escape-closing surfaces.
         event.stopPropagation();
         onCancelRef.current();
         return;

@@ -9,12 +9,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The control socket's limits, and the refusals it has to report.
-//
-// The receive loop used to accumulate WebSocket continuation frames into a MemoryStream with no
-// ceiling and then double the peak with ToArray(), so one client message of arbitrary length was an
-// unbounded allocation in the app's own process — reachable by anything that gets past the Origin
-// check, including the app's own UI with a bug in it.
 [Collection(AppHostCollection.Name)]
 public sealed class ControlSocketBoundsTests
 {
@@ -36,7 +30,6 @@ public sealed class ControlSocketBoundsTests
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(host.WithToken($"ws://localhost:{host.ControlPort}/")), Cancel);
 
-        // Well past the cap, and valid JSON throughout, so nothing but the size can be refusing it.
         var padding = new string('a', IpcServer.ClientConnection.MaxInboundMessageBytes * 2);
         await socket.SendAsync(
             Encoding.UTF8.GetBytes("{\"method\":\"NewConnection\",\"parameters\":{\"pad\":\"" + padding + "\"}}"),
@@ -48,8 +41,6 @@ public sealed class ControlSocketBoundsTests
         await host.ShutdownAsync();
     }
 
-    // The other side of the cap: an ordinary command is nowhere near it, and a large-but-allowed
-    // message must not cost the connection either.
     [Fact]
     public async Task AMessageUnderTheCap_IsProcessedAndTheConnectionSurvives()
     {
@@ -58,11 +49,9 @@ public sealed class ControlSocketBoundsTests
         await host.ConnectWebSocketAsync();
         await DrainPushes(host, 3);
 
-        // An unknown method is dropped silently, so this proves only that the frame was read whole.
         var padding = new string('a', IpcServer.ClientConnection.MaxInboundMessageBytes / 2);
         await host.SendAsync("{\"method\":\"NoSuchCommand\",\"parameters\":{\"pad\":\"" + padding + "\"}}");
 
-        // The connection still answers, which it would not if the big frame had torn it down.
         await host.SendAsync("""{"method":"ListTrash"}""");
         var (method, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("trash", method);
@@ -70,11 +59,6 @@ public sealed class ControlSocketBoundsTests
         await host.ShutdownAsync();
     }
 
-    // ---- the refusals the dispatch entry points report ----
-
-    // StartRecording and StopRecording answer bool, and every refusal returns before the state push.
-    // A caller that drops the bool leaves the user pressing a button and seeing nothing change at
-    // all — no state frame, no error, nothing.
     [Fact]
     public async Task StopRecording_WithNothingRecording_PushesAnError()
     {
@@ -165,12 +149,6 @@ public sealed class ControlSocketBoundsTests
         await host.ShutdownAsync();
     }
 
-    // ---- the outbound queue ----
-
-    // A client that has stopped reading used to make every Broadcast queue against it forever: the
-    // outbound channel was unbounded, so one wedged connection grew the host's memory without limit
-    // for as long as the app kept pushing. Nothing here touches the socket — the queue fills because
-    // no writer is draining it, which is exactly the wedged client's situation.
     [Fact]
     public void AClientThatIsNotRead_DropsFramesRatherThanQueueingThemForever()
     {
@@ -183,7 +161,6 @@ public sealed class ControlSocketBoundsTests
             "an outbound queue nothing is draining must drop frames, not grow without limit");
     }
 
-    // The connection only stores the socket in this test; nothing is sent or received on it.
     private sealed class NeverReadSocket : WebSocket
     {
         public override WebSocketCloseStatus? CloseStatus => null;
@@ -202,7 +179,6 @@ public sealed class ControlSocketBoundsTests
 
     private static CancellationToken Cancel => new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token;
 
-    // Reads until the server's close frame arrives, ignoring anything it pushed first.
     private static async Task<WebSocketCloseStatus?> WaitForCloseAsync(ClientWebSocket socket)
     {
         var buffer = new byte[64 * 1024];

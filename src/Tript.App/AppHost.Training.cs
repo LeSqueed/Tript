@@ -107,9 +107,7 @@ internal sealed partial class AppHost
     private readonly SemaphoreSlim _trainingWorkspaceGate = new(1, 1);
     private CancellationTokenSource? _trainingCancellation;
     private string? _trainingGameId;
-    // "exporting" while the dataset is being prepared (the locked, modal phase) and "training" for
-    // the model run itself. Null when no run is active. Surfaced on the training push so a client
-    // that connects mid-run knows which phase to render.
+
     private string? _trainingPhase;
 
     private async Task WithTrainingWorkspaceLockAsync(Func<Task> action)
@@ -141,7 +139,6 @@ internal sealed partial class AppHost
                 if (definitions.Any(definition => definition.DetectionKind == DetectionKind.Object)
                     && modelSourcePath is null)
                 {
-                    // Retraining OCR only: keep the object model that is already installed.
                     var runtimeModel = ModelService.GetModelPath(gameId);
                     if (File.Exists(runtimeModel)) modelSourcePath = runtimeModel;
                 }
@@ -168,7 +165,6 @@ internal sealed partial class AppHost
             }
             catch
             {
-                // The old model files were not touched until the staged install committed.
                 if (restart)
                     StartDetection(gameId);
                 throw;
@@ -213,8 +209,6 @@ internal sealed partial class AppHost
         return workspace;
     }
 
-    // Snapshot reads share the workspace gate with short mutations and dataset export. The gate is
-    // released for the long model run, so refreshed clients still load while training is active.
     internal Task PushTraining(string? requestedGameId) => WithTrainingWorkspaceLockAsync(() =>
     {
         PushTrainingCore(requestedGameId);
@@ -265,9 +259,7 @@ internal sealed partial class AppHost
             warnings = exportSummary?.Warnings ?? [],
         };
         OnnxModelMetadata? metadata = null;
-        // The installed runtime model is the one the recorder actually uses and is always refreshed
-        // on import/train/install; prefer it over the workspace's own copy so a stale imported model
-        // on the workspace can never be described as the active one.
+
         var runtimeModelPath = ModelService.GetModelPath(workspace.GameId);
         var modelPath = File.Exists(runtimeModelPath) ? runtimeModelPath : workspace.ModelPath;
         if (File.Exists(modelPath))
@@ -768,7 +760,6 @@ internal sealed partial class AppHost
             if (_trainingCancellation is not null)
                 throw new InvalidOperationException("Training is already running.");
 
-            // Persist only a request that is valid and has won the single-run gate.
             workspace.SavePreferences(new TrainingPreferences
             {
                 Epochs = parameters.Epochs,
@@ -836,8 +827,7 @@ internal sealed partial class AppHost
             }
 
             var previousGameId = _activeDetectionGameId;
-            // StartDetection owns a destructive detector swap. It must remain under _recorderGate
-            // so recording teardown cannot race the synchronous ONNX load and publish a stale host.
+
             ActivateRecordingModelCore(gameId, previousGameId, StartDetection,
                 () => AssignActiveRecordingToGame(gameId),
                 () => PushError($"The model for {gameId} could not be loaded."),
@@ -1019,7 +1009,6 @@ internal sealed partial class AppHost
             }
             if (trainOcr)
             {
-                // The DB text detector generalises and is not fine-tuned; the pretrained one stays.
                 ocrDetectorPath = ModelService.GetOcrDetectorPath(workspace.GameId);
                 if (!File.Exists(ocrDetectorPath)) ocrDetectorPath = null;
                 try
@@ -1096,9 +1085,6 @@ internal sealed partial class AppHost
             cancellation.Dispose();
             try
             {
-                // The UI needs a final full state push so trainingActive becomes false after an error
-                // or cancellation, not only after a successful model installation. Snapshot reads
-                // must share the workspace gate with edits, but the long model run never holds it.
                 await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
                 try
                 {
@@ -1170,9 +1156,6 @@ internal sealed partial class AppHost
     internal static string ResolveTrainingModelPath(string installedModelPath, string workspaceModelPath) =>
         File.Exists(installedModelPath) ? installedModelPath : workspaceModelPath;
 
-    // The training panel shows the workspace copy (workspace.ModelPath) ahead of the runtime
-    // installation, so keep that copy in step with any model that was just trained or installed.
-    // Failure here must not fail an install that has already committed at runtime.
     private static void RefreshWorkspaceModel(TrainingWorkspace workspace, string sourcePath)
     {
         try

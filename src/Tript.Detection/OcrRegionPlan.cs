@@ -45,8 +45,6 @@ internal static class OcrRegionPlanner
         return plans.Values.ToList();
     }
 
-    // A region group, when the event references one, is the shared screen region the user drew and
-    // overrides the event's own per-event region. Falls back to the event's region otherwise.
     private static (float X, float Y, float W, float H) EffectiveRegion(EventDefinition definition,
         IReadOnlyList<RegionGroupDefinition>? regionGroups)
     {

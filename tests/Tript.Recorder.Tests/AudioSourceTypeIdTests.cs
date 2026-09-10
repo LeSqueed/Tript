@@ -6,9 +6,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The sink's default source-type resolver. The ids are registered by the platform audio module
-// (linux-pulseaudio, win-wasapi), so a wrong id is not a compile or startup problem: it surfaces as
-// obs_source_create returning null when the routing is wired at record time, on that platform only.
 public sealed class AudioSourceTypeIdTests
 {
     [Fact]
@@ -37,8 +34,6 @@ public sealed class AudioSourceTypeIdTests
         Assert.Equal(expected, ObsAudioRoutingSink.DefaultSourceTypeId(kind));
     }
 
-    // The two maps must not be the same strings: that is the bug this pins — the resolver used to
-    // hand the pulseaudio ids to every platform, so Windows created no audio source at all.
     [Theory]
     [InlineData(AudioSourceKind.Input)]
     [InlineData(AudioSourceKind.Output)]

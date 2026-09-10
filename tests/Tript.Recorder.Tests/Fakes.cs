@@ -7,8 +7,6 @@ using Tript.Settings;
 
 namespace Tript.Recorder.Tests;
 
-// A fake IRecorderSession: no libobs anywhere, the output is a fake, and the wiring calls are
-// recorded so a test can assert on what the recorder asked of its session.
 internal sealed class FakeRecorderSession : IRecorderSession
 {
     public FakeOutput? LastCreatedOutput { get; private set; }
@@ -17,12 +15,10 @@ internal sealed class FakeRecorderSession : IRecorderSession
 
     public int ClearSourceCalls { get; private set; }
 
-    // When set, CreateOutput throws rather than returning a fake — the wiring-failure path.
     public Exception? CreateOutputError { get; set; }
 
     public Exception? PlaceSourceError { get; set; }
 
-    // Installs the output the next CreateOutput call returns.
     public void SetOutput(FakeOutput output) => LastCreatedOutput = output;
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
@@ -63,8 +59,6 @@ internal sealed class FakeRecorderSession : IRecorderSession
     public void Dispose() => Disposed = true;
 }
 
-// A fake IRecorderOutput whose start/stop behaviour and stop signal the test drives. The recorder
-// subscribes to Stopped itself; a test raises the event to simulate the output ending.
 internal sealed class FakeOutput : IRecorderOutput
 {
     private bool _active;
@@ -109,7 +103,6 @@ internal sealed class FakeOutput : IRecorderOutput
         _stopped.Set();
     }
 
-    // Simulates the output's stop signal, the way the binding delivers it.
     public void RaiseStop(ObsOutputStopCode code, string? lastError = null)
     {
         _active = false;

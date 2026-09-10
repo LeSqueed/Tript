@@ -7,9 +7,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// Golden-output tests: the model's input must stay byte-for-byte identical across
-// preprocessing optimisations. Every assertion here compares production against the
-// frozen algorithms in ReferenceImplementations.
 public class PreprocessingGoldenTests
 {
     private const int W = 1920;
@@ -27,7 +24,6 @@ public class PreprocessingGoldenTests
         var expected = ReferenceImplementations.BgraToGray(bgra, W, H);
         var actual = DetectionFramePreprocessor.BgraToGray(bgra, W, H);
 
-        // Production rents from ArrayPool, so the buffer may be longer than w*h.
         Assert.True(actual.Length >= W * H);
         Assert.Equal(expected, actual.AsSpan(0, W * H).ToArray());
     }
@@ -65,8 +61,6 @@ public class PreprocessingGoldenTests
             actual.AsSpan(0, ModelInput * ModelInput).ToArray());
     }
 
-    // Cropping before the greyscale conversion must not change a single byte reaching the
-    // model. Safe because the bilinear resize never samples outside the crop rectangle.
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -111,7 +105,6 @@ public class PreprocessingGoldenTests
         var actual = new float[pixels * 3];
         DetectionFramePreprocessor.FillInputTensor(gray, actual, ModelInput);
 
-        // Identical arithmetic on identical inputs, so exact float equality is the contract.
         Assert.Equal(expected, actual);
     }
 }

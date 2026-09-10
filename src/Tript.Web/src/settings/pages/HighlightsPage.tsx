@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The highlights page: the replay buffer that lets an automatic clip start before the moment, plus
-// the automatic-clip switch and its before/after windows. Buffer fields patch the buffer page; the
-// automatic-clip fields live on the recording model, so they patch the 'recording' page.
 
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { BufferSettings, RecordingSettings } from '../settingsModel';
 import { Button, Checkbox, Field, TextField } from '../../components/ui/controls';
 
-/** The default highlight window the backend applies when a settings push carries no value. */
 const DEFAULT_CLIP_BEFORE_SECONDS = 5;
 const DEFAULT_CLIP_AFTER_SECONDS = 8;
 
-/** A whole positive number of seconds, or null when the draft is not one. */
 function parseSeconds(draft: string): number | null {
   const parsed = Number(draft);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
@@ -42,8 +36,6 @@ export function HighlightsPage({
     String(recording.automaticClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS),
   );
 
-  // Re-sync drafts from the model only on an external push. A self echo must not erase text entered
-  // after the preceding commit.
   useEffect(() => {
     setDurationSeconds(String(settings.duration));
     setBeforeSeconds(String(recording.automaticClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS));
@@ -78,7 +70,6 @@ export function HighlightsPage({
     const currentAfter = parseSeconds(afterSeconds) ?? storedAfterSeconds();
     setBeforeSeconds(String(before));
     if (before > currentAfter) {
-      // Raising before above after would break the pair; raise after along with it in one atomic patch.
       setAfterSeconds(String(before));
       update('recording', { automaticClipBeforeSeconds: before, automaticClipAfterSeconds: before });
     } else {
@@ -93,13 +84,11 @@ export function HighlightsPage({
       return;
     }
     const before = parseSeconds(beforeSeconds) ?? storedBeforeSeconds();
-    // The pair must stay coherent: after can never be below the before value it commits alongside.
     const nextAfter = Math.max(after, before);
     setAfterSeconds(String(nextAfter));
     update('recording', { automaticClipAfterSeconds: nextAfter });
   }
 
-  // The browser-level floor for the after field tracks the current before value (draft or stored).
   const afterMin = Math.max(1, parseSeconds(beforeSeconds) ?? storedBeforeSeconds());
 
   return (

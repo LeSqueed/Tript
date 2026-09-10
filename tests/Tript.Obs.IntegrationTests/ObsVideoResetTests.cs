@@ -7,9 +7,6 @@ namespace Tript.Obs.IntegrationTests;
 
 public sealed class ObsVideoResetTests
 {
-    // Resolutions, frame rates and formats crossed against each other. Run inside one context
-    // because a reset with no output active is exactly the operation being tested — a settings
-    // change is meant to be survivable without restarting OBS.
     public static TheoryData<uint, uint, uint, uint, uint, uint, ObsVideoFormat> Matrix()
     {
         var data = new TheoryData<uint, uint, uint, uint, uint, uint, ObsVideoFormat>();
@@ -75,9 +72,6 @@ public sealed class ObsVideoResetTests
         Assert.Equal(ObsVideoResetResult.Success, result);
         Assert.True(session.Runtime.HasVideo);
 
-        // A success code says the call was accepted, not that it was understood. The read-back and
-        // the frame interval are what say the compositor is running at what was asked for. The
-        // output dimensions are the exception: libobs quietly rounds them, which the next test pins.
         Assert.True(session.Runtime.TryGetVideoInfo(out var readBack));
         Assert.Equal(baseWidth, readBack!.BaseWidth);
         Assert.Equal(baseHeight, readBack.BaseHeight);
@@ -89,11 +83,6 @@ public sealed class ObsVideoResetTests
         Assert.InRange(session.Runtime.FrameIntervalNanoseconds, expected - 1, expected + 1);
     }
 
-    // Silently, and still reporting success. 1366x768 is a real laptop panel, so a recorder that
-    // trusts the success code and its own settings object will label a 1364-pixel-wide file 1366.
-    // The binding does not correct this — it is libobs's behaviour and hiding it would make the
-    // read-back disagree with the settings for a different reason — but nothing may be surprised
-    // by it either.
     [SkippableTheory]
     [InlineData(1366u, 768u, 1364u, 768u)]
     [InlineData(1922u, 1082u, 1920u, 1082u)]
@@ -119,7 +108,6 @@ public sealed class ObsVideoResetTests
         Assert.Equal(effectiveHeight, readBack.OutputHeight);
     }
 
-    // The base canvas is left exactly as asked, unlike the output size.
     [SkippableFact]
     public void TheBaseCanvas_IsNotRounded()
     {
@@ -153,8 +141,6 @@ public sealed class ObsVideoResetTests
         Assert.Equal(33_333_333ul, session.Runtime.FrameIntervalNanoseconds);
     }
 
-    // The return codes, mapped rather than swallowed. Both of these are states a user reaches:
-    // a zero dimension from an unconfigured profile, and a renderer that is not on the machine.
     [SkippableFact]
     public void AZeroDimension_IsReportedAsAnInvalidParameter()
     {
@@ -218,9 +204,6 @@ public sealed class ObsVideoResetTests
         Assert.Equal(settings, readBack);
     }
 
-    // libobs keeps the obs_video_info it was handed, including the graphics module pointer, and
-    // never copies the string. Reading it back after the reset call has returned is what proves the
-    // binding kept that buffer alive rather than freeing it with the call frame.
     [SkippableFact]
     public void TheGraphicsModuleName_OutlivesTheResetCall()
     {
@@ -231,7 +214,6 @@ public sealed class ObsVideoResetTests
             BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720
         });
 
-        // A second reset, so anything scoped to the first call would be long gone.
         session.ResetVideoOrThrow(new ObsVideoSettings
         {
             BaseWidth = 640, BaseHeight = 360, OutputWidth = 640, OutputHeight = 360
@@ -254,8 +236,6 @@ public sealed class ObsVideoResetTests
             BaseWidth = 1920, BaseHeight = 1080, OutputWidth = 1920, OutputHeight = 1080
         });
 
-        // Active means an output is consuming the mix, not that a mix exists. The distinction is
-        // what decides whether a settings change is allowed.
         Assert.True(session.Runtime.HasVideo);
         Assert.False(session.Runtime.IsVideoActive);
     }

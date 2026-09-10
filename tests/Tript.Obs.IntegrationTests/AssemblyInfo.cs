@@ -3,7 +3,4 @@
 
 using Xunit;
 
-// libobs is one global context per process and is not re-entrant: one video mix, one audio mix, one
-// log handler. Two tests running at once would not be testing the same library twice, they would be
-// fighting over one.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

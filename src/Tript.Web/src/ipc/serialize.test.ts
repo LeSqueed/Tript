@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Envelope serialisation tests. The contract's strict cases are pinned here:
-//   - commands with no arguments send NO `parameters` field at all (not `{}`);
-//   - field names are exactly the chosen convention (PascalCase methods, camelCase params);
-//   - the incoming side tolerates an absent `content` and an absent `parameters`;
-//   - malformed frames (non-JSON, no method, non-string method) return null.
 
 import { describe, expect, it } from 'vitest';
 import { serializeCommand, parseMessage } from './serialize';
@@ -13,7 +7,6 @@ describe('serializeCommand', () => {
   it('omits the parameters field entirely for commands with no arguments', () => {
     const wire = serializeCommand('StartRecording');
     expect(wire).toBe('{"method":"StartRecording"}');
-    // The classic mistake: an empty object is NOT sent.
     expect(wire).not.toContain('parameters');
   });
 
@@ -51,8 +44,6 @@ describe('serializeCommand', () => {
   });
 
   it('uses camelCase field names — a wrong-cased field is absent, so serialisation is the guard', () => {
-    // The reference contract mixed `OutputMode` with `fileName`. Our convention is camelCase for
-    // parameters, so a command built with PascalCase keys must not leak them onto the wire.
     const wire = serializeCommand('DeleteContent', {
       contentType: 'recording',
       fileName: 'sessions/a.mp4',
@@ -61,7 +52,6 @@ describe('serializeCommand', () => {
     const params = parsed.parameters as Record<string, unknown>;
     expect(params).toHaveProperty('contentType');
     expect(params).toHaveProperty('fileName');
-    // The PascalCase variants must not appear.
     expect(params).not.toHaveProperty('ContentType');
     expect(params).not.toHaveProperty('FileName');
   });

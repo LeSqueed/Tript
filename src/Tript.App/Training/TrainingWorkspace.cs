@@ -9,9 +9,6 @@ using Tript.Detection;
 
 namespace Tript.App.Training;
 
-// The last training settings used for a game. A local convenience: it lives in the per-game
-// workspace, is never installed with the model, and is restored into the training form when the
-// game's workspace is opened again.
 internal sealed class TrainingPreferences
 {
     public int Epochs { get; init; } = 100;
@@ -52,7 +49,6 @@ internal sealed class TrainingWorkspace
 
     internal string RunsPath => Path.Combine(RootPath, "runs");
 
-    // The training script's per-epoch heartbeat, polled by the host while the model trains.
     internal string TrainingProgressPath => Path.Combine(DatasetPath, "progress.json");
 
     internal List<EventDefinition> LoadDefinitions()
@@ -92,7 +88,6 @@ internal sealed class TrainingWorkspace
         }
         catch (JsonException)
         {
-            // A corrupted local preference must never block opening the workspace.
             return null;
         }
     }
@@ -108,9 +103,6 @@ internal sealed class TrainingWorkspace
             }));
     }
 
-    // Runtime event definitions are installed beside the model. The training workspace keeps its
-    // own copy for dataset/training operations, but the detector and training UI must agree on this
-    // one authoritative definition file.
     internal List<EventDefinition> LoadRuntimeDefinitions()
     {
         var runtimePath = TrainingPaths.InstalledEventsPath(GameId);
@@ -184,7 +176,6 @@ internal sealed class TrainingWorkspace
             }
             catch (Exception exception) when (IsTransientFileSystemError(exception))
             {
-                // Atomic writes and dataset swaps can remove a discovered file before it is statted.
             }
         }
         return string.Join("|", revisions);

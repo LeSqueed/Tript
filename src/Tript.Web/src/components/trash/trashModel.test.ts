@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The trash model, tested without a DOM. Two things are being pinned down: that a `trash` push is
-// read as epoch SECONDS and survives entries the backend under-fills, and that every sentence about
-// retention comes from the wire — including the "never auto-purge" case, which a hardcoded 24 would
-// turn into a promise the backend never made.
 
 import { describe, expect, it } from 'vitest';
 import type { TrashEntry } from '../../ipc/protocol';
@@ -25,7 +20,6 @@ import {
 } from './trashModel';
 import { DEFAULT_LIBRARY_QUERY } from '../library/libraryModel';
 
-/** A fixed "now": 2026-08-17T00:00:00Z in epoch seconds. */
 const NOW = 1787011200;
 const HOUR = 3600;
 const DAY = 24 * HOUR;

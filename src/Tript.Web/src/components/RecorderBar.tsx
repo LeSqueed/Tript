@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The recording indicator, in the topbar. Its weight tracks what is actually happening: a live
-// recording gets an elapsed clock and a stop control, an idle recorder gets a single button, and a
-// dropped connection replaces the lot because nothing else on the bar can be acted on.
-//
-// Three things it deliberately does NOT show. A "Connected" badge, because connection is only
-// information when it is broken. A game name when no game is detected — "Unknown game" is the app
-// admitting it has nothing to say. And the word "Stopped", which the absent clock already says and
-// the button already offers to change.
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
@@ -86,7 +77,6 @@ export function RecorderBar({
   connectionState,
   trainingFeatureEnabled = trainingEnabled,
   clipJobCount = 0,
-  /** Injectable clock so the elapsed time is testable without fake timers. */
   nowSeconds,
 }: {
   client: IpcClient;
@@ -160,7 +150,6 @@ export function RecorderBar({
     : availableModels.find((model) =>
         model.gameId.localeCompare(activeModelGameId, undefined, { sensitivity: 'accent' }) === 0)?.gameId ?? '';
 
-  // One tick a second, and only while there is a clock to advance.
   useEffect(() => {
     if (!recording) {
       return;

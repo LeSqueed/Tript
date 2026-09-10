@@ -6,18 +6,12 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The recorder tests that install an active recording (process-wide state via
-// RecordingSessionRegistry) run one at a time, so two tests cannot each count the other's
-// bookmarks.
 [CollectionDefinition(Name)]
 public sealed class RecorderRecordingCollection
 {
     public const string Name = "recorder active recording";
 }
 
-// Installs an active recording for the duration of a test body and restores the registry
-// afterwards. Bookmark-producing components (the detection host) write
-// through the active session, so this is how a test observes what they produced.
 public sealed class ActiveRecordingScope : IDisposable
 {
     private readonly IRecordingSession _recording;

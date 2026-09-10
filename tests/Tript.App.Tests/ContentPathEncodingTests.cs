@@ -8,16 +8,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// What the content server does with the escapes in a request path.
-//
-// AbsolutePath keeps them, so a recording called "my clip.mp4" reached the resolver as
-// "my%20clip.mp4" and 404'd — every file with a space, a '#' or a '?' in its name was unplayable,
-// because the frontend has always built these URLs with `new URL()`, which escapes them.
-//
-// The decode has to happen AFTER the raw-URL guard, never before: the guard refuses "%2e" and ".."
-// on the undecoded RawUrl, and decoding first would hand it an encoded traversal it can no longer
-// recognise. The traversal cases here are the ones that matter — ContentServerTests covers the same
-// ground for the undecoded forms and must stay green alongside these.
 [Collection(AppHostCollection.Name)]
 public sealed class ContentPathEncodingTests
 {
@@ -37,9 +27,6 @@ public sealed class ContentPathEncodingTests
     [InlineData("100% real.mp4", "100%25%20real.mp4")]
     public async Task AnEscapedFileName_IsServed(string fileName, string escaped)
     {
-        // A file name Windows forbids (e.g. a '?') cannot be created here, so there is nothing to
-        // serve — the case is meaningless off-Unix. On Linux GetInvalidFileNameChars() is only
-        // {'\0','/'}, so every case still runs on CI.
         if (fileName.Any(c => Path.GetInvalidFileNameChars().Contains(c)))
             throw new Xunit.SkipException("the file name is not representable on this platform");
 
@@ -56,15 +43,11 @@ public sealed class ContentPathEncodingTests
         await host.ShutdownAsync();
     }
 
-    // A cached thumbnail is served for an escaped name too: the thumbnail route decodes on the same
-    // path as the content route, and a name it cannot resolve answers 204 rather than the image.
     [Fact]
     public async Task AnEscapedFileName_ServesItsCachedThumbnail()
     {
         Write("sessions/my clip.mp4", "video");
 
-        // Seeded directly into the cache, newer than the video, so the store serves it without
-        // needing ffmpeg on the machine.
         var cached = Path.Combine(_contentRoot, "metadata", "thumbnails", "my clip.mp4.jpg");
         Directory.CreateDirectory(Path.GetDirectoryName(cached)!);
         await File.WriteAllTextAsync(cached, "JPEGBYTES");
@@ -81,8 +64,6 @@ public sealed class ContentPathEncodingTests
         await host.ShutdownAsync();
     }
 
-    // The guard used to refuse any path containing two dots anywhere, which is a legal file name and
-    // nothing to do with traversal.
     [Fact]
     public async Task AFileNameContainingTwoDots_IsServed()
     {
@@ -99,8 +80,6 @@ public sealed class ContentPathEncodingTests
         await host.ShutdownAsync();
     }
 
-    // The regression the decode could have introduced. Every one of these is refused BEFORE anything
-    // is unescaped.
     [Theory]
     [InlineData("/api/content/%2e%2e/sentinel/secret.txt")]
     [InlineData("/api/content/%2E%2E/sentinel/secret.txt")]
@@ -128,8 +107,6 @@ public sealed class ContentPathEncodingTests
         await host.ShutdownAsync();
     }
 
-    // Double encoding is not a second chance: one decode is all there is, and what it produces is
-    // not a traversal segment.
     [Fact]
     public async Task ADoubleEncodedTraversal_IsNotServed()
     {
@@ -150,11 +127,8 @@ public sealed class ContentPathEncodingTests
         File.WriteAllText(path, content);
     }
 
-    // A raw HTTP/1.1 GET with the literal request line. HttpClient normalizes escapes and ".."
-    // before the request leaves the process, so it would never put these paths on the wire at all.
     private static async Task<(HttpStatusCode Status, string Body)> GetRawAsync(AppHostDriver host, string rawPath)
     {
-        // The session token, on every request: the content server serves nothing without it.
         rawPath = host.WithToken(rawPath);
         using var client = new TcpClient();
         await client.ConnectAsync("localhost", host.ContentPort);

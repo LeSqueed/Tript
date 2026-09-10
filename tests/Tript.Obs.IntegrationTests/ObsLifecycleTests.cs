@@ -6,9 +6,6 @@ using Xunit;
 
 namespace Tript.Obs.IntegrationTests;
 
-// Bringing a real OBS context up and down. Each test owns its own context from first line to last,
-// because there is only one per process and sharing it between tests would make the order they run
-// in part of what is being tested.
 public sealed class ObsLifecycleTests
 {
     [SkippableFact]
@@ -67,14 +64,10 @@ public sealed class ObsLifecycleTests
     {
         using var session = ObsSession.Start();
 
-        // libobs prints its own environment survey during startup. Its arrival proves the handler
-        // was installed before startup and that formatted output crosses the boundary intact.
         Assert.Contains(session.Messages, entry => entry.Message.StartsWith("CPU Name:", StringComparison.Ordinal));
         Assert.Contains(session.Messages, entry => entry.Level == ObsLogLevel.Info);
     }
 
-    // The locale is the one string the core stores and hands straight back, which makes it the
-    // cleanest byte-level round trip through libobs's own storage.
     [SkippableFact]
     public void TheLocale_RoundTripsByteIdentically()
     {
@@ -91,14 +84,10 @@ public sealed class ObsLifecycleTests
     {
         using var session = ObsSession.Start();
 
-        // The core data dir is discovered with the runtime; a stripped install may not have it.
         var coreData = ObsTestEnvironment.CoreDataPath;
         if (coreData is null)
             throw new Xunit.SkipException("No OBS core data dir found; nothing to resolve data files from.");
 
-        // The probe file is only a probe. Whether this install ships it is the machine's business,
-        // and asking libobs to find a file that is not there proves nothing about the lookup — so
-        // the disk is checked first, and a lookup that then comes back empty is still a failure.
         const string probeFile = "license/gplv2.txt";
         if (!File.Exists(Path.Combine(coreData, probeFile)))
             throw new Xunit.SkipException(
@@ -116,15 +105,10 @@ public sealed class ObsLifecycleTests
         }
         finally
         {
-            // Data paths outlive obs_shutdown; leaving one behind would make the next test's leak
-            // accounting start from a different floor.
             Assert.True(session.Runtime.RemoveDataPath(coreData));
         }
     }
 
-    // The check that matters most here: a startup and shutdown cycle must give libobs's
-    // allocator back everything it took. Measured after a warm-up cycle, because the first one
-    // legitimately retains process-wide state — the point is that repetition does not accumulate.
     [SkippableFact]
     public void RepeatedStartupAndShutdown_LeavesNoLiveAllocations()
     {
@@ -153,8 +137,6 @@ public sealed class ObsLifecycleTests
 
         Assert.True(session.Runtime.ResetAudio(new ObsAudioSettings()));
 
-        // Drains whatever release scheduled. Its return value says whether anything was waiting,
-        // not whether the drain worked, so there is nothing to assert on.
         session.Runtime.WaitForDestroyQueue();
     }
 }

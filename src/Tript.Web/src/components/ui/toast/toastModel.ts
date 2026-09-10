@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 export type ToastKind = 'success' | 'error' | 'warning' | 'info';
 
@@ -15,13 +14,10 @@ export interface ToastSpec {
   kind: ToastKind;
   message: string;
   title?: string;
-  /** Milliseconds on screen; omitted uses reading time and 0 is permanent. */
   duration?: number;
   dismissible?: boolean;
   actions?: ToastAction[];
-  /** A second line under the message, used for a correlated failure. */
   note?: string;
-  /** Fired when the user dismisses this toast. Programmatic dismissal does not fire it. */
   onDismiss?: () => void;
   testId?: string;
 }
@@ -36,11 +32,9 @@ export interface ToastItem {
   message: string;
   note?: string;
   actions?: ToastAction[];
-  /** 0 = permanent. */
   duration: number;
   dismissible?: boolean;
   state: ToastState;
-  /** The time ran out under a hovering pointer, so the toast outlives it until the pointer leaves. */
   held: boolean;
   onDismiss?: () => void;
   testId?: string;
@@ -50,10 +44,8 @@ export const MAX_VISIBLE = 4;
 
 export const MIN_READING_MS = 4000;
 export const MAX_READING_MS = 15000;
-/** 60 ms per visible character. */
 export const MS_PER_CHARACTER = 60;
 
-/** How long a message should be on screen: its reading time, clamped to sane ends. */
 export function readingDuration(title: string | undefined, message: string, note: string | undefined): number {
   const characters = `${title ?? ''} ${message} ${note ?? ''}`.trim().length;
   return Math.min(MAX_READING_MS, Math.max(MIN_READING_MS, characters * MS_PER_CHARACTER));
@@ -63,7 +55,6 @@ function visibleCount(items: ToastItem[]): number {
   return items.filter((toast) => toast.state === 'visible').length;
 }
 
-/** Promote queued toasts, in order, into any slots the stack has opened. */
 function normalize(items: ToastItem[]): ToastItem[] {
   let open = MAX_VISIBLE - visibleCount(items);
   if (open <= 0) {
@@ -131,7 +122,6 @@ export function dismissKey(items: ToastItem[], key: string): ToastItem[] {
   );
 }
 
-/** Dismiss by id: what the toast's own X button does. Unknown ids are a no-op. */
 export function dismissItem(items: ToastItem[], id: number): ToastItem[] {
   if (!items.some((toast) => toast.id === id && toast.state !== 'leaving')) {
     return items;
@@ -151,7 +141,6 @@ export function dismissItem(items: ToastItem[], id: number): ToastItem[] {
   );
 }
 
-/** The lifetime timer fired: the toast exits, unless the pointer is still over it. */
 export function expireToast(items: ToastItem[], id: number, hovered: boolean): ToastItem[] {
   return items.map((toast) => {
     if (toast.id !== id || toast.state !== 'visible' || toast.held) {
@@ -161,7 +150,6 @@ export function expireToast(items: ToastItem[], id: number, hovered: boolean): T
   });
 }
 
-/** The pointer left a held toast and its grace is up: now it exits. */
 export function releaseToast(items: ToastItem[], id: number): ToastItem[] {
   return items.map((toast) =>
     toast.id === id && toast.state === 'visible' && toast.held
@@ -170,7 +158,6 @@ export function releaseToast(items: ToastItem[], id: number): ToastItem[] {
   );
 }
 
-/** The exit animation is done: the toast leaves the list. */
 export function removeToast(items: ToastItem[], id: number): ToastItem[] {
   return normalize(items.filter((toast) => toast.id !== id));
 }

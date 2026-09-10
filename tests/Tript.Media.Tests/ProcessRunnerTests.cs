@@ -5,24 +5,15 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// The process-plumbing guarantees the media runners rest on: neither runner may park its caller.
-// Both sit on live request paths — the library listing probes every file, the clip dialog waits on
-// the encode — so a runner that can block indefinitely wedges a worker thread for good. Every wait
-// here is bounded, so a regression fails the test instead of hanging the suite.
 public sealed class ProcessRunnerTests
 {
     private static readonly TimeSpan NoHang = TimeSpan.FromSeconds(60);
 
-    // The deadlock a sequential drain produces: read stdout to EOF, then stderr. stdout only
-    // reaches EOF when the child exits, and a child that has filled the stderr pipe nobody is
-    // reading cannot exit. Both parked, with no timeout to break it.
     [Fact]
     public async Task ProbeRun_ReturnsPromptly_WhenTheChildFloodsStderr()
     {
         var source = MediaTestFixture.CreateSdrSource("probe-chatty.mp4", durationSeconds: 8, audioTracks: 2);
 
-        // -v trace logs every packet: a couple of hundred kilobytes on this fixture, against a pipe
-        // buffer of 64 KiB, while stdout gets only the small JSON at the end.
         var arguments = new List<string>
         {
             "-v", "trace", "-show_entries", "format=duration", "-of", "json", source,
@@ -38,13 +29,9 @@ public sealed class ProcessRunnerTests
             $"the fixture must actually flood stderr; got {stderr.Length} bytes");
     }
 
-    // A probe that will not exit is killed at the timeout and reported as a failure, rather than
-    // holding the listing request that asked for the file's duration.
     [Fact]
     public async Task ProbeRun_KillsAChildThatOverrunsTheTimeout()
     {
-        // -re paces a synthetic input at its native rate, so this would run for an hour at nearly
-        // no CPU cost — a wedged child, without having to wedge one.
         var arguments = new List<string>
         {
             "-nostdin", "-loglevel", "error",
@@ -61,9 +48,6 @@ public sealed class ProcessRunnerTests
         Assert.Contains("did not exit", stderr, StringComparison.Ordinal);
     }
 
-    // Without -y an ffmpeg whose output already exists prompts on stdin and never exits. The clip
-    // name is derived from the source and the region, so re-clipping the same region hits exactly
-    // that path.
     [Fact]
     public async Task CreateClips_OverwritesAnExistingOutput_WithoutWaitingForAnAnswer()
     {
@@ -85,8 +69,6 @@ public sealed class ProcessRunnerTests
         var first = engine.CreateClips(request);
         var clip = Assert.Single(first);
 
-        // Stand in for what a killed encode leaves behind: a file at the clip's name that is not a
-        // clip. ffmpeg must replace it rather than stop and ask.
         File.WriteAllText(clip, "leftover from a run that did not finish");
 
         var second = Task.Run(() => engine.CreateClips(request));
@@ -97,8 +79,6 @@ public sealed class ProcessRunnerTests
             MediaTestFixture.Binaries.Ffprobe, clip, "v:0", "codec_name"));
     }
 
-    // Progress arrives on a Process event thread, where an unhandled exception is fatal to the
-    // whole host. A sink that throws must cost nothing more than its own messages.
     [Fact]
     public void CreateClips_SurvivesAProgressSinkThatThrows()
     {
@@ -124,21 +104,16 @@ public sealed class ProcessRunnerTests
 
         var clip = Assert.Single(paths);
         Assert.True(File.Exists(clip));
-        // ffmpeg's own stderr keeps coming after the opening line, so the guard is exercised on the
-        // event thread and not only on the caller's.
+
         Assert.True(calls > 1, $"the progress sink must still be called; got {calls} calls");
     }
 
-    // The timeout path used to abandon its two pending reads to a Process that the enclosing using
-    // was already disposing, which surfaces later as an unobserved task exception on an unrelated
-    // thread.
     [Fact]
     public void RunBounded_Timeout_LeavesNoUnobservedTaskException()
     {
         var unobserved = new List<Exception>();
         void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e)
         {
-            // Only pipe faults are this test's business; the handler is process-wide.
             foreach (var inner in e.Exception.InnerExceptions)
             {
                 if (inner is IOException or ObjectDisposedException)

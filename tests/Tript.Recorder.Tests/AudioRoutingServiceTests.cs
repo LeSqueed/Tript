@@ -6,11 +6,6 @@ using Xunit;
 
 namespace Tript.Recorder.Tests;
 
-// The wiring the service performs through its sink, tested against a fake so no live libobs context
-// is needed: each source is created, routed to its track's mixer bit, given its own volume, and
-// marked active; each track gets one encoder bound to that mixer and assigned to that output slot;
-// and the metadata layout records which track holds which source. The fake sink records the calls so
-// a wrong mixer index, a missed volume or a missed slot each fails a distinct assertion.
 public sealed class AudioRoutingServiceTests
 {
     [Fact]
@@ -35,19 +30,14 @@ public sealed class AudioRoutingServiceTests
         Assert.Equal(3, sink.Volumes.Count);
         Assert.Equal(3, sink.Activated.Count);
 
-        // Both sources on track 0 are routed to mixer 0; the mic on track 1 to mixer 1.
         Assert.Equal([0, 0, 1], sink.Routed.Select(r => r.MixerIndex));
-        // Volumes are applied per source, not per track.
+
         Assert.Equal([0.4f, 0.75f, 1.0f], sink.Volumes.Select(v => v.Volume));
-        // Every created source is marked active so it actually produces audio.
+
         Assert.Equal(sink.CreatedSources.Select(s => s.Name), sink.Activated.Select(s => s.Name));
         Assert.Empty(sink.Deactivated);
     }
 
-    // A source's device selection must reach the sink so the capture source is created against the
-    // right device: the WASAPI-free assertion that the routing writes device_id is that the sink
-    // receives it per source. A source without a selection still gets a source, for the platform
-    // default device (deviceId null).
     [Fact]
     public void TheService_PassesEachSourcesDeviceIdThroughToTheSink()
     {
@@ -106,11 +96,9 @@ public sealed class AudioRoutingServiceTests
 
         using var routing = service.Wire(plan);
 
-        // One encoder per track, each created against that track's mixer.
         Assert.Equal(3, sink.CreatedEncoders.Count);
         Assert.Equal([0, 1, 2], sink.CreatedEncoders.Select(e => e.MixerIndex));
 
-        // Each encoder is assigned to the output slot matching its track.
         Assert.Equal(3, sink.Assigned.Count);
         Assert.Equal([0, 1, 2], sink.Assigned.Select(a => a.OutputSlot));
         Assert.Equal(sink.CreatedEncoders.Select(e => e.Encoder), sink.Assigned.Select(a => a.Encoder));
@@ -209,13 +197,10 @@ public sealed class AudioRoutingServiceTests
         var routing = service.Wire(plan);
         routing.Dispose();
 
-        // Every MarkActive at wire time is balanced by a MarkInactive at dispose.
         Assert.Equal(sink.CreatedSources.Select(s => s.Name), sink.Deactivated.Select(s => s.Name));
         Assert.Equal(sink.Activated.Count, sink.Deactivated.Count);
     }
 
-    // Every capture source the sink created is the routing's to release. Leaving them to a
-    // finalizer is what fills the OBS context with live handles at the moment it is shut down.
     [Fact]
     public void DisposingTheRouting_DisposesEveryCreatedSourceAndEncoder()
     {
@@ -240,8 +225,6 @@ public sealed class AudioRoutingServiceTests
         Assert.All(sink.CreatedEncoders, entry => Assert.True(entry.Encoder.Disposed));
     }
 
-    // A source must be deactivated before it is released, not after: DeactivateSource reaches into
-    // the source the sink created.
     [Fact]
     public void DisposingTheRouting_DeactivatesEachSourceBeforeReleasingIt()
     {
@@ -258,8 +241,6 @@ public sealed class AudioRoutingServiceTests
         Assert.All(sink.Deactivated, source => Assert.False(source.WasDisposedWhenDeactivated));
     }
 
-    // Dispose runs on the recorder's stop path and on its failure path, and both can reach the same
-    // routing. A second pass must not deactivate a source that is already released.
     [Fact]
     public void DisposingTheRoutingTwice_ReleasesEverythingOnce()
     {
@@ -322,8 +303,6 @@ public sealed class AudioRoutingServiceTests
         Assert.Equal(2, sink.CreatedEncoders.Count);
         Assert.All(sink.CreatedEncoders, entry => Assert.True(entry.Encoder.Disposed));
     }
-
-    // ---- the fake sink ----
 
     private sealed class FakeSink : IAudioRoutingSink
     {

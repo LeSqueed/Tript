@@ -1,15 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Capture every UI surface as a PNG, so UI work is looked at before it is handed over rather than
-// after (docs/design-system.md §6). Boots the headless host, reads the launch key off its READY
-// line — the UI refuses every request without it — walks the app, and writes docs/shots/.
-//
-//   cd src/Tript.Web && npm run shots
-//
-// Needs a built app host in dist/<config>: `make shell` (or `make linux`) first. The *frontend* is
-// rebuilt and staged here on every run, because the host serves it from dist/<config>/dist — a
-// capture taken against a stale bundle shows the previous design and reads exactly like proof that
-// the current one is fine.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
@@ -20,22 +9,12 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const CONFIG = process.env.CONFIG ?? 'Debug';
 const HOST_DIR = join(ROOT, 'dist', CONFIG);
 const OUT = join(ROOT, 'docs', 'shots');
-/**
- * A settings file of this run's own, deleted first so every capture is of a *fresh install*.
- *
- * Without it the host reads the developer's own settings, and the settings file stores every
- * property — so the defaults in force the first time anyone launched are frozen into it. A trash
- * screen read "kept for 1 day" through a whole review after the default became a week, because the
- * file still held the old value and the capture was of that install, not of the product.
- */
 const SETTINGS = join(ROOT, 'docs', 'shots-settings.json');
 const VIEWPORT = { width: 1440, height: 900 };
-/** The width below which the player uses the overlay rather than the full-size route. */
 const COMPACT = { width: 1000, height: 800 };
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const HOST = process.platform === 'win32' ? join(HOST_DIR, 'Tript.App.exe') : './Tript.App';
 
-/** Build the frontend and stage it where the host serves it from. */
 function buildFrontend(): void {
   const web = join(import.meta.dirname, '..');
   const built = spawnSync(NPM, ['run', 'build'], {
@@ -78,7 +57,6 @@ function startHost(): Promise<{ url: string; stop: () => void }> {
 }
 
 async function shoot(page: Page, name: string): Promise<void> {
-  // Let transitions settle; a half-played hover reads as a rendering bug in the PNG.
   await page.waitForTimeout(350);
   await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: false });
   console.log(`  ${name}.png`);
@@ -104,7 +82,6 @@ async function main(): Promise<void> {
     const card = page.locator('.content-card').first();
     if (await card.count()) {
       await card.hover();
-      // The delete action only exists on hover — the state where it collides with the favourite.
       await shoot(page, 'library-card-hover');
       await card.click();
       await page.waitForTimeout(600);
@@ -115,15 +92,12 @@ async function main(): Promise<void> {
         await markButton.click();
         await shoot(page, 'player-with-segment');
       }
-      // At this width the player is a route, so Escape does not close it — take the way back the
-      // topbar offers.
       await page.getByRole('button', { name: 'Library', exact: true }).click();
       await page.waitForTimeout(300);
     } else {
       console.log('  (no content — put an .mp4 in ~/Videos/Tript/sessions to capture the player)');
     }
 
-    // Trash is a library filter now, not a destination.
     const trashFilter = page.getByRole('radio', { name: /^Trash/ });
     if (await trashFilter.count()) {
       await trashFilter.click();
@@ -137,8 +111,6 @@ async function main(): Promise<void> {
     const compact = await browser.newPage({ viewport: COMPACT, deviceScaleFactor: 2 });
     await compact.goto(host.url, { waitUntil: 'networkidle' });
     await shoot(compact, 'library-compact');
-    // Below the breakpoint the player remains inside the shell too; capture the compact layout where
-    // the transport and clip actions have the least room.
     const compactCard = compact.locator('.content-card').first();
     if (await compactCard.count()) {
       await compactCard.click();

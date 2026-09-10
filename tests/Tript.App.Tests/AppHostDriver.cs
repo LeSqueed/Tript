@@ -10,10 +10,6 @@ using System.Text.Json;
 
 namespace Tript.App.Tests;
 
-// Drives the Tript.App executable as a child process and speaks the WebSocket control socket to it.
-// The app host owns the OBS context (when real) and the three local IPC channels; running it as a
-// child is the only way to exercise the real startup path, the READY contract, and the full IPC
-// surface at once.
 internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 {
     private readonly Process _process;
@@ -23,18 +19,12 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
     private readonly TaskCompletionSource<string?> _ready = new();
     private ClientWebSocket? _socket;
 
-    // Child hosts bind ephemeral loopback ports so concurrent test runs never collide. The
-    // allocator asks the OS for a free port; the TOCTOU window between release and the child's
-    // bind is accepted — a collision then degrades to "the host never prints READY" and
-    // WaitForReady throws a clear error instead of hanging the run.
     internal int UiPort { get; }
 
     internal int ContentPort { get; }
 
     internal int ControlPort { get; }
 
-    // Asks the OS for a free loopback port: bind a listener to port 0, read the port it was
-    // assigned, and release it.
     internal static int AllocateFreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -44,9 +34,6 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         return port;
     }
 
-    // The per-launch session token, read off the READY line. Every request the suite makes to any
-    // of the three listeners carries it; a host that never printed one leaves this empty and the
-    // tests fail on the 403 rather than hanging.
     private string _token = string.Empty;
 
     private static readonly string AppHostPath =
@@ -63,8 +50,7 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         UiPort = uiPort;
         ContentPort = contentPort;
         ControlPort = controlPort;
-        // Drain stdout continuously so the READY line is captured without deadlocking the child,
-        // and so the host's log stays readable if a test fails.
+
         _drain = Task.Run(async () =>
         {
             while (await _process.StandardOutput.ReadLineAsync() is { } line)
@@ -90,9 +76,6 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         string? webRoot = null, string? fakeRecorderSettingsTrace = null)
         => Start(contentRoot, settingsPath, gameListJson, fake: true, webRoot, fakeRecorderSettingsTrace);
 
-    // The real recording path: no --fake-recorder, so the host starts libobs, resets video/audio,
-    // loads the safe modules, and wires a real ObsRecorderSession. The caller is responsible for
-    // ensuring the muxer helper sits next to the app binary first.
     internal static AppHostDriver StartReal(string contentRoot, string settingsPath)
         => Start(contentRoot, settingsPath, gameListJson: null, fake: false, webRoot: null,
             fakeRecorderSettingsTrace: null);
@@ -143,8 +126,6 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             ?? throw new InvalidOperationException("The app host could not be started.");
         var driver = new AppHostDriver(process, uiPort, contentPort, controlPort);
 
-        // The READY line is the single-line contract: the control socket, content server and UI
-        // host are all reachable once it appears.
         if (!driver.WaitForReady(TimeSpan.FromSeconds(30)))
         {
             string stderr;
@@ -160,15 +141,10 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
 
     private bool WaitForReady(TimeSpan timeout) => _ready.Task.Wait(timeout);
 
-    // The UI URL the host printed, token and all — what the desktop shell loads and what a headless
-    // user pastes into a browser.
     internal string UiUrl { get; private set; } = string.Empty;
 
     internal string Token => _token;
 
-    // Appends the session token to a URL the test is about to request. Every listener wants it in
-    // the query string: the control socket because a browser cannot set a handshake header, the
-    // content server because that is the only channel a <video src> carries.
     internal string WithToken(string url) =>
         url + (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "k=" + _token;
 
@@ -203,11 +179,6 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             endOfMessage: true, CancellationToken.None);
     }
 
-    // Receives the next frame, parsed to its root element. The frames are
-    // { method, content }; the caller reads method/content from the root.
-    //
-    // A frame that never arrives is a failure of the host, not a reason to wait forever: without the
-    // deadline a test for "this command answers" hangs the whole run instead of going red.
     internal async Task<JsonDocument> ReceiveAsync(TimeSpan? timeout = null)
     {
         if (_socket is null)
@@ -257,7 +228,6 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         }
         catch
         {
-            // The socket may already be gone; fall back to a hard kill.
             if (!_process.HasExited)
             {
                 try
@@ -293,8 +263,7 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
             try
             {
                 _process.Kill(entireProcessTree: true);
-                // The ports the host bound are not released until the process is gone; wait so the
-                // next test in the serialized collection can bind them.
+
                 _process.WaitForExit(TimeSpan.FromSeconds(10));
             }
             catch

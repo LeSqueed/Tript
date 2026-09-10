@@ -10,14 +10,10 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// The class count used to come from events.json's entry count, while the YOLO parser strides the
-// output tensor by 4 + numClasses. Adding or removing a single events.json entry without retraining
-// therefore shifted every read and decoded every box to garbage — no exception, no log.
 public class ModelClassCountTests
 {
     private const string GameId = "57ZZVAZ0PJK8VQGPKB728QE57C";
 
-    // The literal Ultralytics writes into metadata_props["names"]: a Python dict, not JSON.
     private const string UltralyticsNames =
         "{0: 'Class zero', 1: 'Class one', 2: 'Class two', 3: 'Class three', 4: 'Class four', " +
         "5: 'Class five', 6: 'Class six'}";
@@ -36,17 +32,15 @@ public class ModelClassCountTests
         Def(6, "Class six"),
     ];
 
-    // [batch, 4 + numClasses, numAnchors].
     [Theory]
     [InlineData(true, 7, new[] { 1, 11, 8400 })]
     [InlineData(true, 1, new[] { 1, 5, 8400 })]
-    // A dynamic axis exports as -1, or 0 on older exporters. Deriving from either produces a
-    // stride that looks plausible, so the shape has to be reported as saying nothing.
+
     [InlineData(false, 0, new[] { 1, -1, 8400 })]
     [InlineData(false, 0, new[] { 1, 0, 8400 })]
-    // Box rows only, or fewer: no class rows to count.
+
     [InlineData(false, 0, new[] { 1, 4, 8400 })]
-    // Not the layout the parser walks at all.
+
     [InlineData(false, 0, new[] { 1, 11 })]
     [InlineData(false, 0, new[] { 1, 11, 8400, 1 })]
     public void TryDeriveClassCount_ReadsTheClassRowsOrRefusesToGuess(
@@ -75,8 +69,6 @@ public class ModelClassCountTests
         Assert.Equal("Class six", names[6]);
     }
 
-    // Another exporter may quote differently or omit the key entirely; a map that cannot be read
-    // must disable the name check rather than invent entries for it to fail on.
     [Fact]
     public void ParseClassNames_AcceptsDoubleQuotes_AndYieldsNullWhenUnreadable()
     {
@@ -110,8 +102,6 @@ public class ModelClassCountTests
         Assert.Null(VisualEventDetector.FindClassMapMismatch(Definitions(), 7, names));
     }
 
-    // A newly appended event is safe for an older model: the decoder still uses the model's class
-    // count and the model can never emit the additional class.
     [Fact]
     public void FindClassMapMismatch_AcceptsAClassIdBeyondTheModelsClasses()
     {
@@ -132,8 +122,7 @@ public class ModelClassCountTests
                 ClassId = 0, ScreenRegionX = 0.1f, ScreenRegionY = 0.2f,
                 ScreenRegionW = 0.3f, ScreenRegionH = 0.4f,
             },
-            // An appended class with no region would otherwise add a full-frame inference pass,
-            // duplicating detections emitted for the older model's region.
+
             new() { ClassId = 1 },
         };
 
@@ -145,7 +134,6 @@ public class ModelClassCountTests
         Assert.Equal(0.4f, group.H);
     }
 
-    // The shape check cannot see this one — the count still matches, only the meaning moved.
     [Fact]
     public void FindClassMapMismatch_RejectsAReorderedOrRenamedClass()
     {
@@ -160,8 +148,6 @@ public class ModelClassCountTests
         Assert.Contains("Class two", mismatch);
     }
 
-    // Without a class map names cannot be checked. Appended definitions remain safe because the
-    // model output shape, rather than events.json, controls the decoder stride.
     [Fact]
     public void FindClassMapMismatch_WithoutAModelClassMap_AcceptsAppendedClassIds()
     {
@@ -172,11 +158,6 @@ public class ModelClassCountTests
         Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
     }
 
-    // Fail loudly rather than skip, matching InputTensorReuseTests: this is the assertion that ties
-    // the pure helpers above to the model and events.json that actually ship, and a guard that
-    // quietly disables itself where the model is absent is worse than no guard at all. Loads its
-    // own session rather than ModelService's cached one: test classes run in parallel and
-    // ModelService.UnloadModel disposes the shared session out from under whoever else holds it.
     [Fact]
     public void ShippedModel_DeclaresAStaticClassMap_AndAgreesWithEventsJson()
     {

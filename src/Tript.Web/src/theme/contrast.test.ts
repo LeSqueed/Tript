@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The accent-colour constraint, verified mechanically. The reference theme put dark text on the
-// primary colour and worked only because its accent was light.
 
 import { describe, expect, it } from 'vitest';
 
-/** Parse #rrggbb into [r, g, b] 0..255. */
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '');
   if (clean.length !== 6) {
@@ -26,7 +22,6 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-/** WCAG contrast ratio between two colours, 1..21. */
 export function contrastRatio(a: string, b: string): number {
   const la = luminance(a);
   const lb = luminance(b);
@@ -42,7 +37,6 @@ const BASE_100 = '#101116';
 
 describe('theme accent constraint', () => {
   it('dark text on the accent is legible (WCAG AA for normal text)', () => {
-    // Dark text on the light accent — the direction the reference theme had wrong.
     expect(contrastRatio(ACCENT_CONTENT, ACCENT)).toBeGreaterThanOrEqual(7);
   });
 
@@ -51,7 +45,6 @@ describe('theme accent constraint', () => {
   });
 
   it('the accent is light, not dark — the trap only bites dark accents', () => {
-    // A dark accent would make white-on-accent buttons unreadable. Guard the hue itself.
     const accentLum = luminance(ACCENT);
     expect(accentLum).toBeGreaterThan(0.35);
   });

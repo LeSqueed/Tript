@@ -16,9 +16,6 @@ internal enum TrayCommand
     Exit,
 }
 
-// The notification-area adapter deliberately owns its own hidden message window. Subclassing the
-// Photino window would couple tray lifetime to the webview's native procedure and would make hiding
-// the main window indistinguishable from closing it.
 internal sealed class WindowsTrayPresence : IDisposable
 {
     private const uint NifMessage = 0x00000001;
@@ -113,9 +110,6 @@ internal sealed class WindowsTrayPresence : IDisposable
         };
         RegisterClass(ref windowClass);
 
-        // This is an invisible top-level window, not a message-only window. Explorer broadcasts
-        // TaskbarCreated only to top-level windows, which is required to restore the icon after an
-        // Explorer restart.
         var window = CreateWindowEx(
             WsExToolWindow,
             WindowClassName,

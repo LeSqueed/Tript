@@ -13,16 +13,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// ModelService cached InferenceSessions in a ConcurrentDictionary keyed by game id, with two holes:
-//
-//   * GetOrAdd runs its factory outside the lock, so two callers racing on a cold cache each built a
-//     ~10 MB native session and the loser was thrown away undisposed — a straight native leak.
-//   * UnloadModel disposed the cached session with no notion of how many detectors were using it,
-//     so stopping one detector pulled the session out from under another still running the game.
-//
-// The cache now builds through a Lazy (one construction, ever) and reference counts users (one
-// disposal, after the last release). These tests load the real ONNX model — the contract is about
-// native session lifetime and cannot be checked without the runtime.
 [Collection(ModelSessionCollection.Name)]
 public class ModelSessionLifetimeTests
 {
@@ -31,16 +21,12 @@ public class ModelSessionLifetimeTests
 
     private static void AssertModelIsOnDisk()
     {
-        // Fail loudly rather than skip, matching InputTensorReuseTests: a guard that quietly
-        // disables itself where the model is absent is worse than no guard at all.
         var modelPath = ModelService.GetModelPath(GameId);
         Assert.True(File.Exists(modelPath),
             $"ONNX model not found at {modelPath}. This test guards native session lifetime and " +
             "cannot be verified without the real model. It must fail, not skip.");
     }
 
-    // Proves the session is still alive, which a disposed handle cannot fake: Run on a disposed
-    // InferenceSession throws rather than returning results.
     private static void AssertStillUsable(InferenceSession session)
     {
         var buffer = new float[ModelInput * ModelInput * 3];
@@ -68,8 +54,6 @@ public class ModelSessionLifetimeTests
             Assert.Same(first, second);
             Assert.Equal(baseline + 2, ModelService.GetSessionRefCount(GameId));
 
-            // The regression: this used to dispose the shared session outright, and the surviving
-            // detector's next inference hit a freed native handle.
             ModelService.UnloadModel(GameId);
             Assert.Equal(baseline + 1, ModelService.GetSessionRefCount(GameId));
             AssertStillUsable(second);
@@ -82,8 +66,6 @@ public class ModelSessionLifetimeTests
         Assert.Equal(baseline, ModelService.GetSessionRefCount(GameId));
     }
 
-    // The GetOrAdd race, driven directly: every caller must come back holding the same native
-    // session, and every caller must be counted so none of them can be freed underneath.
     [Fact]
     public void ConcurrentLoads_ShareOneSession_AndEachTakesAReference()
     {
@@ -117,8 +99,6 @@ public class ModelSessionLifetimeTests
                 threads[index].Start();
             }
 
-            // Released together so the loads genuinely overlap on a cold-ish cache rather than
-            // queueing behind each other.
             gate.Set();
 
             foreach (var thread in threads)
@@ -132,7 +112,6 @@ public class ModelSessionLifetimeTests
             Assert.All(sessions, s => Assert.Same(sessions[0], s));
             Assert.Equal(baseline + callers, ModelService.GetSessionRefCount(GameId));
 
-            // Every release but the last must leave the session intact.
             for (; released < callers - 1; released++)
             {
                 ModelService.UnloadModel(GameId);
@@ -174,10 +153,6 @@ public class ModelSessionLifetimeTests
         Assert.Equal(baseline, ModelService.GetSessionRefCount(GameId));
     }
 
-    // A construction that throws must leave nothing behind. Lazy caches the exception it produced,
-    // so the failed entry has to be evicted along with its reference — otherwise a model that was
-    // missing once (mid-download, mid-update) would keep replaying that same exception for the rest
-    // of the process even after the file appeared.
     [Fact]
     public void FailedLoad_LeavesNoReferenceAndNoPoisonedEntry()
     {
@@ -191,9 +166,6 @@ public class ModelSessionLifetimeTests
         Assert.Equal(0, ModelService.GetSessionRefCount(missing));
     }
 
-    // VisualEventDetector.Stop() calls UnloadModel on a game it may never have loaded (Start can
-    // throw between setting _gameId and loading), so an unmatched release has to be inert rather
-    // than driving a count negative.
     [Fact]
     public void UnloadWithoutLoad_IsInert()
     {

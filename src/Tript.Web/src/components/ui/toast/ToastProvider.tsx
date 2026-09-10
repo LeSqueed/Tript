@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 import {
   createContext,
@@ -24,16 +23,12 @@ import {
 import { Toast } from './Toast';
 import './toast.css';
 
-/** The exit animation, in toast.css. Removal may not outpace it. */
 const EXIT_MS = 180;
-/** After the pointer leaves a held toast, before it is allowed to go. */
 const RELEASE_GRACE_MS = 400;
 
 export interface ToastApi {
   push: (spec: ToastSpec) => number;
-  /** Take a keyed toast down without it firing its onDismiss. */
   dismiss: (key: string) => void;
-  /** What a toast's own dismiss button does: plays the exit and fires the toast's onDismiss. */
   dismissSelf: (id: number) => void;
   noteHover: (id: number, hovered: boolean) => void;
 }
@@ -56,7 +51,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const exitTimers = useRef(new Map<number, number>());
   const graceTimers = useRef(new Map<number, number>());
 
-  // The latest state, readable from event callbacks without re-subscribing them.
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -85,7 +79,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     hoverRef.current.set(id, hovered);
     const grace = graceTimers.current.get(id);
     if (hovered) {
-      // Moving back on time: the toast stays.
       if (grace !== undefined) {
         clearTimeout(grace);
         graceTimers.current.delete(id);
@@ -105,7 +98,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  // Arm each visible timed toast's lifetime once, and re-arm it when an upsert changes its clock.
   useEffect(() => {
     for (const [id, entry] of lifetimeTimers.current) {
       const item = items.find((toast) => toast.id === id);
@@ -126,7 +118,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
   }, [items]);
 
-  // Arm each leaving toast's removal once.
   useEffect(() => {
     const leaving = new Set(items.filter((toast) => toast.state === 'leaving').map((toast) => toast.id));
     for (const [id, handle] of exitTimers.current) {
@@ -146,7 +137,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
   }, [items]);
 
-  // Nothing may outlive the provider.
   useEffect(() => () => {
     for (const entry of lifetimeTimers.current.values()) {
       clearTimeout(entry.handle);

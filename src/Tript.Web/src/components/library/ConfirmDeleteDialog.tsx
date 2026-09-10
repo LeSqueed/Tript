@@ -1,82 +1,43 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The delete confirmation. Mandatory for every delete, single or bulk, from the library and from
-// the trash — deleting a recording is the one action in this app that destroys work, and the only
-// thing standing between a mis-click and that is this panel.
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { summarizeNames } from './selectionModel';
 import { deletionNotice } from '../trash/trashModel';
 import { Button, Checkbox } from '../../components/ui/controls';
 
-/** Above this many, the items are summarised instead of listed. */
 const NAME_LIMIT = 5;
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export interface DeleteConfirmation {
-  /** The dialog's heading — what the user asked for, e.g. "Delete 3 items". */
   title: string;
-  /** Display names of the affected items, in list order. */
   names: string[];
-  /** Label on the destructive button while the trash path is taken. */
   confirmLabel: string;
-  /**
-   * The item is already in the trash: there is no trash path left, so the skip-trash checkbox is not
-   * offered and the confirm always sends `permanent`.
-   */
   permanentOnly?: boolean;
-  /** An independent, ordinary checkbox offered for this deletion, when applicable. */
   checkbox?: {
     label: string;
     defaultChecked?: boolean;
   };
   retentionHours: number;
-  /**
-   * How many items actually move, when that number is not `names.length`. A missing-video session's
-   * placeholder names itself but deletes nothing on its own, so it is not counted. The trash sentence
-   * reads this, so the count it quotes never disagrees with what the button does.
-   */
   affectedCount?: number;
-  /**
-   * How many linked non-favourited automatic highlights a checked cascade checkbox adds. Only read
-   * when this dialog has a checkbox; the caller counts them (mirroring the backend's eligibility) so
-   * the sentence the user reads about "how many items" matches what ticking the box will do.
-   */
   cascadeCount?: number;
 }
 
-/** The one sentence the cascade checkbox is always about, wherever a delete offers it. */
 const CASCADE_CHECKBOX_LABEL = 'Delete linked highlights (favourited highlights are kept)';
 
 export interface DeleteConfirmationInput {
-  /** Display names of the affected items, in list order. */
   names: string[];
   retentionHours: number;
-  /**
-   * How many items actually move, when that is not `names.length` — a placeholder session names
-   * itself but deletes nothing on its own.
-   */
   affectedCount?: number;
-  /** Offer the "delete linked highlights" checkbox and fold its cascade into the count. */
   hasCascade?: boolean;
-  /** How many linked non-favourited highlights a checked cascade adds. Read only when `hasCascade`. */
   cascadeCount?: number;
   deleteLinkedHighlightsDefault?: boolean;
-  /** The item is already in the trash: there is no trash path left, so confirm always sends permanent. */
   permanentOnly?: boolean;
-  /** Override the derived heading; otherwise it is "Delete …?" from the names. */
   title?: string;
-  /** Override the destructive button's label; otherwise it is "Move to trash" / "Delete permanently". */
   confirmLabel?: string;
 }
 
-/**
- * Builds the confirmation every delete dialog reads, in one place. The library, the sessions page,
- * the shell's player delete and the trash all confirm a delete; keeping the title, the button label,
- * the "how many actually move" count and the cascade-checkbox decision here means they cannot drift.
- */
 export function makeDeleteConfirmation(input: DeleteConfirmationInput): DeleteConfirmation {
   const {
     names,
@@ -118,15 +79,12 @@ export function ConfirmDeleteDialog({
 }: {
   confirmation: DeleteConfirmation;
   onCancel: () => void;
-  /** Called with the permanent choice and the optional ordinary checkbox choice. */
   onConfirm: (permanent: boolean, checked: boolean) => void;
 }) {
   const { title, names, confirmLabel, permanentOnly = false, checkbox, retentionHours } = confirmation;
   const [skipTrash, setSkipTrash] = useState(false);
   const [checked, setChecked] = useState(checkbox?.defaultChecked === true);
   const permanent = permanentOnly || skipTrash;
-  // `names.length` is what the caller listed, but the list may not be the deletion: a cascaded link
-  // can delete highlights the dialog never named. The notice counts what the delete really takes.
   const affectedCount =
     (confirmation.affectedCount ?? names.length) + (checkbox && checked ? (confirmation.cascadeCount ?? 0) : 0);
 
@@ -156,7 +114,6 @@ export function ConfirmDeleteDialog({
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        // Stop here: the dialog can be opened over the player overlay, which also closes on Escape.
         event.stopPropagation();
         onCancelRef.current();
         return;
@@ -244,13 +201,11 @@ export function ConfirmDeleteDialog({
             Cancel
           </Button>
           <Button variant="danger"
-            
+
             data-testid="confirm-delete-confirm"
             onClick={() => onConfirm(permanent, checked)}
           >
-            {/* Ticking the checkbox rewrites the button too: the label the user presses must
-                describe what ticking it changed. A permanent-only caller already named its own
-                action ("Empty trash"), so it keeps it. */}
+            {}
             {skipTrash && !permanentOnly ? 'Delete permanently' : confirmLabel}
           </Button>
         </div>

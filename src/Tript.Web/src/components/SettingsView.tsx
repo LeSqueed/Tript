@@ -31,6 +31,10 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
   const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
 
+  useEffect(() => {
+    client.send('ListGames');
+  }, [client]);
+
   useEffect(() => client.on('selectedGameExecutable', (content) => {
     const selected = content as Partial<SelectedGameExecutableMessage> | null;
     if (typeof selected?.requestId === 'string' && (typeof selected.filePath === 'string' || selected.filePath === null)) {

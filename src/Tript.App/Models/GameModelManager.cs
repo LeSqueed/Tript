@@ -125,7 +125,8 @@ internal sealed class GameModelManager : IDisposable
                 string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
             if (game is null)
             {
-                ClearStatus(gameId);
+                SetStatus(gameId, GameModelStage.Unsupported,
+                    message: "No model has been published for this game yet.");
                 return;
             }
 
@@ -136,8 +137,11 @@ internal sealed class GameModelManager : IDisposable
             var hasUsableModel = ModelService.HasModelForGame(gameId);
             if (release is null)
             {
-                if (hasUsableModel || game.Releases.Count == 0)
+                if (hasUsableModel)
                     ClearStatus(gameId);
+                else if (game.Releases.Count == 0)
+                    SetStatus(gameId, GameModelStage.Unsupported,
+                        message: "No model has been published for this game yet.");
                 else
                     SetStatus(gameId, GameModelStage.Unsupported,
                         message: $"No model API {SupportedModelApiVersion} release is available.");

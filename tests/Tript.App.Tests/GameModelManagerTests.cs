@@ -68,6 +68,40 @@ public sealed class GameModelManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task GameAbsentFromManifest_IsReportedUnsupportedNotCleared()
+    {
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new { schemaVersion = 1, games = Array.Empty<object>() })),
+        });
+        using var manager = CreateManager(handler, (_, _, _) => Task.CompletedTask);
+
+        await manager.EnsureModelAsync("NeverPublishedGame");
+
+        Assert.Equal("unsupported", Assert.Single(manager.Snapshot()).Stage);
+    }
+
+    [Fact]
+    public async Task GameWithNoReleasesYet_IsReportedUnsupportedNotCleared()
+    {
+        var manifest = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            games = new[] { new { gameId = "RegisteredButNoModel", releases = Array.Empty<object>() } },
+        });
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
+        });
+        using var manager = CreateManager(handler, (_, _, _) => Task.CompletedTask);
+
+        await manager.EnsureModelAsync("RegisteredButNoModel");
+
+        Assert.Equal("unsupported", Assert.Single(manager.Snapshot()).Stage);
+    }
+
+    [Fact]
     public async Task FreshCachedManifest_AvoidsAnotherNetworkCheck()
     {
         var manifestPath = Path.Combine(_root, "manifest.json");

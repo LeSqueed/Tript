@@ -60,6 +60,8 @@ public sealed class SmokeTests : IDisposable
         var (startMethod, startContent) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", startMethod);
         Assert.True(startContent.GetProperty("state").GetProperty("recording").GetBoolean());
+        var (startedContentMethod, _) = await host.ReceiveAsyncParsed();
+        Assert.Equal("content", startedContentMethod);
 
         await host.SendAsync("""{"method":"StopRecording"}""");
         var (stopMethod, stopContent) = await host.ReceiveAsyncParsed();
@@ -170,6 +172,7 @@ public sealed class SmokeTests : IDisposable
         var (method, content) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", method);
         Assert.True(content.GetProperty("state").GetProperty("recording").GetBoolean());
+        await host.ReceiveAsyncParsed(); // the "content" push fired alongside recording start
 
         var onDisk = JsonDocument.Parse(File.ReadAllText(_settingsPath)).RootElement.GetProperty("capture");
         Assert.Equal("saved-display", onDisk.GetProperty("display").GetString());
@@ -182,6 +185,7 @@ public sealed class SmokeTests : IDisposable
         var (secondMethod, secondContent) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", secondMethod);
         Assert.True(secondContent.GetProperty("state").GetProperty("recording").GetBoolean());
+        await host.ReceiveAsyncParsed(); // the "content" push fired alongside recording start
 
         var effectiveDisplays = File.ReadAllLines(settingsTrace)
             .Select(line => JsonDocument.Parse(line).RootElement.GetProperty("Display").GetString())

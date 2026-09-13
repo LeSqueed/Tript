@@ -59,6 +59,13 @@ function makeSettings(): SettingsMessageContent['settings'] {
         recovery: true,
       },
     },
+    hotkeys: {
+      enabled: true,
+      toggleRecording: { modifiers: ['Control', 'Alt'], key: 'KeyR' },
+      manualBookmark: { modifiers: ['Control', 'Alt'], key: 'KeyB' },
+      quickClip: { modifiers: ['Control', 'Alt'], key: 'KeyC' },
+      quickClipSeconds: 30,
+    },
   };
 }
 
@@ -124,7 +131,7 @@ afterEach(() => {
 });
 
 describe('SettingsView', () => {
-  it('renders the six tabs and the recording page controls', () => {
+  it('renders the seven tabs and the recording page controls', () => {
     renderSettings('general');
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'General',
@@ -133,6 +140,7 @@ describe('SettingsView', () => {
       'Audio',
       'Capture',
       'Games',
+      'Hotkeys',
     ]);
     expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Highlights' })).toBeTruthy();
@@ -140,6 +148,7 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'Capture' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Games' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Hotkeys' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     expect(screen.getByLabelText(/^Recording mode/)).toBeTruthy();

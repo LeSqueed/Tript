@@ -251,6 +251,7 @@ internal sealed partial class AppHost
                 StopDetection();
 
             PushState(recording: true, effectiveGameId);
+            PushContent();
             if (resolved.Mode is RecordingMode.ReplayBufferOnly)
             {
                 RequestNotification(NotificationKind.RecordingStarted, "Buffering started",

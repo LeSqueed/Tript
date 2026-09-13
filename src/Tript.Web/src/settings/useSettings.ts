@@ -12,7 +12,7 @@ import type {
 import type { SettingsUpdateResultMessage } from '../ipc/protocol';
 import { readAvailableDisplays, readDisplayFallbackWarning } from './displayModel';
 
-export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game' | 'general';
+export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game' | 'general' | 'hotkeys';
 
 const PAGE_KEY: Record<SettingsPageName, string> = {
   recording: 'recording',
@@ -21,6 +21,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
   capture: 'capture',
   game: 'game',
   general: 'general',
+  hotkeys: 'hotkeys',
 };
 
 const DEFAULT_SETTINGS: SettingsModel = {
@@ -53,6 +54,13 @@ const DEFAULT_SETTINGS: SettingsModel = {
       errors: true,
       recovery: true,
     },
+  },
+  hotkeys: {
+    enabled: true,
+    toggleRecording: { modifiers: ['Control', 'Alt'], key: 'KeyR' },
+    manualBookmark: { modifiers: ['Control', 'Alt'], key: 'KeyB' },
+    quickClip: { modifiers: ['Control', 'Alt'], key: 'KeyC' },
+    quickClipSeconds: 30,
   },
 };
 
@@ -202,6 +210,13 @@ function mergeSettings(pushed: SettingsModel): SettingsModel {
         ...DEFAULT_SETTINGS.general.notifications,
         ...pushed.general?.notifications,
       },
+    },
+    hotkeys: {
+      ...DEFAULT_SETTINGS.hotkeys,
+      ...pushed.hotkeys,
+      toggleRecording: { ...DEFAULT_SETTINGS.hotkeys.toggleRecording, ...pushed.hotkeys?.toggleRecording },
+      manualBookmark: { ...DEFAULT_SETTINGS.hotkeys.manualBookmark, ...pushed.hotkeys?.manualBookmark },
+      quickClip: { ...DEFAULT_SETTINGS.hotkeys.quickClip, ...pushed.hotkeys?.quickClip },
     },
   };
 }

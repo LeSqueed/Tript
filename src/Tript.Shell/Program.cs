@@ -166,6 +166,29 @@ internal static class Program
                 command => HandleTrayCommand(command))
             : null;
 
+        using var hotkeys = OperatingSystem.IsWindows()
+            ? new WindowsHotkeys(action => HandleHotkey(action), host.PushError)
+            : null;
+        hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(host.SettingsStore.Load()));
+        host.SettingsChanged += settings =>
+            hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(settings));
+
+        void HandleHotkey(HotkeyAction action)
+        {
+            switch (action)
+            {
+                case HotkeyAction.ToggleRecording:
+                    ThreadPool.QueueUserWorkItem(_ => host.ToggleRecording());
+                    break;
+                case HotkeyAction.ManualBookmark:
+                    ThreadPool.QueueUserWorkItem(_ => host.AddLiveBookmark());
+                    break;
+                case HotkeyAction.QuickClip:
+                    ThreadPool.QueueUserWorkItem(_ => host.CreateQuickClipFromBuffer());
+                    break;
+            }
+        }
+
         window = new PhotinoWindow
         {
             Title = "Tript",

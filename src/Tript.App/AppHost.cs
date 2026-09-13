@@ -710,6 +710,8 @@ internal sealed partial class AppHost : IDisposable
                 if (PatchUpdatesAutomaticClipWindows(patch.Value)
                     && !ValidateAutomaticClipWindows(candidate, out var windowError))
                     return windowError;
+                if (!ValidateHotkeys(candidate, out var hotkeyError))
+                    return hotkeyError;
 
                 string effectiveRoot;
                 try
@@ -823,6 +825,9 @@ internal sealed partial class AppHost : IDisposable
                     break;
                 case "general" when property.Value.ValueKind == JsonValueKind.Object:
                     ApplyObjectPatch(settings.General, property.Value);
+                    break;
+                case "hotkeys" when property.Value.ValueKind == JsonValueKind.Object:
+                    ApplyObjectPatch(settings.Hotkeys, property.Value);
                     break;
             }
         }

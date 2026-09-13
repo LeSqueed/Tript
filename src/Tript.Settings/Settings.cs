@@ -13,7 +13,8 @@ public enum SettingsPage
     Audio,
     Capture,
     Game,
-    General
+    General,
+    Hotkeys
 }
 
 public sealed class Settings
@@ -38,4 +39,6 @@ public sealed class Settings
     public GameSettings Game { get; set; } = new();
 
     public GeneralSettings General { get; set; } = new();
+
+    public HotkeySettings Hotkeys { get; set; } = new();
 }

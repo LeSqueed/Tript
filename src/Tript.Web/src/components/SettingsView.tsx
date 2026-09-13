@@ -10,6 +10,7 @@ import { AudioPage } from '../settings/pages/AudioPage';
 import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
 import { GeneralPage } from '../settings/pages/GeneralPage';
+import { HotkeysPage } from '../settings/pages/HotkeysPage';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -18,6 +19,7 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'audio', label: 'Audio' },
   { id: 'capture', label: 'Capture' },
   { id: 'game', label: 'Games' },
+  { id: 'hotkeys', label: 'Hotkeys' },
 ];
 
 export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClient; builtInGameIds?: readonly string[] }) {
@@ -180,6 +182,13 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
           <GeneralPage
             settings={controller.settings.general}
             recording={controller.settings.recording}
+            update={controller.update}
+            page={page}
+          />
+          )}
+          {page === 'hotkeys' && (
+          <HotkeysPage
+            settings={controller.settings.hotkeys}
             update={controller.update}
             page={page}
           />

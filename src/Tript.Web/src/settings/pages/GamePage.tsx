@@ -3,8 +3,9 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
-import type { GameSearchResult, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResult, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import { Button, SelectField, TextField } from '../../components/ui/controls';
+import { useToast } from '../../components/ui/toast/ToastProvider';
 
 function hasOverrides(game: GameSetting): boolean {
   if (game.recordingModeOverride?.mode !== null && game.recordingModeOverride?.mode !== undefined) return true;
@@ -62,6 +63,10 @@ export function GamePage({
   onSearchGames,
   resolvedGameSearch,
   onResolveGameSearch,
+  catalogueGames,
+  modelStatuses,
+  gameAddRequested,
+  onRequestGame,
   globalClipBeforeSeconds,
   globalClipAfterSeconds,
   globalRecordingMode,
@@ -79,6 +84,10 @@ export function GamePage({
   onSearchGames: (requestId: string, query: string) => void;
   resolvedGameSearch: ResolvedGameSearchMessage | null;
   onResolveGameSearch: (requestId: string, input: string) => void;
+  catalogueGames: GameInfo[];
+  modelStatuses: GameModelStatus[];
+  gameAddRequested: GameAddRequestedMessage | null;
+  onRequestGame: (requestId: string, gameId: string) => void;
   globalClipBeforeSeconds?: number;
   globalClipAfterSeconds?: number;
   globalRecordingMode: RecordingMode;
@@ -98,6 +107,9 @@ export function GamePage({
   const [ignoredApplicationFilter, setIgnoredApplicationFilter] = useState('');
   const deferredIgnoredApplicationFilter = useDeferredValue(ignoredApplicationFilter.trim().toLowerCase());
   const pendingBrowseRequest = useRef<string | null>(null);
+  const [gameRequestState, setGameRequestState] = useState<Record<string, 'pending' | 'accepted' | 'alreadyRequested' | 'rateLimited'>>({});
+  const pendingGameRequests = useRef<Map<string, string>>(new Map());
+  const toast = useToast();
 
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
   const ignoredApplications = Array.isArray(settings.ignoredApplications) ? settings.ignoredApplications : [];
@@ -137,6 +149,41 @@ export function GamePage({
       setSearchError(resolvedGameSearch.error || 'The selected game could not be resolved.');
     }
   }, [pendingResolveRequest, resolvedGameSearch]);
+
+  useEffect(() => {
+    if (!gameAddRequested) return;
+    const gameId = pendingGameRequests.current.get(gameAddRequested.requestId);
+    if (!gameId) return;
+    pendingGameRequests.current.delete(gameAddRequested.requestId);
+
+    if (gameAddRequested.status === 'rejected') {
+      setGameRequestState((current) => {
+        const { [gameId]: _dropped, ...rest } = current;
+        return rest;
+      });
+      toast.push({ kind: 'error', message: gameAddRequested.error ?? 'The request could not be sent.' });
+      return;
+    }
+
+    setGameRequestState((current) => ({ ...current, [gameId]: gameAddRequested.status as 'accepted' | 'alreadyRequested' | 'rateLimited' }));
+    if (gameAddRequested.status === 'accepted') {
+      toast.push({ kind: 'success', message: 'Request received — thanks!' });
+    } else if (gameAddRequested.status === 'alreadyRequested') {
+      toast.push({ kind: 'info', message: "You've already requested this game." });
+    } else if (gameAddRequested.status === 'rateLimited') {
+      const hours = gameAddRequested.retryAfterSeconds
+        ? Math.max(1, Math.round(gameAddRequested.retryAfterSeconds / 3600))
+        : 6;
+      toast.push({ kind: 'warning', message: `Too many requests — try again in about ${hours} hour${hours === 1 ? '' : 's'}.` });
+    }
+  }, [gameAddRequested, toast]);
+
+  function requestGame(gameId: string) {
+    const requestId = crypto.randomUUID();
+    pendingGameRequests.current.set(requestId, gameId);
+    setGameRequestState((current) => ({ ...current, [gameId]: 'pending' }));
+    onRequestGame(requestId, gameId);
+  }
 
   useEffect(() => {
     if (!settingsUpdateResult || settingsUpdateResult.requestId !== pendingSaveRequest) {
@@ -255,8 +302,43 @@ export function GamePage({
     onResolveGameSearch(requestId, input);
   }
 
+  const unsupportedGames = modelStatuses.filter((status) => status.stage === 'unsupported');
+
   return (
     <div className="settings-page" data-page="game">
+      {unsupportedGames.length > 0 && (
+        <div className="game-list unsupported-games" data-testid="unsupported-games">
+          <div className="game-list-heading">
+            <h3 className="subheading">Unsupported games</h3>
+          </div>
+          <p className="muted small">
+            These games don't have a detection model yet. You can ask for one to be added.
+          </p>
+          {unsupportedGames.map((status) => {
+            const name = catalogueGames.find((game) => game.id === status.gameId)?.name ?? status.gameId;
+            const state = gameRequestState[status.gameId];
+            const label = state === 'pending' ? 'Requesting…'
+              : state === 'accepted' || state === 'alreadyRequested' ? 'Requested'
+                : state === 'rateLimited' ? 'Request this game'
+                  : 'Request this game';
+            return (
+              <div className="game-row" key={status.gameId} data-testid="unsupported-game-row">
+                <div className="game-row-main">
+                  <strong>{name}</strong>
+                  <span className="muted small">{status.gameId}</span>
+                  <Button
+                    variant="ghost"
+                    onClick={() => requestGame(status.gameId)}
+                    disabled={state === 'pending' || state === 'accepted' || state === 'alreadyRequested'}
+                  >
+                    {label}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="game-list">
         <div className="game-list-heading">
           <h3 className="subheading">Games</h3>

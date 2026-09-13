@@ -549,6 +549,19 @@ export interface ResolveGameSearchParameters {
   input: string;
 }
 
+export interface RequestGameAddParameters {
+  requestId: string;
+  gameId: string;
+}
+
+export interface GameAddRequestedMessage {
+  requestId: string;
+  gameId: string;
+  status: 'accepted' | 'alreadyRequested' | 'rateLimited' | 'rejected';
+  retryAfterSeconds?: number;
+  error?: string;
+}
+
 export interface AddGameCandidateParameters {
   requestId: string;
   name?: string;
@@ -698,6 +711,7 @@ export type CommandParameters =
   | SelectGameExecutableParameters
   | SearchGamesParameters
   | ResolveGameSearchParameters
+  | RequestGameAddParameters
   | AddGameCandidateParameters
   | IgnoreGameCandidateParameters
   | GameRecordingConfirmParameters
@@ -754,6 +768,7 @@ export type CommandName =
   | 'SelectGameExecutable'
   | 'SearchGames'
   | 'ResolveGameSearch'
+  | 'RequestGameAdd'
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
   | 'GameRecordingConfirm'
@@ -798,6 +813,7 @@ export type MessageName =
   | 'selectedGameExecutable'
   | 'gameSearchResults'
   | 'gameSearchResolved'
+  | 'gameAddRequested'
   | 'settingsUpdateResult'
   | 'gameCandidate'
   | 'gameCandidateCleared'

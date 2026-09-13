@@ -110,6 +110,8 @@ internal sealed class AppController
                 await _host.SearchGamesAsync(parameters.Deserialize<SearchGamesParameters>(), client),
             ["ResolveGameSearch"] = async (parameters, client) =>
                 await _host.ResolveGameSearchAsync(parameters.Deserialize<ResolveGameSearchParameters>(), client),
+            ["RequestGameAdd"] = async (parameters, client) =>
+                await _host.RequestGameAddAsync(parameters.Deserialize<RequestGameAddParameters>(), client),
 
             ["ListContent"] = (_, _) => Task.Run(_host.PushContent),
 #if TRIPT_TRAINING

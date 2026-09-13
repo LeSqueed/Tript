@@ -88,6 +88,7 @@ public sealed class ControlSocketBoundsTests
         var (started, startedContent) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", started);
         Assert.True(startedContent.GetProperty("state").GetProperty("recording").GetBoolean());
+        await host.ReceiveAsyncParsed(); // the "content" push fired alongside recording start
 
         await host.SendAsync("""{"method":"StartRecording"}""");
         var (method, content) = await host.ReceiveAsyncParsed();
@@ -136,6 +137,7 @@ public sealed class ControlSocketBoundsTests
         await host.SendAsync("""{"method":"StartRecording","parameters":{"gameId":"Overwatch"}}""");
         var (started, _) = await host.ReceiveAsyncParsed();
         Assert.Equal("state", started);
+        await host.ReceiveAsyncParsed(); // the "content" push fired alongside recording start
 
         await host.SendAsync("""{"method":"ConvertToSdr","parameters":{"id":"sdr-during-recording","contentType":"clip","filePath":"clips/missing.mp4"}}""");
         var (method, content) = await host.ReceiveAsyncParsed();

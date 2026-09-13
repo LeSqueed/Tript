@@ -146,6 +146,23 @@ export interface GeneralSettings {
   [key: string]: unknown;
 }
 
+export type HotkeyAction = 'ToggleRecording' | 'ManualBookmark' | 'QuickClip';
+
+export interface HotkeyBinding {
+  modifiers: string[];
+  key: string | null;
+  [key: string]: unknown;
+}
+
+export interface HotkeySettings {
+  enabled: boolean;
+  toggleRecording: HotkeyBinding;
+  manualBookmark: HotkeyBinding;
+  quickClip: HotkeyBinding;
+  quickClipSeconds: number;
+  [key: string]: unknown;
+}
+
 export interface SettingsModel {
   recording: RecordingSettings;
   buffer: BufferSettings;
@@ -153,6 +170,7 @@ export interface SettingsModel {
   capture: CaptureSettings;
   game: GameSettings;
   general: GeneralSettings;
+  hotkeys: HotkeySettings;
   [key: string]: unknown;
 }
 

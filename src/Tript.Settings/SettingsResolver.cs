@@ -67,6 +67,32 @@ public sealed class SettingsResolver
 
         return (TimeSpan.FromSeconds(beforeSeconds), TimeSpan.FromSeconds(afterSeconds));
     }
+
+    // gameId is unused today — reserved for a future per-game hotkey override layer, which would
+    // consult it the same way every other Resolve* method here consults game?.XyzOverride ?? global.
+    public static IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> ResolveEffectiveHotkeys(
+        Settings settings, string? gameId = null)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var hotkeys = settings.Hotkeys;
+        if (!hotkeys.Enabled)
+        {
+            return new Dictionary<HotkeyAction, HotkeyBinding?>
+            {
+                [HotkeyAction.ToggleRecording] = null,
+                [HotkeyAction.ManualBookmark] = null,
+                [HotkeyAction.QuickClip] = null,
+            };
+        }
+
+        return new Dictionary<HotkeyAction, HotkeyBinding?>
+        {
+            [HotkeyAction.ToggleRecording] = hotkeys.ToggleRecording,
+            [HotkeyAction.ManualBookmark] = hotkeys.ManualBookmark,
+            [HotkeyAction.QuickClip] = hotkeys.QuickClip,
+        };
+    }
 }
 
 public sealed class ResolvedRecorderSettings

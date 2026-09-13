@@ -36,11 +36,15 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void TheSixPages_Exist()
+    public void TheSevenPages_Exist()
     {
-        Assert.Equal(6, Enum.GetValues<SettingsPage>().Length);
+        Assert.Equal(7, Enum.GetValues<SettingsPage>().Length);
         Assert.Equal(
-            new[] { SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture, SettingsPage.Game, SettingsPage.General },
+            new[]
+            {
+                SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture,
+                SettingsPage.Game, SettingsPage.General, SettingsPage.Hotkeys,
+            },
             Enum.GetValues<SettingsPage>());
     }
 
@@ -50,20 +54,24 @@ public class LogicalPagesTests : IDisposable
         var recording = _store.Page<RecordingSettings>(SettingsPage.Recording);
         var buffer = _store.Page<BufferSettings>(SettingsPage.Buffer);
         var general = _store.Page<GeneralSettings>(SettingsPage.General);
+        var hotkeys = _store.Page<HotkeySettings>(SettingsPage.Hotkeys);
 
         Assert.Equal(SettingsPage.Recording, recording.Page);
         Assert.Equal(SettingsPage.Buffer, buffer.Page);
         Assert.Equal(SettingsPage.General, general.Page);
+        Assert.Equal(SettingsPage.Hotkeys, hotkeys.Page);
 
         recording.Load().Mode = RecordingMode.Session;
         buffer.Load().Enabled = true;
         general.Load().StartupVisibility = StartupVisibility.Tray;
+        hotkeys.Load().QuickClipSeconds = 15;
         recording.Save();
 
         var reloaded = new SettingsStore(_provider).Load();
         Assert.Equal(RecordingMode.Session, reloaded.Recording.Mode);
         Assert.True(reloaded.Buffer.Enabled);
         Assert.Equal(StartupVisibility.Tray, reloaded.General.StartupVisibility);
+        Assert.Equal(15, reloaded.Hotkeys.QuickClipSeconds);
     }
 
     [Fact]

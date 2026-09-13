@@ -96,6 +96,7 @@ public sealed class SettingsStore
         SettingsPage.Capture => settings.Capture,
         SettingsPage.Game => settings.Game,
         SettingsPage.General => settings.General,
+        SettingsPage.Hotkeys => settings.Hotkeys,
         _ => throw new ArgumentOutOfRangeException(nameof(page), page, null),
     };
 }

@@ -68,7 +68,7 @@ internal sealed partial class AppHost
     private static bool IsUsableOffsetSeconds(double seconds) =>
         double.IsFinite(seconds) && seconds >= 0 && seconds < TimeSpan.MaxValue.TotalSeconds;
 
-    private void PushError(string message)
+    internal void PushError(string message)
     {
         _ipc.Broadcast("error", JsonSerializer.SerializeToElement(new
         {
@@ -193,6 +193,7 @@ internal sealed partial class AppHost
                             : _pendingMetadata.Game;
                         item.GameId = ResolveStoredGameId(_pendingMetadata.GameId, item.Game);
                     }
+                    item.Bookmarks = MapBookmarks(_sessionTracker.Active?.Bookmarks ?? []);
                 }
             }
             else
@@ -467,17 +468,19 @@ internal sealed partial class AppHost
             _clipTitles.SaveGame(fileName, game, gameId);
     }
 
+    private static List<BookmarkItem> MapBookmarks(IEnumerable<Bookmark> bookmarks) => bookmarks
+        .Select(bookmark => new BookmarkItem
+        {
+            Id = bookmark.Id.ToString(),
+            Type = bookmark.Type.ToString().ToLowerInvariant(),
+            Subtype = bookmark.Subtype,
+            Time = bookmark.Time.TotalSeconds,
+        })
+        .ToList();
+
     private void ApplyRecordingMetadata(ContentItem item, RecordingMetadata metadata)
     {
-        item.Bookmarks = metadata.Bookmarks
-            .Select(bookmark => new BookmarkItem
-            {
-                Id = bookmark.Id.ToString(),
-                Type = bookmark.Type.ToString().ToLowerInvariant(),
-                Subtype = bookmark.Subtype,
-                Time = bookmark.Time.TotalSeconds,
-            })
-            .ToList();
+        item.Bookmarks = MapBookmarks(metadata.Bookmarks);
         item.HasAutomaticClipCandidates = metadata.Bookmarks.Any(IsAutomaticClipCandidate);
         item.Title = string.IsNullOrWhiteSpace(metadata.Title) ? item.Title : metadata.Title;
         item.Favorite = metadata.Favorite;

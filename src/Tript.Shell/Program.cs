@@ -3,6 +3,7 @@
 
 using System.Drawing;
 using Photino.NET;
+using Serilog;
 using Tript.App;
 using Tript.Settings;
 
@@ -287,14 +288,14 @@ internal static class Program
             {
                 window.Invoke(() =>
                 {
-                    if (WindowsWindow.IsVisible(window) && !window.Minimized)
+                    if (WindowsWindow.IsForeground(window))
                         return;
                     window.SendNotification(title, body);
                 });
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine($"Tript.Shell: could not send notification: {exception.Message}");
+                Log.Warning(exception, "Tript.Shell: could not send notification");
             }
         };
 

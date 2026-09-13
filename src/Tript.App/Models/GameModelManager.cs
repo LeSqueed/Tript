@@ -538,6 +538,26 @@ internal sealed class GameModelManager : IDisposable
             StatusChanged?.Invoke(snapshot);
     }
 
+    // Drops statuses for games that are no longer in the catalogue (removed or migrated to a
+    // different id), so a stale entry doesn't linger in the UI forever.
+    internal void PruneStatuses(IReadOnlyCollection<string> currentGameIds)
+    {
+        var keep = new HashSet<string>(currentGameIds, StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<GameModelStatus>? snapshot = null;
+        lock (_statusGate)
+        {
+            var stale = _statuses.Keys.Where(gameId => !keep.Contains(gameId)).ToArray();
+            if (stale.Length > 0)
+            {
+                foreach (var gameId in stale)
+                    _statuses.Remove(gameId);
+                snapshot = _statuses.Values.OrderBy(status => status.GameId, StringComparer.OrdinalIgnoreCase).ToArray();
+            }
+        }
+        if (snapshot is not null)
+            StatusChanged?.Invoke(snapshot);
+    }
+
     private static T? ReadJson<T>(string? path) where T : class
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))

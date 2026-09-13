@@ -242,7 +242,7 @@ internal sealed partial class AppHost
             GameInventory inventory;
             lock (_inventoryGate)
                 inventory = _inventory;
-            var resolution = CandidateResolverInput(candidate, normalized, inventory);
+            var resolution = CandidateResolverInput(candidate.Executable, normalized, inventory);
             if (!resolution.StoreBacked)
             {
                 PushGameCandidate(candidate, normalized);
@@ -317,7 +317,7 @@ internal sealed partial class AppHost
 
     internal sealed record CandidateResolution(string Input, bool StoreBacked);
 
-    internal static CandidateResolution CandidateResolverInput(FullscreenGameCandidate candidate, string normalized,
+    internal static CandidateResolution CandidateResolverInput(string executable, string normalized,
         GameInventory inventory)
     {
         var installed = inventory.Games
@@ -326,7 +326,7 @@ internal sealed partial class AppHost
             .FirstOrDefault();
         return installed is not null
             ? new CandidateResolution(installed.ProductId.ToString(), true)
-            : new CandidateResolution($"executable:{ExecutableNames.Normalize(candidate.Executable)}", false);
+            : new CandidateResolution($"executable:{ExecutableNames.Normalize(executable)}", false);
     }
 
     internal void ConfirmGameRecording(string promptId, bool record)
@@ -633,7 +633,7 @@ internal sealed partial class AppHost
     private string? ResolveStoredGameId(string? storedId, string? gameName)
         => string.IsNullOrWhiteSpace(storedId)
             ? ResolveLegacyGameId(gameName)
-            : (ResolveLegacyGameId(storedId) ?? storedId);
+            : (_gameIdAliases.Resolve(storedId) ?? ResolveLegacyGameId(storedId) ?? storedId);
 
     private (string? Game, string? GameId) ResolveGameForSession(string sourceSessionPath)
     {

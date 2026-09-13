@@ -175,13 +175,13 @@ public sealed class GameCustomSettingsTests : IDisposable
             new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
                 "KovaaK's", installRoot, ImmutableArray<string>.Empty),
         ], []);
-        var candidate = new FullscreenGameCandidate(42, "FPSAimTrainer-Win64-Shipping.exe", executablePath);
+        const string executable = "FPSAimTrainer-Win64-Shipping.exe";
 
-        var resolution = AppHost.CandidateResolverInput(candidate, executablePath, inventory);
+        var resolution = AppHost.CandidateResolverInput(executable, executablePath, inventory);
         Assert.Equal("steam:824270", resolution.Input);
         Assert.True(resolution.StoreBacked);
 
-        var unrooted = AppHost.CandidateResolverInput(candidate,
+        var unrooted = AppHost.CandidateResolverInput(executable,
             Path.Combine(_contentRoot, "elsewhere", "example.exe"), new GameInventory([], []));
         Assert.Equal("executable:FPSAimTrainer-Win64-Shipping", unrooted.Input);
         Assert.False(unrooted.StoreBacked);

@@ -102,6 +102,26 @@ public sealed class GameModelManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task PruneStatuses_DropsEntriesNotInTheKeepList()
+    {
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new { schemaVersion = 1, games = Array.Empty<object>() })),
+        });
+        using var manager = CreateManager(handler, (_, _, _) => Task.CompletedTask);
+
+        await manager.EnsureModelAsync("GameA");
+        await manager.EnsureModelAsync("GameB");
+        Assert.Equal(2, manager.Snapshot().Count);
+
+        manager.PruneStatuses(["GameA"]);
+
+        var remaining = Assert.Single(manager.Snapshot());
+        Assert.Equal("GameA", remaining.GameId);
+    }
+
+    [Fact]
     public async Task FreshCachedManifest_AvoidsAnotherNetworkCheck()
     {
         var manifestPath = Path.Combine(_root, "manifest.json");

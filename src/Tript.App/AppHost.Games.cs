@@ -149,7 +149,7 @@ internal sealed partial class AppHost
     internal void ReloadGameList()
     {
         var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson,
-            out var settingsMigrated);
+            out var settingsMigrated, _gameIdAliases);
         if (settingsMigrated)
             _settingsStore.Save();
         AttachDiscoveredProcessPaths(games);
@@ -164,7 +164,9 @@ internal sealed partial class AppHost
         if (manager is null || _disposed)
             return;
 
-        foreach (var game in GameList)
+        var games = GameList;
+        manager.PruneStatuses(games.Select(game => game.Id).ToArray());
+        foreach (var game in games)
         {
             try
             {
@@ -174,6 +176,105 @@ internal sealed partial class AppHost
             {
                 return;
             }
+        }
+    }
+
+    // Retries resolver identification for locally-minted "custom-" games (created when the
+    // resolver was unreachable at detection time, or added by hand). If the resolver now returns a
+    // different, canonical id, the game entry is migrated in place — name, executable path, and
+    // every override survive since only the Id field changes — and the old id is recorded as an
+    // alias so already-recorded sessions/clips keep resolving to the same (now renamed) entry
+    // without any historical file being rewritten. See GameIdAliasStore / ResolveStoredGameId.
+    internal async Task ReconcileCustomGameIdentitiesAsync()
+    {
+        if (_resolverClient is null || _disposed)
+            return;
+
+        var candidates = GameList
+            .Where(game => game.Id.StartsWith("custom-", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(game.ExecutablePath))
+            .ToArray();
+        if (candidates.Length == 0)
+            return;
+
+        GameInventory inventory;
+        lock (_inventoryGate)
+            inventory = _inventory;
+
+        var migrated = false;
+        foreach (var game in candidates)
+        {
+            if (_disposed || _shuttingDown)
+                return;
+
+            var resolution = CandidateResolverInput(game.Executable ?? string.Empty, game.ExecutablePath!, inventory);
+            if (!resolution.StoreBacked)
+                continue;
+
+            ResolvedGame resolved;
+            try
+            {
+                resolved = await _resolverClient.ResolveAsync(resolution.Input, _discoveryCancellation.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_discoveryCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException
+                or OperationCanceledException)
+            {
+                Log.Debug(exception, "AppHost: identity recheck failed for {GameId}", game.Id);
+                continue;
+            }
+
+            if (string.Equals(resolved.GameId, game.Id, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var oldId = game.Id;
+            var didMutate = false;
+            bool saved;
+            lock (_settingsUpdateGate)
+            {
+                saved = _settingsStore.TryUpdate(settings =>
+                {
+                    var entry = settings.Game.GameList.FirstOrDefault(value =>
+                        string.Equals(value.Id, oldId, StringComparison.OrdinalIgnoreCase));
+                    if (entry is null)
+                        return null; // removed or edited concurrently; nothing left to migrate
+
+                    var existingCanonical = settings.Game.GameList.FirstOrDefault(value =>
+                        !ReferenceEquals(value, entry)
+                        && string.Equals(value.Id, resolved.GameId, StringComparison.OrdinalIgnoreCase));
+                    if (existingCanonical is not null)
+                        settings.Game.GameList.Remove(entry);
+                    else
+                        entry.Id = resolved.GameId;
+
+                    didMutate = true;
+                    return ValidateGameList(settings.Game.GameList, out var validationError)
+                        ? null
+                        : validationError;
+                }, out _, out var failure);
+
+                if (!saved)
+                    Log.Warning("AppHost: identity migration for {OldId} was not saved: {Reason}", oldId, failure);
+            }
+
+            if (!saved || !didMutate)
+                continue;
+
+            _gameIdAliases.TryAdd(oldId, resolved.GameId);
+            migrated = true;
+        }
+
+        if (migrated)
+        {
+            ReloadGameList();
+            RebuildDetectionTargets();
+            PushGameList();
+            PushSettings();
+            PushModelStatus();
         }
     }
 

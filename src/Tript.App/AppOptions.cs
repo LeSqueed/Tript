@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.Json;
+using Tript.App.Models;
 
 namespace Tript.App;
 
@@ -116,9 +117,9 @@ internal sealed class AppOptions
     }
 
     internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
-        string? overrideJson, out bool settingsMigrated)
+        string? overrideJson, out bool settingsMigrated, GameIdAliasStore? aliases = null)
     {
-        settingsMigrated = MigrateLegacyGameIds(settings.Game.GameList, catalog);
+        settingsMigrated = MigrateLegacyGameIds(settings.Game.GameList, catalog, aliases);
 
         var games = new List<GameInfo>();
         var packagedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -174,12 +175,13 @@ internal sealed class AppOptions
         return games;
     }
 
-    private static bool MigrateLegacyGameIds(List<Settings.GameSetting> gameList, GameCatalog catalog)
+    private static bool MigrateLegacyGameIds(List<Settings.GameSetting> gameList, GameCatalog catalog,
+        GameIdAliasStore? aliases)
     {
         var migrated = false;
         foreach (var game in gameList)
         {
-            var current = catalog.ResolveLegacyGameId(game.Id);
+            var current = aliases?.Resolve(game.Id) ?? catalog.ResolveLegacyGameId(game.Id);
             if (current is not null && !string.Equals(current, game.Id, StringComparison.OrdinalIgnoreCase))
             {
                 game.Id = current;

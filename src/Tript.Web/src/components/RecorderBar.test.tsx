@@ -105,6 +105,22 @@ describe('RecorderBar', () => {
     expect(screen.queryByText(/Wrong game/)).toBeNull();
   });
 
+  it('renders nothing in the bar for an unsupported model status', () => {
+    const client = mockClient();
+    render(<RecorderBar client={client} connectionState="connected" />);
+
+    act(() => {
+      client.emit('state', {
+        state: { recording: false, game: { id: 'cs2', name: 'CS2', detected: true } },
+      });
+      client.emit('modelStatus', {
+        models: [{ gameId: 'cs2', stage: 'unsupported', message: 'No model has been published for this game yet.' }],
+      } satisfies ModelStatusMessage);
+    });
+
+    expect(screen.queryByTestId('model-status')).toBeNull();
+  });
+
   it('uses indeterminate progress semantics while verifying', () => {
     const client = mockClient();
     render(<RecorderBar client={client} connectionState="connected" />);
@@ -132,10 +148,10 @@ describe('RecorderBar', () => {
         state: { recording: false, game: { id: 'cs2', name: 'CS2', detected: true } },
       });
       client.emit('modelStatus', {
-        models: [{ gameId: 'cs2', stage: 'unsupported', message: 'No model available' }],
+        models: [{ gameId: 'cs2', stage: 'error', message: 'No model available' }],
       } satisfies ModelStatusMessage);
     });
-    expect(screen.getByRole('status').textContent).toBe('Model unsupported: No model available');
+    expect(screen.getByRole('status').textContent).toBe('Model error: No model available');
 
     act(() => client.emit('modelStatus', {
       models: [{ gameId: 'cs2', stage: 'ready', revision: 2 }],

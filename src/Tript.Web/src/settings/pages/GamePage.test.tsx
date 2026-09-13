@@ -3,8 +3,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { GamePage } from './GamePage';
-import type { GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import type { GameSettings, RecordingMode } from '../settingsModel';
+import { ToastProvider } from '../../components/ui/toast/ToastProvider';
 
 const PACKAGED_ID = 'Overwatch';
 const SETTINGS: GameSettings = {
@@ -37,33 +38,43 @@ function renderPage(
   const onBrowseExecutable = vi.fn();
   const onSearchGames = vi.fn();
   const onResolveGameSearch = vi.fn();
+  const onRequestGame = vi.fn();
   const view = (
     selected = selectedGameExecutable,
     settingsUpdateResult: SettingsUpdateResultMessage | null = null,
     gameSearchResults: GameSearchResultsMessage | null = null,
     resolvedGameSearch: ResolvedGameSearchMessage | null = null,
+    catalogueGames: GameInfo[] = [],
+    modelStatuses: GameModelStatus[] = [],
+    gameAddRequested: GameAddRequestedMessage | null = null,
   ) => (
-    <GamePage
-      settings={settings}
-      update={update}
-      page="game"
-      externalPushCount={0}
-      builtInGameIds={[PACKAGED_ID]}
-      selectedGameExecutable={selected}
-      settingsUpdateResult={settingsUpdateResult}
-      onBrowseExecutable={onBrowseExecutable}
-      gameSearchResults={gameSearchResults}
-      onSearchGames={onSearchGames}
-      resolvedGameSearch={resolvedGameSearch}
-      onResolveGameSearch={onResolveGameSearch}
-      globalClipBeforeSeconds={globalClipBeforeSeconds}
-      globalClipAfterSeconds={globalClipAfterSeconds}
-      globalRecordingMode={globalRecordingMode}
-      automaticClipsEnabled={automaticClipsEnabled}
-    />
+    <ToastProvider>
+      <GamePage
+        settings={settings}
+        update={update}
+        page="game"
+        externalPushCount={0}
+        builtInGameIds={[PACKAGED_ID]}
+        selectedGameExecutable={selected}
+        settingsUpdateResult={settingsUpdateResult}
+        onBrowseExecutable={onBrowseExecutable}
+        gameSearchResults={gameSearchResults}
+        onSearchGames={onSearchGames}
+        resolvedGameSearch={resolvedGameSearch}
+        onResolveGameSearch={onResolveGameSearch}
+        catalogueGames={catalogueGames}
+        modelStatuses={modelStatuses}
+        gameAddRequested={gameAddRequested}
+        onRequestGame={onRequestGame}
+        globalClipBeforeSeconds={globalClipBeforeSeconds}
+        globalClipAfterSeconds={globalClipAfterSeconds}
+        globalRecordingMode={globalRecordingMode}
+        automaticClipsEnabled={automaticClipsEnabled}
+      />
+    </ToastProvider>
   );
   const result = render(view());
-  return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, view };
+  return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, onRequestGame, view };
 }
 
 function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverride']) {
@@ -503,5 +514,68 @@ describe('per-game override disclosure', () => {
     fireEvent.change(screen.getByLabelText('Recording mode'), { target: { value: 'ReplayBufferOnly' } });
 
     expect(gameListFrom(update)[0].recordingModeOverride).toEqual({ mode: 'ReplayBufferOnly' });
+  });
+});
+
+describe('unsupported games', () => {
+  const STATUS = { gameId: 'unsupported-game', stage: 'unsupported' as const };
+  const CATALOGUE = [{ id: 'unsupported-game', name: 'Some Unreleased Game', detected: false }];
+
+  it('renders a row for every unsupported model status regardless of the gameList overrides', () => {
+    const { view, rerender } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+
+    const row = screen.getByTestId('unsupported-game-row');
+    expect(row.textContent).toContain('Some Unreleased Game');
+    expect(screen.getByRole('button', { name: 'Request this game' })).toBeTruthy();
+  });
+
+  it('does not render the section when nothing is unsupported', () => {
+    renderPage();
+    expect(screen.queryByTestId('unsupported-games')).toBeNull();
+  });
+
+  it('sends RequestGameAdd for the clicked game', () => {
+    const { view, rerender, onRequestGame } = renderPage();
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
+
+    expect(onRequestGame).toHaveBeenCalledTimes(1);
+    expect(onRequestGame.mock.calls[0][1]).toBe('unsupported-game');
+  });
+
+  it('shows the button as Requested and a quiet toast for an already-requested response, not an error', () => {
+    const { view, rerender, onRequestGame } = renderPage();
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+    fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
+    const requestId = onRequestGame.mock.calls[0][0] as string;
+
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS], {
+      requestId,
+      gameId: 'unsupported-game',
+      status: 'alreadyRequested',
+    }));
+
+    expect(screen.getByRole('button', { name: 'Requested' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain("already requested");
+  });
+
+  it('shows a wait message with hours for a rate-limited response', () => {
+    const { view, rerender, onRequestGame } = renderPage();
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+    fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
+    const requestId = onRequestGame.mock.calls[0][0] as string;
+
+    rerender(view(null, null, null, null, CATALOGUE, [STATUS], {
+      requestId,
+      gameId: 'unsupported-game',
+      status: 'rateLimited',
+      retryAfterSeconds: 21600,
+    }));
+
+    expect(screen.getByRole('status').textContent).toContain('6 hours');
+    expect(screen.getByRole('button', { name: 'Request this game' })).toBeTruthy();
   });
 });

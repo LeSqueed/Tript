@@ -5,6 +5,7 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { createIpcClient } from '../ipc/websocketClient';
 import { MockWebSocket, createMockSocketFactory } from '../ipc/test/mockWebSocket';
 import { SettingsView } from './SettingsView';
+import { ToastProvider } from './ui/toast/ToastProvider';
 import type {
   AudioSourceKind,
   CaptureSettings,
@@ -90,7 +91,7 @@ function pushSettings(
 function renderSettings(initialPage: 'recording' | 'general' = 'recording') {
   const { factory } = createMockSocketFactory();
   const client = createIpcClient({ createSocket: factory });
-  const result = render(<SettingsView client={client} />);
+  const result = render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
   client.connect();
   const ws = activeSocket();
   act(() => {
@@ -215,7 +216,7 @@ describe('SettingsView', () => {
   it('defaults the recording mode to the one the recorder implements', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
-    render(<SettingsView client={client} />);
+    render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
   });
@@ -867,7 +868,7 @@ describe('SettingsView', () => {
   it('forms stay editable before the backend pushes settings', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
-    render(<SettingsView client={client} />);
+    render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
     client.connect();
     const ws = activeSocket();
@@ -908,7 +909,7 @@ function renderCapture(
 ): { ws: MockWebSocket } {
   const { factory } = createMockSocketFactory();
   const client = createIpcClient({ createSocket: factory });
-  render(<SettingsView client={client} />);
+  render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
   client.connect();
   const ws = activeSocket();
   act(() => {

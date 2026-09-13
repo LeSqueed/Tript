@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -60,6 +61,30 @@ internal sealed class ResolverClient : IDisposable
         return game;
     }
 
+    internal async Task<GameRequestResult> RequestGameAsync(string gameId, string installId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installId);
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            _config.Endpoint($"games/{Uri.EscapeDataString(gameId.Trim())}/request"))
+        {
+            Content = JsonContent.Create(new { installId }, options: JsonOptions),
+        };
+        using var response = await _http.SendAsync(request, cancellationToken);
+        var payload = await response.Content.ReadFromJsonAsync<GameRequestResponse>(JsonOptions, cancellationToken)
+            ?? throw new InvalidDataException("The resolver returned an empty response.");
+        return response.StatusCode switch
+        {
+            HttpStatusCode.OK when payload.Status == "already_requested" =>
+                new GameRequestResult(GameRequestStatus.AlreadyRequested, null),
+            HttpStatusCode.OK => new GameRequestResult(GameRequestStatus.Accepted, null),
+            HttpStatusCode.TooManyRequests => new GameRequestResult(GameRequestStatus.RateLimited,
+                payload.RetryAfterSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : TimeSpan.FromHours(6)),
+            _ => throw new HttpRequestException($"Unexpected resolver response: {(int)response.StatusCode}"),
+        };
+    }
+
     private async Task<T> GetAsync<T>(Uri uri, bool authenticated, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -114,4 +139,15 @@ internal sealed class ResolverSearchResult
 internal sealed class ResolverSearchResponse
 {
     public IReadOnlyList<ResolverSearchResult> Results { get; init; } = [];
+}
+
+internal enum GameRequestStatus { Accepted, AlreadyRequested, RateLimited }
+
+internal readonly record struct GameRequestResult(GameRequestStatus Status, TimeSpan? RetryAfter);
+
+internal sealed class GameRequestResponse
+{
+    public string Status { get; init; } = string.Empty;
+    public int? RetryAfterSeconds { get; init; }
+    public string? Error { get; init; }
 }

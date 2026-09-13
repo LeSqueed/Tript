@@ -281,6 +281,13 @@ internal sealed class ResolveGameSearchParameters
     public string Input { get; set; } = string.Empty;
 }
 
+internal sealed class RequestGameAddParameters
+{
+    public string RequestId { get; set; } = string.Empty;
+
+    public string GameId { get; set; } = string.Empty;
+}
+
 internal sealed class GameCandidateParameters
 {
     public string RequestId { get; set; } = string.Empty;

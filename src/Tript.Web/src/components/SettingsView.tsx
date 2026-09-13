@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { AudioLevelsMessage, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
+import type { AudioLevelsMessage, GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ModelStatusMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
 import { HighlightsPage } from '../settings/pages/HighlightsPage';
@@ -26,6 +26,9 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
   const [audioLevels, setAudioLevels] = useState<Record<string, number>>({});
+  const [catalogueGames, setCatalogueGames] = useState<GameInfo[]>([]);
+  const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
+  const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
 
   useEffect(() => client.on('selectedGameExecutable', (content) => {
@@ -45,6 +48,20 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
     if (typeof response?.requestId === 'string' && Array.isArray(response.results)) {
       setGameSearchResults(response as GameSearchResultsMessage);
     }
+  }), [client]);
+
+  useEffect(() => client.on('gameList', (content) => {
+    if (Array.isArray(content)) setCatalogueGames(content as GameInfo[]);
+  }), [client]);
+
+  useEffect(() => client.on('modelStatus', (content) => {
+    const message = content as Partial<ModelStatusMessage> | null;
+    if (Array.isArray(message?.models)) setModelStatuses(message.models);
+  }), [client]);
+
+  useEffect(() => client.on('gameAddRequested', (content) => {
+    const response = content as Partial<GameAddRequestedMessage> | null;
+    if (typeof response?.requestId === 'string') setGameAddRequested(response as GameAddRequestedMessage);
   }), [client]);
 
   useEffect(() => client.on('audioLevels', (content) => {
@@ -145,6 +162,10 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
             onSearchGames={(requestId, query) => client.send('SearchGames', { requestId, query, limit: 20 })}
             resolvedGameSearch={resolvedGameSearch}
             onResolveGameSearch={(requestId, input) => client.send('ResolveGameSearch', { requestId, input })}
+            catalogueGames={catalogueGames}
+            modelStatuses={modelStatuses}
+            gameAddRequested={gameAddRequested}
+            onRequestGame={(requestId, gameId) => client.send('RequestGameAdd', { requestId, gameId })}
             globalClipBeforeSeconds={controller.settings.recording.automaticClipBeforeSeconds}
             globalClipAfterSeconds={controller.settings.recording.automaticClipAfterSeconds}
             globalRecordingMode={controller.settings.recording.mode}

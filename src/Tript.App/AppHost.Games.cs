@@ -101,6 +101,51 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
+    internal async Task RequestGameAddAsync(RequestGameAddParameters? parameters, ClientHandle client)
+    {
+        var requestId = parameters?.RequestId?.Trim() ?? string.Empty;
+        var gameId = parameters?.GameId?.Trim() ?? string.Empty;
+        if (requestId.Length == 0 || gameId.Length == 0 || _resolverClient is null)
+        {
+            PushGameAddRequested(client, requestId, gameId, "rejected", null,
+                "The request could not be sent.");
+            return;
+        }
+
+        try
+        {
+            var result = await _resolverClient.RequestGameAsync(gameId, InstallIdentity.Value,
+                _discoveryCancellation.Token).ConfigureAwait(false);
+            var status = result.Status switch
+            {
+                GameRequestStatus.Accepted => "accepted",
+                GameRequestStatus.AlreadyRequested => "alreadyRequested",
+                _ => "rateLimited",
+            };
+            PushGameAddRequested(client, requestId, gameId, status,
+                (int?)result.RetryAfter?.TotalSeconds, null);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException
+            or JsonException or TaskCanceledException)
+        {
+            PushGameAddRequested(client, requestId, gameId, "rejected", null,
+                "The request could not be sent.");
+        }
+    }
+
+    private static void PushGameAddRequested(ClientHandle client, string requestId, string gameId,
+        string status, int? retryAfterSeconds, string? error)
+    {
+        client.Push("gameAddRequested", JsonSerializer.SerializeToElement(new
+        {
+            requestId,
+            gameId,
+            status,
+            retryAfterSeconds,
+            error,
+        }, Wire.Options));
+    }
+
     internal void ReloadGameList()
     {
         var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson,

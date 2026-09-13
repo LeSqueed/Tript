@@ -223,6 +223,83 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 
     [Fact]
+    public async Task RequestGameAddAsync_WithoutAResolverConfigured_PushesRejected()
+    {
+        var messages = new List<(string Method, JsonElement Content)>();
+        var client = new ClientHandle((method, content) => messages.Add((method, content)));
+
+        await _host.RequestGameAddAsync(new RequestGameAddParameters
+        {
+            RequestId = "req-1",
+            GameId = "some-game",
+        }, client);
+
+        var message = Assert.Single(messages);
+        Assert.Equal("gameAddRequested", message.Method);
+        Assert.Equal("rejected", message.Content.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("accepted-game", "accepted")]
+    [InlineData("duplicate-game", "alreadyRequested")]
+    [InlineData("limited-game", "rateLimited")]
+    public async Task RequestGameAddAsync_ForwardsTheResolverOutcome(string gameId, string expectedStatus)
+    {
+        var handler = new RequestGameHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = _contentRoot,
+            SettingsPath = _store.FilePath,
+            WebRoot = _contentRoot,
+            FakeRecorder = true,
+        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        var messages = new List<(string Method, JsonElement Content)>();
+        var client = new ClientHandle((method, content) => messages.Add((method, content)));
+
+        await host.RequestGameAddAsync(new RequestGameAddParameters
+        {
+            RequestId = "req-1",
+            GameId = gameId,
+        }, client);
+
+        var message = Assert.Single(messages);
+        Assert.Equal("gameAddRequested", message.Method);
+        Assert.Equal(expectedStatus, message.Content.GetProperty("status").GetString());
+        if (expectedStatus == "rateLimited")
+            Assert.Equal(21600, message.Content.GetProperty("retryAfterSeconds").GetInt32());
+    }
+
+    private sealed class RequestGameHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.Contains("duplicate-game", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"status":"already_requested"}""", Encoding.UTF8, "application/json"),
+                });
+            }
+            if (path.Contains("limited-game", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("""{"status":"rate_limited","retryAfterSeconds":21600}""",
+                        Encoding.UTF8, "application/json"),
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"status":"accepted"}""", Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    [Fact]
     public void AnInvalidCustomGameUpdate_IsRejectedWithoutSaving()
     {
         var before = _store.Load().Game.GameList.ToList();

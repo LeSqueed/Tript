@@ -54,6 +54,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly ThumbnailStore _thumbnails;
     private readonly TrashStore _trash;
     private readonly GameCatalog _gameCatalog;
+    private readonly GameIdAliasStore _gameIdAliases;
     private readonly GameModelManager? _modelManager;
     private readonly ResolverClient? _resolverClient;
     private readonly bool _ownsResolverClient;
@@ -173,7 +174,8 @@ internal sealed partial class AppHost : IDisposable
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
         TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false,
         ResolverClient? resolverClient = null,
-        AudioDeviceInventory? audioDeviceInventory = null)
+        AudioDeviceInventory? audioDeviceInventory = null,
+        GameIdAliasStore? gameIdAliases = null)
     {
         _options = options;
         _settingsStore = settingsStore;
@@ -183,6 +185,7 @@ internal sealed partial class AppHost : IDisposable
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _resolverClient = resolverClient;
+        _gameIdAliases = gameIdAliases ?? new GameIdAliasStore();
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
 #if TRIPT_TRAINING
         MigrateLegacyTrainingFolders(_gameCatalog, TrainingPaths.RootPath,
@@ -240,8 +243,13 @@ internal sealed partial class AppHost : IDisposable
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
         if (_modelManager is not null)
-            _modelCheckTimer = new Timer(_ => EnsureModelsForGameList(), null, TimeSpan.FromHours(24),
-                TimeSpan.FromHours(24));
+        {
+            _modelCheckTimer = new Timer(_ =>
+            {
+                EnsureModelsForGameList();
+                _ = ReconcileCustomGameIdentitiesAsync();
+            }, null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
+        }
     }
 
     internal AppOptions Options => _options;

@@ -24,15 +24,14 @@ import { Button, Icon, SelectField } from './ui/controls';
 import { deriveRecorderState, formatElapsed } from './recorder/recorderState';
 
 function ModelStatusIndicator({ status }: { status?: GameModelStatus }) {
-  if (!status || status.stage === 'ready') {
+  if (!status || status.stage === 'ready' || status.stage === 'unsupported') {
     return null;
   }
 
-  if (status.stage === 'error' || status.stage === 'unsupported') {
-    const label = status.stage === 'error' ? 'Model error' : 'Model unsupported';
+  if (status.stage === 'error') {
     return (
       <span className={`rec-model-status ${status.stage}`} role="status" data-testid="model-status">
-        {status.message ? `${label}: ${status.message}` : label}
+        {status.message ? `Model error: ${status.message}` : 'Model error'}
       </span>
     );
   }

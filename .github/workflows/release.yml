@@ -1,0 +1,86 @@
+# Builds the Windows alpha bundle and publishes it as a GitHub Release whenever a version tag is
+# pushed. Runs on ubuntu-latest, not windows-latest: `make windows` cross-compiles the whole bundle
+# (dotnet publish -r win-x64, plain shell, and the apt-installable mingw-w64 cross-compiler for the
+# native launcher) without ever needing a Windows host, matching how `README.md` already builds it.
+#
+# This workflow does not publish detection models. That is `publish-model.yml`'s job, run manually
+# and separately — an alpha binary is useless until at least one model revision has been published
+# for a game, since models are fetched at runtime from data/model-manifest.json, not bundled here.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Tript.Web/package-lock.json
+
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+
+      - name: Verify tag matches Directory.Build.props version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Fq "<Version>${TAG_VERSION}</Version>" Directory.Build.props; then
+            echo "Tag $GITHUB_REF_NAME does not match <Version> in Directory.Build.props" >&2
+            exit 1
+          fi
+
+      - name: Point resolver.json at the production resolver
+        # config/resolver.json ships via a Content Include (Tript.App.csproj) that copies it
+        # verbatim into the publish output as ./resolver.json. Overwriting the checkout's copy
+        # here — never committed back — means `make windows` bakes the production resolver into
+        # the release build instead of the checked-in localhost dev default.
+        env:
+          RESOLVER_URL: ${{ secrets.RESOLVER_URL }}
+          RESOLVER_API_KEY: ${{ secrets.RESOLVER_API_KEY }}
+        run: |
+          jq -n --arg url "$RESOLVER_URL" --arg key "$RESOLVER_API_KEY" \
+            '{url: $url, apiKey: $key}' > config/resolver.json
+
+      - name: Build Windows bundle
+        run: make windows CONFIG=Release
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="Tript-${VERSION}-win-x64.zip"
+          (cd dist && zip -r "../$ZIP" Release-win)
+          sha256sum "$ZIP" > "$ZIP.sha256"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS=()
+          if [[ "$GITHUB_REF_NAME" == *-alpha* || "$GITHUB_REF_NAME" == *-beta* ]]; then
+            FLAGS+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$ZIP" "$ZIP.sha256" \
+            --title "Tript $GITHUB_REF_NAME" \
+            --generate-notes \
+            "${FLAGS[@]}"

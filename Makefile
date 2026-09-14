@@ -12,6 +12,7 @@
 #   obs-fetch  download the pinned OBS Studio Windows portable zip into third_party/
 #   test       run the .NET test suite + the frontend Vitest suite
 #   run        run the assembled binary — prefers the desktop shell, falls back to the headless host
+#   cut-release  bump the version, commit, tag, and push — triggers .github/workflows/release.yml
 #   clean      remove build outputs
 #
 # Flags (defaults):
@@ -25,6 +26,7 @@
 #   OBS_URL=<url>                 override the OBS zip download URL
 #   WIN_LAUNCHER_CC=<compiler>    mingw-w64 C compiler (default x86_64-w64-mingw32-gcc)
 #   WIN_LAUNCHER_WINDRES=<tool>   mingw-w64 resource compiler (default x86_64-w64-mingw32-windres)
+#   VERSION=<x.y.z-suffix>        cut-release: version to bump to (default: auto-increment)
 #
 # The Linux build is framework-dependent and expects OBS as a system dependency (the app
 # discovers it at runtime). The Windows build bundles a pinned OBS Studio portable zip.
@@ -60,7 +62,7 @@ WIN_LAUNCHER_CC ?= x86_64-w64-mingw32-gcc
 WIN_LAUNCHER_WINDRES ?= x86_64-w64-mingw32-windres
 
 .PHONY: all dev release linux windows obs-fetch restore-windows test test-dotnet test-web test-integration test-all
-.PHONY: run clean shell publish-shell
+.PHONY: run clean shell publish-shell cut-release
 .PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows launcher-windows
 
 all: linux
@@ -251,6 +253,44 @@ release:
 linux: publish-linux
 
 windows: publish-windows
+
+# ---- release tagging ----
+# The single command that turns a clean main into a release.yml run: bumps <Version> in
+# Directory.Build.props and "version" in package.json, commits, tags, and pushes both.
+# Without VERSION=, the trailing numeric segment after the last "." is incremented
+# (0.1.0-alpha.1 -> 0.1.0-alpha.2); pass VERSION=x.y.z-suffix explicitly for a major/minor bump
+# or to move off a prerelease suffix.
+cut-release:
+	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	if [ "$$branch" != "main" ]; then \
+		echo "cut-release: must be run from main (currently on $$branch)." >&2; exit 1; \
+	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "cut-release: working tree is not clean; commit or stash first." >&2; exit 1; \
+	fi
+	@current="$$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' Directory.Build.props)"; \
+	if [ -z "$$current" ]; then \
+		echo "cut-release: could not read <Version> from Directory.Build.props." >&2; exit 1; \
+	fi; \
+	if [ -n "$(VERSION)" ]; then \
+		next="$(VERSION)"; \
+	else \
+		base="$${current%.*}"; n="$${current##*.}"; \
+		case "$$n" in \
+			''|*[!0-9]*) \
+				echo "cut-release: can't auto-increment '$$current' — pass VERSION= explicitly." >&2; \
+				exit 1;; \
+		esac; \
+		next="$$base.$$((n + 1))"; \
+	fi; \
+	echo "Bumping $$current -> $$next"; \
+	sed -i "s#<Version>$$current</Version>#<Version>$$next</Version>#" Directory.Build.props; \
+	sed -i "s#\"version\": \"$$current\"#\"version\": \"$$next\"#" $(WEB_SRC)/package.json; \
+	git add Directory.Build.props $(WEB_SRC)/package.json; \
+	git commit -m "chore: bump version to $$next"; \
+	git tag "v$$next"; \
+	git push origin main; \
+	git push origin "v$$next"
 
 # ---- run ----
 # The app host is headless: it prints READY on stdout and serves its UI over HTTP. There is no

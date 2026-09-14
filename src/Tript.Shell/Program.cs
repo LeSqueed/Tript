@@ -313,7 +313,11 @@ internal static class Program
                 {
                     if (WindowsWindow.IsForeground(window))
                         return;
+#if WINDOWS_TOAST
+                    WindowsToastNotifications.Show(title, body, Path.Combine(host.Options.WebRoot, "tript.png"));
+#else
                     window.SendNotification(title, body);
+#endif
                 });
             }
             catch (Exception exception)

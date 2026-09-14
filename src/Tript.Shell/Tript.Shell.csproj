@@ -6,7 +6,6 @@
          app's UI host, and reuses Tript.App's construction seam (AppHost.BuildApp). Like the app
          host, it must be an apphost executable so the ffmpeg_muxer plugin can resolve its helper
          next to the actual binary. -->
-    <TargetFrameworks>net10.0</TargetFrameworks>
     <Platforms>x64</Platforms>
     <!-- WinExe, not Exe: the subsystem bit is what decides whether Windows opens a console window
          for the process. A desktop app that shows a Photino window must not also raise an empty
@@ -22,6 +21,19 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+  <!-- Native Windows toast notifications need a Windows-flavored TFM to expose ToastContentBuilder
+       at all; scoped to just that TFM the same way EnableTraining/TRIPT_TRAINING keeps an opt-in
+       feature out of every build. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+    <DefineConstants>$(DefineConstants);WINDOWS_TOAST</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <!-- Microsoft.Toolkit.Uwp.Notifications 7.1.3 transitively pulls System.Drawing.Common 4.7.0,
+         which has a known critical RCE (GHSA-rxg9-xrhp-64gj, Mac/Linux-only, and we never call into
+         its API surface ourselves either way) — pin explicitly to a patched version. -->
+    <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
   </ItemGroup>
   <ItemGroup>
     <!-- The shell's startup preflights are decision logic worth asserting (WebviewAudioSink refuses

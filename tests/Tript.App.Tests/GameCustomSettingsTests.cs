@@ -137,6 +137,43 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.Equal("Example Game", game.Name);
         Assert.Equal(executablePath, game.ExecutablePath);
         Assert.Equal("/resolve?input=steam%3A824270", Assert.Single(handler.Requests));
+
+        // A brand-new recognized game is no longer gated behind a "Record? Yes/No" prompt — the
+        // existing auto-record setting/override is consulted immediately, same as any other game.
+        Assert.True(host.ShouldAutoRecord(ResolverHandler.GameId));
+    }
+
+    [Fact]
+    public void FullscreenCandidate_WhenAutoRecordIsDisabled_IsStillAddedButIsNotFlaggedToAutoRecord()
+    {
+        var root = Path.Combine(_contentRoot, "resolved-no-auto-record");
+        var installRoot = Path.Combine(root, "steamapps", "common", "ExampleGame");
+        Directory.CreateDirectory(installRoot);
+        var executablePath = Path.Combine(installRoot, "example.exe");
+        File.WriteAllText(executablePath, "exe");
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        store.Load().Game.AutoRecordDetectedGames = false;
+        store.Save();
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        host.SetInventoryForTesting(new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
+                "Example Game", installRoot, ImmutableArray<string>.Empty),
+        ], []));
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
+
+        Assert.True(SpinWait.SpinUntil(() => host.GameList.Any(game => game.Id == ResolverHandler.GameId),
+            TimeSpan.FromSeconds(3)));
+        Assert.False(host.ShouldAutoRecord(ResolverHandler.GameId));
     }
 
     [Fact]

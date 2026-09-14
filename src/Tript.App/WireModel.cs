@@ -304,13 +304,6 @@ internal sealed class AddGameCandidateParameters
     public string ExecutablePath { get; set; } = string.Empty;
 }
 
-internal sealed class GameRecordingConfirmParameters
-{
-    public string PromptId { get; set; } = string.Empty;
-
-    public bool Record { get; set; }
-}
-
 internal sealed class PublishTrainingModelParameters
 {
     public string RequestId { get; set; } = string.Empty;

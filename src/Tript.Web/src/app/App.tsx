@@ -9,7 +9,7 @@ import { WarningToasts } from '../components/toasts/WarningToasts';
 import { ConnectionToasts } from '../components/toasts/ConnectionToasts';
 import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToasts';
 import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
-import { GameRecordingToasts } from '../components/toasts/GameRecordingToasts';
+import { GameAddedToasts } from '../components/toasts/GameAddedToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionsView } from '../components/SessionsView';
@@ -189,6 +189,7 @@ function AppShell({
   const { push, dismiss } = useToast();
   const [pendingRestore, setPendingRestore] = useState<ContentItem | null>(null);
   const restoreSentRef = useRef(false);
+  const [gameSettingsFocus, setGameSettingsFocus] = useState<string | null>(null);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const savedScrollTop = useRef(0);
@@ -564,6 +565,10 @@ function AppShell({
     replaceRouteHash('settings');
     leaveFor('settings');
   }, [leaveFor]);
+  const openGameSettings = useCallback((gameId: string) => {
+    setGameSettingsFocus(gameId);
+    showSettings();
+  }, [showSettings]);
   const showTraining = useCallback(() => leaveFor('training'), [leaveFor]);
   const backFromPlayer = useCallback(() => {
     if (playerReturnRoute === 'session') {
@@ -656,7 +661,7 @@ function AppShell({
         <WarningToasts client={client} />
         <DisplayFallbackToasts client={client} />
         <GameCandidateToasts client={client} />
-        <GameRecordingToasts client={client} />
+        <GameAddedToasts client={client} onOpenGameSettings={openGameSettings} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}
@@ -723,7 +728,14 @@ function AppShell({
               />
             </div>
           )}
-          {route === 'settings' && <SettingsView client={client} builtInGameIds={builtInGameIds} />}
+          {route === 'settings' && (
+            <SettingsView
+              client={client}
+              builtInGameIds={builtInGameIds}
+              focusGameId={gameSettingsFocus}
+              onFocusGameHandled={() => setGameSettingsFocus(null)}
+            />
+          )}
           {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}
         </div>
       </main>

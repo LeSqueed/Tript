@@ -68,6 +68,18 @@ public sealed class SettingsResolver
         return (TimeSpan.FromSeconds(beforeSeconds), TimeSpan.FromSeconds(afterSeconds));
     }
 
+    public static bool ResolveAutoRecord(Settings settings, string? gameId)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        GameSetting? game = null;
+        if (!string.IsNullOrEmpty(gameId))
+            game = settings.Game.GameList.FirstOrDefault(g =>
+                string.Equals(g.Id, gameId, StringComparison.OrdinalIgnoreCase));
+
+        return game?.AutoRecordOverride ?? settings.Game.AutoRecordDetectedGames;
+    }
+
     // gameId is unused today — reserved for a future per-game hotkey override layer, which would
     // consult it the same way every other Resolve* method here consults game?.XyzOverride ?? global.
     public static IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> ResolveEffectiveHotkeys(

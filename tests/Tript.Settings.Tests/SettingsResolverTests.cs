@@ -334,4 +334,35 @@ public class SettingsResolverTests
         Assert.Equal(TimeSpan.FromSeconds(6), before);
         Assert.Equal(TimeSpan.FromSeconds(6), after);
     }
+
+    [Fact]
+    public void ResolveAutoRecord_NoOverride_UsesTheGlobalDefault()
+    {
+        var settings = new Settings { Game = { AutoRecordDetectedGames = true } };
+
+        Assert.True(SettingsResolver.ResolveAutoRecord(settings, gameId: "unknown-game"));
+
+        settings.Game.AutoRecordDetectedGames = false;
+        Assert.False(SettingsResolver.ResolveAutoRecord(settings, gameId: "unknown-game"));
+    }
+
+    [Fact]
+    public void ResolveAutoRecord_WithOverride_WinsOverTheGlobalDefaultEitherWay()
+    {
+        var settingsGlobalOn = WithGame("ow", game => game.AutoRecordOverride = false);
+        settingsGlobalOn.Game.AutoRecordDetectedGames = true;
+        Assert.False(SettingsResolver.ResolveAutoRecord(settingsGlobalOn, gameId: "ow"));
+
+        var settingsGlobalOff = WithGame("ow", game => game.AutoRecordOverride = true);
+        settingsGlobalOff.Game.AutoRecordDetectedGames = false;
+        Assert.True(SettingsResolver.ResolveAutoRecord(settingsGlobalOff, gameId: "ow"));
+    }
+
+    [Fact]
+    public void ResolveAutoRecord_NullGameId_UsesTheGlobalDefault()
+    {
+        var settings = new Settings { Game = { AutoRecordDetectedGames = false } };
+
+        Assert.False(SettingsResolver.ResolveAutoRecord(settings, gameId: null));
+    }
 }

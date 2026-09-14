@@ -131,6 +131,20 @@ afterEach(() => {
 });
 
 describe('SettingsView', () => {
+  it('opens directly to the Games tab when a game focus is requested', () => {
+    const { factory } = createMockSocketFactory();
+    const client = createIpcClient({ createSocket: factory });
+    render(<ToastProvider><SettingsView client={client} focusGameId="custom-existing" /></ToastProvider>);
+    client.connect();
+    const ws = activeSocket();
+    act(() => {
+      ws.serverOpen();
+    });
+    pushSettings(ws);
+
+    expect(screen.getByRole('tab', { name: 'Games' }).getAttribute('aria-selected')).toBe('true');
+  });
+
   it('renders the seven tabs and the recording page controls', () => {
     renderSettings('general');
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([

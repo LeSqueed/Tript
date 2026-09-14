@@ -26,9 +26,7 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    private readonly object _gameRecordingPromptGate = new();
-    private readonly Dictionary<string, PendingGameRecording> _gameRecordingPrompts =
-        new(StringComparer.Ordinal);
+    private readonly object _candidateResolutionGate = new();
     private readonly HashSet<string> _resolvingCandidatePaths = new(FilePaths.Comparer);
 
     private void WireAutoStart()
@@ -212,7 +210,7 @@ internal sealed partial class AppHost
 
         if (_resolverClient is not null)
         {
-            lock (_gameRecordingPromptGate)
+            lock (_candidateResolutionGate)
             {
                 if (!_resolvingCandidatePaths.Add(normalized))
                     return;
@@ -253,11 +251,10 @@ internal sealed partial class AppHost
             if (_disposed || _shuttingDown)
                 return;
 
-            var promptId = Guid.NewGuid().ToString("N");
             var displayName = string.IsNullOrWhiteSpace(resolved.DisplayName)
                 ? Path.GetFileNameWithoutExtension(candidate.Executable)
                 : resolved.DisplayName;
-            var prompt = new PendingGameRecording(promptId, resolved.GameId, displayName, normalized);
+            var wasNew = false;
             lock (_settingsUpdateGate)
             {
                 var saved = _settingsStore.TryUpdate(settings =>
@@ -273,6 +270,7 @@ internal sealed partial class AppHost
                             ExecutablePath = _gameCatalog.EntryById(resolved.GameId) is null ? normalized : null,
                         };
                         settings.Game.GameList.Add(game);
+                        wasNew = true;
                     }
                     return ValidateGameList(settings.Game.GameList, out var validationError)
                         ? null
@@ -285,14 +283,13 @@ internal sealed partial class AppHost
                     return;
                 }
 
-                lock (_gameRecordingPromptGate)
-                    _gameRecordingPrompts[promptId] = prompt;
                 ReloadGameList();
                 RebuildDetectionTargets();
                 PushGameList();
                 PushSettings();
             }
-            PushGameRecordingPrompt(prompt);
+            if (wasNew)
+                PushGameAdded(resolved.GameId, displayName, normalized);
         }
         catch (OperationCanceledException) when (_discoveryCancellation.IsCancellationRequested)
         {
@@ -310,9 +307,19 @@ internal sealed partial class AppHost
         }
         finally
         {
-            lock (_gameRecordingPromptGate)
+            lock (_candidateResolutionGate)
                 _resolvingCandidatePaths.Remove(normalized);
         }
+    }
+
+    private void PushGameAdded(string gameId, string name, string executablePath)
+    {
+        _ipc.Broadcast("gameAdded", JsonSerializer.SerializeToElement(new
+        {
+            gameId,
+            name,
+            executablePath,
+        }, Wire.Options));
     }
 
     internal sealed record CandidateResolution(string Input, bool StoreBacked);
@@ -328,64 +335,6 @@ internal sealed partial class AppHost
             ? new CandidateResolution(installed.ProductId.ToString(), true)
             : new CandidateResolution($"executable:{ExecutableNames.Normalize(executable)}", false);
     }
-
-    internal void ConfirmGameRecording(string promptId, bool record)
-    {
-        PendingGameRecording? prompt;
-        lock (_gameRecordingPromptGate)
-        {
-            if (!_gameRecordingPrompts.TryGetValue(promptId, out prompt))
-                return;
-        }
-
-        lock (_settingsUpdateGate)
-        {
-            var saved = _settingsStore.TryUpdate(settings =>
-            {
-                var game = settings.Game.GameList.FirstOrDefault(value =>
-                    string.Equals(value.Id, prompt.GameId, StringComparison.OrdinalIgnoreCase));
-                if (game is null)
-                    return "the resolved game is no longer in settings.";
-                game.AutoRecordOverride = record == settings.Game.AutoRecordDetectedGames ? null : record;
-                return null;
-            }, out _, out var failure);
-            if (!saved)
-            {
-                PushError($"That recording preference was not saved: {failure}");
-                PushGameRecordingPrompt(prompt);
-                return;
-            }
-        }
-
-        lock (_gameRecordingPromptGate)
-            _gameRecordingPrompts.Remove(promptId);
-        _ipc.Broadcast("gameRecordingPromptCleared", JsonSerializer.SerializeToElement(new { promptId }, Wire.Options));
-        ReloadGameList();
-        PushSettings();
-        if (record && _detectedGames.LatestOwner(prompt.GameId) is { } owner)
-            ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(prompt.GameId, owner));
-    }
-
-    internal void PushPendingGameRecordingPrompts(ClientHandle client)
-    {
-        PendingGameRecording[] prompts;
-        lock (_gameRecordingPromptGate)
-            prompts = _gameRecordingPrompts.Values.ToArray();
-        foreach (var prompt in prompts)
-            client.Push("gameRecordingPrompt", SerializeGameRecordingPrompt(prompt));
-    }
-
-    private void PushGameRecordingPrompt(PendingGameRecording prompt)
-        => _ipc.Broadcast("gameRecordingPrompt", SerializeGameRecordingPrompt(prompt));
-
-    private static JsonElement SerializeGameRecordingPrompt(PendingGameRecording prompt)
-        => JsonSerializer.SerializeToElement(new
-        {
-            prompt.PromptId,
-            prompt.GameId,
-            prompt.Name,
-            prompt.ExecutablePath,
-        }, Wire.Options);
 
     private void OnFullscreenCandidateCleared(FullscreenGameCandidate candidate)
     {
@@ -508,25 +457,8 @@ internal sealed partial class AppHost
         ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(gameId, owner));
     }
 
-    internal bool ShouldAutoRecord(string gameId)
-    {
-        lock (_gameRecordingPromptGate)
-        {
-            if (_gameRecordingPrompts.Values.Any(prompt =>
-                string.Equals(prompt.GameId, gameId, StringComparison.OrdinalIgnoreCase)))
-            {
-                return false;
-            }
-        }
-
-        var settings = _settingsStore.Load();
-        var game = settings.Game.GameList.FirstOrDefault(value =>
-            string.Equals(value.Id, gameId, StringComparison.OrdinalIgnoreCase));
-        return game?.AutoRecordOverride ?? settings.Game.AutoRecordDetectedGames;
-    }
-
-    private sealed record PendingGameRecording(string PromptId, string GameId, string Name,
-        string ExecutablePath);
+    internal bool ShouldAutoRecord(string gameId) =>
+        SettingsResolver.ResolveAutoRecord(_settingsStore.Load(), gameId);
 
     private void StartDetectedGameRecording(string gameId, string owner)
     {

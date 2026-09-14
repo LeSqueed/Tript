@@ -130,9 +130,11 @@ export type CloseBehavior = 'Exit' | 'HideToTray';
 export interface NotificationSettings {
   enabled: boolean;
   recordingStarted: boolean;
+  recordingStartedSound: boolean;
   recordingStopped: boolean;
+  recordingStoppedSound: boolean;
   errors: boolean;
-  recovery: boolean;
+  errorsSound: boolean;
   [key: string]: unknown;
 }
 

@@ -41,9 +41,11 @@ export function GeneralPage({
   const notifications = settings.notifications ?? {
     enabled: true,
     recordingStarted: true,
+    recordingStartedSound: true,
     recordingStopped: true,
+    recordingStoppedSound: true,
     errors: true,
-    recovery: true,
+    errorsSound: true,
   };
 
   function updateNotification(name: keyof GeneralSettings['notifications'], value: boolean) {
@@ -135,30 +137,57 @@ export function GeneralPage({
           onChange={(checked) => updateNotification('enabled', checked)}
           label="Enable desktop notifications"
         />
-        <Toggle
-          checked={notifications.recordingStarted}
-          onChange={(checked) => updateNotification('recordingStarted', checked)}
-          label="Recording started"
-          disabled={!notifications.enabled}
-        />
-        <Toggle
-          checked={notifications.recordingStopped}
-          onChange={(checked) => updateNotification('recordingStopped', checked)}
-          label="Recording stopped"
-          disabled={!notifications.enabled}
-        />
-        <Toggle
-          checked={notifications.errors}
-          onChange={(checked) => updateNotification('errors', checked)}
-          label="Errors"
-          disabled={!notifications.enabled}
-        />
-        <Toggle
-          checked={notifications.recovery}
-          onChange={(checked) => updateNotification('recovery', checked)}
-          label="Unfinished recording found"
-          disabled={!notifications.enabled}
-        />
+        <div className="field">
+          <span className="field-label">Recording started</span>
+          <div className="toggle-pair">
+            <Toggle
+              checked={notifications.recordingStarted}
+              onChange={(checked) => updateNotification('recordingStarted', checked)}
+              label="Show notification"
+              disabled={!notifications.enabled}
+            />
+            <Toggle
+              checked={notifications.recordingStartedSound}
+              onChange={(checked) => updateNotification('recordingStartedSound', checked)}
+              label="Play sound"
+              disabled={!notifications.enabled}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label">Recording stopped</span>
+          <div className="toggle-pair">
+            <Toggle
+              checked={notifications.recordingStopped}
+              onChange={(checked) => updateNotification('recordingStopped', checked)}
+              label="Show notification"
+              disabled={!notifications.enabled}
+            />
+            <Toggle
+              checked={notifications.recordingStoppedSound}
+              onChange={(checked) => updateNotification('recordingStoppedSound', checked)}
+              label="Play sound"
+              disabled={!notifications.enabled}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label">Errors</span>
+          <div className="toggle-pair">
+            <Toggle
+              checked={notifications.errors}
+              onChange={(checked) => updateNotification('errors', checked)}
+              label="Show notification"
+              disabled={!notifications.enabled}
+            />
+            <Toggle
+              checked={notifications.errorsSound}
+              onChange={(checked) => updateNotification('errorsSound', checked)}
+              label="Play sound"
+              disabled={!notifications.enabled}
+            />
+          </div>
+        </div>
       </section>
     </div>
   );

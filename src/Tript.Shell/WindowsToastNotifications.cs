@@ -17,6 +17,9 @@ internal static class WindowsToastNotifications
         var builder = new ToastContentBuilder().AddText(title).AddText(body);
         if (iconPath is not null && File.Exists(iconPath))
             builder.AddAppLogoOverride(new Uri(iconPath), ToastGenericAppLogoCrop.Default);
+        // The custom cue is played separately via NativeSound — the toast itself always stays
+        // silent so Windows' own default "ding" never layers on top of it.
+        builder.AddAudio(new ToastAudio { Silent = true });
         builder.Show();
     }
 }

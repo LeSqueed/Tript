@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { GeneralPage } from './GeneralPage';
 import type { GeneralSettings, RecordingSettings } from '../settingsModel';
 
@@ -13,9 +13,11 @@ const GENERAL: GeneralSettings = {
   notifications: {
     enabled: true,
     recordingStarted: true,
+    recordingStartedSound: true,
     recordingStopped: true,
+    recordingStoppedSound: true,
     errors: true,
-    recovery: true,
+    errorsSound: true,
   },
 };
 
@@ -88,6 +90,26 @@ describe('trash retention', () => {
         update={vi.fn()} page="general" />,
     );
     expect(trashRetention().selectedOptions[0].text).toBe('Never');
+  });
+});
+
+describe('notification show/sound toggles', () => {
+  function fieldFor(label: string) {
+    return screen.getByText(label).closest('.field') as HTMLElement;
+  }
+
+  it('updates only the sound toggle for an event, independent of showing it', () => {
+    const update = renderPage();
+    fireEvent.click(within(fieldFor('Recording started')).getByLabelText('Play sound'));
+
+    expect(update).toHaveBeenCalledWith('general', { notifications: { recordingStartedSound: false } });
+  });
+
+  it('updates only the show toggle for an event, independent of its sound', () => {
+    const update = renderPage();
+    fireEvent.click(within(fieldFor('Recording started')).getByLabelText('Show notification'));
+
+    expect(update).toHaveBeenCalledWith('general', { notifications: { recordingStarted: false } });
   });
 });
 

@@ -110,6 +110,12 @@
   font-size: 11px;
 }
 
+.toggle-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
 .input {
   background: var(--color-base-300);
   color: var(--color-base-content);

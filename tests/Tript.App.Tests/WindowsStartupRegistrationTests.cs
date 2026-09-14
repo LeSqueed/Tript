@@ -97,19 +97,21 @@ public sealed class WindowsStartupRegistrationTests
     [InlineData(true, Tript.App.NotificationKind.RecordingStarted)]
     [InlineData(true, Tript.App.NotificationKind.RecordingStopped)]
     [InlineData(true, Tript.App.NotificationKind.Error)]
-    [InlineData(true, Tript.App.NotificationKind.Recovery)]
     public void EnabledNotificationKinds_AreAccepted(bool enabled, Tript.App.NotificationKind kind)
     {
         var settings = new Tript.Settings.NotificationSettings
         {
             Enabled = enabled,
             RecordingStarted = true,
+            RecordingStartedSound = true,
             RecordingStopped = true,
+            RecordingStoppedSound = true,
             Errors = true,
-            Recovery = true,
+            ErrorsSound = true,
         };
 
         Assert.True(Tript.Shell.Program.NotificationEnabled(settings, kind));
+        Assert.True(Tript.Shell.Program.SoundEnabled(settings, kind));
     }
 
     [Fact]

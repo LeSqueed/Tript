@@ -137,9 +137,13 @@ public sealed class NotificationSettings
 
     public bool RecordingStarted { get; set; } = true;
 
+    public bool RecordingStartedSound { get; set; } = true;
+
     public bool RecordingStopped { get; set; } = true;
+
+    public bool RecordingStoppedSound { get; set; } = true;
 
     public bool Errors { get; set; } = true;
 
-    public bool Recovery { get; set; } = true;
+    public bool ErrorsSound { get; set; } = true;
 }

@@ -50,9 +50,11 @@ const DEFAULT_SETTINGS: SettingsModel = {
     notifications: {
       enabled: true,
       recordingStarted: true,
+      recordingStartedSound: true,
       recordingStopped: true,
+      recordingStoppedSound: true,
       errors: true,
-      recovery: true,
+      errorsSound: true,
     },
   },
   hotkeys: {

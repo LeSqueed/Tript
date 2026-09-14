@@ -1,6 +1,5 @@
-#define UNICODE
-#define _UNICODE
-
+// -municode (Makefile's launcher-windows target) already predefines UNICODE/_UNICODE on the
+// compiler command line; redefining them here trips -Werror on newer mingw-w64 as a hard error.
 #include <windows.h>
 #include <wchar.h>
 

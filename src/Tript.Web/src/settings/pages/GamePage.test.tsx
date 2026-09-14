@@ -33,6 +33,8 @@ function renderPage(
   globalClipAfterSeconds = 8,
   globalRecordingMode: RecordingMode = 'SessionWithReplayBuffer',
   automaticClipsEnabled = true,
+  focusGameId: string | null = null,
+  onFocusHandled: () => void = vi.fn(),
 ) {
   const update = vi.fn((_page: string, _patch: Partial<Record<string, unknown>>) => 'settings-request-1');
   const onBrowseExecutable = vi.fn();
@@ -70,6 +72,8 @@ function renderPage(
         globalClipAfterSeconds={globalClipAfterSeconds}
         globalRecordingMode={globalRecordingMode}
         automaticClipsEnabled={automaticClipsEnabled}
+        focusGameId={focusGameId}
+        onFocusHandled={onFocusHandled}
       />
     </ToastProvider>
   );
@@ -514,6 +518,82 @@ describe('per-game override disclosure', () => {
     fireEvent.change(screen.getByLabelText('Recording mode'), { target: { value: 'ReplayBufferOnly' } });
 
     expect(gameListFrom(update)[0].recordingModeOverride).toEqual({ mode: 'ReplayBufferOnly' });
+  });
+});
+
+describe('automatic capture', () => {
+  it('shows the global toggle checked by default and sends a game page patch on change', () => {
+    const { update } = renderPage();
+    const toggle = screen.getByLabelText('Automatically record recognized games when they launch') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    fireEvent.click(toggle);
+
+    expect(update).toHaveBeenCalledWith('game', { autoRecordDetectedGames: false });
+  });
+
+  it('reflects an explicit false global setting', () => {
+    renderPage({ ...SETTINGS, autoRecordDetectedGames: false });
+    const toggle = screen.getByLabelText('Automatically record recognized games when they launch') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('defaults the per-game override to inherit and marks it modified once set', () => {
+    renderPage(oneGame());
+    expect((screen.getByLabelText('Auto-record on launch') as HTMLSelectElement).value).toBe('');
+    expect(screen.queryByText('modified')).toBeNull();
+  });
+
+  it('sends true and false overrides distinctly from clearing the override', () => {
+    const { update, rerender, view } = renderPage(oneGame());
+
+    fireEvent.change(screen.getByLabelText('Auto-record on launch'), { target: { value: 'true' } });
+    expect(gameListFrom(update)[0].autoRecordOverride).toBe(true);
+
+    rerender(view());
+    fireEvent.change(screen.getByLabelText('Auto-record on launch'), { target: { value: 'false' } });
+    expect(gameListFrom(update)[0].autoRecordOverride).toBe(false);
+
+    rerender(view());
+    fireEvent.change(screen.getByLabelText('Auto-record on launch'), { target: { value: '' } });
+    expect(gameListFrom(update)[0].autoRecordOverride).toBe(null);
+  });
+
+  it('shows the modified marker once an override is set', () => {
+    renderPage({
+      gameCaptureTimeout: 10,
+      ignoredApplications: [],
+      gameList: [{ id: PACKAGED_ID, name: 'Overwatch', autoRecordOverride: false }],
+    });
+
+    expect(screen.getByText('modified')).toBeTruthy();
+  });
+});
+
+describe('focusing a game from a deep link', () => {
+  it('scrolls the matching row into view, highlights it, and reports the focus as handled', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const onFocusHandled = vi.fn();
+
+    const { container } = renderPage(
+      SETTINGS, null, 5, 8, 'SessionWithReplayBuffer', true, 'custom-existing', onFocusHandled,
+    );
+
+    const row = container.querySelector('[data-game-id="custom-existing"]');
+    expect(row).toBeTruthy();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(row?.className).toContain('game-row-highlighted');
+    expect(onFocusHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when no game is focused', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    renderPage();
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });
 

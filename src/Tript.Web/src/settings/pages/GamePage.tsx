@@ -4,10 +4,11 @@ import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { DisplayCaptureMethod, GameSetting, RecordingMode } from '../settingsModel';
 import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResult, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
-import { Button, SelectField, TextField } from '../../components/ui/controls';
+import { Button, SelectField, TextField, Toggle } from '../../components/ui/controls';
 import { useToast } from '../../components/ui/toast/ToastProvider';
 
 function hasOverrides(game: GameSetting): boolean {
+  if (game.autoRecordOverride !== null && game.autoRecordOverride !== undefined) return true;
   if (game.recordingModeOverride?.mode !== null && game.recordingModeOverride?.mode !== undefined) return true;
   if (game.captureMethodOverride?.method !== null && game.captureMethodOverride?.method !== undefined) return true;
   if (game.qualityOverride !== null && game.qualityOverride !== undefined) {
@@ -38,6 +39,12 @@ const RECORDING_MODE_OVERRIDES: { value: string; label: string }[] = [
   { value: 'Session', label: 'Session' },
   { value: 'SessionWithReplayBuffer', label: 'Session + Replay Buffer' },
   { value: 'ReplayBufferOnly', label: 'Replay buffer only' },
+];
+
+const AUTO_RECORD_OVERRIDES: { value: string; label: string }[] = [
+  { value: '', label: 'Inherit global setting' },
+  { value: 'true', label: 'Always' },
+  { value: 'false', label: 'Never' },
 ];
 
 const DEFAULT_CLIP_BEFORE_SECONDS = 5;
@@ -71,6 +78,8 @@ export function GamePage({
   globalClipAfterSeconds,
   globalRecordingMode,
   automaticClipsEnabled,
+  focusGameId,
+  onFocusHandled,
 }: {
   settings: import('../settingsModel').GameSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
@@ -92,6 +101,8 @@ export function GamePage({
   globalClipAfterSeconds?: number;
   globalRecordingMode: RecordingMode;
   automaticClipsEnabled: boolean;
+  focusGameId?: string | null;
+  onFocusHandled?: () => void;
 }) {
   const clipBeforeSeconds = globalClipBeforeSeconds ?? DEFAULT_CLIP_BEFORE_SECONDS;
   const clipAfterSeconds = globalClipAfterSeconds ?? DEFAULT_CLIP_AFTER_SECONDS;
@@ -110,6 +121,17 @@ export function GamePage({
   const [gameRequestState, setGameRequestState] = useState<Record<string, 'pending' | 'accepted' | 'alreadyRequested' | 'rateLimited'>>({});
   const pendingGameRequests = useRef<Map<string, string>>(new Map());
   const toast = useToast();
+  const [highlightedGameId, setHighlightedGameId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusGameId) return;
+    const row = document.querySelector(`[data-game-id="${CSS.escape(focusGameId)}"]`);
+    row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedGameId(focusGameId);
+    onFocusHandled?.();
+    const timeout = window.setTimeout(() => setHighlightedGameId(null), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [focusGameId]);
 
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
   const ignoredApplications = Array.isArray(settings.ignoredApplications) ? settings.ignoredApplications : [];
@@ -306,6 +328,14 @@ export function GamePage({
 
   return (
     <div className="settings-page" data-page="game">
+      <section className="settings-section" aria-labelledby="game-auto-capture-heading">
+        <h3 className="subheading" id="game-auto-capture-heading">Automatic capture</h3>
+        <Toggle
+          checked={settings.autoRecordDetectedGames !== false}
+          onChange={(checked) => update(page, { autoRecordDetectedGames: checked })}
+          label="Automatically record recognized games when they launch"
+        />
+      </section>
       {unsupportedGames.length > 0 && (
         <div className="game-list unsupported-games" data-testid="unsupported-games">
           <div className="game-list-heading">
@@ -452,7 +482,11 @@ export function GamePage({
             ? 'Automatic highlights are off in global settings.'
             : 'Automatic highlights need a replay buffer recording mode.';
           return (
-          <div className="game-row" key={game.id ?? index}>
+          <div
+            className={highlightedGameId === game.id ? 'game-row game-row-highlighted' : 'game-row'}
+            key={game.id ?? index}
+            data-game-id={game.id}
+          >
             <div className="game-row-main">
               <strong>{game.name}</strong>
               <span className="muted small">{game.id}</span>
@@ -491,6 +525,17 @@ export function GamePage({
                     } else {
                       patchGame(index, { recordingModeOverride: { mode: value as RecordingMode } });
                     }
+                  }}
+                />
+              </label>
+
+              <label className="settings-inline-field">
+                <span className="muted small">Auto-record on launch</span>
+                <SelectField
+                  value={game.autoRecordOverride === true ? 'true' : game.autoRecordOverride === false ? 'false' : ''}
+                  options={AUTO_RECORD_OVERRIDES}
+                  onChange={(value) => {
+                    patchGame(index, { autoRecordOverride: value === '' ? null : value === 'true' });
                   }}
                 />
               </label>

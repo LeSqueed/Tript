@@ -281,8 +281,7 @@ export interface TrainingOcrEventDefinition {
   };
 }
 
-export interface GameRecordingPromptMessage {
-  promptId: string;
+export interface GameAddedMessage {
   gameId: string;
   name: string;
   executablePath: string;
@@ -640,11 +639,6 @@ export interface TrainingOcrRegion {
   text: string;
 }
 
-export interface GameRecordingConfirmParameters {
-  promptId: string;
-  record: boolean;
-}
-
 export interface UpdateTrainingEventsParameters {
   gameId: string;
   requestId: string;
@@ -714,7 +708,6 @@ export type CommandParameters =
   | RequestGameAddParameters
   | AddGameCandidateParameters
   | IgnoreGameCandidateParameters
-  | GameRecordingConfirmParameters
   | OpenFileLocationParameters
   | CopyFileToClipboardParameters
   | OpenInBrowserParameters
@@ -771,7 +764,6 @@ export type CommandName =
   | 'RequestGameAdd'
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
-  | 'GameRecordingConfirm'
   | 'ApplyVideoPreset'
   | 'ApplyClipPreset'
   | 'OpenFileLocation'
@@ -818,8 +810,7 @@ export type MessageName =
   | 'gameCandidate'
   | 'gameCandidateCleared'
   | 'gameCandidateActionResult'
-  | 'gameRecordingPrompt'
-  | 'gameRecordingPromptCleared'
+  | 'gameAdded'
   | 'gameList'
   | 'error'
   | 'warning'

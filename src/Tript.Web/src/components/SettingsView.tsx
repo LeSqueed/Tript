@@ -22,8 +22,22 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'hotkeys', label: 'Hotkeys' },
 ];
 
-export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClient; builtInGameIds?: readonly string[] }) {
+export function SettingsView({
+  client,
+  builtInGameIds = [],
+  focusGameId = null,
+  onFocusGameHandled,
+}: {
+  client: IpcClient;
+  builtInGameIds?: readonly string[];
+  focusGameId?: string | null;
+  onFocusGameHandled?: () => void;
+}) {
   const [page, setPage] = useState<SettingsPageName>('general');
+
+  useEffect(() => {
+    if (focusGameId) setPage('game');
+  }, [focusGameId]);
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
@@ -161,6 +175,8 @@ export function SettingsView({ client, builtInGameIds = [] }: { client: IpcClien
             page={page}
             externalPushCount={controller.externalPushCount}
             builtInGameIds={builtInGameIds}
+            focusGameId={focusGameId}
+            onFocusHandled={onFocusGameHandled}
             selectedGameExecutable={selectedGameExecutable}
             settingsUpdateResult={controller.settingsUpdateResult}
             onBrowseExecutable={(requestId) => client.send('SelectGameExecutable', { requestId })}

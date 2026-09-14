@@ -85,12 +85,6 @@ internal sealed class AppController
                 var parsed = parameters.Deserialize<GameCandidateParameters>();
                 _host.IgnoreGameCandidate(parsed?.ExecutablePath, parsed?.RequestId);
             },
-            ["GameRecordingConfirm"] = (parameters, _) =>
-            {
-                var parsed = parameters.Deserialize<GameRecordingConfirmParameters>();
-                if (parsed is not null)
-                    _host.ConfirmGameRecording(parsed.PromptId, parsed.Record);
-            },
             ["ApplyVideoPreset"] = (_, _) => {  },
             ["ApplyClipPreset"] = (_, _) => {  },
             ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
@@ -168,7 +162,6 @@ internal sealed class AppController
         _host.PushSettings();
         _host.PushGameList();
         _host.PushModelStatus();
-        _host.PushPendingGameRecordingPrompts(client);
 
         _host.RaiseRecoveryPromptIfNeeded(client);
     }

@@ -141,7 +141,7 @@ describe('App shell', () => {
     expect(screen.getByTestId('library-groups')).toBeTruthy();
   });
 
-  it('requests games once and does not request them again in response to gameList', () => {
+  it('requests games once per subscriber and does not request them again in response to gameList', () => {
     renderApp();
     connect();
     const socket = activeSocket();
@@ -149,12 +149,42 @@ describe('App shell', () => {
       .map((frame) => JSON.parse(frame) as { method?: string })
       .filter((frame) => frame.method === 'ListGames').length;
 
-    expect(listGamesCount()).toBe(1);
+    // One request from App's own builtInGameIds tracking, one from the (always-mounted, hidden)
+    // SettingsView's Games page catalogue fetch — each independent, neither should double-fire.
+    const afterConnect = listGamesCount();
+    expect(afterConnect).toBeGreaterThan(0);
     act(() => socket.serverMessage(JSON.stringify({
       method: 'gameList',
       content: [{ id: 'Overwatch', name: 'Overwatch', detected: false, builtIn: true }],
     })));
-    expect(listGamesCount()).toBe(1);
+    expect(listGamesCount()).toBe(afterConnect);
+  });
+
+  it('keeps Settings data warm across navigation instead of refetching on every visit', () => {
+    renderApp();
+    connect();
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const socket = activeSocket();
+    const countOf = (method: string) => socket.sent
+      .map((frame) => JSON.parse(frame) as { method?: string })
+      .filter((frame) => frame.method === method).length;
+
+    // SettingsView is mounted up front (hidden), so its data-fetch effects have already run
+    // once before the user ever opens the tab. (There's more than one independent subscriber for
+    // each of these — App's own builtInGameIds/HDR-default tracking, plus SettingsView's own —
+    // so the baseline isn't necessarily 1, just stable.)
+    const settingsAfterConnect = countOf('ListSettings');
+    const gamesAfterConnect = countOf('ListGames');
+    expect(settingsAfterConnect).toBeGreaterThan(0);
+    expect(gamesAfterConnect).toBeGreaterThan(0);
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('tab', { name: 'Recording' })).toBeTruthy();
+    fireEvent.click(within(nav).getByRole('button', { name: 'Library' }));
+    fireEvent.click(within(nav).getByRole('button', { name: 'Settings' }));
+
+    expect(countOf('ListSettings')).toBe(settingsAfterConnect);
+    expect(countOf('ListGames')).toBe(gamesAfterConnect);
   });
 
   it('honours a settings startup fragment without changing normal navigation', () => {

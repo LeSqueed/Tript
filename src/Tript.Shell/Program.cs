@@ -171,7 +171,7 @@ internal static class Program
             : null;
         hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(host.SettingsStore.Load()));
         host.SettingsChanged += settings =>
-            hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(settings));
+            window?.Invoke(() => hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(settings)));
 
         void HandleHotkey(HotkeyAction action)
         {

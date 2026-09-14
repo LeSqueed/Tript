@@ -48,7 +48,17 @@ export function SettingsView({
   const controller = useSettings(client);
 
   useEffect(() => {
-    client.send('ListGames');
+    // Mounted up front, often before the socket finishes connecting — a send() issued before
+    // then is silently dropped, so request once immediately if already connected, and again on
+    // every future connect/reconnect.
+    if (client.state === 'connected') {
+      client.send('ListGames');
+    }
+    return client.onStateChange((state) => {
+      if (state === 'connected') {
+        client.send('ListGames');
+      }
+    });
   }, [client]);
 
   useEffect(() => client.on('selectedGameExecutable', (content) => {
@@ -128,12 +138,12 @@ export function SettingsView({
           ))}
         </div>
         <div className="settings-body" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${page}`} tabIndex={0}>
-          {!controller.hasSettings && (
-            <p className="muted small">
-              Waiting for the backend to push settings. The forms stay editable; changes are sent
-              when the connection is live.
+          {!controller.hasSettings ? (
+            <p className="muted small settings-loading">
+              Loading settings…
             </p>
-          )}
+          ) : (
+          <>
           {page === 'recording' && (
           <RecordingPage
             settings={controller.settings.recording}
@@ -207,7 +217,10 @@ export function SettingsView({
             settings={controller.settings.hotkeys}
             update={controller.update}
             page={page}
+            bufferDurationSeconds={controller.settings.buffer.duration}
           />
+          )}
+          </>
           )}
         </div>
       </div>

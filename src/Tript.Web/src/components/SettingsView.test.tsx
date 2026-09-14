@@ -236,14 +236,6 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText('Start with Windows') as HTMLInputElement).checked).toBe(false);
   });
 
-  it('defaults the recording mode to the one the recorder implements', () => {
-    const { factory } = createMockSocketFactory();
-    const client = createIpcClient({ createSocket: factory });
-    render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
-    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
-    expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('SessionWithReplayBuffer');
-  });
-
   it('keeps the recording mode default when an older settings push omits it', () => {
     const { ws } = renderSettings();
     const older = makeSettings();
@@ -888,17 +880,23 @@ describe('SettingsView', () => {
     expect((screen.getByLabelText(/^Recording mode/) as HTMLSelectElement).value).toBe('Session');
   });
 
-  it('forms stay editable before the backend pushes settings', () => {
+  it('shows a loading state instead of the form before the backend pushes settings', () => {
     const { factory } = createMockSocketFactory();
     const client = createIpcClient({ createSocket: factory });
     render(<ToastProvider><SettingsView client={client} /></ToastProvider>);
     fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
+
+    expect(screen.getByText('Loading settings…')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Frame rate/)).toBeNull();
+
     client.connect();
     const ws = activeSocket();
     act(() => {
       ws.serverOpen();
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Recording' }));
+    pushSettings(ws);
+
+    expect(screen.queryByText('Loading settings…')).toBeNull();
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     changeInput(/^Frame rate/, '144');
     const sent = sentUpdates(ws);

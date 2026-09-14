@@ -21,6 +21,7 @@ public sealed class HotkeyValidationTests
     public void DuplicateBindings_AreRejected()
     {
         var settings = new SettingsModel();
+        settings.Hotkeys.ToggleRecording = new HotkeyBinding { Modifiers = ["Control", "Alt"], Key = "KeyR" };
         settings.Hotkeys.ManualBookmark = new HotkeyBinding { Modifiers = ["Control", "Alt"], Key = "KeyR" };
 
         Assert.False(AppHost.ValidateHotkeys(settings, out var failure));
@@ -32,6 +33,7 @@ public sealed class HotkeyValidationTests
     public void DuplicateBindings_AreDetectedRegardlessOfModifierOrder()
     {
         var settings = new SettingsModel();
+        settings.Hotkeys.ToggleRecording = new HotkeyBinding { Modifiers = ["Control", "Alt"], Key = "KeyR" };
         settings.Hotkeys.ManualBookmark = new HotkeyBinding { Modifiers = ["Alt", "Control"], Key = "KeyR" };
 
         Assert.False(AppHost.ValidateHotkeys(settings, out _));
@@ -95,7 +97,8 @@ public sealed class HotkeySettingsUpdateTests : IDisposable
         {
             hotkeys = new
             {
-                manualBookmark = new { modifiers = new[] { "Control", "Alt" }, key = "KeyR" },
+                // Collides with the default ToggleRecording binding (Control+F9).
+                manualBookmark = new { modifiers = new[] { "Control" }, key = "F9" },
             },
         }));
 

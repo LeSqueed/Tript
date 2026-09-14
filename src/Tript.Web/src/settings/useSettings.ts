@@ -59,9 +59,9 @@ const DEFAULT_SETTINGS: SettingsModel = {
   },
   hotkeys: {
     enabled: true,
-    toggleRecording: { modifiers: ['Control', 'Alt'], key: 'KeyR' },
-    manualBookmark: { modifiers: ['Control', 'Alt'], key: 'KeyB' },
-    quickClip: { modifiers: ['Control', 'Alt'], key: 'KeyC' },
+    toggleRecording: { modifiers: ['Control'], key: 'F9' },
+    manualBookmark: { modifiers: ['Control'], key: 'F10' },
+    quickClip: { modifiers: ['Control'], key: 'F7' },
     quickClipSeconds: 30,
   },
 };

@@ -33,11 +33,11 @@ public sealed class HotkeySettings
 
     public bool Enabled { get; set; } = true;
 
-    public HotkeyBinding ToggleRecording { get; set; } = new() { Modifiers = ["Control", "Alt"], Key = "KeyR" };
+    public HotkeyBinding ToggleRecording { get; set; } = new() { Modifiers = ["Control"], Key = "F9" };
 
-    public HotkeyBinding ManualBookmark { get; set; } = new() { Modifiers = ["Control", "Alt"], Key = "KeyB" };
+    public HotkeyBinding ManualBookmark { get; set; } = new() { Modifiers = ["Control"], Key = "F10" };
 
-    public HotkeyBinding QuickClip { get; set; } = new() { Modifiers = ["Control", "Alt"], Key = "KeyC" };
+    public HotkeyBinding QuickClip { get; set; } = new() { Modifiers = ["Control"], Key = "F7" };
 
     public int QuickClipSeconds { get; set; } = 30;
 }

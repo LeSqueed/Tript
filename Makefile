@@ -202,7 +202,7 @@ publish-shell:
 # win-x64 payload (Photino.Native.dll + WebView2Loader.dll) via runtimes/win-x64/native, which
 # self-contained win-x64 publish lands automatically.
 publish-shell-win: restore-windows
-	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0 -c $(CONFIG) -r win-x64 \
+	dotnet publish src/Tript.Shell/Tript.Shell.csproj -f net10.0-windows10.0.19041.0 -c $(CONFIG) -r win-x64 \
 		--self-contained true -p:EnableTraining=$(TRAINING) \
 		-p:RestoreLockedMode=true -o $(WIN_APP_DIR)
 	rm -f $(WIN_APP_DIR)/Tript.App.exe $(WIN_APP_DIR)/Tript.App.deps.json \

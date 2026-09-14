@@ -141,8 +141,21 @@ function AppShell({
         settings?.recording?.deleteLinkedHighlightsByDefault === true,
       );
     });
-    client.send('ListSettings');
     return remove;
+  }, [client]);
+
+  useEffect(() => {
+    // Mounted before the socket has necessarily finished connecting — a send() issued before
+    // then is silently dropped (no queueing), so request once immediately if already connected,
+    // and again on every future connect/reconnect.
+    if (client.state === 'connected') {
+      client.send('ListSettings');
+    }
+    return client.onStateChange((state) => {
+      if (state === 'connected') {
+        client.send('ListSettings');
+      }
+    });
   }, [client]);
 
   useEffect(() => client.on('state', (content) => {
@@ -728,14 +741,14 @@ function AppShell({
               />
             </div>
           )}
-          {route === 'settings' && (
+          <div hidden={route !== 'settings'}>
             <SettingsView
               client={client}
               builtInGameIds={builtInGameIds}
               focusGameId={gameSettingsFocus}
               onFocusGameHandled={() => setGameSettingsFocus(null)}
             />
-          )}
+          </div>
           {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}
         </div>
       </main>

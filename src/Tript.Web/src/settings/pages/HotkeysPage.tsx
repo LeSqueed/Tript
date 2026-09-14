@@ -11,14 +11,20 @@ export function HotkeysPage({
   settings,
   update,
   page,
+  bufferDurationSeconds,
 }: {
   settings: HotkeySettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
   page: SettingsPageName;
+  bufferDurationSeconds?: number;
 }) {
   function updateBinding(name: BindingName, binding: HotkeyBinding) {
     update(page, { [name]: binding });
   }
+
+  const quickClipHint = bufferDurationSeconds
+    ? `How many seconds before the hotkey press are included — capped at the replay buffer length (${bufferDurationSeconds}s).`
+    : 'How many seconds before the hotkey press are included in the clip. Needs a replay buffer enabled.';
 
   return (
     <div className="settings-page" data-page="hotkeys">
@@ -61,7 +67,7 @@ export function HotkeysPage({
         </Field>
         <Field
           label="Quick clip length"
-          hint="How many seconds before the hotkey press are included in the clip."
+          hint={quickClipHint}
         >
           <TextField
             type="number"

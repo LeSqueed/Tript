@@ -90,6 +90,27 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void TheBufferDuration_IsPersistedAsWholeSeconds()
+    {
+        _store.Load().Buffer.Duration = TimeSpan.FromSeconds(45);
+        _store.Save();
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
+        var value = doc.RootElement.GetProperty("buffer").GetProperty("duration");
+        Assert.Equal(JsonValueKind.Number, value.ValueKind);
+        Assert.Equal(45, value.GetDouble());
+    }
+
+    [Fact]
+    public void ALegacyTimeSpanStringBufferDuration_StillLoads()
+    {
+        File.WriteAllText(_provider.FilePath, """{"version":1,"buffer":{"duration":"00:00:30"}}""");
+
+        var settings = _store.Load();
+        Assert.Equal(TimeSpan.FromSeconds(30), settings.Buffer.Duration);
+    }
+
+    [Fact]
     public void AnInvalidGameCaptureTimeoutNumber_ReadsBackNonPositive()
     {
         File.WriteAllText(_provider.FilePath, """{"version":1,"game":{"gameCaptureTimeout":-5}}""");

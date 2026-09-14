@@ -52,6 +52,7 @@ public sealed class BufferSettings
 
     public bool Enabled { get; set; }
 
+    [JsonConverter(typeof(SecondsTimeSpanConverter))]
     public TimeSpan Duration { get; set; } = TimeSpan.FromSeconds(30);
 
     public long MaxSizeBytes { get; set; } = 4L * 1024 * 1024 * 1024;

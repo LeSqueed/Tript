@@ -304,7 +304,12 @@ internal static class Program
                 return;
 
             var notifications = host.SettingsStore.Load().General.Notifications;
-            if (!notifications.Enabled || !NotificationEnabled(notifications, kind))
+            if (!notifications.Enabled)
+                return;
+
+            var showToast = NotificationEnabled(notifications, kind);
+            var playSound = SoundEnabled(notifications, kind);
+            if (!showToast && !playSound)
                 return;
 
             try
@@ -314,9 +319,13 @@ internal static class Program
                     if (WindowsWindow.IsForeground(window))
                         return;
 #if WINDOWS_TOAST
-                    WindowsToastNotifications.Show(title, body, Path.Combine(host.Options.WebRoot, "tript.png"));
+                    if (showToast)
+                        WindowsToastNotifications.Show(title, body, Path.Combine(host.Options.WebRoot, "tript.png"));
+                    if (playSound)
+                        NativeSound.Play(kind, host.Options.WebRoot);
 #else
-                    window.SendNotification(title, body);
+                    if (showToast)
+                        window.SendNotification(title, body);
 #endif
                 });
             }
@@ -451,7 +460,14 @@ internal static class Program
         NotificationKind.RecordingStarted => settings.RecordingStarted,
         NotificationKind.RecordingStopped => settings.RecordingStopped,
         NotificationKind.Error => settings.Errors,
-        NotificationKind.Recovery => settings.Recovery,
+        _ => false,
+    };
+
+    internal static bool SoundEnabled(NotificationSettings settings, NotificationKind kind) => kind switch
+    {
+        NotificationKind.RecordingStarted => settings.RecordingStartedSound,
+        NotificationKind.RecordingStopped => settings.RecordingStoppedSound,
+        NotificationKind.Error => settings.ErrorsSound,
         _ => false,
     };
 

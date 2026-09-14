@@ -30,7 +30,6 @@ public enum NotificationKind
     RecordingStarted,
     RecordingStopped,
     Error,
-    Recovery,
 }
 
 internal sealed partial class AppHost : IDisposable
@@ -1344,8 +1343,6 @@ internal sealed partial class AppHost : IDisposable
                 typeLabel = Path.GetFileName(file),
             }),
         }, Wire.Options));
-        RequestNotification(NotificationKind.Recovery, "Unfinished recording found",
-            $"Tript found {orphans.Count} recording file{(orphans.Count == 1 ? "" : "s")} to recover.");
     }
 
     private List<string> FindOrphanFiles()

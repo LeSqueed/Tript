@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
 import { createIpcClient } from '../ipc/websocketClient';
 import { MockWebSocket, createMockSocketFactory } from '../ipc/test/mockWebSocket';
 import { SettingsView } from './SettingsView';
@@ -54,9 +54,11 @@ function makeSettings(): SettingsMessageContent['settings'] {
       notifications: {
         enabled: true,
         recordingStarted: true,
+        recordingStartedSound: true,
         recordingStopped: true,
+        recordingStoppedSound: true,
         errors: true,
-        recovery: true,
+        errorsSound: true,
       },
     },
     hotkeys: {
@@ -185,7 +187,8 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText('Enable desktop notifications')).toBeTruthy();
     expect(screen.queryByLabelText(/^Startup destination/)).toBeNull();
     expect(screen.queryByLabelText(/^Close while recording/)).toBeNull();
-    expect(screen.getByLabelText('Unfinished recording found')).toBeTruthy();
+    expect(screen.queryByText('Unfinished recording found')).toBeNull();
+    expect(within(screen.getByText('Errors').closest('.field') as HTMLElement).getByLabelText('Play sound')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('Start with Windows'));
     expect(sentUpdates(ws).at(-1)).toEqual({ general: { startWithWindows: true } });
@@ -197,7 +200,8 @@ describe('SettingsView', () => {
   it('sends notification updates as a nested general patch', () => {
     const { ws } = renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'General' }));
-    fireEvent.click(screen.getByLabelText('Errors'));
+    const errorsField = screen.getByText('Errors').closest('.field') as HTMLElement;
+    fireEvent.click(within(errorsField).getByLabelText('Show notification'));
 
     expect(sentUpdates(ws).at(-1)).toEqual({
       general: {
@@ -215,13 +219,11 @@ describe('SettingsView', () => {
     disabled.general.notifications.enabled = false;
     pushSettings(ws, disabled);
 
-    for (const label of [
-      'Recording started',
-      'Recording stopped',
-      'Errors',
-      'Unfinished recording found',
-    ]) {
-      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+    for (const fieldLabel of ['Recording started', 'Recording stopped', 'Errors']) {
+      const field = screen.getByText(fieldLabel).closest('.field') as HTMLElement;
+      for (const toggleLabel of ['Show notification', 'Play sound']) {
+        expect((within(field).getByLabelText(toggleLabel) as HTMLInputElement).disabled).toBe(true);
+      }
     }
   });
 

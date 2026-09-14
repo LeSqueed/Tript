@@ -191,6 +191,37 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1440u, video.BaseHeight);
     }
 
+    // A fresh install with no tracks configured would otherwise record silent video — recognizable
+    // audio devices exist on virtually every machine, so seed one track covering both rather than
+    // ship a recorder that captures nothing until someone finds the Audio settings page.
+    [Fact]
+    public void AFreshInstall_SeedsAMicAndDesktopTrack()
+    {
+        using var directory = new TemporarySettingsDirectory();
+        var store = new SettingsStore(new SettingsFileProvider(directory.SettingsPath));
+
+        Program.ApplyFirstRunDefaults(store, new DisplaySize(2560, 1440));
+
+        var track = Assert.Single(store.Load().Audio.Tracks);
+        Assert.Equal(2, track.Sources.Count);
+        Assert.Contains(track.Sources, source => source.Kind == AudioSourceKind.Input && source.DeviceId is null);
+        Assert.Contains(track.Sources, source => source.Kind == AudioSourceKind.Output && source.DeviceId is null);
+    }
+
+    // Same rule as the resolution: a settings file that exists is the user's, even if they removed
+    // every track on purpose. First run never runs twice.
+    [Fact]
+    public void AnExistingSettingsFile_KeepsItsTracksAndIsNotSeeded()
+    {
+        using var directory = new TemporarySettingsDirectory();
+        File.WriteAllText(directory.SettingsPath, """{"version":1,"audio":{"tracks":[]}}""");
+        var store = new SettingsStore(new SettingsFileProvider(directory.SettingsPath));
+
+        Program.ApplyFirstRunDefaults(store, new DisplaySize(2560, 1440));
+
+        Assert.Empty(store.Load().Audio.Tracks);
+    }
+
     private sealed class TemporarySettingsDirectory : IDisposable
     {
         private readonly string _directory;

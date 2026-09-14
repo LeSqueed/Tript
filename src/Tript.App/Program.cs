@@ -107,6 +107,16 @@ internal static class Program
             settings.Recording.ResolutionHeight = display.Height;
         }
 
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Mic + Desktop",
+            Sources =
+            {
+                new AudioSource { Name = "Microphone", Kind = AudioSourceKind.Input },
+                new AudioSource { Name = "Desktop Audio", Kind = AudioSourceKind.Output },
+            },
+        });
+
         store.Save();
         return true;
     }

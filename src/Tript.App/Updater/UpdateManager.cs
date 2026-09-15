@@ -179,6 +179,8 @@ internal sealed class UpdateManager : IDisposable
 
         foreach (var file in Directory.EnumerateFiles(stagingRoot, "download-*.zip.part"))
             DeleteFileIfExists(file);
+
+        DeleteStagingRootIfEmpty();
     }
 
     internal static string? CurrentInstalledVersion()
@@ -244,6 +246,7 @@ internal sealed class UpdateManager : IDisposable
         finally
         {
             DeleteFileIfExists(downloadPath);
+            DeleteStagingRootIfEmpty();
         }
     }
 
@@ -379,6 +382,22 @@ internal sealed class UpdateManager : IDisposable
         {
             if (Directory.Exists(path))
                 Directory.Delete(path, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    // Without this, .tript-update\ lingers forever as an empty directory once whatever put
+    // something in it (a failed check, or a completed-and-since-applied update) is done - nothing
+    // else ever removes the staging root itself, only its contents.
+    private void DeleteStagingRootIfEmpty()
+    {
+        var stagingRoot = UpdateStagingPaths.StagingRoot(_installRoot);
+        try
+        {
+            if (Directory.Exists(stagingRoot) && !Directory.EnumerateFileSystemEntries(stagingRoot).Any())
+                Directory.Delete(stagingRoot);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

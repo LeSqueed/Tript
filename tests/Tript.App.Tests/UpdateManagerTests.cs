@@ -153,6 +153,8 @@ public sealed class UpdateManagerTests : IDisposable
 
         Assert.Null(UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot)));
         Assert.False(Directory.Exists(stagedFolder));
+        // Nothing left worth keeping - .tript-update\ itself shouldn't linger as an empty folder.
+        Assert.False(Directory.Exists(UpdateStagingPaths.StagingRoot(_installRoot)));
     }
 
     [Fact]
@@ -203,14 +205,10 @@ public sealed class UpdateManagerTests : IDisposable
         Assert.True(manager.TryApply());
     }
 
-    private void AssertNoStagedLeftovers()
-    {
-        var stagingRoot = UpdateStagingPaths.StagingRoot(_installRoot);
-        if (!Directory.Exists(stagingRoot))
-            return;
-
-        Assert.Empty(Directory.EnumerateDirectories(stagingRoot, "staged-*"));
-    }
+    // A failed check must not leave .tript-update\ behind as an empty directory - nothing else
+    // ever removes the staging root itself once nothing is using it.
+    private void AssertNoStagedLeftovers() =>
+        Assert.False(Directory.Exists(UpdateStagingPaths.StagingRoot(_installRoot)));
 
     private UpdateManager CreateManager(RouteHandler handler, string currentVersion = "0.1.0-alpha.1",
         bool supportsAutomaticApply = true)

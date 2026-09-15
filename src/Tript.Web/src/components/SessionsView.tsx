@@ -28,7 +28,6 @@ import {
 import { selectionKey } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
 import { EmptyState, FilterMismatchEmptyState } from './ui/Ui';
-import { useWatchedGames } from './recorder/useWatchedGames';
 
 const SESSIONS_QUERY: LibraryQuery = { ...DEFAULT_LIBRARY_QUERY, type: 'sessions' };
 
@@ -59,7 +58,6 @@ export function SessionsView({
   const [pendingDelete, setPendingDelete] = useState<ContentItem | null>(null);
   const now = nowSeconds ?? Date.now() / 1000;
   const view = useMemo(() => deriveSessions(items, query, now), [items, query, now]);
-  const watchedGames = useWatchedGames(client);
   const recordingCounts = useMemo(() => recordingChildCounts(items), [items]);
 
   const updateQuery = useCallback((patch: Partial<LibraryQuery>) => {
@@ -184,11 +182,7 @@ export function SessionsView({
         <div data-testid="sessions-empty">
           <EmptyState
             title="No sessions yet"
-            description={
-              watchedGames.length > 0
-                ? `Tript is watching for ${watchedGames.join(', ')} — start playing and it records on its own.`
-                : 'Tript records a session on its own once it recognises a game on screen. Start playing.'
-            }
+            description="Tript records a session on its own once it recognises a game on screen. Start playing."
             action={
               <Button variant="primary" onClick={() => client.send('StartRecording')}>
                 Record now

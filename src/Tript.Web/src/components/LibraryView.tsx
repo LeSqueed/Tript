@@ -49,7 +49,6 @@ import {
 import type { TrashController } from './trash/useTrash';
 import { TrashList } from './trash/TrashList';
 import { filterTrashEntries } from './trash/trashModel';
-import { useWatchedGames } from './recorder/useWatchedGames';
 
 function typeFilters(trashCount: number): { value: ContentTypeFilter; label: string }[] {
   return [
@@ -98,7 +97,6 @@ export function LibraryView({
     () => (grouped ? deriveGroupedLibrary(items, query, now) : null),
     [grouped, items, query, now],
   );
-  const watchedGames = useWatchedGames(client);
   const page = groupView?.page ?? view.page;
   const pageCount = groupView?.pageCount ?? view.pageCount;
   const games = useMemo(
@@ -375,11 +373,7 @@ export function LibraryView({
         <div data-testid="library-empty">
           <EmptyState
             title="Nothing recorded yet"
-            description={
-              watchedGames.length > 0
-                ? `Tript is watching for ${watchedGames.join(', ')} — start playing and it records on its own.`
-                : 'Tript records on its own once it recognises a game on screen. Start playing.'
-            }
+            description="Tript records on its own once it recognises a game on screen. Start playing."
             action={
               <Button variant="primary" onClick={() => client.send('StartRecording')}>
                 Record now

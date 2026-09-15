@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { GeneralSettings, RecordingSettings } from '../settingsModel';
-import { Checkbox, Field, SelectField, Toggle } from '../../components/ui/controls';
+import type { IpcClient } from '../../ipc/websocketClient';
+import type { UpdateProgressMessage } from '../../ipc/protocol';
+import { Button, Checkbox, Field, SelectField, Toggle } from '../../components/ui/controls';
 
 const STARTUP_VISIBILITY = [
   { value: 'Window', label: 'Open the Tript window' },
@@ -28,16 +31,26 @@ const TRASH_RETENTION = [
 ];
 
 export function GeneralPage({
+  client,
   settings,
   recording,
   update,
   page,
+  appVersion,
 }: {
+  client: IpcClient;
   settings: GeneralSettings;
   recording: RecordingSettings;
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
   page: SettingsPageName;
+  appVersion?: string | null;
 }) {
+  const [updateStatus, setUpdateStatus] = useState<UpdateProgressMessage | null>(null);
+
+  useEffect(() => client.on('updateProgress', (content) => {
+    setUpdateStatus(content as UpdateProgressMessage | null);
+  }), [client]);
+
   const notifications = settings.notifications ?? {
     enabled: true,
     recordingStarted: true,
@@ -58,8 +71,38 @@ export function GeneralPage({
     ? TRASH_RETENTION
     : [...TRASH_RETENTION, { value: trashRetentionValue, label: `${trashRetentionValue} hours (current)` }];
 
+  const isChecking = updateStatus?.stage === 'checking' || updateStatus?.stage === 'downloading';
+  const updateStatusText = describeUpdateStatus(updateStatus);
+  const updateReleaseUrl = (updateStatus?.stage === 'ready' || updateStatus?.stage === 'available')
+    ? updateStatus.releaseUrl
+    : undefined;
+
   return (
     <div className="settings-page" data-page="general">
+      <section className="settings-section" aria-labelledby="general-updates-heading">
+        <h3 className="subheading" id="general-updates-heading">Updates</h3>
+        <p className="muted small">Tript {appVersion ?? 'unknown version'}</p>
+        <Toggle
+          checked={settings.checkForUpdatesAutomatically !== false}
+          onChange={(checked) => update(page, { checkForUpdatesAutomatically: checked })}
+          label="Check for updates automatically"
+        />
+        <div className="field">
+          <Button onClick={() => client.send('CheckForUpdates')} disabled={isChecking}>
+            {isChecking ? 'Checking…' : 'Check for Updates'}
+          </Button>
+          {updateStatus?.stage === 'ready' && (
+            <Button onClick={() => client.send('ApplyUpdate')}>Restart &amp; update</Button>
+          )}
+          {updateReleaseUrl && (
+            <Button variant="ghost" onClick={() => client.send('OpenInBrowser', { url: updateReleaseUrl })}>
+              View on GitHub
+            </Button>
+          )}
+        </div>
+        {updateStatusText && <span className="field-hint">{updateStatusText}</span>}
+      </section>
+
       <section className="settings-section" aria-labelledby="general-startup-heading">
         <h3 className="subheading" id="general-startup-heading">Startup</h3>
         <Toggle
@@ -191,4 +234,29 @@ export function GeneralPage({
       </section>
     </div>
   );
+}
+
+function describeUpdateStatus(status: UpdateProgressMessage | null): string | null {
+  if (!status) return null;
+  switch (status.stage) {
+    case 'checking':
+      return 'Checking for updates…';
+    case 'upToDate':
+      return "You're up to date.";
+    case 'available':
+      return `Tript ${status.version ?? ''} is available.`.replace('  ', ' ');
+    case 'downloading': {
+      if (typeof status.completedBytes === 'number' && typeof status.totalBytes === 'number' && status.totalBytes > 0) {
+        const percent = Math.min(100, Math.round((status.completedBytes / status.totalBytes) * 100));
+        return `Downloading update… ${percent}%.`;
+      }
+      return 'Downloading update…';
+    }
+    case 'ready':
+      return `Tript ${status.version ?? ''} is ready. Restart to finish updating.`.replace('  ', ' ');
+    case 'error':
+      return status.error ?? 'Could not check for updates.';
+    default:
+      return null;
+  }
 }

@@ -47,6 +47,7 @@ const DEFAULT_SETTINGS: SettingsModel = {
     startupVisibility: 'Window',
     minimizeBehavior: 'Taskbar',
     closeBehavior: 'Exit',
+    checkForUpdatesAutomatically: true,
     notifications: {
       enabled: true,
       recordingStarted: true,
@@ -77,6 +78,7 @@ export interface SettingsController {
   displayResolution?: DisplayResolution;
   availableDisplays: DisplayInfo[] | null;
   displayFallbackWarning: DisplayFallbackWarning | null;
+  appVersion?: string | null;
 }
 
 function readDisplayResolution(value: unknown): DisplayResolution | undefined {
@@ -102,6 +104,7 @@ export function useSettings(client: IpcClient): SettingsController {
   const [displayResolution, setDisplayResolution] = useState<DisplayResolution | undefined>(undefined);
   const [availableDisplays, setAvailableDisplays] = useState<DisplayInfo[] | null>(null);
   const [displayFallbackWarning, setDisplayFallbackWarning] = useState<DisplayFallbackWarning | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null | undefined>(undefined);
   const [settingsUpdateResult, setSettingsUpdateResult] = useState<SettingsUpdateResultMessage | null>(null);
   const pendingCauses = useRef(new Set<string>());
 
@@ -127,6 +130,7 @@ export function useSettings(client: IpcClient): SettingsController {
       setDisplayResolution(readDisplayResolution(message.displayResolution));
       setAvailableDisplays(readAvailableDisplays(message.availableDisplays));
       setDisplayFallbackWarning(readDisplayFallbackWarning(message.displayFallbackWarning));
+      setAppVersion(typeof message.appVersion === 'string' ? message.appVersion : null);
       setHasSettings(true);
       if (!isSelfEcho) {
         setExternalPushCount((count) => count + 1);
@@ -205,6 +209,7 @@ export function useSettings(client: IpcClient): SettingsController {
     displayResolution,
     availableDisplays,
     displayFallbackWarning,
+    appVersion,
   };
 }
 

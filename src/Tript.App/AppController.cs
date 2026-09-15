@@ -36,8 +36,7 @@ internal sealed class AppController
             ["StopRecording"] = (_, _) => _host.StopRecordingOrReport(),
             ["ToggleFullscreen"] = (parameters, _) => _host.ToggleFullscreen(
                 parameters.GetPropertyOrDefault("enabled").GetBooleanOr(false)),
-            ["CheckForUpdates"] = (_, _) => _host.CheckForUpdates(),
-            ["ApplyUpdate"] = (_, _) => {  },
+            ["ApplyUpdate"] = (_, _) => _host.ApplyUpdate(),
             ["RefreshStorageStats"] = (_, _) => _host.RefreshStorageStats(),
             ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
             ["MigrateContent"] = (_, _) => _host.MigrateContent(),
@@ -90,7 +89,7 @@ internal sealed class AppController
             ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
                 parameters.Deserialize<OpenFileLocationParameters>()),
             ["CopyFileToClipboard"] = (_, _) => {  },
-            ["OpenInBrowser"] = (_, _) => {  },
+            ["OpenInBrowser"] = (parameters, _) => _host.OpenInBrowser(parameters.Deserialize<OpenInBrowserParameters>()),
             ["StorageWarningConfirm"] = (_, _) => {  },
             ["RecoveryConfirm"] = (parameters, _) => _host.RecoveryConfirm(parameters.Deserialize<RecoveryConfirmParameters>()),
 #if TRIPT_TRAINING
@@ -100,6 +99,7 @@ internal sealed class AppController
 
         _asyncCommands = new Dictionary<string, Func<JsonElement?, ClientHandle, Task>>(StringComparer.Ordinal)
         {
+            ["CheckForUpdates"] = (_, _) => Task.Run(_host.CheckForUpdatesManualAsync),
             ["SearchGames"] = async (parameters, client) =>
                 await _host.SearchGamesAsync(parameters.Deserialize<SearchGamesParameters>(), client),
             ["ResolveGameSearch"] = async (parameters, client) =>
@@ -162,6 +162,7 @@ internal sealed class AppController
         _host.PushSettings();
         _host.PushGameList();
         _host.PushModelStatus();
+        _host.PushUpdateStatus();
 
         _host.RaiseRecoveryPromptIfNeeded(client);
     }

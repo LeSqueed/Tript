@@ -103,6 +103,8 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         startInfo.ArgumentList.Add(settingsPath);
         if (fake)
             startInfo.ArgumentList.Add("--fake-recorder");
+        // Otherwise every spawned test process would make a live api.github.com call on startup.
+        startInfo.ArgumentList.Add("--disable-updater");
         if (fakeRecorderSettingsTrace is not null)
             startInfo.Environment[FakeRecorderSession.SettingsTraceEnvironmentVariable] = fakeRecorderSettingsTrace;
         if (gameListJson is not null)

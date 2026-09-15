@@ -4,6 +4,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { GeneralPage } from './GeneralPage';
 import type { GeneralSettings, RecordingSettings } from '../settingsModel';
+import type { IpcClient } from '../../ipc/websocketClient';
+
+function fakeClient(): IpcClient {
+  return {
+    state: 'connecting',
+    on: () => () => {},
+    send: vi.fn(),
+    connect: vi.fn(),
+    close: vi.fn(),
+    onStateChange: vi.fn(() => () => {}),
+  };
+}
 
 const GENERAL: GeneralSettings = {
   startWithWindows: false,
@@ -38,6 +50,7 @@ function renderPage(
   const update = vi.fn();
   render(
     <GeneralPage
+      client={fakeClient()}
       settings={general}
       recording={recording}
       update={update}
@@ -79,14 +92,14 @@ describe('trash retention', () => {
 
   it('shows legacy negative and zero retention values as Never', () => {
     const { rerender } = render(
-      <GeneralPage settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: -5 }}
+      <GeneralPage client={fakeClient()} settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: -5 }}
         update={vi.fn()} page="general" />,
     );
     expect(trashRetention().value).toBe('0');
     expect(screen.queryByText('-5 hours (current)')).toBeNull();
 
     rerender(
-      <GeneralPage settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: 0 }}
+      <GeneralPage client={fakeClient()} settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: 0 }}
         update={vi.fn()} page="general" />,
     );
     expect(trashRetention().selectedOptions[0].text).toBe('Never');

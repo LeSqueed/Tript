@@ -16,6 +16,8 @@ internal sealed class AppOptions
 
     public bool FakeRecorder { get; init; }
 
+    public bool DisableUpdater { get; init; }
+
     public bool StartedByWindows { get; init; }
 
     public int UiPort { get; init; } = LocalPorts.Ui;
@@ -32,6 +34,7 @@ internal sealed class AppOptions
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
         string webRoot = DefaultWebRoot();
         var fakeRecorder = false;
+        var disableUpdater = false;
         var startedByWindows = false;
         string? gameListJson = null;
         var uiPort = LocalPorts.Ui;
@@ -54,6 +57,9 @@ internal sealed class AppOptions
                 case "--fake-recorder":
                     fakeRecorder = true;
                     break;
+                case "--disable-updater":
+                    disableUpdater = true;
+                    break;
                 case "--startup":
                     startedByWindows = true;
                     break;
@@ -70,8 +76,8 @@ internal sealed class AppOptions
                 case "-h":
                     Console.WriteLine(
                         "Usage: Tript.App [--content-root <dir>] [--settings-path <file>] " +
-                        "[--web-root <dir>] [--fake-recorder] [--startup] [--game-list <json>] " +
-                        "[--ui-port <port>] [--content-port <port>] [--control-port <port>]");
+                        "[--web-root <dir>] [--fake-recorder] [--disable-updater] [--startup] " +
+                        "[--game-list <json>] [--ui-port <port>] [--content-port <port>] [--control-port <port>]");
                     return null;
                 default:
                     Console.Error.WriteLine($"Tript.App: unknown argument '{args[index]}'.");
@@ -85,6 +91,7 @@ internal sealed class AppOptions
             SettingsPath = settingsPath,
             WebRoot = webRoot,
             FakeRecorder = fakeRecorder,
+            DisableUpdater = disableUpdater,
             StartedByWindows = startedByWindows,
             GameListJson = gameListJson,
             UiPort = uiPort,

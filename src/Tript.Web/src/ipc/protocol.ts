@@ -71,6 +71,7 @@ export interface SettingsMessage {
   displayResolution?: { width: number; height: number } | null;
   availableDisplays?: DisplayInfo[] | null;
   displayFallbackWarning?: DisplayFallbackWarning | null;
+  appVersion?: string | null;
 }
 
 export interface DisplayInfo {
@@ -152,10 +153,15 @@ export interface ImportProgressMessage {
   error?: string;
 }
 
-export type UpdateStatus = 'downloading' | 'downloaded' | 'ready' | 'error';
+export type UpdateStage = 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'ready' | 'error';
 
 export interface UpdateProgressMessage {
-  status: UpdateStatus;
+  stage: UpdateStage;
+  version?: string;
+  releaseUrl?: string;
+  completedBytes?: number;
+  totalBytes?: number;
+  error?: string;
 }
 
 export interface ShowModalMessage {

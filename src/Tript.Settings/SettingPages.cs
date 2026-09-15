@@ -125,6 +125,8 @@ public sealed class GeneralSettings
 
     public bool ConvertHdrClipsToSdr { get; set; }
 
+    public bool CheckForUpdatesAutomatically { get; set; } = true;
+
     public NotificationSettings Notifications { get; set; } = new();
 }
 

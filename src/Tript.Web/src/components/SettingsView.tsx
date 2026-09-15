@@ -206,10 +206,12 @@ export function SettingsView({
           )}
           {page === 'general' && (
           <GeneralPage
+            client={client}
             settings={controller.settings.general}
             recording={controller.settings.recording}
             update={controller.update}
             page={page}
+            appVersion={controller.appVersion}
           />
           )}
           {page === 'hotkeys' && (

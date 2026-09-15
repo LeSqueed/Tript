@@ -14,6 +14,7 @@ using Tript.Core;
 using Tript.Detection;
 using Tript.GameDiscovery;
 using Tript.Media;
+using Tript.App.Updater;
 using Tript.Obs;
 using Tript.Recorder;
 using Tript.Settings;
@@ -30,6 +31,7 @@ public enum NotificationKind
     RecordingStarted,
     RecordingStopped,
     Error,
+    UpdateReady,
 }
 
 internal sealed partial class AppHost : IDisposable
@@ -135,6 +137,12 @@ internal sealed partial class AppHost : IDisposable
 
     private Timer? _trashPurgeTimer;
 
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(24);
+
+    private readonly UpdateManager? _updateManager;
+    private Timer? _updateCheckTimer;
+    private string? _lastNotifiedUpdateStage;
+
     private bool _disposed;
 
     private sealed class AutomaticClipJob
@@ -239,6 +247,16 @@ internal sealed partial class AppHost : IDisposable
         _content = new ContentServer(EffectiveRoot, _token, _thumbnails, options.ContentPort);
         _ui = new UiHost(options.WebRoot, _token, options.UiPort);
 
+        _updateManager = options.DisableUpdater
+            ? null
+            : new UpdateManager(UpdateStagingPaths.InstallRootFromAppBaseDirectory(AppContext.BaseDirectory),
+                UpdateManager.CurrentInstalledVersion() ?? "0.0.0");
+        if (_updateManager is not null)
+        {
+            _updateManager.SweepLeftovers();
+            _updateManager.StatusChanged += OnUpdateStatusChanged;
+        }
+
         Directory.CreateDirectory(EffectiveRoot);
         ReloadGameList();
         if (_modelManager is not null)
@@ -260,6 +278,8 @@ internal sealed partial class AppHost : IDisposable
     internal event Action<bool, string?>? StateChanged;
 
     internal event Action<NotificationKind, string, string>? NotificationRequested;
+
+    internal event Action? RestartForUpdateRequested;
 
     internal ObsRuntime? Runtime => _runtime;
 
@@ -369,6 +389,14 @@ internal sealed partial class AppHost : IDisposable
             PurgeExpiredTrash();
             _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
 
+            if (_updateManager is not null)
+            {
+                if (_settingsStore.Load().General.CheckForUpdatesAutomatically)
+                    _ = CheckForUpdatesAutomaticAsync();
+                _updateCheckTimer = new Timer(_ => { _ = CheckForUpdatesAutomaticAsync(); }, null,
+                    UpdateCheckInterval, UpdateCheckInterval);
+            }
+
             WireAutoStart();
 
             Console.WriteLine($"READY {UiUrl}");
@@ -428,6 +456,12 @@ internal sealed partial class AppHost : IDisposable
         }
 
         _trashPurgeTimer?.Dispose();
+        _updateCheckTimer?.Dispose();
+        if (_updateManager is not null)
+        {
+            _updateManager.StatusChanged -= OnUpdateStatusChanged;
+            _updateManager.Dispose();
+        }
         _modelCheckTimer?.Dispose();
         _audioLevelTimer?.Dispose();
         lock (_audioLevelGate)
@@ -491,10 +525,6 @@ internal sealed partial class AppHost : IDisposable
     }
 
     internal bool ToggleFullscreen(bool enabled) => true;
-
-    internal void CheckForUpdates()
-    {
-    }
 
     internal void RefreshStorageStats()
     {
@@ -1012,6 +1042,8 @@ internal sealed partial class AppHost : IDisposable
                 primary = monitor.Primary,
             }).ToList(),
             displayFallbackWarning = BuildDisplayFallbackWarning(settings.Capture, displays),
+
+            appVersion = UpdateManager.CurrentInstalledVersion(),
         }, Wire.Options));
     }
 

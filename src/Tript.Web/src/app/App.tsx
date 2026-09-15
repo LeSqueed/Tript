@@ -10,6 +10,7 @@ import { ConnectionToasts } from '../components/toasts/ConnectionToasts';
 import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToasts';
 import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
 import { GameAddedToasts } from '../components/toasts/GameAddedToasts';
+import { UpdateToasts } from '../components/toasts/UpdateToasts';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionsView } from '../components/SessionsView';
@@ -675,6 +676,7 @@ function AppShell({
         <DisplayFallbackToasts client={client} />
         <GameCandidateToasts client={client} />
         <GameAddedToasts client={client} onOpenGameSettings={openGameSettings} />
+        <UpdateToasts client={client} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}

@@ -150,6 +150,11 @@ internal sealed class OpenFileLocationParameters
     public string FilePath { get; set; } = string.Empty;
 }
 
+internal sealed class OpenInBrowserParameters
+{
+    public string Url { get; set; } = string.Empty;
+}
+
 internal sealed class ConvertToSdrParameters
 {
     public string Id { get; set; } = string.Empty;

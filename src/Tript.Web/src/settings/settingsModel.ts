@@ -144,6 +144,7 @@ export interface GeneralSettings {
   minimizeBehavior: MinimizeBehavior;
   closeBehavior: CloseBehavior;
   convertHdrClipsToSdr?: boolean;
+  checkForUpdatesAutomatically?: boolean;
   notifications: NotificationSettings;
   [key: string]: unknown;
 }
@@ -183,6 +184,7 @@ export interface SettingsMessageContent {
   displayResolution?: DisplayResolution | null;
   availableDisplays?: DisplayInfo[] | null;
   displayFallbackWarning?: DisplayFallbackWarning | null;
+  appVersion?: string | null;
 }
 
 export interface DisplayResolution {

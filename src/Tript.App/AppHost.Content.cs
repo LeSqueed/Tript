@@ -57,6 +57,26 @@ internal sealed partial class AppHost
         }
     }
 
+    internal void OpenInBrowser(OpenInBrowserParameters? parameters)
+    {
+        var url = parameters?.Url;
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            Log.Warning(exception, "AppHost: could not open {Url} in a browser", url);
+        }
+    }
+
     internal void PushContent()
     {
         _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new

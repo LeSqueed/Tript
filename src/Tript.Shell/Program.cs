@@ -55,6 +55,7 @@ internal static class Program
             };
             hostThread.Start();
 
+            var restartForUpdate = false;
             try
             {
                 if (!WaitForUi(host.UiUrl, TimeSpan.FromSeconds(15)))
@@ -71,7 +72,7 @@ internal static class Program
                     return 1;
                 }
 
-                OpenWindow(host.UiUrl, host, singleInstance);
+                restartForUpdate = OpenWindow(host.UiUrl, host, singleInstance);
             }
             catch (Exception exception)
             {
@@ -87,9 +88,8 @@ internal static class Program
                     Environment.Exit(1);
                 }
             }
+            return restartForUpdate ? ShellExitCodes.RestartForUpdate : 0;
         }
-
-        return 0;
     }
 
     private static void ApplyStartupRegistration(WindowsStartupRegistration registration, bool enabled)
@@ -145,7 +145,7 @@ internal static class Program
         }
     }
 
-    private static void OpenWindow(string url, AppHost host, SingleInstance singleInstance)
+    private static bool OpenWindow(string url, AppHost host, SingleInstance singleInstance)
     {
             var general = host.SettingsStore.Load().General;
             var iconPath = Path.Combine(host.Options.WebRoot, "tript.ico");
@@ -154,6 +154,7 @@ internal static class Program
         var activationPending = false;
         var startupMinimizePending = false;
         var exitRequested = false;
+        var restartForUpdatePending = false;
         var webReady = false;
         string? pendingNavigation = null;
         var startupVisibility = general.StartupVisibility;
@@ -298,6 +299,18 @@ internal static class Program
         }
 
         host.StateChanged += UpdateTrayState;
+        host.RestartForUpdateRequested += () =>
+        {
+            if (window is null)
+                return;
+
+            exitRequested = true;
+            restartForUpdatePending = true;
+            CloseShellOrRequestShutdown(
+                () => window.Invoke(() => WindowsWindow.CloseWindow(window)),
+                host.Ipc.RequestShutdown,
+                () => Environment.Exit(ShellExitCodes.RestartForUpdate));
+        };
         host.NotificationRequested += (kind, title, body) =>
         {
             if (!OperatingSystem.IsWindows() || window is null)
@@ -437,6 +450,8 @@ internal static class Program
         {
             singleInstance.ActivationRequested -= ShowMainWindow;
         }
+
+        return restartForUpdatePending;
     }
 
     internal static string BuildLibraryUrl(string url) => $"{url}#library";
@@ -460,6 +475,7 @@ internal static class Program
         NotificationKind.RecordingStarted => settings.RecordingStarted,
         NotificationKind.RecordingStopped => settings.RecordingStopped,
         NotificationKind.Error => settings.Errors,
+        NotificationKind.UpdateReady => true,
         _ => false,
     };
 
@@ -468,6 +484,7 @@ internal static class Program
         NotificationKind.RecordingStarted => settings.RecordingStartedSound,
         NotificationKind.RecordingStopped => settings.RecordingStoppedSound,
         NotificationKind.Error => settings.ErrorsSound,
+        NotificationKind.UpdateReady => false,
         _ => false,
     };
 

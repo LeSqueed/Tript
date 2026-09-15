@@ -55,8 +55,8 @@ Found one of these, or something else? Join the Discord and let me know.
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/G4DR3Meumn)
 
-- **Wide screen event detection** currently the model is trained and regions are based on a 16:9 aspect ratio. Other aspect ratio's are untested. I'd love to receive feedback with a ideally a high quality recording or screenshot.
-- **Non English game clients** to give the best experience, Tript tries to avoid creating screenshots when you are dead and spectating the person who eliminated you or when you are spectating a teammate. To ensure we only show your best moments. This is done based on text on your screen. Leading to it creating bookmarks or highlights of moments that are not of interest to you.
+- **Wide screen event detection** currently the model is trained and regions are based on a 16:9 aspect ratio. Other aspect ratio's are untested. I'd love to receive feedback with a ideally a high quality recording.
+- **Non English game clients** to give the best experience, Tript tries to avoid creating events when you are dead and spectating the person who eliminated you or when you are spectating a teammate. To ensure we only show your best moments. This is done based on text on your screen. Leading to it creating bookmarks or highlights of moments that are not of interest to you.
 - **Nvidia and Intel GPUs** I only had access to an AMD GPU during testing. Nvidia or Intel will hopefully work out of the box. Report issues if you do encounter them.
 - **Automated game detection outside of Steam** - Tript tries to automatically detect when you are playing a game and add it to the games library. The only tested launcher is currently Steam. If you find it is not properly detecting games, please report on this. Including your install location and what launcher you use to play the game.
 

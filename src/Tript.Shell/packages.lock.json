@@ -46,13 +46,13 @@
         "type": "Project",
         "dependencies": {
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Detection": "[0.1.0-alpha.5, )",
-          "Tript.GameDiscovery": "[0.1.0-alpha.5, )",
-          "Tript.Media": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )",
-          "Tript.Recorder": "[0.1.0-alpha.5, )",
-          "Tript.Settings": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Detection": "[0.1.0-alpha.6, )",
+          "Tript.GameDiscovery": "[0.1.0-alpha.6, )",
+          "Tript.Media": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )",
+          "Tript.Recorder": "[0.1.0-alpha.6, )",
+          "Tript.Settings": "[0.1.0-alpha.6, )"
         }
       },
       "tript.core": {
@@ -63,20 +63,20 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )"
         }
       },
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       },
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       },
       "tript.obs": {
@@ -85,16 +85,16 @@
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Detection": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )",
-          "Tript.Settings": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Detection": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )",
+          "Tript.Settings": "[0.1.0-alpha.6, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       }
     },
@@ -181,13 +181,13 @@
         "type": "Project",
         "dependencies": {
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Detection": "[0.1.0-alpha.5, )",
-          "Tript.GameDiscovery": "[0.1.0-alpha.5, )",
-          "Tript.Media": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )",
-          "Tript.Recorder": "[0.1.0-alpha.5, )",
-          "Tript.Settings": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Detection": "[0.1.0-alpha.6, )",
+          "Tript.GameDiscovery": "[0.1.0-alpha.6, )",
+          "Tript.Media": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )",
+          "Tript.Recorder": "[0.1.0-alpha.6, )",
+          "Tript.Settings": "[0.1.0-alpha.6, )"
         }
       },
       "tript.core": {
@@ -198,20 +198,20 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )"
         }
       },
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       },
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       },
       "tript.obs": {
@@ -220,16 +220,16 @@
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )",
-          "Tript.Detection": "[0.1.0-alpha.5, )",
-          "Tript.Obs": "[0.1.0-alpha.5, )",
-          "Tript.Settings": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )",
+          "Tript.Detection": "[0.1.0-alpha.6, )",
+          "Tript.Obs": "[0.1.0-alpha.6, )",
+          "Tript.Settings": "[0.1.0-alpha.6, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.5, )"
+          "Tript.Core": "[0.1.0-alpha.6, )"
         }
       }
     },

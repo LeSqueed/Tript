@@ -13,7 +13,7 @@ namespace Tript.Recorder.Tests;
 [Collection(RecorderRecordingCollection.Name)]
 public sealed class DetectionHostTests
 {
-    private static readonly DateTime Origin = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Local);
+    private static readonly DateTime Origin = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
     private static EventDefinition Trigger(int classId, BookmarkType? bookmarkType = BookmarkType.Kill,
         bool includeInAutoClips = false) => new()
@@ -115,9 +115,9 @@ public sealed class DetectionHostTests
         {
             ["Overwatch"] = [Trigger(0)],
         });
-        var recording = new FakeRecordingSession { StartTime = DateTime.Now };
+        var recording = new FakeRecordingSession { StartTimeUtc = DateTime.UtcNow };
         var detection = Box(0);
-        detection.Timestamp = recording.StartTime;
+        detection.Timestamp = recording.StartTimeUtc;
 
         using (new ActiveRecordingScope(recording))
         using (var host = new DetectionHost(detector, detector.DefinitionSource))
@@ -342,7 +342,7 @@ public sealed class DetectionHostTests
     {
         var exclusion = OcrEvent(7, EventType.Exclusion, bookmarkType: null);
         var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0), exclusion] });
-        var recording = new FakeRecordingSession { StartTime = Origin };
+        var recording = new FakeRecordingSession { StartTimeUtc = Origin };
 
         using (new ActiveRecordingScope(recording))
         using (var host = new DetectionHost(detector, detector.DefinitionSource))
@@ -377,7 +377,7 @@ public sealed class DetectionHostTests
     public void Detections_ImplausibleBurstInOneCycle_IsClamped()
     {
         var detector = WithFrameSource(new() { ["Overwatch"] = [Trigger(0)] });
-        var recording = new FakeRecordingSession { StartTime = Origin };
+        var recording = new FakeRecordingSession { StartTimeUtc = Origin };
 
         var boxes = (from column in new[] { 0.05f, 0.20f, 0.35f, 0.50f }
                      from row in new[] { 0.05f, 0.20f, 0.35f }
@@ -848,7 +848,7 @@ public sealed class DetectionHostTests
         internal void RaiseDetections(params DetectionResult[] detections)
             => DetectionsAvailable?.Invoke(new DetectionBatch
             {
-                FrameTimestamp = detections.FirstOrDefault()?.Timestamp ?? DateTime.Now,
+                FrameTimestamp = detections.FirstOrDefault()?.Timestamp ?? DateTime.UtcNow,
                 ObjectDetections = detections.ToList(),
             });
 
@@ -896,7 +896,7 @@ public sealed class DetectionHostTests
 
     private sealed class FakeRecordingSession : IRecordingSession
     {
-        public DateTime StartTime { get; init; } = Origin;
+        public DateTime StartTimeUtc { get; init; } = Origin;
 
         public List<Bookmark> Bookmarks { get; } = [];
 

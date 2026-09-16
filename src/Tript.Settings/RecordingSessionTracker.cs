@@ -46,9 +46,9 @@ public sealed class RecordingSessionTracker
 
     // Begins a new recording session and makes it the active one. Any prior session is simply
     // superseded — the caller is expected to have stopped it.
-    public RecordingSession Start(DateTime? startTime = null)
+    public RecordingSession Start(DateTime? startTimeUtc = null)
     {
-        var session = new RecordingSession(startTime ?? DateTime.Now);
+        var session = new RecordingSession(startTimeUtc ?? DateTime.UtcNow);
         lock (_gate)
         {
             _current = session;

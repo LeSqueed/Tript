@@ -9,7 +9,7 @@ namespace Tript.Core;
 // with its file name, its game or its encoder settings.
 public interface IRecordingSession
 {
-    DateTime StartTime { get; }
+    DateTime StartTimeUtc { get; }
 
     // Called from whichever thread noticed the event, including a detector's own inference thread.
     // Implementations own the synchronisation.

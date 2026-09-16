@@ -12,7 +12,7 @@ namespace Tript.Settings.Tests;
 
 public class RecordingSessionTests
 {
-    private static readonly DateTime Origin = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Local);
+    private static readonly DateTime Origin = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     public void AddBookmark_StoresBookmarkWithOffsetFromStart()
@@ -29,7 +29,7 @@ public class RecordingSessionTests
         var stored = Assert.Single(session.Bookmarks);
         Assert.Equal(BookmarkType.Kill, stored.Type);
         Assert.Equal(TimeSpan.FromSeconds(30), stored.Time);
-        Assert.Equal(Origin, session.StartTime);
+        Assert.Equal(Origin, session.StartTimeUtc);
     }
 
     [Fact]

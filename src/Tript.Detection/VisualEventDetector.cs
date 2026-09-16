@@ -530,7 +530,7 @@ public class VisualEventDetector : IDisposable
             var width = (int)frame.Width;
             var height = (int)frame.Height;
             var rowBytes = width * 4;
-            var timestamp = DateTime.Now;
+            var timestamp = DateTime.UtcNow;
             buffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
 
             var src = frame.GetPlane(0, (uint)height);

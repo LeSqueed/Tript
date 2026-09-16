@@ -41,7 +41,7 @@ internal sealed partial class AppHost
         var bookmark = new Bookmark
         {
             Type = BookmarkType.Manual,
-            Time = DateTime.Now - session.StartTime,
+            Time = DateTime.UtcNow - session.StartTimeUtc,
         };
         session.AddBookmark(bookmark);
         // No-ops unless Recording.AutomaticClipsEnabled + a replay buffer are both active for this

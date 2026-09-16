@@ -386,7 +386,7 @@ internal static class DetectionFramePreprocessor
                 Y = cy - h / 2,
                 Width = w,
                 Height = h,
-                Timestamp = DateTime.Now
+                Timestamp = DateTime.UtcNow
             });
         }
 

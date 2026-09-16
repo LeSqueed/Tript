@@ -16,7 +16,7 @@ public sealed class RecordingSession : IRecordingSession
 
     // The wall-clock time the recording began; bookmarks are stored as offsets from it. Fixed at
     // construction so a bookmark written mid-session always resolves against the same origin.
-    public DateTime StartTime { get; }
+    public DateTime StartTimeUtc { get; }
 
     // The bookmarks written so far, in write order. The snapshot is the contract for anything
     // that consumes the session after it stops (metadata serialization, the timeline); live
@@ -32,9 +32,9 @@ public sealed class RecordingSession : IRecordingSession
         }
     }
 
-    public RecordingSession(DateTime startTime)
+    public RecordingSession(DateTime startTimeUtc)
     {
-        StartTime = startTime;
+        StartTimeUtc = startTimeUtc.Kind == DateTimeKind.Local ? startTimeUtc.ToUniversalTime() : startTimeUtc;
     }
 
     // Called from whichever thread noticed the event — including a detector's own inference

@@ -233,7 +233,7 @@ public sealed class DetectionHost : IDisposable
             try
             {
                 lock (_processingGate)
-                    ProcessDetections(batch ?? new DetectionBatch { FrameTimestamp = DateTime.Now });
+                    ProcessDetections(batch ?? new DetectionBatch { FrameTimestamp = DateTime.UtcNow });
             }
             finally
             {
@@ -501,7 +501,7 @@ public sealed class DetectionHost : IDisposable
                 var bookmark = new Bookmark
                 {
                     Type = bookmarkType,
-                    Time = now - recording.StartTime,
+                    Time = now - recording.StartTimeUtc,
                 };
                 recording.AddBookmark(bookmark);
                 if (definition.IncludeInAutoClips)

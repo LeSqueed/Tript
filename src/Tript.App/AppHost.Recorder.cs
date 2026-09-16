@@ -221,21 +221,22 @@ internal sealed partial class AppHost
             _activeRecordingMode = resolved.Mode;
             _currentGameId = effectiveGameId;
             var gameName = GameDisplayName(effectiveGameId);
+            var startedUtc = DateTime.UtcNow;
             _pendingMetadata = new RecordingMetadata
             {
                 Game = gameName,
                 GameId = effectiveGameId,
                 ContentType = ContentType.Recording,
-                StartTime = DateTime.Now,
+                StartTime = startedUtc.ToLocalTime(),
             };
 
-            _sessionTracker.Start(_pendingMetadata.StartTime);
+            _sessionTracker.Start(startedUtc);
             lock (_automaticClipGate)
             {
                 _automaticClipBookmarks.Clear();
                 _liveHighlightRegions.Clear();
                 _liveHighlightBookmarkIds.Clear();
-                _recordingStartUtc = DateTime.UtcNow;
+                _recordingStartUtc = startedUtc;
                 _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
                     && resolved.Mode.UsesReplayBuffer();
                 _liveHighlightsEnabledAtSessionStart = _liveHighlightsEnabled;

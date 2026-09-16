@@ -3,9 +3,5 @@
 
 using System.Runtime.CompilerServices;
 
-// The desktop shell (src/Tript.Shell) reuses the app host's exact construction path — the same
-// BuildApp seam the headless launcher uses — so a windowed build and a browser build are the same
-// host, not two divergent copies. Exposing the internal construction seam is all the shell needs;
-// nothing else about the host is public.
 [assembly: InternalsVisibleTo("Tript.Shell")]
 [assembly: InternalsVisibleTo("Tript.App.Tests")]

@@ -138,8 +138,6 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.Equal(executablePath, game.ExecutablePath);
         Assert.Equal("/resolve?input=steam%3A824270", Assert.Single(handler.Requests));
 
-        // A brand-new recognized game is no longer gated behind a "Record? Yes/No" prompt — the
-        // existing auto-record setting/override is consulted immediately, same as any other game.
         Assert.True(host.ShouldAutoRecord(ResolverHandler.GameId));
     }
 

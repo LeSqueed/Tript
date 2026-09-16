@@ -11,8 +11,6 @@ public sealed class AppHostCollection : ICollectionFixture<AppHostCollectionFixt
     public const string Name = "app-host-smoke";
 }
 
-// SingleInstance is keyed on the test host's own executable path, so two tests that acquire it at
-// the same time collide on one mutex. -m:1 only serialises projects, not the classes inside one.
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class SingleInstanceCollection
 {

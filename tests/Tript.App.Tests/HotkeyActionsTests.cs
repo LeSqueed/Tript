@@ -118,7 +118,7 @@ public sealed class HotkeyActionsTests : IDisposable
         _store.Load().Recording.Mode = RecordingMode.SessionWithReplayBuffer;
         _store.Save();
         Assert.True(_host.StartRecording("Overwatch"));
-        Thread.Sleep(5); // ensure a non-zero elapsed window for the clip region
+        Thread.Sleep(5);
 
         _host.CreateQuickClipFromBuffer();
 

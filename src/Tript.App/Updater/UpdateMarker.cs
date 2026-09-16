@@ -3,11 +3,8 @@
 
 namespace Tript.App.Updater;
 
-// Plain UTF-8 text with a fixed line order, not JSON: this marker is also read by the native
-// launcher (launcher.c), which links only user32/windows.h and has no JSON parser.
-//   line 1: marker format version ("1" today)
-//   line 2: target version (informational only, not consumed by launcher.c's decision logic)
-//   line 3: staged folder name, relative to <installRoot>\.tript-update\
+// Read by launcher.c, which has no JSON parser. Line 1: format version, line 2: target
+// version, line 3: staged folder name under <installRoot>\.tript-update\.
 internal sealed record UpdateMarker(int FormatVersion, string Version, string StagedFolderName)
 {
     internal const int CurrentFormatVersion = 1;

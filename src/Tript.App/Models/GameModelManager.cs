@@ -538,8 +538,6 @@ internal sealed class GameModelManager : IDisposable
             StatusChanged?.Invoke(snapshot);
     }
 
-    // Drops statuses for games that are no longer in the catalogue (removed or migrated to a
-    // different id), so a stale entry doesn't linger in the UI forever.
     internal void PruneStatuses(IReadOnlyCollection<string> currentGameIds)
     {
         var keep = new HashSet<string>(currentGameIds, StringComparer.OrdinalIgnoreCase);

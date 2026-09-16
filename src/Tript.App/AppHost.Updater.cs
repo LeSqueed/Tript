@@ -31,9 +31,7 @@ internal sealed partial class AppHost
         _ipc.Broadcast("updateProgress", _updateManager.Snapshot());
     }
 
-    // Fires the OS-level toast exactly once per genuine stage transition — Snapshot()-driven
-    // pushes (e.g. on every new IPC connection/relaunch) go through PushUpdateStatus above and
-    // never touch this, so relaunching an already-staged update doesn't re-notify.
+    // Only real stage transitions notify; snapshot pushes on reconnect must not re-toast.
     private void OnUpdateStatusChanged(UpdateStatusPayload status)
     {
         PushUpdateStatus();

@@ -41,7 +41,6 @@ public sealed class UpdateManagerTests : IDisposable
         var stagedFolder = UpdateStagingPaths.StagedFolderPath(_installRoot, marker!.StagedFolderName);
         Assert.True(File.Exists(Path.Combine(stagedFolder, "Tript.Shell.exe")));
         Assert.True(File.Exists(Path.Combine(stagedFolder, "dist", "index.html")));
-        // The launcher itself is never part of the staged App/ subtree.
         Assert.False(File.Exists(Path.Combine(stagedFolder, "Tript.exe")));
     }
 
@@ -153,7 +152,6 @@ public sealed class UpdateManagerTests : IDisposable
 
         Assert.Null(UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot)));
         Assert.False(Directory.Exists(stagedFolder));
-        // Nothing left worth keeping - .tript-update\ itself shouldn't linger as an empty folder.
         Assert.False(Directory.Exists(UpdateStagingPaths.StagingRoot(_installRoot)));
     }
 
@@ -205,8 +203,6 @@ public sealed class UpdateManagerTests : IDisposable
         Assert.True(manager.TryApply());
     }
 
-    // A failed check must not leave .tript-update\ behind as an empty directory - nothing else
-    // ever removes the staging root itself once nothing is using it.
     private void AssertNoStagedLeftovers() =>
         Assert.False(Directory.Exists(UpdateStagingPaths.StagingRoot(_installRoot)));
 
@@ -252,11 +248,6 @@ public sealed class UpdateManagerTests : IDisposable
         return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(releases));
     }
 
-    // Builds a minimal "<top>/Tript.exe" + "<top>/App/Tript.Shell.exe" + "<top>/App/dist/index.html"
-    // zip, mirroring release.yml's `zip -r ../$ZIP Release-win` layout (including the explicit
-    // directory entries a real `zip -r` emits for every directory it recurses into — a real
-    // release zip crashed extraction on the bare "<top>/App/" entry before this was added; see
-    // ExtractAppSubtree's isDirectoryEntry && relative.Length > 0 guard), plus any extra raw entries.
     private static byte[] BuildAppZip(string topLevel, params (string Path, byte[] Content)[] extraEntries)
     {
         using var stream = new MemoryStream();

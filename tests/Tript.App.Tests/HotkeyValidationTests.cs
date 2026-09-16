@@ -97,7 +97,6 @@ public sealed class HotkeySettingsUpdateTests : IDisposable
         {
             hotkeys = new
             {
-                // Collides with the default ToggleRecording binding (Control+F9).
                 manualBookmark = new { modifiers = new[] { "Control" }, key = "F9" },
             },
         }));

@@ -3,7 +3,7 @@
 
 namespace Tript.App.Updater;
 
-// Parses sha256sum's "<hex>␠␠<filename>" format, as produced by release.yml's `sha256sum` step.
+// The sha256sum format written by release.yml.
 internal static class Sha256Sidecar
 {
     internal static string? TryParse(string? sidecarContent)

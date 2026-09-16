@@ -5,10 +5,6 @@ using System.Text.Json;
 
 namespace Tript.App.Models;
 
-// Maps a retired game id (e.g. a locally-minted "custom-<guid>" that later turned out to have a
-// resolver-canonical identity) to the id that replaced it. Consulted anywhere an old id needs to
-// keep resolving to the live game entry, so migrating an id never requires rewriting historical
-// recording metadata.
 internal sealed class GameIdAliasStore
 {
     private const int MaxChainHops = 8;

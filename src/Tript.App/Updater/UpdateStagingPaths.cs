@@ -3,8 +3,7 @@
 
 namespace Tript.App.Updater;
 
-// Pure path math, no disk access - staging lives under the install root (not %AppData%) so the
-// final rename launcher.c performs stays on one volume and is atomic.
+// Staging lives under the install root so launcher.c's final rename stays on one volume.
 internal static class UpdateStagingPaths
 {
     private const string StagingDirectoryName = ".tript-update";

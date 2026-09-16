@@ -5,8 +5,6 @@ using System.Text.Json.Serialization;
 
 namespace Tript.App.Updater;
 
-// GitHub's API is snake_case, unlike Wire.Options (camelCase for our own protocol) — deserialized
-// with plain System.Text.Json and explicit property names rather than a naming policy.
 internal sealed class GitHubRelease
 {
     [JsonPropertyName("tag_name")]

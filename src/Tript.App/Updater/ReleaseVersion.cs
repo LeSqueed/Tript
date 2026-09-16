@@ -5,10 +5,7 @@ using System.Globalization;
 
 namespace Tript.App.Updater;
 
-// Deliberately separate from GameModelManager's Assembly.GetName().Version comparison: that one is
-// numeric-only (MSBuild strips the prerelease suffix from AssemblyVersion) which is fine for its
-// minimumAppVersion gating, but wrong here since consecutive Tript releases only differ by
-// prerelease suffix (e.g. 0.1.0-alpha.2 -> 0.1.0-alpha.3).
+// Not GameModelManager's numeric comparison: releases differ only by prerelease suffix.
 internal readonly struct ReleaseVersion : IComparable<ReleaseVersion>
 {
     private static readonly string[] PrereleaseLabelOrder = ["alpha", "beta"];
@@ -38,8 +35,6 @@ internal readonly struct ReleaseVersion : IComparable<ReleaseVersion>
         if (text.Length > 0 && (text[0] == 'v' || text[0] == 'V'))
             text = text[1..];
 
-        // Build metadata (a trailing "+..." suffix, e.g. from a local SourceLink-stamped
-        // InformationalVersion) never affects precedence per semver — ignore it entirely.
         var plusIndex = text.IndexOf('+', StringComparison.Ordinal);
         if (plusIndex >= 0)
             text = text[..plusIndex];
@@ -86,7 +81,6 @@ internal readonly struct ReleaseVersion : IComparable<ReleaseVersion>
         return true;
     }
 
-    // Fails closed: an unparseable version never counts as "newer" than anything.
     internal static bool IsNewer(string candidateRaw, string currentRaw) =>
         TryParse(candidateRaw, out var candidate) && TryParse(currentRaw, out var current)
             && candidate.CompareTo(current) > 0;
@@ -106,7 +100,7 @@ internal readonly struct ReleaseVersion : IComparable<ReleaseVersion>
         if (_prereleaseLabel is null && other._prereleaseLabel is null)
             return 0;
         if (_prereleaseLabel is null)
-            return 1; // stable beats any prerelease of the same core version.
+            return 1;
         if (other._prereleaseLabel is null)
             return -1;
 

@@ -26,8 +26,6 @@ public sealed class ShellExitRequestTests
         Assert.False(Tript.Shell.Program.IsExitRequest(args));
     }
 
-    // Why the shell has to intercept --exit before it parses anything: AppOptions rejects arguments
-    // it does not know, so reaching Parse at all would turn an exit request into exit code 2.
     [Fact]
     public void AppOptions_RejectsTheExitArgument()
     {

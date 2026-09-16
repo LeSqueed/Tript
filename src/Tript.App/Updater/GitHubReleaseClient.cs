@@ -10,10 +10,7 @@ namespace Tript.App.Updater;
 
 internal sealed class GitHubReleaseClient
 {
-    // Never /releases/latest: that endpoint excludes prereleases and 404s when a repo (like this
-    // one, so far) has never cut a non-prerelease release. The list endpoint is already
-    // newest-first; per_page=10 gives headroom for the defensive Draft filter below even though
-    // the public API generally doesn't return drafts at all.
+    // Not /releases/latest: it excludes prereleases and 404s while only prereleases exist.
     private static readonly Uri DefaultReleasesUri =
         new("https://api.github.com/repos/LeSqueed/Tript/releases?per_page=10");
 
@@ -54,8 +51,6 @@ internal sealed class GitHubReleaseClient
         }
     }
 
-    // Returns null when the release doesn't ship the expected Windows asset shape (e.g. a future
-    // release published for a different platform only) - treated as inapplicable, not an error.
     internal static (string Version, string ZipAssetName, string Sha256AssetName)? ParseTagAndAssetNames(
         GitHubRelease release)
     {

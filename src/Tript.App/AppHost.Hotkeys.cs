@@ -9,9 +9,6 @@ using SettingsModel = Tript.Settings.Settings;
 
 namespace Tript.App;
 
-// Backs the global (OS-level) hotkeys Tript.Shell registers — see WindowsHotkeys. These are plain
-// AppHost methods so they can be unit tested the same way every other host action is, independent
-// of the native Win32 registration that fires them.
 internal sealed partial class AppHost
 {
     internal void ToggleRecording()
@@ -44,8 +41,6 @@ internal sealed partial class AppHost
             Time = DateTime.UtcNow - session.StartTimeUtc,
         };
         session.AddBookmark(bookmark);
-        // No-ops unless Recording.AutomaticClipsEnabled + a replay buffer are both active for this
-        // session — same gate every detected bookmark already goes through.
         RememberAutomaticClipBookmark(bookmark);
         PushContent();
     }

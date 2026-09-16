@@ -9,11 +9,6 @@ using Serilog;
 
 namespace Tript.App.Updater;
 
-// Mirrors Models/GameModelManager's shape (injectable HttpClient, streaming download with
-// incremental SHA-256, staged-then-atomic install) but with a much smaller surface: there is only
-// ever one artifact (App\), Tript already enforces single-instance, and the only writer of App\ is
-// launcher.c at a point where no .NET process is running - so no cross-process lock file is
-// needed, just an in-process non-blocking gate to stop the manual button and the timer racing.
 internal sealed class UpdateManager : IDisposable
 {
     private const long MaximumPackageBytes = 2L * 1024 * 1024 * 1024;
@@ -38,17 +33,11 @@ internal sealed class UpdateManager : IDisposable
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         _ownsHttp = httpClient is null;
         _releaseClient = releaseClient ?? new GitHubReleaseClient(_http);
-        // Windows-only in production (the whole download/stage/apply pipeline assumes launcher.c's
-        // swap contract), but injectable so tests can exercise both branches deterministically
-        // regardless of which OS actually runs them (CI runs this suite on Linux).
         _supportsAutomaticApply = supportsAutomaticApply ?? OperatingSystem.IsWindows();
     }
 
     internal event Action<UpdateStatusPayload>? StatusChanged;
 
-    // Reads the on-disk marker fresh on every call - this, plus AppController pushing this
-    // snapshot on every new IPC connection, is the entire "reappear on relaunch" mechanism. No
-    // "dismissed" flag is ever persisted anywhere.
     internal UpdateStatusPayload Snapshot()
     {
         var marker = UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot));
@@ -93,7 +82,6 @@ internal sealed class UpdateManager : IDisposable
                 && string.Equals(existingMarker.Version, versionText, StringComparison.Ordinal)
                 && StagedShellExists(existingMarker))
             {
-                // Already downloaded and staged this exact version on a previous check.
                 SetStatus(UpdateStage.Ready, version: versionText);
                 return;
             }
@@ -134,8 +122,7 @@ internal sealed class UpdateManager : IDisposable
         }
     }
 
-    // Re-reads the marker fresh from disk, not cached state - the primary safeguard against ever
-    // firing a restart-for-update with nothing genuinely staged.
+    // Read fresh from disk so a restart is never requested with nothing staged.
     internal bool TryApply()
     {
         var marker = UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot));
@@ -145,9 +132,6 @@ internal sealed class UpdateManager : IDisposable
     private bool StagedShellExists(UpdateMarker marker) => File.Exists(Path.Combine(
         UpdateStagingPaths.StagedFolderPath(_installRoot, marker.StagedFolderName), "Tript.Shell.exe"));
 
-    // Called once at AppHost construction: clears the previous swap's backup, drops the marker
-    // once the running app has actually reached the version it named, and removes any staged
-    // folder that isn't (or is no longer) referenced by a live marker.
     internal void SweepLeftovers()
     {
         var stagingRoot = UpdateStagingPaths.StagingRoot(_installRoot);
@@ -296,9 +280,7 @@ internal sealed class UpdateManager : IDisposable
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
-    // Extracts only the "<top>/App/**" subtree of the zip (the launcher, "<top>/Tript.exe", is
-    // never replaced - see the plan's decision to extend launcher.c instead of swapping it out).
-    // Zip-slip-safe: every entry's stripped-and-resolved path is checked to stay under stagingPath.
+    // Every entry is checked to stay under stagingPath (zip slip).
     private static void ExtractAppSubtree(string archivePath, string stagingPath)
     {
         using var archive = ZipFile.OpenRead(archivePath);
@@ -335,7 +317,7 @@ internal sealed class UpdateManager : IDisposable
             if (isDirectoryEntry && relative.Length > 0)
                 relative = relative[..^1];
             if (relative.Length == 0)
-                continue; // the App/ directory entry itself (real zip tools emit one explicitly).
+                continue;
 
             var segments = relative.Split('/');
             if (segments.Any(segment => segment.Length == 0 || segment is "." or ".."))
@@ -388,9 +370,6 @@ internal sealed class UpdateManager : IDisposable
         }
     }
 
-    // Without this, .tript-update\ lingers forever as an empty directory once whatever put
-    // something in it (a failed check, or a completed-and-since-applied update) is done - nothing
-    // else ever removes the staging root itself, only its contents.
     private void DeleteStagingRootIfEmpty()
     {
         var stagingRoot = UpdateStagingPaths.StagingRoot(_installRoot);

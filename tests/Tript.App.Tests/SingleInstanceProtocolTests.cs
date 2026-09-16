@@ -5,10 +5,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The pipe protocol is the only route a deploy script has to a graceful shutdown, so the wire
-// literals and the latch that replays a request arriving before anyone subscribed are worth
-// pinning. Both ends run in this process, under the test host's own instance scope, so these
-// never touch a real Tript.
 [Collection(SingleInstanceCollection.Name)]
 public sealed class SingleInstanceProtocolTests
 {
@@ -63,9 +59,6 @@ public sealed class SingleInstanceProtocolTests
         Assert.False(raised.Wait(TimeSpan.FromMilliseconds(500)));
     }
 
-    // An exit request can land during the fifteen seconds the shell spends waiting for its UI host,
-    // which is before OpenWindow subscribes. Dropping it there would leave a deploy waiting out the
-    // full timeout on a process that was told to quit.
     [Fact]
     public void ExitArrivingBeforeAnyoneSubscribes_IsReplayedOnSubscribe()
     {
@@ -83,8 +76,6 @@ public sealed class SingleInstanceProtocolTests
         Assert.Equal(1, Volatile.Read(ref raised));
     }
 
-    // Nothing is listening on the test host's scope, so this is the "asked a Tript that is not
-    // running to quit" case: it must report success immediately rather than sitting out the wait.
     [Fact]
     public void RequestExit_WithNoInstanceRunning_SucceedsWithoutWaiting()
     {

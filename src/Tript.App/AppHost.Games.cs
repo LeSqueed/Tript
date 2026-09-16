@@ -183,12 +183,6 @@ internal sealed partial class AppHost
         }
     }
 
-    // Retries resolver identification for locally-minted "custom-" games (created when the
-    // resolver was unreachable at detection time, or added by hand). If the resolver now returns a
-    // different, canonical id, the game entry is migrated in place — name, executable path, and
-    // every override survive since only the Id field changes — and the old id is recorded as an
-    // alias so already-recorded sessions/clips keep resolving to the same (now renamed) entry
-    // without any historical file being rewritten. See GameIdAliasStore / ResolveStoredGameId.
     internal async Task ReconcileCustomGameIdentitiesAsync()
     {
         if (_resolverClient is null || _disposed)
@@ -245,7 +239,7 @@ internal sealed partial class AppHost
                     var entry = settings.Game.GameList.FirstOrDefault(value =>
                         string.Equals(value.Id, oldId, StringComparison.OrdinalIgnoreCase));
                     if (entry is null)
-                        return null; // removed or edited concurrently; nothing left to migrate
+                        return null;
 
                     var existingCanonical = settings.Game.GameList.FirstOrDefault(value =>
                         !ReferenceEquals(value, entry)

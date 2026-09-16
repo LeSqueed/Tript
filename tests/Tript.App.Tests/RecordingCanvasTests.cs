@@ -6,20 +6,6 @@ using Xunit;
 
 namespace Tript.App.Tests;
 
-// The two decisions that settle what a recording actually looks like, both taken during host startup
-// and neither of them needing libobs to assert:
-//
-//   * the OBS canvas the runtime is reset with (Program.BuildVideoSettings), and
-//   * the resolution a fresh install starts at (Program.ApplyFirstRunDefaults).
-//
-// The canvas is worth pinning because it was wrong in a way nothing failed on: it was a hardcoded
-// 1920x1080 while the frame rate was read from the settings, and ObsRecorderSession.CreateOutput then
-// asked the encoder to scale to the *configured* size. A user on 2560x1440 got a 1440p file upscaled
-// from a 1080p canvas — every cost of recording 1440p and none of the detail, with no error anywhere.
-// A test over the settings-to-canvas mapping is the cheap way that stays fixed.
-//
-// No app host and no runtime is started here, so this class stays out of the port-binding smoke
-// collection.
 public sealed class RecordingCanvasTests
 {
     [Fact]
@@ -33,9 +19,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1440u, video.BaseHeight);
     }
 
-    // Base and output are the same size on purpose: the encoder is separately told to emit
-    // ResolutionWidth x ResolutionHeight (videoEncoder.SetScaledSize), so a canvas of any other size
-    // means the scaler is resampling every frame. Equal sizes make it a no-op.
     [Fact]
     public void TheCanvas_IsNotScaledOnTheWayOut()
     {
@@ -60,9 +43,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1u, video.FpsDenominator);
     }
 
-    // A zero in any dimension is the one combination obs_reset_video rejects outright, so a corrupt
-    // or hand-edited settings file must not become a failure to start. Flooring at 1 records a
-    // useless picture, which is still a running app the user can fix the setting in.
     [Theory]
     [InlineData(0, 0, 0)]
     [InlineData(-1, -1, -1)]
@@ -82,11 +62,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1u, video.FpsNumerator);
     }
 
-    // ---- the fresh-install resolution default ----
-    //
-    // The detected display is injected rather than read from the machine: the assertion is about the
-    // rule, and a test that depended on the developer's monitors would pass or fail on hardware.
-
     [Fact]
     public void AFreshInstall_DefaultsToThePrimaryDisplaysResolution()
     {
@@ -100,9 +75,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1440, store.Load().Recording.ResolutionHeight);
     }
 
-    // Detection failed (no display server, an X server without RandR, a platform we cannot read).
-    // The model's own 1080p stands: a safe default beats a guess, and it is a resolution every
-    // encoder on every machine can handle.
     [Fact]
     public void AFreshInstall_WithNoDetectedDisplay_KeepsTheSafeDefault()
     {
@@ -118,9 +90,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(PrimaryDisplay.Fallback.Height, store.Load().Recording.ResolutionHeight);
     }
 
-    // A size of zero is not a display — it is a platform answering with nothing. It is refused for
-    // the same reason detection returning null is: the fallback is a working recording, a 0x0 canvas
-    // is a host that will not start.
     [Fact]
     public void AFreshInstall_WithAnUnusableDetectedSize_KeepsTheSafeDefault()
     {
@@ -133,9 +102,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1080, store.Load().Recording.ResolutionHeight);
     }
 
-    // The rule that keeps the feature from being a data-loss bug: a settings file that exists is the
-    // user's, whatever is in it. Someone who chose 1280x720 on a 1440p screen keeps 1280x720 on
-    // every subsequent launch.
     [Fact]
     public void AnExistingSettingsFile_KeepsItsResolutionAndIsNotRewritten()
     {
@@ -150,14 +116,9 @@ public sealed class RecordingCanvasTests
         Assert.False(applied);
         Assert.Equal(1280, store.Load().Recording.ResolutionWidth);
         Assert.Equal(720, store.Load().Recording.ResolutionHeight);
-        // Untouched on disk as well: the first-run path does not even rewrite the file it declined
-        // to change.
         Assert.Equal(written, File.ReadAllText(directory.SettingsPath));
     }
 
-    // The first run is a first run exactly once. The file is written on the way out, so a second
-    // launch takes the "existing file" path even if the user never opened the settings UI — and a
-    // display swapped in later does not silently move the resolution out from under them.
     [Fact]
     public void AFreshInstall_WritesTheSettingsFile_SoASecondLaunchIsNotAFirstRun()
     {
@@ -167,17 +128,12 @@ public sealed class RecordingCanvasTests
 
         Assert.True(File.Exists(path));
 
-        // The second launch sees a file and leaves it alone, even though a different display is
-        // reported this time.
         var second = new SettingsStore(new SettingsFileProvider(path));
         Assert.False(Program.ApplyFirstRunDefaults(second, new DisplaySize(1920, 1080)));
         Assert.Equal(2560, second.Load().Recording.ResolutionWidth);
         Assert.Equal(1440, second.Load().Recording.ResolutionHeight);
     }
 
-    // The canvas and the fresh-install default are the same number by construction: the host applies
-    // the default first and then reads the settings back for the canvas (Program.BuildApp). If they
-    // ever diverged the encoder would be scaling again, which is the bug this whole change is about.
     [Fact]
     public void AFreshInstallsCanvas_IsThePrimaryDisplaysResolution()
     {
@@ -191,9 +147,6 @@ public sealed class RecordingCanvasTests
         Assert.Equal(1440u, video.BaseHeight);
     }
 
-    // A fresh install with no tracks configured would otherwise record silent video — recognizable
-    // audio devices exist on virtually every machine, so seed one track covering both rather than
-    // ship a recorder that captures nothing until someone finds the Audio settings page.
     [Fact]
     public void AFreshInstall_SeedsAMicAndDesktopTrack()
     {
@@ -208,8 +161,6 @@ public sealed class RecordingCanvasTests
         Assert.Contains(track.Sources, source => source.Kind == AudioSourceKind.Output && source.DeviceId is null);
     }
 
-    // Same rule as the resolution: a settings file that exists is the user's, even if they removed
-    // every track on purpose. First run never runs twice.
     [Fact]
     public void AnExistingSettingsFile_KeepsItsTracksAndIsNotSeeded()
     {
@@ -232,7 +183,6 @@ public sealed class RecordingCanvasTests
             Directory.CreateDirectory(_directory);
         }
 
-        // The file itself does not exist yet — that absence is what "fresh install" means here.
         internal string SettingsPath => Path.Combine(_directory, "settings.json");
 
         public void Dispose()
@@ -243,7 +193,6 @@ public sealed class RecordingCanvasTests
             }
             catch (IOException)
             {
-                // Best-effort cleanup of the temp directory.
             }
         }
     }

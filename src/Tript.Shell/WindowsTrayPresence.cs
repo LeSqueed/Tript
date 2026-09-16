@@ -62,6 +62,7 @@ internal sealed class WindowsTrayPresence : IDisposable
     private IntPtr _messageWindow;
     private IntPtr _icon;
     private bool _added;
+    private bool _useGuid = true;
     private bool _disposed;
     private string _tooltip = "Tript";
 
@@ -76,17 +77,58 @@ internal sealed class WindowsTrayPresence : IDisposable
         _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
     }
 
-    internal void Start()
+    // Never throws. A shell that cannot put an icon in the tray is still a usable shell - it just
+    // must not hide its window, which is what EnsureIconPresent() is for. Throwing here used to
+    // propagate out of Program.OpenWindow and take the whole process down instead.
+    internal bool Start()
     {
         if (!OperatingSystem.IsWindows())
-            return;
+            return false;
 
-        _messageWindow = CreateMessageWindow();
-        _icon = LoadImage(IntPtr.Zero, _iconPath, ImageIcon, 32, 32, LoadFromFile | LoadDefaultSize);
-        if (_icon == IntPtr.Zero)
-            throw new InvalidOperationException($"Could not load the tray icon '{_iconPath}'.");
+        try
+        {
+            _messageWindow = CreateMessageWindow();
+            _icon = LoadImage(IntPtr.Zero, _iconPath, ImageIcon, 32, 32, LoadFromFile | LoadDefaultSize);
+            if (_icon == IntPtr.Zero)
+                throw new InvalidOperationException($"Could not load the tray icon '{_iconPath}'.");
 
-        AddIcon();
+            AddIcon();
+            return true;
+        }
+        catch (InvalidOperationException exception)
+        {
+            Console.Error.WriteLine($"Tript.Shell: the tray icon is unavailable: {exception.Message}");
+            return false;
+        }
+    }
+
+    // The question every hide decision has to ask: is there really an icon in the tray right now?
+    // Shell_NotifyIcon(NIM_ADD) fails transiently at logon before the taskbar exists, and the
+    // TaskbarCreated re-add below can fail too, so a false _added is worth one more attempt rather
+    // than a permanent verdict. A caller that hides a window on a stale "yes" leaves the process
+    // with no window, no taskbar button and no icon. Because that retry mutates the icon state,
+    // every caller has to be on the thread that owns the message window - the same STA thread
+    // Photino pumps - which is what keeps this lock-free.
+    internal bool EnsureIconPresent()
+    {
+        if (_disposed || !OperatingSystem.IsWindows())
+            return false;
+
+        if (_added)
+            return true;
+
+        if (_messageWindow == IntPtr.Zero || _icon == IntPtr.Zero)
+            return false;
+
+        try
+        {
+            AddIcon();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return _added;
     }
 
     internal void SetRecordingState(bool recording, string? gameId)
@@ -94,7 +136,7 @@ internal sealed class WindowsTrayPresence : IDisposable
         _tooltip = recording
             ? string.IsNullOrWhiteSpace(gameId) ? "Tript - Recording" : $"Tript - Recording: {gameId}"
             : "Tript";
-        if (_added)
+        if (EnsureIconPresent())
             ModifyIcon();
     }
 
@@ -129,11 +171,24 @@ internal sealed class WindowsTrayPresence : IDisposable
         return window;
     }
 
+    // Windows binds a GUID-registered notify icon to the executable path that first registered it,
+    // so the same install copied or moved elsewhere gets NIM_ADD refused and shows no icon at all.
+    // Fall back to identifying the icon by window handle + id, which carries no path affinity.
+    // Deliberately no NIM_DELETE of the GUID first: IconGuid is one constant shared by every Tript
+    // install on the machine, not derived from the path, so a delete would take a *different* live
+    // instance's icon out of the tray. NIM_MODIFY and NIM_DELETE then have to address the icon the
+    // same way the add did, hence _useGuid.
     private void AddIcon()
     {
+        _useGuid = true;
         var data = BuildNotifyIconData(NifMessage | NifIcon | NifTip | NifGuid);
         if (!ShellNotifyIcon(NimAdd, ref data))
-            throw new InvalidOperationException("Windows could not add the Tript tray icon.");
+        {
+            _useGuid = false;
+            data = BuildNotifyIconData(NifMessage | NifIcon | NifTip);
+            if (!ShellNotifyIcon(NimAdd, ref data))
+                throw new InvalidOperationException("Windows could not add the Tript tray icon.");
+        }
 
         data.Version = NotifyIconVersion4;
         ShellNotifyIcon(NimSetVersion, ref data);
@@ -142,7 +197,7 @@ internal sealed class WindowsTrayPresence : IDisposable
 
     private void ModifyIcon()
     {
-        var data = BuildNotifyIconData(NifTip | NifGuid);
+        var data = BuildNotifyIconData(_useGuid ? NifTip | NifGuid : NifTip);
         ShellNotifyIcon(NimModify, ref data);
     }
 
@@ -155,7 +210,7 @@ internal sealed class WindowsTrayPresence : IDisposable
         CallbackMessage = _trayCallbackMessage,
         Icon = _icon,
         Tip = _tooltip,
-        Guid = IconGuid,
+        Guid = _useGuid ? IconGuid : Guid.Empty,
     };
 
     private IntPtr WndProc(IntPtr window, uint message, IntPtr wParam, IntPtr lParam)
@@ -165,14 +220,7 @@ internal sealed class WindowsTrayPresence : IDisposable
             if (!_disposed)
             {
                 DeleteIcon();
-                try
-                {
-                    AddIcon();
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine($"Tript.Shell: could not restore the tray icon: {exception.Message}");
-                }
+                EnsureIconPresent();
             }
             return IntPtr.Zero;
         }
@@ -260,9 +308,10 @@ internal sealed class WindowsTrayPresence : IDisposable
         if (!_added)
             return;
 
-        var data = BuildNotifyIconData(NifGuid);
+        var data = BuildNotifyIconData(_useGuid ? NifGuid : 0);
         ShellNotifyIcon(NimDelete, ref data);
         _added = false;
+        _useGuid = true;
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]

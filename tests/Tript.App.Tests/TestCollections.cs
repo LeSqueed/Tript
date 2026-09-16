@@ -11,6 +11,14 @@ public sealed class AppHostCollection : ICollectionFixture<AppHostCollectionFixt
     public const string Name = "app-host-smoke";
 }
 
+// SingleInstance is keyed on the test host's own executable path, so two tests that acquire it at
+// the same time collide on one mutex. -m:1 only serialises projects, not the classes inside one.
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SingleInstanceCollection
+{
+    public const string Name = "shell-single-instance";
+}
+
 public sealed class AppHostCollectionFixture : IDisposable
 {
     private static readonly string SuiteRoot = Path.Combine(Path.GetTempPath(), "tript-app-tests");

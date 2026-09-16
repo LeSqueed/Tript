@@ -12,6 +12,9 @@ namespace Tript.Shell;
 internal static class Program
 {
     internal const string NavigateSettingsMessage = "tript:navigate:settings";
+    internal const string ExitArgument = "--exit";
+
+    private static readonly TimeSpan ExitWait = TimeSpan.FromSeconds(90);
 
     private static readonly string UiAddress = $"http://localhost:{LocalPorts.Ui}/";
     private static readonly HttpClient UiClient = new()
@@ -22,6 +25,11 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // Ahead of AppOptions.Parse, which rejects arguments it does not know: --exit never reaches
+        // a host because it is a message to one that is already running.
+        if (IsExitRequest(args))
+            return RequestExitOfRunningInstance();
+
         var options = AppOptions.Parse(args);
         if (options is null)
             return 2;
@@ -91,6 +99,12 @@ internal static class Program
             return restartForUpdate ? ShellExitCodes.RestartForUpdate : 0;
         }
     }
+
+    internal static bool IsExitRequest(string[] args) =>
+        args.Any(argument => string.Equals(argument, ExitArgument, StringComparison.Ordinal));
+
+    private static int RequestExitOfRunningInstance() =>
+        SingleInstance.RequestExit(ExitWait) ? 0 : ShellExitCodes.ExitRequestTimedOut;
 
     private static void ApplyStartupRegistration(WindowsStartupRegistration registration, bool enabled)
     {
@@ -171,7 +185,7 @@ internal static class Program
         PhotinoWindow? window = null;
         var activationPending = false;
         var startupMinimizePending = false;
-        var exitRequested = false;
+        var exitRequested = 0;
         var restartForUpdatePending = false;
         var webReady = false;
         string? pendingNavigation = null;
@@ -184,6 +198,12 @@ internal static class Program
                 () => host.IsRecording,
                 command => HandleTrayCommand(command))
             : null;
+
+        // SW_HIDE takes the taskbar button with it, so every hide site below has to be certain an
+        // icon is actually in the tray first. "We constructed a WindowsTrayPresence" is not that:
+        // the icon file existing says nothing about Shell_NotifyIcon having succeeded. When it has
+        // not, the window minimizes to the taskbar instead of vanishing.
+        bool TrayReachable() => tray is not null && tray.EnsureIconPresent();
 
         using var hotkeys = OperatingSystem.IsWindows()
             ? new WindowsHotkeys(action => HandleHotkey(action), host.PushError)
@@ -250,8 +270,44 @@ internal static class Program
 
         singleInstance.ActivationRequested += ShowMainWindow;
 
+        void RequestShellExit()
+        {
+            if (Interlocked.Exchange(ref exitRequested, 1) != 0)
+                return;
+
+            if (window is null)
+            {
+                host.Ipc.RequestShutdown();
+                Environment.Exit(0);
+                return;
+            }
+
+            // Off the message pump: StopRecordingOrReport blocks under the recorder gate for up to
+            // the stop timeout, and the pump is what CloseWindow needs to marshal through. Stopping
+            // here rather than leaving it to AppHost.Dispose is what makes an exit request flush
+            // the session's metadata instead of dropping it.
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                if (host.IsRecording)
+                    host.StopRecordingOrReport();
+
+                CloseShellOrRequestShutdown(
+                    () => WindowsWindow.CloseWindow(window),
+                    host.Ipc.RequestShutdown,
+                    () => Environment.Exit(1));
+            });
+        }
+
+        singleInstance.ExitRequested += RequestShellExit;
+
         void HandleTrayCommand(TrayCommand command)
         {
+            if (command == TrayCommand.Exit)
+            {
+                RequestShellExit();
+                return;
+            }
+
             if (window is null)
                 return;
 
@@ -293,13 +349,6 @@ internal static class Program
                         }
                     });
                     break;
-                case TrayCommand.Exit:
-                    exitRequested = true;
-                    CloseShellOrRequestShutdown(
-                        () => window.Invoke(() => WindowsWindow.CloseWindow(window)),
-                        host.Ipc.RequestShutdown,
-                        () => Environment.Exit(1));
-                    break;
             }
         }
 
@@ -324,10 +373,10 @@ internal static class Program
             if (window is null)
                 return;
 
-            exitRequested = true;
+            Interlocked.Exchange(ref exitRequested, 1);
             restartForUpdatePending = true;
             CloseShellOrRequestShutdown(
-                () => window.Invoke(() => WindowsWindow.CloseWindow(window)),
+                () => WindowsWindow.CloseWindow(window),
                 host.Ipc.RequestShutdown,
                 () => Environment.Exit(ShellExitCodes.RestartForUpdate));
         };
@@ -370,7 +419,7 @@ internal static class Program
 
         window.RegisterWindowClosingHandler((_, _) =>
         {
-            if (exitRequested)
+            if (Volatile.Read(ref exitRequested) != 0)
                 return false;
 
             if (tray is null)
@@ -384,7 +433,12 @@ internal static class Program
             if (!shouldHide)
                 return false;
 
-            WindowsWindow.HideWindow(window);
+            // Cancelling the close is what the setting asks for either way; only the destination
+            // changes when there is no icon to come back from.
+            if (TrayReachable())
+                WindowsWindow.HideWindow(window);
+            else
+                WindowsWindow.MinimizeWindow(window);
             return true;
         });
 
@@ -412,14 +466,14 @@ internal static class Program
                 return;
 
             startupVisibilityApplied = true;
-            if (startupVisibility == StartupVisibility.Minimized)
+            if (startupVisibility == StartupVisibility.Tray && TrayReachable())
+            {
+                WindowsWindow.HideWindow(window);
+            }
+            else if (startupVisibility != StartupVisibility.Window)
             {
                 startupMinimizePending = true;
                 WindowsWindow.MinimizeWindow(window);
-            }
-            else if (startupVisibility == StartupVisibility.Tray)
-            {
-                WindowsWindow.HideWindow(window);
             }
         }
 
@@ -456,11 +510,19 @@ internal static class Program
                 return;
             }
 
-            if (tray is not null && host.SettingsStore.Load().General.MinimizeBehavior == MinimizeBehavior.Tray)
+            if (host.SettingsStore.Load().General.MinimizeBehavior == MinimizeBehavior.Tray
+                && TrayReachable())
+            {
                 WindowsWindow.HideWindow(window);
+            }
         };
 
-        tray?.Start();
+        if (tray is not null && !tray.Start())
+        {
+            Log.Warning(
+                "Tript.Shell: the tray icon could not be registered; Tript will minimize to the taskbar instead of hiding");
+        }
+
         window.Load(startupUrl);
         try
         {
@@ -469,6 +531,7 @@ internal static class Program
         finally
         {
             singleInstance.ActivationRequested -= ShowMainWindow;
+            singleInstance.ExitRequested -= RequestShellExit;
         }
 
         return restartForUpdatePending;

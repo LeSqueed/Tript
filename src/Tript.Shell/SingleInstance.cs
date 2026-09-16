@@ -10,7 +10,8 @@ namespace Tript.Shell;
 
 internal sealed class SingleInstance : IDisposable
 {
-    private const string ActivationMessage = "activate";
+    internal const string ActivationMessage = "activate";
+    internal const string ExitMessage = "exit";
 
     private static string MutexName => $"Local\\Tript.SingleInstance.{InstanceScope}";
     private static string PipeName => $"Tript.SingleInstance.Activate.{InstanceScope}";
@@ -34,7 +35,9 @@ internal sealed class SingleInstance : IDisposable
     private readonly Thread _serverThread;
     private readonly object _activationGate = new();
     private Action? _activationRequested;
+    private Action? _exitRequested;
     private bool _activationPending;
+    private bool _exitPending;
     private bool _disposed;
 
     internal event Action? ActivationRequested
@@ -59,6 +62,31 @@ internal sealed class SingleInstance : IDisposable
         {
             lock (_activationGate)
                 _activationRequested -= value;
+        }
+    }
+
+    internal event Action? ExitRequested
+    {
+        add
+        {
+            var invokeImmediately = false;
+            lock (_activationGate)
+            {
+                _exitRequested += value;
+                if (_exitPending)
+                {
+                    _exitPending = false;
+                    invokeImmediately = true;
+                }
+            }
+
+            if (invokeImmediately)
+                value?.Invoke();
+        }
+        remove
+        {
+            lock (_activationGate)
+                _exitRequested -= value;
         }
     }
 
@@ -91,11 +119,47 @@ internal sealed class SingleInstance : IDisposable
             return new SingleInstance(mutex);
 
         mutex.Dispose();
-        RequestActivation();
+        Send(ActivationMessage);
         return null;
     }
 
-    private static void RequestActivation()
+    // Asks a running instance to quit and reports whether it is really gone. The mutex is the only
+    // handle an outside process has on that: it is opened, never acquired, so this never briefly
+    // becomes the single instance itself and never has to reason about an abandoned mutex. The
+    // handle closes in Dispose, which runs after AppHost.Dispose has flushed the recording, so
+    // "the scope disappeared" is the signal a deploy actually wants. The image lock on
+    // Tript.Shell.exe outlives it by a few milliseconds, so a script that overwrites the files
+    // should still retry the copy briefly.
+    internal static bool RequestExit(TimeSpan timeout)
+    {
+        if (!ScopeIsTaken())
+            return true;
+
+        if (!Send(ExitMessage))
+            return false;
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!ScopeIsTaken())
+                return true;
+
+            Thread.Sleep(100);
+        }
+
+        return false;
+    }
+
+    private static bool ScopeIsTaken()
+    {
+        if (!Mutex.TryOpenExisting(MutexName, out var existing))
+            return false;
+
+        existing.Dispose();
+        return true;
+    }
+
+    internal static bool Send(string message)
     {
         try
         {
@@ -105,9 +169,9 @@ internal sealed class SingleInstance : IDisposable
                 {
                     using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
                     client.Connect(750);
-                    var bytes = Encoding.UTF8.GetBytes(ActivationMessage + "\n");
+                    var bytes = Encoding.UTF8.GetBytes(message + "\n");
                     client.Write(bytes, 0, bytes.Length);
-                    return;
+                    return true;
                 }
                 catch (TimeoutException) when (attempt < 7)
                 {
@@ -122,6 +186,8 @@ internal sealed class SingleInstance : IDisposable
         catch (Exception exception) when (exception is IOException or TimeoutException)
         {
         }
+
+        return false;
     }
 
     private void ServerLoop()
@@ -138,25 +204,7 @@ internal sealed class SingleInstance : IDisposable
                     PipeOptions.Asynchronous);
                 server.WaitForConnectionAsync(_cancellation.Token).GetAwaiter().GetResult();
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
-                if (reader.ReadLineAsync(_cancellation.Token).GetAwaiter().GetResult() == ActivationMessage)
-                {
-                    Action? handler;
-                    lock (_activationGate)
-                    {
-                        handler = _activationRequested;
-                        if (handler is null)
-                            _activationPending = true;
-                    }
-
-                    try
-                    {
-                        handler?.Invoke();
-                    }
-                    catch (Exception exception)
-                    {
-                        Console.Error.WriteLine($"Tript.Shell: activation failed: {exception.Message}");
-                    }
-                }
+                Dispatch(reader.ReadLineAsync(_cancellation.Token).GetAwaiter().GetResult());
             }
             catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
             {
@@ -165,6 +213,38 @@ internal sealed class SingleInstance : IDisposable
             catch (IOException) when (!_cancellation.IsCancellationRequested)
             {
             }
+        }
+    }
+
+    private void Dispatch(string? message)
+    {
+        Action? handler;
+        lock (_activationGate)
+        {
+            switch (message)
+            {
+                case ActivationMessage:
+                    handler = _activationRequested;
+                    if (handler is null)
+                        _activationPending = true;
+                    break;
+                case ExitMessage:
+                    handler = _exitRequested;
+                    if (handler is null)
+                        _exitPending = true;
+                    break;
+                default:
+                    return;
+            }
+        }
+
+        try
+        {
+            handler?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Tript.Shell: the {message} request failed: {exception.Message}");
         }
     }
 

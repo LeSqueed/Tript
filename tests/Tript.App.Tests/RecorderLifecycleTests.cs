@@ -70,6 +70,27 @@ public sealed class RecorderLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void RecordingStartedNotification_NamesTheGame()
+    {
+        var game = _host.GameList.First(entry => entry.Name == "Overwatch");
+        Assert.NotEqual(game.Id, game.Name);
+        _host.TrackDetectedGameStarted(new DetectedGameProcess(game.Id, 4001, "Overwatch",
+            @"C:\Games\Overwatch\Overwatch.exe"));
+
+        string? body = null;
+        _host.NotificationRequested += (kind, _, text) =>
+        {
+            if (kind == NotificationKind.RecordingStarted)
+                body = text;
+        };
+
+        Assert.True(_host.StartRecording(game.Id));
+        Assert.NotNull(body);
+        Assert.Contains("Overwatch", body);
+        Assert.DoesNotContain(game.Id, body);
+    }
+
+    [Fact]
     public void ConcurrentStops_OnlyOneWins()
     {
         Assert.True(_host.StartRecording("Overwatch"));

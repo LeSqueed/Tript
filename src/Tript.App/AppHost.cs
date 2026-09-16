@@ -941,7 +941,7 @@ internal sealed partial class AppHost : IDisposable
         var game = representedGameId is null ? null : new GameInfo
         {
             Id = representedGameId,
-            Name = GameList.FirstOrDefault(g => g.Id == representedGameId)?.Name ?? representedGameId,
+            Name = GameDisplayName(representedGameId),
             Detected = DetectedProcessFor(representedGameId) is not null,
         };
 

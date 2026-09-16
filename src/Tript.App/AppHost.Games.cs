@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Serilog;
 using Tript.App.Content;
 using Tript.App.Ipc;
@@ -420,4 +421,8 @@ internal sealed partial class AppHost
                 return _catalogueGames;
         }
     }
+
+    [return: NotNullIfNotNull(nameof(gameId))]
+    internal string? GameDisplayName(string? gameId) =>
+        GameList.FirstOrDefault(game => game.Id == gameId)?.Name ?? gameId;
 }

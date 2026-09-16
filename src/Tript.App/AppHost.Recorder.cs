@@ -220,9 +220,10 @@ internal sealed partial class AppHost
             _pendingSessionReassignment = null;
             _activeRecordingMode = resolved.Mode;
             _currentGameId = effectiveGameId;
+            var gameName = GameDisplayName(effectiveGameId);
             _pendingMetadata = new RecordingMetadata
             {
-                Game = GameList.FirstOrDefault(g => g.Id == effectiveGameId)?.Name ?? effectiveGameId,
+                Game = gameName,
                 GameId = effectiveGameId,
                 ContentType = ContentType.Recording,
                 StartTime = DateTime.Now,
@@ -255,12 +256,12 @@ internal sealed partial class AppHost
             if (resolved.Mode is RecordingMode.ReplayBufferOnly)
             {
                 RequestNotification(NotificationKind.RecordingStarted, "Buffering started",
-                    string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is buffering." : $"Tript is buffering {effectiveGameId}.");
+                    string.IsNullOrWhiteSpace(gameName) ? "Tript is buffering." : $"Tript is buffering {gameName}.");
             }
             else
             {
                 RequestNotification(NotificationKind.RecordingStarted, "Recording started",
-                    string.IsNullOrWhiteSpace(effectiveGameId) ? "Tript is recording." : $"Tript is recording {effectiveGameId}.");
+                    string.IsNullOrWhiteSpace(gameName) ? "Tript is recording." : $"Tript is recording {gameName}.");
             }
             return StartRecordingResult.Started;
         }

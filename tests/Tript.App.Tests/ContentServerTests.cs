@@ -40,6 +40,7 @@ public sealed class ContentServerTests : IDisposable
         using var response = await GetWithRange(host, "sessions/clip.mp4", "bytes=4-8");
         Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
         Assert.Equal("bytes 4-8/20", response.Content.Headers.GetValues("Content-Range").Single());
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("45678", body);
 

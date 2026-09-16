@@ -29,4 +29,11 @@ public class IpcOriginTests
     [InlineData("null")]
     public void AnyOtherOrigin_IsRefused(string origin) =>
         Assert.False(IpcServer.IsAllowedOrigin(origin));
+
+    [Theory]
+    [InlineData("http://localhost:9100", true)]
+    [InlineData("http://127.0.0.1:9100", true)]
+    [InlineData("http://localhost:8892", false)]
+    public void ACustomUiPort_MovesTheAllowlistWithIt(string origin, bool allowed) =>
+        Assert.Equal(allowed, IpcServer.IsAllowedOrigin(origin, LocalPorts.OriginsFor(9100)));
 }

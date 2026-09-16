@@ -38,7 +38,7 @@ internal sealed class IpcServer : IDisposable
         _controller = controller;
         _token = token;
         _port = port;
-        _allowedOrigins = [$"http://localhost:{uiPort}", $"http://127.0.0.1:{uiPort}"];
+        _allowedOrigins = LocalPorts.OriginsFor(uiPort);
         _shutdown = _cts.Token;
     }
 
@@ -136,15 +136,12 @@ internal sealed class IpcServer : IDisposable
         }
     }
 
-    private static readonly string[] AllowedOrigins = LocalPorts.UiOrigins;
+    private bool IsOriginAllowed(string? origin) => IsAllowedOrigin(origin, _allowedOrigins);
 
-    private bool IsOriginAllowed(string? origin) =>
-        string.IsNullOrEmpty(origin) ||
-        _allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+    internal static bool IsAllowedOrigin(string? origin) => IsAllowedOrigin(origin, LocalPorts.UiOrigins);
 
-    internal static bool IsAllowedOrigin(string? origin) =>
-        string.IsNullOrEmpty(origin) ||
-        AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+    internal static bool IsAllowedOrigin(string? origin, IReadOnlyCollection<string> allowed) =>
+        string.IsNullOrEmpty(origin) || allowed.Contains(origin, StringComparer.OrdinalIgnoreCase);
 
     internal async Task DispatchAsync(ClientConnection client, string method, JsonElement? parameters)
     {

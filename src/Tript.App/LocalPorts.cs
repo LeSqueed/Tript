@@ -9,6 +9,7 @@ internal static class LocalPorts
     internal const int Content = 8893;
     internal const int ControlSocket = 8894;
 
-    internal static readonly string[] UiOrigins =
-        [$"http://localhost:{Ui}", $"http://127.0.0.1:{Ui}"];
+    internal static readonly string[] UiOrigins = OriginsFor(Ui);
+
+    internal static string[] OriginsFor(int port) => [$"http://localhost:{port}", $"http://127.0.0.1:{port}"];
 }

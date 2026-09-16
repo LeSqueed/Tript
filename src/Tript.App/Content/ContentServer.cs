@@ -21,6 +21,9 @@ internal sealed class ContentServer : IDisposable
     private static readonly Regex ThumbnailRoute =
         new(@"^/api/thumbnail/(.+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex RangeHeader =
+        new(@"bytes=(\d*)-(\d*)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex PathSegment =
         new(@"(^|/)\.\.(/|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -106,8 +109,7 @@ internal sealed class ContentServer : IDisposable
             var rawPath = context.Request.RawUrl ?? string.Empty;
             if (rawPath.Contains("/../", StringComparison.Ordinal)
                 || rawPath.Contains("/..", StringComparison.Ordinal)
-                || rawPath.Contains("%2e", StringComparison.OrdinalIgnoreCase)
-                || rawPath.Contains("%2E", StringComparison.OrdinalIgnoreCase))
+                || rawPath.Contains("%2e", StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = 403;
                 context.Response.Close();
@@ -183,7 +185,7 @@ internal sealed class ContentServer : IDisposable
         {
             var root = Path.GetFullPath(contentRoot);
             var candidate = Path.GetFullPath(Path.Combine(root, requestPath));
-            if (!IsUnderRoot(candidate, root))
+            if (!FilePaths.IsAtOrUnder(candidate, root))
                 return null;
             return allowTrash || !IsInTrash(candidate, root) ? candidate : null;
         }
@@ -192,19 +194,6 @@ internal sealed class ContentServer : IDisposable
         {
             return null;
         }
-    }
-
-    private static bool IsUnderRoot(string candidate, string root)
-    {
-        var comparison = FilePaths.Comparison;
-        if (string.Compare(candidate, root, comparison) == 0)
-            return true;
-
-        var prefix = root.EndsWith(Path.DirectorySeparatorChar)
-            ? root
-            : root + Path.DirectorySeparatorChar;
-
-        return candidate.StartsWith(prefix, comparison);
     }
 
     private static bool IsInTrash(string candidate, string root)
@@ -239,8 +228,9 @@ internal sealed class ContentServer : IDisposable
         var length = stream.Length;
 
         context.Response.ContentType = "video/mp4";
+        context.Response.AddHeader("X-Content-Type-Options", "nosniff");
         context.Response.Headers.Add("Accept-Ranges", "bytes");
-        context.Response.Headers.Add("Content-Disposition", $"inline; filename=\"{Path.GetFileName(resolved)}\"");
+        context.Response.Headers.Add("Content-Disposition", InlineDisposition(Path.GetFileName(resolved)));
 
         var rangeHeader = context.Request.Headers["Range"];
         if (string.IsNullOrEmpty(rangeHeader))
@@ -297,12 +287,20 @@ internal sealed class ContentServer : IDisposable
         }
     }
 
+    internal static string InlineDisposition(string fileName)
+    {
+        var fallback = new string(fileName
+            .Select(character => character is >= ' ' and <= '~' and not '"' and not '\\' ? character : '_')
+            .ToArray());
+        return $"inline; filename=\"{fallback}\"; filename*=UTF-8''{Uri.EscapeDataString(fileName)}";
+    }
+
     internal static bool TryParseRange(string header, long length, out long start, out long end)
     {
         start = 0;
         end = length - 1;
 
-        var match = Regex.Match(header, @"bytes=(\d*)-(\d*)", RegexOptions.CultureInvariant);
+        var match = RangeHeader.Match(header);
         if (!match.Success)
             return false;
 
@@ -375,6 +373,7 @@ internal sealed class ContentServer : IDisposable
 
         context.Response.StatusCode = 200;
         context.Response.ContentType = "image/jpeg";
+        context.Response.AddHeader("X-Content-Type-Options", "nosniff");
         context.Response.ContentLength64 = image.Length;
 
         context.Response.Headers.Add("Cache-Control", "private, max-age=3600");

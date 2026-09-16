@@ -666,13 +666,30 @@ internal sealed partial class AppHost
     private string GameFolderName(string gameId)
     {
         var game = GameList.FirstOrDefault(candidate => candidate.Id == gameId)?.Name;
-        return SafeDirectoryName(string.IsNullOrWhiteSpace(game) ? gameId : game);
+        return SafeDirectoryName(string.IsNullOrWhiteSpace(game) ? gameId : game, OperatingSystem.IsWindows());
     }
 
-    private static string SafeDirectoryName(string value)
+    private const string UnknownGameFolder = "Unknown Game";
+
+    private static readonly char[] WindowsInvalidFileNameChars =
+        [.. "<>:\"/\\|?*", .. Enumerable.Range(0, 32).Select(code => (char)code)];
+
+    internal static string SafeDirectoryName(string value, bool windowsRules)
     {
-        var invalid = Path.GetInvalidFileNameChars();
+        var invalid = windowsRules ? WindowsInvalidFileNameChars : Path.GetInvalidFileNameChars();
         var name = new string(value.Trim().Select(character => invalid.Contains(character) ? '_' : character).ToArray());
-        return string.IsNullOrWhiteSpace(name) || name is "." or ".." ? "Unknown Game" : name;
+        if (windowsRules)
+            name = name.TrimEnd('.', ' ');
+        if (string.IsNullOrWhiteSpace(name) || name is "." or "..")
+            return UnknownGameFolder;
+        return windowsRules && IsReservedDeviceName(name) ? "_" + name : name;
+    }
+
+    private static bool IsReservedDeviceName(string name)
+    {
+        var stem = name.Split('.', 2)[0].TrimEnd(' ').ToUpperInvariant();
+        return stem is "CON" or "PRN" or "AUX" or "NUL"
+            || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal)
+                || stem.StartsWith("LPT", StringComparison.Ordinal)) && stem[3] is >= '1' and <= '9');
     }
 }

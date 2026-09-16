@@ -25,6 +25,8 @@ public sealed class ContentPathEncodingTests
     [InlineData("my#clip.mp4", "my%23clip.mp4")]
     [InlineData("what?.mp4", "what%3F.mp4")]
     [InlineData("100% real.mp4", "100%25%20real.mp4")]
+    [InlineData("clé.mp4", "cl%C3%A9.mp4")]
+    [InlineData("say \"hi\".mp4", "say%20%22hi%22.mp4")]
     public async Task AnEscapedFileName_IsServed(string fileName, string escaped)
     {
         if (fileName.Any(c => Path.GetInvalidFileNameChars().Contains(c)))

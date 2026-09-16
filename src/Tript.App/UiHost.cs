@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Net;
+using Serilog;
 using Tript.Core;
 
 namespace Tript.App;
@@ -78,42 +79,12 @@ internal sealed class UiHost : IDisposable
 
             var setCookie = context.Request.QueryString[SessionToken.QueryKey] is not null;
 
-            var path = context.Request.Url?.AbsolutePath ?? "/";
-            if (path == "/")
-                path = "/index.html";
-
-            var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            if (relative.Contains("..", StringComparison.Ordinal))
+            var candidate = ResolveFile(_webRoot, context.Request.Url?.AbsolutePath ?? "/");
+            if (candidate is null)
             {
                 context.Response.StatusCode = 404;
                 context.Response.Close();
                 return;
-            }
-
-            var candidate = Path.GetFullPath(Path.Combine(_webRoot, relative));
-            if (!candidate.StartsWith(_webRoot, FilePaths.Comparison))
-            {
-                context.Response.StatusCode = 404;
-                context.Response.Close();
-                return;
-            }
-
-            if (!File.Exists(candidate))
-            {
-                if (Path.HasExtension(relative))
-                {
-                    context.Response.StatusCode = 404;
-                    context.Response.Close();
-                    return;
-                }
-
-                candidate = Path.Combine(_webRoot, "index.html");
-                if (!File.Exists(candidate))
-                {
-                    context.Response.StatusCode = 404;
-                    context.Response.Close();
-                    return;
-                }
             }
 
             if (setCookie)
@@ -122,14 +93,18 @@ internal sealed class UiHost : IDisposable
                     $"{SessionToken.CookieName}={_token.Value}; Path=/; HttpOnly; SameSite=Strict");
             }
 
+            AddSecurityHeaders(context.Response);
+            if (IsIndexDocument(candidate))
+                context.Response.AddHeader("Cache-Control", "no-cache");
             context.Response.ContentType = ContentTypeFor(candidate);
             context.Response.ContentLength64 = new FileInfo(candidate).Length;
             using var stream = File.OpenRead(candidate);
             stream.CopyTo(context.Response.OutputStream);
             context.Response.Close();
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            Log.Warning(exception, "Ui: a request failed");
             try
             {
                 context.Response.StatusCode = 500;
@@ -141,9 +116,29 @@ internal sealed class UiHost : IDisposable
         }
     }
 
+    internal static string? ResolveFile(string webRoot, string urlPath)
+    {
+        var path = urlPath == "/" ? "/index.html" : urlPath;
+        var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        if (relative.Contains("..", StringComparison.Ordinal))
+            return null;
+
+        var candidate = Path.GetFullPath(Path.Combine(webRoot, relative));
+        if (!FilePaths.IsUnder(candidate, webRoot))
+            return null;
+        if (File.Exists(candidate))
+            return candidate;
+        if (Path.HasExtension(relative))
+            return null;
+
+        var index = Path.Combine(webRoot, "index.html");
+        return File.Exists(index) ? index : null;
+    }
+
     private static void Refuse(HttpListenerContext context)
     {
         var body = "Tript: this page is served only to the session that launched the app.\n"u8.ToArray();
+        AddSecurityHeaders(context.Response);
         context.Response.StatusCode = 403;
         context.Response.ContentType = "text/plain; charset=utf-8";
         context.Response.ContentLength64 = body.Length;
@@ -151,14 +146,24 @@ internal sealed class UiHost : IDisposable
         context.Response.Close();
     }
 
-    private static string ContentTypeFor(string path)
+    internal static void AddSecurityHeaders(HttpListenerResponse response)
+    {
+        response.AddHeader("X-Content-Type-Options", "nosniff");
+        response.AddHeader("Referrer-Policy", "same-origin");
+        response.AddHeader("X-Frame-Options", "DENY");
+    }
+
+    private bool IsIndexDocument(string path) =>
+        string.Equals(path, Path.Combine(_webRoot, "index.html"), FilePaths.Comparison);
+
+    internal static string ContentTypeFor(string path)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
         return extension switch
         {
-            ".html" => "text/html",
-            ".js" => "application/javascript",
-            ".css" => "text/css",
+            ".html" => "text/html; charset=utf-8",
+            ".js" => "text/javascript; charset=utf-8",
+            ".css" => "text/css; charset=utf-8",
             ".json" => "application/json",
             ".svg" => "image/svg+xml",
             ".png" => "image/png",

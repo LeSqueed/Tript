@@ -196,14 +196,10 @@ public sealed class DetectionHost : IDisposable
         internal string GameId { get; }
 
         private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsByClass;
-        private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsById;
         private readonly Action<Bookmark>? _onAutomaticClipBookmark;
         private readonly object _processingGate = new();
-        private readonly Dictionary<int, int> _previousNetCounts = new();
-        private readonly Dictionary<int, List<TextTrack>> _ocrTracks = new();
-
-        private const float VetoConfidenceFloor = 0.8f;
-        private const int VetoMemoryMilliseconds = 1000;
+        private readonly OcrTextTracker _ocrTracker;
+        private readonly TriggerCounter _triggerCounter;
         private readonly object _callbackGate = new();
         private int _callbacksInFlight;
         private bool _stopping;
@@ -215,9 +211,11 @@ public sealed class DetectionHost : IDisposable
             GameId = gameId;
             _definitionsByClass = definitionsByClass;
             _onAutomaticClipBookmark = onAutomaticClipBookmark;
-            _definitionsById = definitions
+            var definitionsById = definitions
                 .GroupBy(definition => definition.Id)
                 .ToDictionary(group => group.Key, group => group.First());
+            _ocrTracker = new OcrTextTracker(definitionsById.Values);
+            _triggerCounter = new TriggerCounter(gameId, definitionsById);
         }
 
         internal void OnDetections(DetectionBatch batch)
@@ -269,211 +267,9 @@ public sealed class DetectionHost : IDisposable
                 resolvedObjects.Add((detection, definition));
             }
 
-            var activeOcrTracks = UpdateOcrTracks(batch.OcrMatches, now);
-
-            var hasExclusion = resolvedObjects.Any(item => item.Definition.Type == EventType.Exclusion)
-                || activeOcrTracks.Any(item => item.Definition.Type == EventType.Exclusion);
-            if (hasExclusion)
-            {
-                foreach (var definition in _definitionsById.Values.Where(item => item.Type == EventType.Trigger))
-                {
-                    var observedCount = definition.DetectionKind == DetectionKind.Ocr
-                        ? activeOcrTracks.Count(item => item.Definition.Id == definition.Id)
-                        : DetectionBatchCounter.DistinctDetections(
-                            resolvedObjects.Where(item => item.Definition.Type == EventType.Trigger
-                                    && item.Definition.Id == definition.Id)
-                                .Select(item => item.Detection).ToList()).Count;
-                    _previousNetCounts[definition.Id] = Math.Max(
-                        _previousNetCounts.GetValueOrDefault(definition.Id), observedCount);
-                }
-
-                Log.Information("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
-                    GameId, resolvedObjects.Count + activeOcrTracks.Count);
-                return;
-            }
-
-            var subtractionCounts = new Dictionary<int, int>();
-            foreach (var subtractorGroup in resolvedObjects
-                .Where(item => item.Definition.Type == EventType.Subtractor)
-                .GroupBy(item => item.Definition.Id))
-            {
-                var subtractor = subtractorGroup.First().Definition;
-                if (subtractor.SubtractsEventId is not int targetId
-                    || !_definitionsById.TryGetValue(targetId, out var target)
-                    || target.Type != EventType.Trigger)
-                {
-                    Log.Warning("DetectionHost: subtractor in {GameId} has an invalid target; ignoring it",
-                        GameId);
-                    continue;
-                }
-
-                subtractionCounts[target.Id] = subtractionCounts.GetValueOrDefault(target.Id)
-                    + DetectionBatchCounter.DistinctDetections(
-                        subtractorGroup.Select(item => item.Detection).ToList()).Count;
-            }
-            foreach (var subtractorGroup in activeOcrTracks
-                .Where(item => item.Definition.Type == EventType.Subtractor)
-                .GroupBy(item => item.Definition.Id))
-            {
-                var subtractor = subtractorGroup.First().Definition;
-                if (subtractor.SubtractsEventId is not int targetId
-                    || !_definitionsById.TryGetValue(targetId, out var target)
-                    || target.Type != EventType.Trigger)
-                {
-                    Log.Warning("DetectionHost: OCR subtractor in {GameId} has an invalid target; ignoring it", GameId);
-                    continue;
-                }
-
-                subtractionCounts[target.Id] = subtractionCounts.GetValueOrDefault(target.Id)
-                    + subtractorGroup.Count();
-            }
-
-            var currentNetCounts = new Dictionary<int, int>();
-            foreach (var definition in _definitionsById.Values.Where(item => item.Type == EventType.Trigger))
-            {
-                var grossCount = definition.DetectionKind == DetectionKind.Ocr
-                    ? activeOcrTracks.Count(item => item.Definition.Id == definition.Id)
-                    : DetectionBatchCounter.DistinctDetections(
-                        resolvedObjects.Where(item => item.Definition.Type == EventType.Trigger
-                                && item.Definition.Id == definition.Id)
-                            .Select(item => item.Detection).ToList()).Count;
-                subtractionCounts.TryGetValue(definition.Id, out var subtractions);
-                var netCount = Math.Max(0, grossCount - subtractions);
-                currentNetCounts[definition.Id] = netCount;
-
-                _previousNetCounts.TryGetValue(definition.Id, out var previousNetCount);
-                var increase = netCount - previousNetCount;
-                if (increase > 0)
-                    CreateBookmarks(definition, increase, now);
-            }
-
-            _previousNetCounts.Clear();
-            foreach (var (eventId, count) in currentNetCounts)
-                _previousNetCounts[eventId] = count;
-        }
-
-        private List<(TextTrack Track, EventDefinition Definition)> UpdateOcrTracks(
-            IReadOnlyList<OcrMatch> matches, DateTime now)
-        {
-            foreach (var definition in _definitionsById.Values.Where(definition =>
-                         definition.DetectionKind == DetectionKind.Ocr))
-            {
-                if (!_ocrTracks.TryGetValue(definition.Id, out var tracks))
-                {
-                    tracks = [];
-                    _ocrTracks[definition.Id] = tracks;
-                }
-
-                foreach (var track in tracks) track.SeenThisBatch = false;
-                foreach (var match in matches.Where(match => match.EventId == definition.Id)
-                             .GroupBy(match => new
-                             {
-                                 match.SegmentId,
-                                 Text = string.IsNullOrWhiteSpace(match.NormalizedText)
-                                     ? OcrTextNormalizer.Normalize(match.Text)
-                                     : match.NormalizedText,
-                                 match.X,
-                                 match.Y,
-                                 match.Width,
-                                 match.Height,
-                             })
-                             .Select(group => group.First()))
-                {
-                    var normalized = string.IsNullOrWhiteSpace(match.NormalizedText)
-                        ? OcrTextNormalizer.Normalize(match.Text)
-                        : match.NormalizedText;
-                    if (normalized.Length == 0) continue;
-                    if (definition.Type != EventType.Trigger && match.Confidence < VetoConfidenceFloor)
-                        continue;
-
-                    var track = tracks
-                        .Where(candidate => !candidate.SeenThisBatch && TextDistance(candidate.Text, normalized)
-                            <= (definition.Ocr?.Tracking.MaximumTextDistance ?? 0.2))
-                        .OrderByDescending(candidate => BoundsAffinity(candidate, match,
-                            definition.Ocr?.Tracking.MinimumBoundsIou ?? 0.3f))
-                        .FirstOrDefault(candidate => BoundsAffinity(candidate, match,
-                            definition.Ocr?.Tracking.MinimumBoundsIou ?? 0.3f) >= 0);
-                    if (track is null)
-                    {
-                        track = new TextTrack
-                        {
-                            Text = normalized,
-                            FirstSeen = now,
-                            LastSeen = now,
-                            X = match.X,
-                            Y = match.Y,
-                            Width = match.Width,
-                            Height = match.Height,
-                        };
-                        tracks.Add(track);
-                    }
-                    else
-                    {
-                        if (track.ConsecutiveMatches == 0) track.FirstSeen = now;
-                        track.Text = normalized;
-                        track.LastSeen = now;
-                        track.X = match.X;
-                        track.Y = match.Y;
-                        track.Width = match.Width;
-                        track.Height = match.Height;
-                    }
-
-                    track.SeenThisBatch = true;
-                    track.ConsecutiveMatches++;
-                    var tracking = definition.Ocr?.Tracking ?? new OcrTrackingDefinition();
-                    if (!track.Confirmed && (track.ConsecutiveMatches >= tracking.ConfirmationFrames
-                        || now - track.FirstSeen >= TimeSpan.FromMilliseconds(tracking.MinimumStableMilliseconds)))
-                    {
-                        track.Confirmed = true;
-                    }
-                }
-
-                foreach (var track in tracks.Where(track => !track.SeenThisBatch))
-                    track.ConsecutiveMatches = 0;
-                var expiryMs = definition.Ocr?.Tracking.ExpireAfterMissingMilliseconds ?? 350;
-                if (definition.Type != EventType.Trigger)
-                    expiryMs = Math.Max(expiryMs, VetoMemoryMilliseconds);
-                var expiry = TimeSpan.FromMilliseconds(expiryMs);
-                tracks.RemoveAll(track => now - track.LastSeen > expiry);
-            }
-
-            return _ocrTracks.SelectMany(pair => pair.Value
-                    .Where(track => track.Confirmed || _definitionsById[pair.Key].Type != EventType.Trigger)
-                    .Select(track => (track, _definitionsById[pair.Key])))
-                .ToList();
-        }
-
-        private static double BoundsAffinity(TextTrack track, OcrMatch match, float minimumIou)
-        {
-            var left = Math.Max(track.X, match.X);
-            var top = Math.Max(track.Y, match.Y);
-            var right = Math.Min(track.X + track.Width, match.X + match.Width);
-            var bottom = Math.Min(track.Y + track.Height, match.Y + match.Height);
-            var intersection = Math.Max(0, right - left) * Math.Max(0, bottom - top);
-            var union = track.Width * track.Height + match.Width * match.Height - intersection;
-            if (union > 0 && intersection / union >= minimumIou) return intersection / union;
-
-            var centerDistance = Math.Abs(track.X + track.Width / 2 - match.X - match.Width / 2)
-                + Math.Abs(track.Y + track.Height / 2 - match.Y - match.Height / 2);
-            return centerDistance <= Math.Max(track.Height, match.Height) * 1.5 ? 0 : -1;
-        }
-
-        private static double TextDistance(string left, string right)
-        {
-            if (left == right) return 0;
-            var previous = Enumerable.Range(0, right.Length + 1).ToArray();
-            var current = new int[right.Length + 1];
-            for (var row = 1; row <= left.Length; row++)
-            {
-                current[0] = row;
-                for (var column = 1; column <= right.Length; column++)
-                {
-                    current[column] = Math.Min(Math.Min(previous[column] + 1, current[column - 1] + 1),
-                        previous[column - 1] + (left[row - 1] == right[column - 1] ? 0 : 1));
-                }
-                (previous, current) = (current, previous);
-            }
-            return (double)previous[right.Length] / Math.Max(left.Length, right.Length);
+            var activeOcr = _ocrTracker.Update(batch.OcrMatches, now);
+            _triggerCounter.Count(resolvedObjects, activeOcr,
+                (definition, increase) => CreateBookmarks(definition, increase, now));
         }
 
         private const int MaxNewOccurrencesPerCycle = 8;
@@ -510,20 +306,6 @@ public sealed class DetectionHost : IDisposable
 
             Log.Information("CreateBookmark: created {Count} {Type} bookmark(s) for '{EventName}'",
                 effectiveCount, bookmarkType, definition.Name);
-        }
-
-        private sealed class TextTrack
-        {
-            internal string Text { get; set; } = string.Empty;
-            internal DateTime FirstSeen { get; set; }
-            internal DateTime LastSeen { get; set; }
-            internal int ConsecutiveMatches { get; set; }
-            internal bool Confirmed { get; set; }
-            internal bool SeenThisBatch { get; set; }
-            internal float X { get; set; }
-            internal float Y { get; set; }
-            internal float Width { get; set; }
-            internal float Height { get; set; }
         }
 
         internal void BeginStop()

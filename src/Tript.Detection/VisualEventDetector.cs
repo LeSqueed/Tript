@@ -123,36 +123,8 @@ public class VisualEventDetector : IDisposable
 
             try
             {
-                List<EventDefinition> definitions;
-                while (true)
-                {
-                    definitions = ModelService.LoadEventDefinitions(gameId);
-                    var objectDefinitions = definitions
-                        .Where(definition => definition.DetectionKind == DetectionKind.Object)
-                        .ToList();
-                    if (objectDefinitions.Count == 0)
-                        break;
-
-                    session = ModelService.LoadModel(gameId);
-                    modelLoaded = true;
-                    var metadata = OnnxModelInspector.Inspect(session, ModelService.GetModelPath(gameId));
-                    var apiMismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
-                    if (apiMismatch is null)
-                        break;
-
-                    ModelService.UnloadModel(gameId);
-                    session = null;
-                    modelLoaded = false;
-                    if (!ModelService.RejectCurrentBundle(gameId, out var rejectedPath))
-                    {
-                        throw new InvalidDataException(
-                            $"Model API v1 compatibility failed for {gameId}: {apiMismatch}");
-                    }
-
-                    Log.Warning(
-                        "VisualEventDetector: skipping incompatible model bundle {ModelPath} for {GameId}: {Mismatch}",
-                        rejectedPath, gameId, apiMismatch);
-                }
+                (var definitions, session) = LoadCompatibleModel(gameId);
+                modelLoaded = session is not null;
 
                 var ocrDefinitions = definitions
                     .Where(definition => definition.DetectionKind == DetectionKind.Ocr)
@@ -166,25 +138,8 @@ public class VisualEventDetector : IDisposable
                         ModelService.GetOcrDetectorPath(gameId));
                 }
 
-                float[]? inputBuffer = null;
-                DenseTensor<float>? inputTensor = null;
-                List<string>? outputNames = null;
-                List<NamedOnnxValue>? inputContainer = null;
-                var numClasses = 0;
-                var regionGroups = new List<RegionGroup>();
-                if (session is not null)
-                {
-                    inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
-                    inputTensor = new DenseTensor<float>(
-                        inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
-                    outputNames = session.OutputMetadata.Keys.ToList();
-                    inputContainer =
-                    [
-                        NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor),
-                    ];
-                    numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
-                    regionGroups = BuildRuntimeRegionGroups(definitions, numClasses);
-                }
+                var inference = session is null ? null : CreateInferenceState(session, definitions, gameId);
+                var regionGroups = inference?.RegionGroups ?? [];
                 var ocrRegionPlans = OcrRegionPlanner.Build(definitions,
                     ModelService.LoadRegionGroups(gameId));
                 var grayscaleStrategy = DetectionFramePreprocessor.SelectGrayscaleStrategy(regionGroups);
@@ -204,17 +159,17 @@ public class VisualEventDetector : IDisposable
                 _gameId = gameId;
                 _session = session;
                 _runIdentity = runIdentity;
-                _inputBuffer = inputBuffer;
-                _inputTensor = inputTensor;
-                _inputContainer = inputContainer;
-                _outputNames = outputNames;
+                _inputBuffer = inference?.InputBuffer;
+                _inputTensor = inference?.InputTensor;
+                _inputContainer = inference?.InputContainer;
+                _outputNames = inference?.OutputNames;
                 _runOptions = runOptions;
                 _regionGroups = regionGroups;
                 _objectDefinitions = definitions
                     .Where(definition => definition.DetectionKind == DetectionKind.Object)
                     .ToList();
                 _grayscaleStrategy = grayscaleStrategy;
-                _numClasses = numClasses;
+                _numClasses = inference?.NumClasses ?? 0;
                 _subscription = subscription;
                 _cts = cts;
 
@@ -285,6 +240,64 @@ public class VisualEventDetector : IDisposable
                 throw;
             }
         }
+    }
+
+    private static (List<EventDefinition> Definitions, InferenceSession? Session) LoadCompatibleModel(string gameId)
+    {
+        InferenceSession? session = null;
+        try
+        {
+            while (true)
+            {
+                var definitions = ModelService.LoadEventDefinitions(gameId);
+                if (!definitions.Any(definition => definition.DetectionKind == DetectionKind.Object))
+                    return (definitions, null);
+
+                session = ModelService.LoadModel(gameId);
+                var metadata = OnnxModelInspector.Inspect(session, ModelService.GetModelPath(gameId));
+                var apiMismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
+                if (apiMismatch is null)
+                    return (definitions, session);
+
+                ModelService.UnloadModel(gameId);
+                session = null;
+                if (!ModelService.RejectCurrentBundle(gameId, out var rejectedPath))
+                {
+                    throw new InvalidDataException(
+                        $"Model API v1 compatibility failed for {gameId}: {apiMismatch}");
+                }
+
+                Log.Warning(
+                    "VisualEventDetector: skipping incompatible model bundle {ModelPath} for {GameId}: {Mismatch}",
+                    rejectedPath, gameId, apiMismatch);
+            }
+        }
+        catch
+        {
+            if (session is not null)
+                ModelService.UnloadModel(gameId);
+            throw;
+        }
+    }
+
+    private sealed record InferenceState(
+        float[] InputBuffer,
+        DenseTensor<float> InputTensor,
+        List<string> OutputNames,
+        List<NamedOnnxValue> InputContainer,
+        int NumClasses,
+        List<RegionGroup> RegionGroups);
+
+    private static InferenceState CreateInferenceState(InferenceSession session, List<EventDefinition> definitions,
+        string gameId)
+    {
+        var inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
+        var inputTensor = new DenseTensor<float>(inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
+        var outputNames = session.OutputMetadata.Keys.ToList();
+        List<NamedOnnxValue> inputContainer = [NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor)];
+        var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
+        return new InferenceState(inputBuffer, inputTensor, outputNames, inputContainer, numClasses,
+            BuildRuntimeRegionGroups(definitions, numClasses));
     }
 
     public void Stop()

@@ -80,10 +80,7 @@ public sealed class SettingsResolver
         return game?.AutoRecordOverride ?? settings.Game.AutoRecordDetectedGames;
     }
 
-    // gameId is unused today — reserved for a future per-game hotkey override layer, which would
-    // consult it the same way every other Resolve* method here consults game?.XyzOverride ?? global.
-    public static IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> ResolveEffectiveHotkeys(
-        Settings settings, string? gameId = null)
+    public static IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> ResolveEffectiveHotkeys(Settings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

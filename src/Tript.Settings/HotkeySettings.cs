@@ -18,11 +18,8 @@ public sealed class HotkeyBinding
     [JsonExtensionData]
     public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
 
-    // "Control" | "Shift" | "Alt" | "Win"
     public List<string> Modifiers { get; set; } = [];
 
-    // A KeyboardEvent.code value (e.g. "KeyB", "F9") — the physical key, independent of layout/shift.
-    // Null means the action is unbound.
     public string? Key { get; set; }
 }
 

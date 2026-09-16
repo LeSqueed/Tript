@@ -57,10 +57,6 @@ public class RecordingSessionTests
         Assert.Single(session.Bookmarks);
     }
 
-    // The seam the detector writes into: detection runs on its own inference thread, so adding
-    // bookmarks concurrently must never lose one or corrupt the list. The detector computes the
-    // offset itself from the session start time, so this test exercises the concurrent writes
-    // against the same session.
     [Fact]
     public void AddBookmark_ConcurrentWriters_AllLand()
     {
@@ -108,8 +104,6 @@ public class RecordingSessionTests
 
         writer.Start();
 
-        // The snapshot must be a consistent, complete list of whatever was written by the moment
-        // it was taken — never a torn view, never duplicates.
         for (int i = 0; i < 500 && !stop.IsSet; i++)
         {
             var snapshot = session.Bookmarks;
@@ -120,9 +114,6 @@ public class RecordingSessionTests
         Assert.True(writer.Join(TimeSpan.FromSeconds(10)), "bookmark writer did not stop");
     }
 
-    // The tracker owns the process-wide active-session state and registers the resolver with the
-    // core registry. This test pins the full seam: the registry hands the active session to
-    // whatever asks, per call, and Stop clears it.
     [Fact]
     public void Tracker_RegistersWithTheCoreRegistry()
     {

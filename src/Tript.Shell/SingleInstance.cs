@@ -123,13 +123,8 @@ internal sealed class SingleInstance : IDisposable
         return null;
     }
 
-    // Asks a running instance to quit and reports whether it is really gone. The mutex is the only
-    // handle an outside process has on that: it is opened, never acquired, so this never briefly
-    // becomes the single instance itself and never has to reason about an abandoned mutex. The
-    // handle closes in Dispose, which runs after AppHost.Dispose has flushed the recording, so
-    // "the scope disappeared" is the signal a deploy actually wants. The image lock on
-    // Tript.Shell.exe outlives it by a few milliseconds, so a script that overwrites the files
-    // should still retry the copy briefly.
+    // The mutex is only opened, never acquired. The exe image lock outlives it by a few ms,
+    // so deploy scripts should retry the copy briefly.
     internal static bool RequestExit(TimeSpan timeout)
     {
         if (!ScopeIsTaken())

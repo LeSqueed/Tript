@@ -5,15 +5,13 @@ using Tript.Settings;
 
 namespace Tript.Shell;
 
-// Translates a HotkeyBinding (modifier names + a KeyboardEvent.code string, as captured by the
-// Settings UI) into the Win32 MOD_*/VK_* values RegisterHotKey needs. Kept separate from
-// WindowsHotkeys so the mapping table can grow without touching the registration/message-loop code.
 internal static class HotkeyBindingFormat
 {
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint ModWin = 0x0008;
+    private const uint VirtualKeyF1 = 0x70;
 
     internal static bool TryParse(HotkeyBinding binding, out uint modifiers, out uint virtualKey)
     {
@@ -62,7 +60,7 @@ internal static class HotkeyBindingFormat
         if (code.Length is 2 or 3 && code[0] == 'F' && int.TryParse(code.AsSpan(1), out var fKey)
             && fKey is >= 1 and <= 24)
         {
-            virtualKey = 0x6Fu + (uint)fKey; // VK_F1 = 0x70
+            virtualKey = VirtualKeyF1 + (uint)(fKey - 1);
             return true;
         }
 

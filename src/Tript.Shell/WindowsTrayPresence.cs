@@ -77,9 +77,6 @@ internal sealed class WindowsTrayPresence : IDisposable
         _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
     }
 
-    // Never throws. A shell that cannot put an icon in the tray is still a usable shell - it just
-    // must not hide its window, which is what EnsureIconPresent() is for. Throwing here used to
-    // propagate out of Program.OpenWindow and take the whole process down instead.
     internal bool Start()
     {
         if (!OperatingSystem.IsWindows())
@@ -102,13 +99,8 @@ internal sealed class WindowsTrayPresence : IDisposable
         }
     }
 
-    // The question every hide decision has to ask: is there really an icon in the tray right now?
-    // Shell_NotifyIcon(NIM_ADD) fails transiently at logon before the taskbar exists, and the
-    // TaskbarCreated re-add below can fail too, so a false _added is worth one more attempt rather
-    // than a permanent verdict. A caller that hides a window on a stale "yes" leaves the process
-    // with no window, no taskbar button and no icon. Because that retry mutates the icon state,
-    // every caller has to be on the thread that owns the message window - the same STA thread
-    // Photino pumps - which is what keeps this lock-free.
+    // Hiding without a confirmed tray icon leaves no window, taskbar button or icon. The retry
+    // mutates icon state, so callers must be on the message window's STA thread.
     internal bool EnsureIconPresent()
     {
         if (_disposed || !OperatingSystem.IsWindows())
@@ -171,13 +163,8 @@ internal sealed class WindowsTrayPresence : IDisposable
         return window;
     }
 
-    // Windows binds a GUID-registered notify icon to the executable path that first registered it,
-    // so the same install copied or moved elsewhere gets NIM_ADD refused and shows no icon at all.
-    // Fall back to identifying the icon by window handle + id, which carries no path affinity.
-    // Deliberately no NIM_DELETE of the GUID first: IconGuid is one constant shared by every Tript
-    // install on the machine, not derived from the path, so a delete would take a *different* live
-    // instance's icon out of the tray. NIM_MODIFY and NIM_DELETE then have to address the icon the
-    // same way the add did, hence _useGuid.
+    // A GUID icon is bound to the exe path that first registered it, so a moved install falls
+    // back to hwnd + id. Never NIM_DELETE the shared GUID: it would remove another instance's icon.
     private void AddIcon()
     {
         _useGuid = true;

@@ -25,8 +25,6 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // Ahead of AppOptions.Parse, which rejects arguments it does not know: --exit never reaches
-        // a host because it is a message to one that is already running.
         if (IsExitRequest(args))
             return RequestExitOfRunningInstance();
 
@@ -119,9 +117,6 @@ internal static class Program
         }
     }
 
-    // The Start Menu shortcut has to point at what the user actually launches - the native
-    // launcher one level above App\ - not at this process's own Tript.Shell.exe. Falls back to the
-    // shell itself when there's no launcher beside it (a dev run straight out of App\).
     private static string ResolveLauncherExecutablePath()
     {
         var shellPath = Environment.ProcessPath;
@@ -199,10 +194,7 @@ internal static class Program
                 command => HandleTrayCommand(command))
             : null;
 
-        // SW_HIDE takes the taskbar button with it, so every hide site below has to be certain an
-        // icon is actually in the tray first. "We constructed a WindowsTrayPresence" is not that:
-        // the icon file existing says nothing about Shell_NotifyIcon having succeeded. When it has
-        // not, the window minimizes to the taskbar instead of vanishing.
+        // SW_HIDE removes the taskbar button, so only hide once an icon is confirmed in the tray.
         bool TrayReachable() => tray is not null && tray.EnsureIconPresent();
 
         using var hotkeys = OperatingSystem.IsWindows()
@@ -282,10 +274,7 @@ internal static class Program
                 return;
             }
 
-            // Off the message pump: StopRecordingOrReport blocks under the recorder gate for up to
-            // the stop timeout, and the pump is what CloseWindow needs to marshal through. Stopping
-            // here rather than leaving it to AppHost.Dispose is what makes an exit request flush
-            // the session's metadata instead of dropping it.
+            // Off the message pump, which CloseWindow needs: stopping here flushes the session metadata.
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 if (host.IsRecording)

@@ -44,9 +44,7 @@ internal static class WindowsWindow
 
     internal static bool IsMinimized(PhotinoWindow window) => IsIconic(window.WindowHandle);
 
-    // IsWindowVisible stays true for a restored window even when a fullscreen app fully covers it,
-    // so it can't tell us whether the user is actually looking at Tript. The foreground window is
-    // the real signal for "already looking at it".
+    // IsWindowVisible stays true under a fullscreen app; the foreground window is the real signal.
     internal static bool IsForeground(PhotinoWindow window) => GetForegroundWindow() == window.WindowHandle;
 
     internal static void ShowContentWindows(PhotinoWindow window) => ShowContentWindows(window.WindowHandle);

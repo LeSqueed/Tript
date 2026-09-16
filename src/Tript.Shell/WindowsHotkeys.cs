@@ -6,12 +6,6 @@ using Tript.Settings;
 
 namespace Tript.Shell;
 
-// Global (OS-level) hotkeys, mirroring WindowsTrayPresence's shape: a hidden window receives Win32
-// messages and a constructor-injected callback turns them into app commands. Uses a true
-// message-only window (HWND_MESSAGE) rather than the tray's tool window, since this one is never
-// shown and never owns a popup. Its WM_HOTKEY messages are pumped by the same per-thread message
-// loop Photino's window already relies on (this window is created on the same STA thread, before
-// PhotinoWindow.WaitForClose blocks pumping it) — no dedicated thread needed, same as the tray.
 internal sealed class WindowsHotkeys : IDisposable
 {
     private const uint WmHotkey = 0x0312;

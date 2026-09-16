@@ -7,8 +7,6 @@ using Tript.App;
 
 namespace Tript.Shell;
 
-// Plays the notification cue directly through winmm — no toast involvement, no new NuGet
-// dependency — so it stays independent of whether the toast itself is shown or silenced.
 internal static class NativeSound
 {
     [DllImport("winmm.dll", CharSet = CharSet.Unicode, SetLastError = true)]

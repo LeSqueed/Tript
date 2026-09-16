@@ -6,16 +6,6 @@ using System.Text;
 
 namespace Tript.Shell;
 
-// Windows resolves a running app's taskbar, jump list and notification identity through its
-// AppUserModelID (set in Program.cs via NotificationRegistrationId) by looking for a Start Menu
-// shortcut whose own AUMID property matches. When no such shortcut exists, Windows invents a
-// placeholder entry instead, which can end up bound to a stale install path and renders the
-// generic "no icon" placeholder on the taskbar no matter what the window itself reports through
-// WM_SETICON.
-//
-// Tript ships as a portable zip with no installer, so nothing else ever creates that shortcut -
-// the app has to keep its own current on each launch. This is the same thing Electron's
-// setAppUserModelId helper and Discord's installer both do, and for the same reason.
 internal static class WindowsAppIdentity
 {
     internal const string AppUserModelId = "Tript";
@@ -26,9 +16,6 @@ internal static class WindowsAppIdentity
         PropertyId = 5,
     };
 
-    // Rewrites the shortcut unconditionally rather than reading it back to compare first: a few COM
-    // calls once per launch are cheap, and comparing would mean a second, more fragile read path
-    // through the same interfaces purely to decide whether to write.
     internal static void EnsureStartMenuShortcut(string targetExecutablePath, string? iconPath)
     {
         if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(targetExecutablePath))
@@ -77,8 +64,7 @@ internal static class WindowsAppIdentity
     {
     }
 
-    // Every method has to be declared, in this exact order, even the ones never called: COM
-    // dispatch is by vtable slot, so omitting one would silently shift every method after it.
+    // COM dispatches by vtable slot: keep every method, in this order, even unused ones.
     [ComImport]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     [Guid("000214F9-0000-0000-C000-000000000046")]

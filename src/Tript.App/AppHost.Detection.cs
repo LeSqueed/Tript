@@ -889,7 +889,7 @@ internal sealed partial class AppHost
             foreach (var result in results)
             {
                 metadataSaved &= _clipTitles.SaveAutomatic(Path.GetFileName(result), sourceSessionPath,
-                    region.Start.TotalSeconds, region.End.TotalSeconds, highlightsOnlySession);
+                    replayStartSeconds + localStart, replayStartSeconds + localEnd, highlightsOnlySession);
             }
             AttachGameToClips(results, sourceSessionPath);
             if (!metadataSaved)

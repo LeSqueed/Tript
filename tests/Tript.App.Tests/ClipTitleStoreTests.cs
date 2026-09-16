@@ -23,6 +23,39 @@ public sealed class ClipTitleStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveSourceSession_RoundTripsTheSourceSpans()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ClipTitleStore(_root);
+
+        Assert.True(store.SaveSourceSession("merged.mp4", "sessions/session-a.mp4",
+        [
+            new ClipSourceSpan { Start = 10, End = 20 },
+            new ClipSourceSpan { Start = 40, End = 50 },
+        ]));
+
+        var spans = store.LoadRecord("merged.mp4")!.SourceSpans;
+        Assert.NotNull(spans);
+        Assert.Equal([10, 40], spans.Select(span => span.Start));
+        Assert.Equal([20, 50], spans.Select(span => span.End));
+    }
+
+    [Fact]
+    public void SaveConvertedFrom_CarriesTheSourceSpansToTheSdrCopy()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new ClipTitleStore(_root);
+        Assert.True(store.SaveSourceSession("merged.mp4", "sessions/session-a.mp4",
+            [new ClipSourceSpan { Start = 10, End = 20 }]));
+
+        Assert.True(store.SaveConvertedFrom("merged.mp4", "merged-sdr.mp4"));
+
+        var span = Assert.Single(store.LoadRecord("merged-sdr.mp4")!.SourceSpans!);
+        Assert.Equal(10, span.Start);
+        Assert.Equal(20, span.End);
+    }
+
+    [Fact]
     public void EnumerateRecords_ReturnsValidRecordsAndIgnoresUnusableFiles()
     {
         Directory.CreateDirectory(_root);

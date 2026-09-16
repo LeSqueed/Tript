@@ -124,6 +124,78 @@ public class ClipEngineTests
     }
 
     [Fact]
+    public void CreateClipOutputs_Separate_PairsEachFileWithTheRegionItWasCutFrom()
+    {
+        var source = MediaTestFixture.CreateSdrSource("outputs-separate.mp4");
+        var directory = Path.Combine(MediaTestFixture.ScratchRoot, "clips-outputs-separate");
+
+        var engine = NewEngine();
+        var outputs = engine.CreateClipOutputs(new ClipRequest
+        {
+            SourcePath = source,
+            Regions =
+            [
+                ClipRegion.FromSeconds(0.5, 2.0),
+                ClipRegion.FromSeconds(3.0, 4.5),
+            ],
+            Mode = ClipMode.Separate,
+            OutputPath = directory,
+        });
+
+        Assert.Equal(2, outputs.Count);
+        Assert.Equal(ClipRegion.FromSeconds(0.5, 2.0), Assert.Single(outputs[0].Regions));
+        Assert.Equal(ClipRegion.FromSeconds(3.0, 4.5), Assert.Single(outputs[1].Regions));
+    }
+
+    [Fact]
+    public void CreateClipOutputs_Separate_SkipsARegionThatClampingDrops()
+    {
+        var source = MediaTestFixture.CreateSdrSource("outputs-dropped.mp4");
+        var directory = Path.Combine(MediaTestFixture.ScratchRoot, "clips-outputs-dropped");
+
+        var engine = NewEngine();
+        var outputs = engine.CreateClipOutputs(new ClipRequest
+        {
+            SourcePath = source,
+            Regions =
+            [
+                ClipRegion.FromSeconds(0.5, 2.0),
+                ClipRegion.FromSeconds(600, 700),
+            ],
+            Mode = ClipMode.Separate,
+            OutputPath = directory,
+        });
+
+        var only = Assert.Single(outputs);
+        Assert.Equal(ClipRegion.FromSeconds(0.5, 2.0), Assert.Single(only.Regions));
+    }
+
+    [Fact]
+    public void CreateClipOutputs_Combine_PairsTheOneFileWithEveryRegion()
+    {
+        var source = MediaTestFixture.CreateSdrSource("outputs-combine.mp4");
+        var output = Path.Combine(MediaTestFixture.ScratchRoot, "clips-outputs-combine.mp4");
+
+        var engine = NewEngine();
+        var outputs = engine.CreateClipOutputs(new ClipRequest
+        {
+            SourcePath = source,
+            Regions =
+            [
+                ClipRegion.FromSeconds(3.0, 4.5),
+                ClipRegion.FromSeconds(0.5, 2.0),
+            ],
+            Mode = ClipMode.Combine,
+            OutputPath = output,
+        });
+
+        var only = Assert.Single(outputs);
+        Assert.Equal(
+            [ClipRegion.FromSeconds(3.0, 4.5), ClipRegion.FromSeconds(0.5, 2.0)],
+            only.Regions);
+    }
+
+    [Fact]
     public void CreateClips_Separate_VolumeAndMute_AreReflectedInAudioTracks()
     {
         var source = MediaTestFixture.CreateSdrSource("audio2.mp4", audioTracks: 2);

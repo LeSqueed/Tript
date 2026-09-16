@@ -25,6 +25,30 @@ internal sealed class RecordingMetadataStore
 
     internal RecordingMetadata? Load(string videoFileName) => Read(videoFileName).Record;
 
+    internal IReadOnlyList<string> EnumerateVideoFileNames()
+    {
+        const string suffix = ".metadata.json";
+        string[] paths;
+        try
+        {
+            paths = Directory.GetFiles(_metadataRoot, $"*{suffix}", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        foreach (var path in paths)
+        {
+            var videoFileName = Path.GetFileName(path)[..^suffix.Length];
+            if (videoFileName.Length > 0)
+                names.Add(videoFileName);
+        }
+
+        return names;
+    }
+
     internal StoredRecord<RecordingMetadata> Read(string videoFileName)
     {
         var path = PathFor(videoFileName);

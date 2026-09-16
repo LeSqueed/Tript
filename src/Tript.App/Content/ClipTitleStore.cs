@@ -187,6 +187,7 @@ internal sealed class ClipTitleStore
                 SourceSessionHighlightsOnly = source.SourceSessionHighlightsOnly,
                 ClipStartTime = source.ClipStartTime,
                 ClipEndTime = source.ClipEndTime,
+                SourceSpans = source.SourceSpans,
                 Game = source.Game,
                 GameId = source.GameId,
             };
@@ -214,7 +215,8 @@ internal sealed class ClipTitleStore
         }
     }
 
-    internal bool SaveSourceSession(string clipFileName, string sourceSessionPath)
+    internal bool SaveSourceSession(string clipFileName, string sourceSessionPath,
+        IReadOnlyList<ClipSourceSpan>? sourceSpans = null)
     {
         lock (_writeGate)
         {
@@ -224,6 +226,8 @@ internal sealed class ClipTitleStore
 
             var record = existing.Record ?? new ClipTitleRecord();
             record.SourceSessionPath = sourceSessionPath;
+            if (sourceSpans is { Count: > 0 })
+                record.SourceSpans = [.. sourceSpans];
             return Write(clipFileName, record);
         }
     }
@@ -305,4 +309,13 @@ internal sealed class ClipTitleRecord
     public double? ClipStartTime { get; set; }
 
     public double? ClipEndTime { get; set; }
+
+    public List<ClipSourceSpan>? SourceSpans { get; set; }
+}
+
+internal sealed class ClipSourceSpan
+{
+    public double Start { get; set; }
+
+    public double End { get; set; }
 }

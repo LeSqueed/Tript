@@ -253,7 +253,8 @@ internal sealed partial class AppHost
             status = "importing",
         }, Wire.Options));
 
-        var results = _clipEngine!.CreateClips(request);
+        var outputs = _clipEngine!.CreateClipOutputs(request);
+        var results = outputs.Select(output => output.Path).ToList();
 
         if (!string.IsNullOrWhiteSpace(request.Title))
         {
@@ -262,8 +263,17 @@ internal sealed partial class AppHost
         }
         if (!string.IsNullOrWhiteSpace(request.SourceSessionPath))
         {
-            foreach (var result in results)
-                _clipTitles.SaveSourceSession(Path.GetFileName(result), request.SourceSessionPath);
+            foreach (var output in outputs)
+            {
+                _clipTitles.SaveSourceSession(Path.GetFileName(output.Path), request.SourceSessionPath,
+                    output.Regions
+                        .Select(region => new ClipSourceSpan
+                        {
+                            Start = region.Start.TotalSeconds,
+                            End = region.End.TotalSeconds,
+                        })
+                        .ToList());
+            }
             AttachGameToClips(results, request.SourceSessionPath);
         }
 

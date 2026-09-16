@@ -221,13 +221,13 @@ internal sealed partial class AppHost
                 clipRecords.TryGetValue(file.Name, out var record);
                 item.SourceSessionPath = NormalizeSourcePath(record?.SourceSessionPath);
                 item.IsHdr = record?.IsHdr;
+                item.ClipStartTime = record?.ClipStartTime;
+                item.ClipEndTime = record?.ClipEndTime;
                 if (record?.IsAutomatic == true)
                 {
                     contentType = "highlight";
                     item.ContentType = contentType;
                     item.Automated = true;
-                    item.ClipStartTime = record.ClipStartTime;
-                    item.ClipEndTime = record.ClipEndTime;
                     if (item.SourceSessionPath is not null)
                     {
                         linkedAutomaticSources.Add(item.SourceSessionPath);
@@ -276,6 +276,28 @@ internal sealed partial class AppHost
             }
 
             items.Add(item);
+        }
+
+        var sourceMetadata = new Dictionary<string, RecordingMetadata?>(pathComparer);
+        foreach (var clip in clips)
+        {
+            if (clip.SourceSessionPath is null || !clipRecords.TryGetValue(clip.FileName, out var record))
+                continue;
+
+            var spans = SourceSpansOf(record);
+            if (spans.Count == 0)
+                continue;
+
+            var sourceFileName = FileNameFromWirePath(clip.SourceSessionPath);
+            if (!sourceMetadata.TryGetValue(sourceFileName, out var metadata))
+            {
+                metadata = _metadata.Load(sourceFileName);
+                sourceMetadata[sourceFileName] = metadata;
+            }
+            if (metadata is null)
+                continue;
+
+            clip.Bookmarks = InheritedBookmarks(metadata.Bookmarks, spans, clip.DurationSeconds);
         }
 
         foreach (var clip in clips)
@@ -488,15 +510,60 @@ internal sealed partial class AppHost
             _clipTitles.SaveGame(fileName, game, gameId);
     }
 
-    private static List<BookmarkItem> MapBookmarks(IEnumerable<Bookmark> bookmarks) => bookmarks
-        .Select(bookmark => new BookmarkItem
+    private static List<BookmarkItem> MapBookmarks(IEnumerable<Bookmark> bookmarks) =>
+        MapBookmarks(bookmarks.Select(bookmark => (bookmark, bookmark.Time.TotalSeconds)));
+
+    private static List<BookmarkItem> MapBookmarks(IEnumerable<(Bookmark Bookmark, double Time)> placed) => placed
+        .Select(entry => new BookmarkItem
         {
-            Id = bookmark.Id.ToString(),
-            Type = bookmark.Type.ToString().ToLowerInvariant(),
-            Subtype = bookmark.Subtype,
-            Time = bookmark.Time.TotalSeconds,
+            Id = entry.Bookmark.Id.ToString(),
+            Type = entry.Bookmark.Type.ToString().ToLowerInvariant(),
+            Subtype = entry.Bookmark.Subtype,
+            Time = entry.Time,
         })
         .ToList();
+
+    private static List<ClipSourceSpan> SourceSpansOf(ClipTitleRecord record)
+    {
+        if (record.SourceSpans is { Count: > 0 } spans)
+            return spans;
+        if (record.ClipStartTime is { } start && record.ClipEndTime is { } end && end > start)
+            return [new ClipSourceSpan { Start = start, End = end }];
+        return [];
+    }
+
+    private static double? LocalTimeIn(double sourceSeconds, IReadOnlyList<ClipSourceSpan> spans)
+    {
+        var offset = 0d;
+        foreach (var span in spans)
+        {
+            var length = span.End - span.Start;
+            if (length <= 0)
+                continue;
+            if (sourceSeconds >= span.Start && sourceSeconds <= span.End)
+                return offset + (sourceSeconds - span.Start);
+            offset += length;
+        }
+
+        return null;
+    }
+
+    private static List<BookmarkItem> InheritedBookmarks(
+        IEnumerable<Bookmark> bookmarks, IReadOnlyList<ClipSourceSpan> spans, double? clipDuration)
+    {
+        var placed = new List<(Bookmark Bookmark, double Time)>();
+        foreach (var bookmark in bookmarks)
+        {
+            if (LocalTimeIn(bookmark.Time.TotalSeconds, spans) is not { } local)
+                continue;
+            if (local < 0 || (clipDuration is { } duration && duration > 0 && local > duration))
+                continue;
+            placed.Add((bookmark, local));
+        }
+
+        placed.Sort((left, right) => left.Time.CompareTo(right.Time));
+        return MapBookmarks(placed);
+    }
 
     private void ApplyRecordingMetadata(ContentItem item, RecordingMetadata metadata)
     {

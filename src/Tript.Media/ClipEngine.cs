@@ -17,7 +17,10 @@ public sealed class ClipEngine : IClipEngine
         _probe = probe;
     }
 
-    public IReadOnlyList<string> CreateClips(ClipRequest request)
+    public IReadOnlyList<string> CreateClips(ClipRequest request) =>
+        CreateClipOutputs(request).Select(output => output.Path).ToList();
+
+    public IReadOnlyList<ClipOutput> CreateClipOutputs(ClipRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -25,12 +28,19 @@ public sealed class ClipEngine : IClipEngine
 
         if (request.PreferStreamCopy && !request.ForceSdr
             && request.Mode == ClipMode.Combine && regions.Count == 1)
-            return CreateStreamCopy(request, regions[0]);
+            return SharingRegions(CreateStreamCopy(request, regions[0]), [regions[0]]);
 
-        return request.Mode == ClipMode.Combine
-            ? CreateCombined(request, sourceInfo, regions)
-            : CreateSeparate(request, sourceInfo, regions);
+        if (request.Mode == ClipMode.Combine)
+            return SharingRegions(CreateCombined(request, sourceInfo, regions), regions);
+
+        return CreateSeparate(request, sourceInfo, regions)
+            .Select((path, index) => new ClipOutput(path, [regions[index]]))
+            .ToList();
     }
+
+    private static IReadOnlyList<ClipOutput> SharingRegions(
+        IReadOnlyList<string> paths, IReadOnlyList<ClipRegion> regions) =>
+        paths.Select(path => new ClipOutput(path, regions)).ToList();
 
     private (MediaInfo SourceInfo, IReadOnlyList<ClipRegion> Regions) Validate(ClipRequest request)
     {

@@ -147,7 +147,8 @@ public sealed class TrashTests : IDisposable
         });
 
         Assert.False(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
-        Assert.False(File.Exists(MetadataPath("session-1.mp4")));
+        Assert.True(File.Exists(MetadataPath("session-1.mp4")),
+            "favourite.mp4 and manual.mp4 still point at the session, so its bookmarks must be kept");
         Assert.False(File.Exists(HighlightPath("eligible.mp4")));
         Assert.False(File.Exists(ClipRecordPath("eligible.mp4")));
         Assert.False(File.Exists(ThumbnailPath("eligible.mp4")));
@@ -165,7 +166,7 @@ public sealed class TrashTests : IDisposable
 
         var sourceEntry = entries.Single(entry => entry.FileName == "session-1.mp4");
         Assert.True(File.Exists(Path.Combine(EntryDirectory(sourceEntry.Id), "files", "sessions", "session-1.mp4")));
-        Assert.True(File.Exists(Path.Combine(EntryDirectory(sourceEntry.Id), "files", "metadata",
+        Assert.False(File.Exists(Path.Combine(EntryDirectory(sourceEntry.Id), "files", "metadata",
             "session-1.mp4.metadata.json")));
 
         var highlightEntry = entries.Single(entry => entry.FileName == "eligible.mp4");
@@ -548,6 +549,96 @@ public sealed class TrashTests : IDisposable
         await controller.HandleAsync("PurgeTrash", null, new ClientHandle((_, _) => { }));
 
         Assert.Empty(_host.TrashEntries());
+    }
+
+    [Fact]
+    public void DeleteContent_RecordingWithSurvivingClips_KeepsItsBookmarksOutOfTheTrash()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+        WriteManualHighlight("manual.mp4", "sessions/session-1.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+
+        Assert.False(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
+        Assert.True(File.Exists(MetadataPath("session-1.mp4")));
+
+        var entry = Assert.Single(_host.TrashEntries());
+        Assert.False(File.Exists(Path.Combine(EntryDirectory(entry.Id), "files", "metadata",
+            "session-1.mp4.metadata.json")));
+    }
+
+    [Fact]
+    public void DeleteContent_PermanentWithSurvivingClips_KeepsTheBookmarks()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+        WriteManualHighlight("manual.mp4", "sessions/session-1.mp4");
+
+        _host.DeleteMultipleContent(new DeleteMultipleContentParameters
+        {
+            Items = [new DeleteContentParameters { FileName = "sessions/session-1.mp4" }],
+            Permanent = true,
+        });
+
+        Assert.False(File.Exists(Path.Combine(_contentRoot, "sessions", "session-1.mp4")));
+        Assert.True(File.Exists(MetadataPath("session-1.mp4")));
+    }
+
+    [Fact]
+    public void DeleteContent_WithoutClips_StillRemovesTheRecordAsBefore()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+
+        Assert.False(File.Exists(MetadataPath("session-1.mp4")));
+        var entry = Assert.Single(_host.TrashEntries());
+        Assert.True(File.Exists(Path.Combine(EntryDirectory(entry.Id), "files", "metadata",
+            "session-1.mp4.metadata.json")));
+    }
+
+    [Fact]
+    public void DeleteContent_LastClipOfAGoneRecording_ReleasesTheRetainedBookmarks()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+        WriteManualHighlight("manual.mp4", "sessions/session-1.mp4");
+
+        _host.DeleteMultipleContent(new DeleteMultipleContentParameters
+        {
+            Items = [new DeleteContentParameters { FileName = "sessions/session-1.mp4" }],
+            Permanent = true,
+        });
+        Assert.True(File.Exists(MetadataPath("session-1.mp4")));
+
+        _host.DeleteMultipleContent(new DeleteMultipleContentParameters
+        {
+            Items = [new DeleteContentParameters { ContentType = "clip", FileName = "highlights/manual.mp4" }],
+            Permanent = true,
+        });
+
+        Assert.False(File.Exists(MetadataPath("session-1.mp4")));
+    }
+
+    [Fact]
+    public void DeleteContent_LastClipWhileTheRecordingIsRestorable_KeepsTheBookmarks()
+    {
+        WriteSession("session-1.mp4", "Overwatch", "Source session");
+        WriteManualHighlight("manual.mp4", "sessions/session-1.mp4");
+
+        _host.DeleteContent(new DeleteContentParameters { FileName = "sessions/session-1.mp4" });
+        _host.DeleteMultipleContent(new DeleteMultipleContentParameters
+        {
+            Items = [new DeleteContentParameters { ContentType = "clip", FileName = "highlights/manual.mp4" }],
+            Permanent = true,
+        });
+
+        Assert.True(File.Exists(MetadataPath("session-1.mp4")),
+            "the recording is still in the trash, so restoring it must still bring its bookmarks back");
+
+        var entry = Assert.Single(_host.TrashEntries());
+        _host.RestoreTrash(new RestoreTrashParameters { EntryIds = [entry.Id] });
+
+        var restored = _host.ListContent().Single(item => item.FileName == "session-1.mp4");
+        Assert.Single(restored.Bookmarks!);
     }
 
     private void WriteSession(string fileName, string? game, string? title)

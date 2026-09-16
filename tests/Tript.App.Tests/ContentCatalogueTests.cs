@@ -600,6 +600,135 @@ public sealed class ContentCatalogueTests : IDisposable
         await host.ShutdownAsync();
     }
 
+    private void WriteSourceWithBookmarks(string sessionFileName, params double[] bookmarkSeconds)
+    {
+        var sessions = Path.Combine(_contentRoot, "sessions");
+        Directory.CreateDirectory(sessions);
+        File.WriteAllText(Path.Combine(sessions, sessionFileName), "session");
+
+        var metadata = new RecordingMetadata { VideoPath = $"sessions/{sessionFileName}" };
+        foreach (var seconds in bookmarkSeconds)
+        {
+            metadata.Bookmarks.Add(new Bookmark
+            {
+                Type = BookmarkType.Kill,
+                Time = TimeSpan.FromSeconds(seconds),
+            });
+        }
+
+        Assert.True(new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata")).Save(metadata));
+    }
+
+    private async Task<List<JsonElement>> ListContentItemsAsync()
+    {
+        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
+        await using var _ = host;
+        await host.ConnectWebSocketAsync();
+        await DrainPushes(host, 3);
+
+        await host.SendAsync("""{"method":"ListContent"}""");
+        var (_, content) = await host.ReceiveAsyncParsed();
+        var items = content.GetProperty("content").EnumerateArray().ToList();
+
+        await host.ShutdownAsync();
+        return items;
+    }
+
+    private static List<double> BookmarkTimes(JsonElement item) =>
+        item.TryGetProperty("bookmarks", out var bookmarks)
+            ? bookmarks.EnumerateArray().Select(bookmark => bookmark.GetProperty("time").GetDouble()).ToList()
+            : [];
+
+    [SkippableFact]
+    public async Task ListContent_HighlightInheritsItsSourceBookmarks_InClipLocalTime()
+    {
+        WriteSourceWithBookmarks("session-1.mp4", 120, 125);
+
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/session-1.mp4", 118, 133));
+
+        var items = await ListContentItemsAsync();
+        var highlight = items.Single(item => item.GetProperty("fileName").GetString() == "highlight-1.mp4");
+
+        Assert.Equal([2, 7], BookmarkTimes(highlight));
+    }
+
+    [SkippableFact]
+    public async Task ListContent_HighlightDoesNotInheritBookmarksOutsideItsRange()
+    {
+        WriteSourceWithBookmarks("session-1.mp4", 10, 120, 400);
+
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/session-1.mp4", 118, 133));
+
+        var items = await ListContentItemsAsync();
+        var highlight = items.Single(item => item.GetProperty("fileName").GetString() == "highlight-1.mp4");
+
+        Assert.Equal([2], BookmarkTimes(highlight));
+    }
+
+    [SkippableFact]
+    public async Task ListContent_DropsAnInheritedBookmarkBeyondTheClipsRealDuration()
+    {
+        WriteSourceWithBookmarks("session-1.mp4", 120, 130);
+
+        var highlights = Path.Combine(_contentRoot, "highlights");
+        Directory.CreateDirectory(highlights);
+        await File.WriteAllTextAsync(Path.Combine(highlights, "highlight-1.mp4"), "highlight");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveAutomatic("highlight-1.mp4", "sessions/session-1.mp4", 118, 133));
+        Assert.True(clipTitles.SaveDuration("highlight-1.mp4", 5));
+
+        var items = await ListContentItemsAsync();
+        var highlight = items.Single(item => item.GetProperty("fileName").GetString() == "highlight-1.mp4");
+
+        Assert.Equal([2], BookmarkTimes(highlight));
+    }
+
+    [SkippableFact]
+    public async Task ListContent_ManualClipWithoutSpans_InheritsNothing()
+    {
+        WriteSourceWithBookmarks("session-1.mp4", 120);
+
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(clips, "manual.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveSourceSession("manual.mp4", "sessions/session-1.mp4"));
+
+        var items = await ListContentItemsAsync();
+        var clip = items.Single(item => item.GetProperty("fileName").GetString() == "manual.mp4");
+
+        Assert.Empty(BookmarkTimes(clip));
+    }
+
+    [SkippableFact]
+    public async Task ListContent_MergedClipMapsEachBookmarkPastTheRemovedGap()
+    {
+        WriteSourceWithBookmarks("session-1.mp4", 15, 45);
+
+        var clips = Path.Combine(_contentRoot, "clips");
+        Directory.CreateDirectory(clips);
+        await File.WriteAllTextAsync(Path.Combine(clips, "merged.mp4"), "clip");
+        var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
+        Assert.True(clipTitles.SaveSourceSession("merged.mp4", "sessions/session-1.mp4",
+        [
+            new ClipSourceSpan { Start = 10, End = 20 },
+            new ClipSourceSpan { Start = 40, End = 50 },
+        ]));
+
+        var items = await ListContentItemsAsync();
+        var clip = items.Single(item => item.GetProperty("fileName").GetString() == "merged.mp4");
+
+        Assert.Equal([5, 15], BookmarkTimes(clip));
+    }
+
     [SkippableFact]
     public async Task AddAndDeleteBookmark_RoundTripThroughTheMetadataStore()
     {

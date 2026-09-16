@@ -1112,14 +1112,82 @@ internal sealed partial class AppHost : IDisposable
     private void DeleteItems(IReadOnlyList<DeleteContentParameters> items, bool permanent)
     {
         var processed = new HashSet<string>(ContentPathComparer);
-        var clipRecords = items.Any(item => item.DeleteLinkedHighlights)
-            ? _clipTitles.EnumerateRecords()
-            : [];
+        var clipRecords = _clipTitles.EnumerateRecords();
 
         foreach (var item in items)
         {
             if (!string.IsNullOrEmpty(item.FileName))
                 DeleteOne(item, permanent || item.Permanent, clipRecords, processed);
+        }
+
+        ReleaseSourceMetadataOfDeletedClips(clipRecords);
+    }
+
+    private HashSet<string> ReferencedSourcePaths(
+        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords)
+    {
+        var referenced = new HashSet<string>(ContentPathComparer);
+        foreach (var (_, record) in clipRecords)
+        {
+            if (NormalizeSourcePath(record.SourceSessionPath) is { } path)
+                referenced.Add(path);
+        }
+
+        return referenced;
+    }
+
+    private bool IsReferencedByAnyClip(string relativePath,
+        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords) =>
+        ReferencedSourcePaths(clipRecords).Contains(relativePath);
+
+    private void ReleaseSourceMetadataOfDeletedClips(
+        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecordsBeforeDelete)
+    {
+        try
+        {
+            var survivingClips = _clipTitles.EnumerateRecords();
+            var surviving = new HashSet<string>(
+                survivingClips.Select(entry => entry.ClipFileName), ContentPathComparer);
+
+            var candidates = new HashSet<string>(ContentPathComparer);
+            foreach (var (clipFileName, record) in clipRecordsBeforeDelete)
+            {
+                if (surviving.Contains(clipFileName))
+                    continue;
+                if (NormalizeSourcePath(record.SourceSessionPath) is { } path)
+                    candidates.Add(path);
+            }
+
+            if (candidates.Count == 0)
+                return;
+
+            var trashed = _trash.List();
+            if (trashed.Any(entry => entry.ContentType is "clip" or "highlight"))
+                return;
+
+            var trashedNames = new HashSet<string>(
+                trashed.Select(entry => entry.FileName), ContentPathComparer);
+            var stillReferenced = ReferencedSourcePaths(survivingClips);
+
+            foreach (var path in candidates)
+            {
+                if (stillReferenced.Contains(path))
+                    continue;
+
+                var fileName = FileNameFromWirePath(path);
+                if (trashedNames.Contains(fileName))
+                    continue;
+
+                var video = _content.ResolveWithinRoot(path);
+                if (video is not null && File.Exists(video))
+                    continue;
+
+                _metadata.Delete(fileName);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning("could not release source metadata of deleted clips: {Reason}", exception.Message);
         }
     }
 
@@ -1140,9 +1208,12 @@ internal sealed partial class AppHost : IDisposable
             DeleteLinkedAutomaticHighlights(target, relative, permanent, clipRecords, processed);
         }
 
+        var keepMetadataForClips = contentType == "recording"
+            && IsReferencedByAnyClip(relative, clipRecords);
+
         if (permanent)
         {
-            UnlinkContent(target, fileName);
+            UnlinkContent(target, fileName, keepMetadataForClips);
             return;
         }
 
@@ -1178,7 +1249,8 @@ internal sealed partial class AppHost : IDisposable
             files.Add(new TrashedFile(target, relative));
         }
 
-        AddIfPresent(files, _metadata.PathFor(fileName));
+        if (!keepMetadataForClips)
+            AddIfPresent(files, _metadata.PathFor(fileName));
         AddIfPresent(files, _clipTitles.PathFor(fileName));
 
         _thumbnails.Invalidate(fileName);
@@ -1219,13 +1291,13 @@ internal sealed partial class AppHost : IDisposable
         }
     }
 
-    private void UnlinkContent(string target, string fileName)
+    private void UnlinkContent(string target, string fileName, bool keepMetadataForClips = false)
     {
         try
         {
             File.Delete(target);
 
-            var metadataDeleted = _metadata.Delete(fileName);
+            var metadataDeleted = keepMetadataForClips || _metadata.Delete(fileName);
             var clipRecordDeleted = _clipTitles.Delete(fileName);
             var thumbnailDeleted = _thumbnails.Delete(fileName);
             if (!metadataDeleted || !clipRecordDeleted || !thumbnailDeleted)

@@ -163,7 +163,7 @@ export function GeneralPage({
             aria-label="Minimize button"
           />
         </Field>
-        <Field label="When closing Tript" hint="An active recording is stopped before Tript exits or hides to the tray.">
+        <Field label="When closing Tript" hint="Hiding to the tray keeps an active recording going. Exiting stops and saves it first.">
           <SelectField
             value={settings.closeBehavior}
             onChange={(value) => update(page, { closeBehavior: value })}

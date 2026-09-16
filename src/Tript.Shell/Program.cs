@@ -419,27 +419,27 @@ internal static class Program
 
         window.RegisterWindowClosingHandler((_, _) =>
         {
-            if (Volatile.Read(ref exitRequested) != 0)
-                return false;
+            var decision = DecideWindowClose(
+                exitRequested: Volatile.Read(ref exitRequested) != 0,
+                hideToTray: tray is not null
+                    && host.SettingsStore.Load().General.CloseBehavior == CloseBehavior.HideToTray,
+                trayReachable: TrayReachable,
+                recording: host.IsRecording);
 
-            if (tray is null)
-                return false;
-
-            var settings = host.SettingsStore.Load().General;
-            if (host.IsRecording)
-                host.StopRecordingOrReport();
-
-            var shouldHide = settings.CloseBehavior == CloseBehavior.HideToTray;
-            if (!shouldHide)
-                return false;
-
-            // Cancelling the close is what the setting asks for either way; only the destination
-            // changes when there is no icon to come back from.
-            if (TrayReachable())
-                WindowsWindow.HideWindow(window);
-            else
-                WindowsWindow.MinimizeWindow(window);
-            return true;
+            switch (decision)
+            {
+                case WindowCloseDecision.HideToTray:
+                    WindowsWindow.HideWindow(window);
+                    return true;
+                case WindowCloseDecision.MinimizeToTaskbar:
+                    WindowsWindow.MinimizeWindow(window);
+                    return true;
+                case WindowCloseDecision.StopRecordingThenExit:
+                    RequestShellExit();
+                    return true;
+                default:
+                    return false;
+            }
         });
 
         host.FolderPicker = () => PickRecordingFolder(window, host);
@@ -538,6 +538,24 @@ internal static class Program
     }
 
     internal static string BuildLibraryUrl(string url) => $"{url}#library";
+
+    internal enum WindowCloseDecision
+    {
+        Close,
+        HideToTray,
+        MinimizeToTaskbar,
+        StopRecordingThenExit,
+    }
+
+    internal static WindowCloseDecision DecideWindowClose(
+        bool exitRequested, bool hideToTray, Func<bool> trayReachable, bool recording)
+    {
+        if (exitRequested)
+            return WindowCloseDecision.Close;
+        if (hideToTray)
+            return trayReachable() ? WindowCloseDecision.HideToTray : WindowCloseDecision.MinimizeToTaskbar;
+        return recording ? WindowCloseDecision.StopRecordingThenExit : WindowCloseDecision.Close;
+    }
 
     internal static void CloseShellOrRequestShutdown(
         Action closeShell, Action requestShutdown, Action forceExit)

@@ -148,7 +148,7 @@ internal sealed class IpcServer : IDisposable
 
     internal async Task DispatchAsync(ClientConnection client, string method, JsonElement? parameters)
     {
-        Console.Error.WriteLine($"Tript.App.Ipc: dispatching {Loggable(method)}");
+        Log.Debug("Ipc: dispatching {Method}", Loggable(method));
         try
         {
             var handle = new ClientHandle((message, content) => client.Send(Serialize(message, content)));
@@ -156,7 +156,7 @@ internal sealed class IpcServer : IDisposable
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App.Ipc: command {Loggable(method)} failed: {exception.Message}");
+            Log.Warning(exception, "Ipc: command {Method} failed", Loggable(method));
 
             TrySendError(client, $"That action could not be completed ({exception.Message}).");
         }
@@ -286,8 +286,7 @@ internal sealed class IpcServer : IDisposable
                 _ =>
                 {
                     if (Interlocked.Increment(ref _dropped) == 1)
-                        Console.Error.WriteLine(
-                            "Tript.App.Ipc: a client is not reading; its oldest queued frames are being dropped.");
+                        Log.Warning("Ipc: a client is not reading; its oldest queued frames are being dropped.");
                 });
         }
 
@@ -312,7 +311,7 @@ internal sealed class IpcServer : IDisposable
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine($"Tript.App.Ipc: writer died: {exception.Message}");
+                Log.Warning(exception, "Ipc: a client writer stopped unexpectedly");
             }
         }
 
@@ -335,8 +334,8 @@ internal sealed class IpcServer : IDisposable
 
                         if (ms.Length + result.Count > MaxInboundMessageBytes)
                         {
-                            Console.Error.WriteLine(
-                                $"Tript.App.Ipc: a client sent a message over {MaxInboundMessageBytes} bytes; closing it.");
+                            Log.Warning("Ipc: a client sent a message over {Limit} bytes; closing it.",
+                                MaxInboundMessageBytes);
                             await CloseTooBigAsync();
                             return;
                         }
@@ -354,7 +353,7 @@ internal sealed class IpcServer : IDisposable
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine($"Tript.App.Ipc: receive loop died: {exception.Message}");
+                Log.Warning(exception, "Ipc: a client receive loop stopped unexpectedly");
             }
             finally
             {
@@ -383,16 +382,7 @@ internal sealed class IpcServer : IDisposable
             }
         }
 
-        internal void Send(string frame)
-        {
-            try
-            {
-                _outbound.Writer.TryWrite(Encoding.UTF8.GetBytes(frame));
-            }
-            catch (Exception)
-            {
-            }
-        }
+        internal void Send(string frame) => _outbound.Writer.TryWrite(Encoding.UTF8.GetBytes(frame));
 
         private async Task ParseAndDispatchAsync(string text)
         {

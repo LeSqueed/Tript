@@ -64,6 +64,7 @@ internal sealed partial class AppHost : IDisposable
     private Timer? _audioLevelTimer;
     private static readonly TimeSpan AudioLevelLease = TimeSpan.FromSeconds(5);
     private long _audioLevelsWantedUntilTicks;
+    private string? _lastAudioLevelFailure;
     private int _windowVisible = 1;
     private readonly ObsAudioLevelMonitor? _audioLevelMonitor;
     private readonly AudioDeviceInventory _audioDeviceInventory;
@@ -1021,8 +1022,13 @@ internal sealed partial class AppHost : IDisposable
                     levels = levels.Select(level => new { deviceId = level.Key, peak = level.Value }).ToList(),
                 }, Wire.Options));
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                if (_lastAudioLevelFailure != exception.Message)
+                {
+                    _lastAudioLevelFailure = exception.Message;
+                    Log.Warning(exception, "AppHost: audio levels could not be read.");
+                }
             }
         }
     }

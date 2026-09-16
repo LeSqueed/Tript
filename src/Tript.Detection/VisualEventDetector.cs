@@ -569,7 +569,7 @@ public class VisualEventDetector : IDisposable
             }
 
             if (queued && Interlocked.Increment(ref _diagnosticFrameCount) % 15 == 0)
-                Log.Information("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
+                Log.Debug("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
                     _diagnosticFrameCount, width, height);
 
             if (!queued)

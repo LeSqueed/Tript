@@ -5,6 +5,7 @@ using Tript.Detection;
 using Tript.Obs;
 using Tript.Core;
 using Serilog;
+using Serilog.Events;
 
 namespace Tript.Recorder;
 
@@ -249,8 +250,11 @@ public sealed class DetectionHost : IDisposable
         {
             var now = batch.FrameTimestamp;
             var detections = batch.ObjectDetections;
-            Log.Information("DetectionHost: received {Count} detection(s) for {GameId}: classes {Classes}",
-                detections.Count, GameId, string.Join(",", detections.Select(d => d.ClassId).Distinct()));
+            if (detections.Count > 0 && Log.IsEnabled(LogEventLevel.Debug))
+            {
+                Log.Debug("DetectionHost: received {Count} detection(s) for {GameId}: classes {Classes}",
+                    detections.Count, GameId, string.Join(",", detections.Select(d => d.ClassId).Distinct()));
+            }
 
             var resolvedObjects = new List<(DetectionResult Detection, EventDefinition Definition)>();
             foreach (var detection in detections)

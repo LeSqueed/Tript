@@ -843,8 +843,9 @@ internal sealed partial class AppHost
         {
             activated = startDetection(gameId);
         }
-        catch
+        catch (Exception exception)
         {
+            Log.Warning(exception, "AppHost: detection for {GameId} could not start.", gameId);
         }
 
         if (!activated)
@@ -854,8 +855,9 @@ internal sealed partial class AppHost
                 if (!string.IsNullOrWhiteSpace(previousGameId))
                     startDetection(previousGameId);
             }
-            catch
+            catch (Exception exception)
             {
+                Log.Warning(exception, "AppHost: detection for {GameId} could not be restored.", previousGameId);
             }
             pushError();
         }

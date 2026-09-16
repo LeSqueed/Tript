@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Globalization;
 using System.Text.Json;
+using Serilog;
 using Tript.App.Models;
 
 namespace Tript.App;
@@ -28,7 +30,9 @@ internal sealed class AppOptions
 
     public string? GameListJson { get; init; }
 
-    public static AppOptions? Parse(string[] args)
+    public static AppOptions? Parse(string[] args) => Parse(args, Console.Error);
+
+    internal static AppOptions? Parse(string[] args, TextWriter errors)
     {
         string contentRoot = Tript.Settings.RecordingLocations.DefaultDirectory();
         var settingsPath = Settings.SettingsFilePaths.SettingsPath;
@@ -66,11 +70,17 @@ internal sealed class AppOptions
                 case "--game-list" when index + 1 < args.Length:
                     gameListJson = args[++index];
                     break;
-                case "--ui-port" when index + 1 < args.Length && int.TryParse(args[++index], out uiPort):
+                case "--ui-port" when index + 1 < args.Length:
+                    if (!TryParsePort(args[index], args[++index], out uiPort, errors))
+                        return null;
                     break;
-                case "--content-port" when index + 1 < args.Length && int.TryParse(args[++index], out contentPort):
+                case "--content-port" when index + 1 < args.Length:
+                    if (!TryParsePort(args[index], args[++index], out contentPort, errors))
+                        return null;
                     break;
-                case "--control-port" when index + 1 < args.Length && int.TryParse(args[++index], out controlPort):
+                case "--control-port" when index + 1 < args.Length:
+                    if (!TryParsePort(args[index], args[++index], out controlPort, errors))
+                        return null;
                     break;
                 case "--help":
                 case "-h":
@@ -80,7 +90,7 @@ internal sealed class AppOptions
                         "[--game-list <json>] [--ui-port <port>] [--content-port <port>] [--control-port <port>]");
                     return null;
                 default:
-                    Console.Error.WriteLine($"Tript.App: unknown argument '{args[index]}'.");
+                    errors.WriteLine($"Tript.App: unknown argument '{args[index]}'.");
                     return null;
             }
         }
@@ -101,6 +111,15 @@ internal sealed class AppOptions
 
         options.Validate();
         return options;
+    }
+
+    private static bool TryParsePort(string option, string value, out int port, TextWriter errors)
+    {
+        if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port))
+            return true;
+
+        errors.WriteLine($"Tript.App: invalid value '{value}' for {option}; expected a port number.");
+        return false;
     }
 
     internal static string DefaultWebRoot()
@@ -174,8 +193,9 @@ internal sealed class AppOptions
                 if (extra is not null)
                     games.AddRange(extra);
             }
-            catch (JsonException)
+            catch (JsonException exception)
             {
+                Log.Warning("the --game-list value is not valid JSON and was ignored: {Reason}", exception.Message);
             }
         }
 

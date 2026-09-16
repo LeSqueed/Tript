@@ -5,6 +5,7 @@ using System.Buffers;
 using System.Net;
 using System.Text.RegularExpressions;
 
+using Serilog;
 using Tript.App;
 using Tript.Core;
 
@@ -144,7 +145,7 @@ internal sealed class ContentServer : IDisposable
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App.Content: request failed: {exception}");
+            Log.Warning(exception, "Content: a request failed");
             try
             {
                 context.Response.StatusCode = 500;
@@ -361,7 +362,7 @@ internal sealed class ContentServer : IDisposable
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Console.Error.WriteLine($"Tript.App: could not serve a thumbnail for '{resolved}': {exception.Message}");
+            Log.Warning("Content: could not serve a thumbnail for {Path}: {Reason}", resolved, exception.Message);
             image = null;
         }
 

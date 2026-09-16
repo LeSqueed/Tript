@@ -16,8 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The detection models live in Git LFS. Without them Tript.Detection.Tests fails outright
-          # rather than skipping — deliberately, since those tests pin the tensor layout.
+          # The detection models live in Git LFS, and those tests pin the tensor layout against the
+          # real weights, so they fail outright rather than skipping without them — deliberately.
+          # Note the failure is an opaque ONNX Runtime protobuf-parse error, not a "no model found":
+          # an unfetched LFS pointer is still a file, so every existence check upstream of the load
+          # passes first.
           lfs: true
 
       - uses: actions/setup-dotnet@v6

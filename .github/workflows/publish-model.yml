@@ -1,3 +1,10 @@
+# SUPERSEDED - this is not how models reach users any more. Live delivery is via the resolver: the
+# app reads its manifest from the resolver's /manifest endpoint whenever a resolver.json is present
+# (every build has one), and models are published to the resolver through its admin API
+# (ResolverAdminClient.PublishAsync) from the in-app Training UI. This workflow still produces valid
+# immutable assets on the model-assets-v1 tag, but they are only installable by an app with no
+# resolver.json, and data/model-manifest.json currently lists no releases. Kept for that fallback
+# route. See docs/model-publication.md.
 name: Publish model asset
 
 on:

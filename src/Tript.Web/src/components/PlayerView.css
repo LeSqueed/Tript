@@ -45,6 +45,53 @@
   overflow: hidden;
 }
 
+.player-panel-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.player-panel-tab {
+  flex: 0 0 auto;
+  margin-bottom: -1px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted-strong);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out);
+}
+
+.player-panel-tab:hover {
+  color: var(--color-base-content);
+}
+
+.player-panel-tab.is-active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-base-content);
+}
+
+.player-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.player-panel-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
 .player-playlist-header {
   display: flex;
   align-items: baseline;
@@ -157,6 +204,95 @@
   align-items: center;
   gap: 8px;
   color: var(--color-muted-strong);
+  font-size: var(--text-small);
+}
+
+.bookmark-filters {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.bookmark-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+
+.bookmark-filter-label {
+  color: var(--color-base-content);
+}
+
+.bookmark-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.bookmark-empty {
+  padding: 14px;
+}
+
+.bookmark-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.bookmark-row:hover {
+  background: var(--color-panel-raised);
+}
+
+.bookmark-row.active {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-panel));
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.bookmark-row-seek {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 6px 10px 14px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bookmark-row-label {
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-row-time {
+  flex: none;
+  color: var(--color-muted-strong);
+  font-family: var(--font-mono);
   font-size: var(--text-small);
 }
 

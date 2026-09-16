@@ -32,6 +32,31 @@ public class RecordingSessionTests
         Assert.Equal(Origin, session.StartTime);
     }
 
+    [Fact]
+    public void RemoveBookmark_TakesOutTheMatchingIdOnly()
+    {
+        var session = new RecordingSession(Origin);
+        var kept = new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) };
+        var removed = new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(20) };
+        session.AddBookmark(kept);
+        session.AddBookmark(removed);
+
+        Assert.True(session.RemoveBookmark(removed.Id));
+
+        Assert.Equal(kept.Id, Assert.Single(session.Bookmarks).Id);
+    }
+
+    [Fact]
+    public void RemoveBookmark_ReportsAnUnknownIdRatherThanThrowing()
+    {
+        var session = new RecordingSession(Origin);
+        session.AddBookmark(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
+
+        Assert.False(session.RemoveBookmark(Guid.NewGuid()));
+
+        Assert.Single(session.Bookmarks);
+    }
+
     // The seam the detector writes into: detection runs on its own inference thread, so adding
     // bookmarks concurrently must never lose one or corrupt the list. The detector computes the
     // offset itself from the session start time, so this test exercises the concurrent writes

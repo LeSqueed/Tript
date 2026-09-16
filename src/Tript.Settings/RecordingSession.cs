@@ -49,4 +49,12 @@ public sealed class RecordingSession : IRecordingSession
             _bookmarks.Add(bookmark);
         }
     }
+
+    public bool RemoveBookmark(Guid id)
+    {
+        lock (_gate)
+        {
+            return _bookmarks.RemoveAll(bookmark => bookmark.Id == id) > 0;
+        }
+    }
 }

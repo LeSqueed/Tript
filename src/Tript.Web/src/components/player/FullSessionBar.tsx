@@ -2,9 +2,9 @@
 
 import { useRef } from 'react';
 import type { BookmarkItem } from '../../ipc/protocol';
-import { clamp, positionToTime } from './timelineModel';
+import { clamp, formatTime, positionToTime } from './timelineModel';
 import type { WindowState } from './timelineModel';
-import { bookmarkColor } from './bookmarks';
+import { bookmarkColor, bookmarkKindLabel } from './bookmarks';
 import { releasePointerFocus } from '../ui/pointerFocus';
 
 export interface FullSessionBarProps {
@@ -60,13 +60,15 @@ export function FullSessionBar({
       <div className="timeline-bar-fill" style={{ width: `${(playFraction * 100).toFixed(4)}%` }} />
       {bookmarks.map((bookmark) => {
         const fraction = duration > 0 ? clamp(bookmark.time / duration, 0, 1) : 0;
+        const label = `${bookmarkKindLabel(bookmark.type)} at ${formatTime(bookmark.time)}`;
         return (
           <button
             key={bookmark.id}
             type="button"
             className="timeline-tick"
             style={{ left: `${fraction * 100}%`, background: bookmarkColor(bookmark.type) }}
-            aria-label={`Bookmark at ${bookmark.time.toFixed(1)}s`}
+            title={label}
+            aria-label={label}
             onPointerDown={(event) => {
               event.stopPropagation();
               onSeek(bookmark.time);

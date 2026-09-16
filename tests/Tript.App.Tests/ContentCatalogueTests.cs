@@ -679,12 +679,16 @@ public sealed class ContentCatalogueTests : IDisposable
         Directory.CreateDirectory(sessions);
         await File.WriteAllTextAsync(Path.Combine(sessions, "session-1.mp4"), "session");
 
+        var bookmarkId = new Guid("11111111-2222-3333-4444-555555555555");
         var recordPath = Path.Combine(_contentRoot, "metadata", "session-1.mp4.metadata.json");
         var store = new RecordingMetadataStore(Path.Combine(_contentRoot, "metadata"));
         store.Save(new RecordingMetadata
         {
             VideoPath = "sessions/session-1.mp4",
-            Bookmarks = { new Bookmark { Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(5) } },
+            Bookmarks =
+            {
+                new Bookmark { Id = bookmarkId, Type = BookmarkType.Manual, Time = TimeSpan.FromSeconds(5) },
+            },
         });
         Assert.True(File.Exists(recordPath));
         File.SetAttributes(recordPath, FileAttributes.ReadOnly);

@@ -20,8 +20,9 @@ import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
 import { TransportBar } from './player/TransportBar';
 import { PlayerHeader } from './player/PlayerHeader';
-import { PlaylistPanel } from './player/PlaylistPanel';
+import { PlayerSidePanel, availableTabs, type PlayerPanelTab } from './player/PlayerSidePanel';
 import { PlaybackSurface } from './player/PlaybackSurface';
+import { filterBookmarks } from './player/bookmarks';
 import { useClipDialog } from './player/useClipDialog';
 import { ClipDialog } from './player/clipDialog';
 import { computeEditSeek, computeLoopDecision } from './player/clipLoop';
@@ -133,6 +134,23 @@ export function PlayerView({
     }
   }, [item, onItemChange]);
   const bookmarks = useMemo(() => (item && source ? source.getBookmarks(item) : []), [source, item]);
+  const [hiddenKinds, setHiddenKinds] = useState<ReadonlySet<string>>(() => new Set());
+  const [panelTab, setPanelTab] = useState<PlayerPanelTab>('playlist');
+  const awaitingAddedBookmark = useRef(false);
+  const visibleBookmarks = useMemo(
+    () => filterBookmarks(bookmarks, hiddenKinds),
+    [bookmarks, hiddenKinds],
+  );
+
+  const toggleBookmarkKind = useCallback((type: string) => {
+    setHiddenKinds((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(type)) {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
 
   const declaredDuration = item?.endTime !== undefined && item.endTime > 0 ? item.endTime : undefined;
   const fallbackDuration = declaredDuration ?? DEFAULT_SESSION_SECONDS;
@@ -395,7 +413,46 @@ export function PlayerView({
 
   useEffect(() => {
     setMarkInTime(null);
+    setHiddenKinds(new Set());
+    awaitingAddedBookmark.current = false;
   }, [item?.filePath]);
+
+  useEffect(() => {
+    if (awaitingAddedBookmark.current && bookmarks.length > 0) {
+      awaitingAddedBookmark.current = false;
+      setPanelTab('bookmarks');
+    }
+  }, [bookmarks]);
+
+  const canBookmark = item?.contentType === 'recording';
+
+  const addBookmark = useCallback(() => {
+    if (!item || item.contentType !== 'recording') {
+      return;
+    }
+    awaitingAddedBookmark.current = true;
+    client.send('AddBookmark', {
+      contentType: 'recording',
+      filePath: item.filePath,
+      id: '',
+      time: currentTime,
+      type: 'manual',
+    });
+  }, [client, item, currentTime]);
+
+  const deleteBookmark = useCallback(
+    (bookmark: BookmarkItem) => {
+      if (!item || item.contentType !== 'recording') {
+        return;
+      }
+      client.send('DeleteBookmark', {
+        contentType: 'recording',
+        filePath: item.filePath,
+        id: bookmark.id,
+      });
+    },
+    [client, item],
+  );
 
   const markIn = useCallback(() => {
     if (!canMark) {
@@ -481,6 +538,11 @@ export function PlayerView({
         markSegmentAtPlayhead();
         return;
       }
+      if (key === 'b') {
+        event.preventDefault();
+        addBookmark();
+        return;
+      }
       if (event.code === 'Space') {
         event.preventDefault();
         playback.togglePlayPause();
@@ -500,7 +562,7 @@ export function PlayerView({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead, onToggleFavorite, handleToggleFavorite, item, onDelete, navigate, markInTime, onBack]);
+  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead, addBookmark, onToggleFavorite, handleToggleFavorite, item, onDelete, navigate, markInTime, onBack]);
 
   const lastSampleRef = useRef<number | null>(null);
   useEffect(() => {
@@ -648,7 +710,7 @@ export function PlayerView({
         <FullSessionBar
           currentTime={currentTime}
           duration={duration}
-          bookmarks={bookmarks}
+          bookmarks={visibleBookmarks}
           window={clampWindow(viewWindow, duration)}
           onSeek={seek}
         />
@@ -658,7 +720,7 @@ export function PlayerView({
             currentTime={currentTime}
             duration={duration}
             window={clampWindow(viewWindow, duration)}
-            bookmarks={bookmarks}
+            bookmarks={visibleBookmarks}
             regions={regions}
             selectedRegionId={selectedRegionId}
             markInTime={canAdjustRegions ? markInTime : null}
@@ -670,9 +732,19 @@ export function PlayerView({
         )}
         </div>
         <div className="player-clip-tools">
-        {canAdjustRegions && (
+        {(canAdjustRegions || canBookmark) && (
         <div className="player-clip-bar">
           <div className="player-clip-actions">
+          {canBookmark && (
+            <Button variant="ghost" size="small"
+              onClick={addBookmark}
+              aria-label="Add a bookmark where you are"
+              title="Mark this moment (B)">
+              Add bookmark (B)
+            </Button>
+          )}
+          {canAdjustRegions && (
+          <>
           <Button variant="primary" size="small"
             onClick={markSegmentAtPlayhead}
             disabled={!canMark}
@@ -705,6 +777,8 @@ export function PlayerView({
               Clear start
             </Button>
           )}
+          </>
+          )}
           </div>
           {trainingEnabled && (item.gameId ?? item.game) && (
             <Button
@@ -717,6 +791,7 @@ export function PlayerView({
               Label frame
             </Button>
           )}
+          {canAdjustRegions && (
           <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ?
@@ -727,6 +802,7 @@ export function PlayerView({
                  ? 'Quick clip marks the moment, or press I to set a start, then O to set an end.'
                  : `${regions.length} clip${regions.length === 1 ? '' : 's'} ready — drag one or its edges on the timeline to adjust.`}
           </span>
+          )}
         </div>
         )}
 
@@ -770,8 +846,20 @@ export function PlayerView({
         </div>
       </div>
 
-      {!isFullscreen && navigation.length > 1 && (
-        <PlaylistPanel items={navigation} currentIndex={itemIndex} onSelect={selectNavigationItem} />
+      {!isFullscreen && availableTabs(navigation.length, bookmarks.length).length > 0 && (
+        <PlayerSidePanel
+          tab={panelTab}
+          onTabChange={setPanelTab}
+          items={navigation}
+          currentIndex={itemIndex}
+          onSelect={selectNavigationItem}
+          bookmarks={bookmarks}
+          currentTime={currentTime}
+          hiddenKinds={hiddenKinds}
+          onToggleKind={toggleBookmarkKind}
+          onSeek={seek}
+          onDeleteBookmark={canBookmark ? deleteBookmark : undefined}
+        />
       )}
 
       <ClipDialog dialog={dialog} currentTime={currentTime} />

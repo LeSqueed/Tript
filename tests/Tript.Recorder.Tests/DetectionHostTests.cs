@@ -916,6 +916,8 @@ public sealed class DetectionHostTests
 
             Bookmarks.Add(bookmark);
         }
+
+        public bool RemoveBookmark(Guid id) => Bookmarks.RemoveAll(bookmark => bookmark.Id == id) > 0;
     }
 
     private sealed class FakeFrameSource : IFrameSource

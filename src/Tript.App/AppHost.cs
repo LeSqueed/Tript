@@ -1273,14 +1273,16 @@ internal sealed partial class AppHost : IDisposable
         }
 
         var session = _sessionTracker.Active;
-        if (session is not null)
+        if (session is not null && IsActiveRecordingPath(parameters.FilePath))
         {
             var bookmark = new Tript.Core.Bookmark
             {
+                Id = ParseBookmarkId(parameters.Id),
                 Type = ParseBookmarkType(parameters.Type),
                 Time = TimeSpan.FromSeconds(parameters.Time),
             };
             session.AddBookmark(bookmark);
+            PushContent();
             return;
         }
 
@@ -1306,22 +1308,36 @@ internal sealed partial class AppHost : IDisposable
         };
         metadata.Bookmarks.Add(new Tript.Core.Bookmark
         {
-            Id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.NewGuid(),
+            Id = ParseBookmarkId(parameters.Id),
             Type = ParseBookmarkType(parameters.Type),
             Time = TimeSpan.FromSeconds(parameters.Time),
         });
 
         if (!_metadata.Save(metadata))
         {
-            PushError("The bookmark could not be saved — check the recording folder is writable.");
+            PushError("The bookmark could not be saved, check the recording folder is writable.");
+            return;
         }
         }
+
+        PushContent();
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
     {
         if (parameters is null || string.IsNullOrEmpty(parameters.FilePath))
             return;
+
+        if (!Guid.TryParse(parameters.Id, out var id))
+            return;
+
+        var session = _sessionTracker.Active;
+        if (session is not null && IsActiveRecordingPath(parameters.FilePath))
+        {
+            if (session.RemoveBookmark(id))
+                PushContent();
+            return;
+        }
 
         var target = ResolveContentFile(parameters.FilePath);
         if (target is null)
@@ -1343,14 +1359,31 @@ internal sealed partial class AppHost : IDisposable
         if (metadata is null)
             return;
 
-        var id = Guid.TryParse(parameters.Id, out var parsedId) ? parsedId : Guid.Empty;
-        metadata.Bookmarks.RemoveAll(b => b.Id == id);
+        if (metadata.Bookmarks.RemoveAll(b => b.Id == id) == 0)
+            return;
+
         if (!_metadata.Save(metadata))
         {
-            PushError("The bookmark could not be removed — check the recording folder is writable.");
+            PushError("The bookmark could not be removed, check the recording folder is writable.");
+            return;
         }
         }
+
+        PushContent();
     }
+
+    private bool IsActiveRecordingPath(string relativePath)
+    {
+        if (!IsRecording || _activeSessionPath is not { Length: > 0 })
+            return false;
+
+        var active = Path.GetRelativePath(EffectiveRoot, _activeSessionPath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        return string.Equals(relativePath, active, ContentPathComparison);
+    }
+
+    private static Guid ParseBookmarkId(string id) =>
+        Guid.TryParse(id, out var parsed) ? parsed : Guid.NewGuid();
 
     private static Tript.Core.BookmarkType ParseBookmarkType(string type)
     {

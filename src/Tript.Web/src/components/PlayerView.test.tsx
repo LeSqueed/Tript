@@ -117,9 +117,9 @@ describe('PlayerView', () => {
 
   it('renders the bookmark ticks on the full-session bar', () => {
     renderPlayer();
-    expect(screen.getAllByRole('button', { name: /^Bookmark at / })).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Bookmark at 20.0s' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Bookmark at 80.0s' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /^(Kill|Goal) at / })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Kill at 0:20' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Goal at 1:20' })).toBeTruthy();
   });
 
   it('keeps the two timelines synced: full-session bar seek updates the transport readout', () => {
@@ -194,7 +194,7 @@ describe('PlayerView', () => {
       />,
     );
 
-    expect(screen.getByRole('complementary', { name: 'Playlist' })).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Playlist and bookmarks' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Playing Session 1' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Play Session 2' }));
     expect(playingItem()).toBe('Session 2');
@@ -274,7 +274,7 @@ describe('bookmark interaction', () => {
   it('clicking a full-session tick jumps the playhead to the bookmark time', () => {
     renderPlayer();
     act(() => {
-      fireEvent.pointerDown(screen.getByRole('button', { name: 'Bookmark at 20.0s' }), { clientX: 20, pointerId: 1 });
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Kill at 0:20' }), { clientX: 20, pointerId: 1 });
     });
     expect(currentReadout()).toBe('0:20');
   });
@@ -297,6 +297,96 @@ describe('bookmark interaction', () => {
     expect(bubble).not.toBeNull();
     expect(bubble?.textContent).toContain('kill');
     expect(bubble?.textContent).toContain('0:20');
+  });
+});
+
+describe('bookmark panel and manual bookmarks', () => {
+  beforeEach(() => {
+    stubLayout();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  function renderWith(item: ContentItem, client = mockClient()) {
+    const result = render(
+      <PlayerView client={client} source={source} item={item} navigationItems={[item]} />,
+    );
+    return { ...result, client };
+  }
+
+  it('offers a bookmarks tab only when the recording has bookmarks', () => {
+    const { unmount } = renderWith(session(1, 'sessions/a.mp4'));
+    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toBeTruthy();
+    unmount();
+
+    renderWith(session(2, 'sessions/b.mp4'));
+    expect(screen.queryByRole('tab', { name: 'Bookmarks' })).toBeNull();
+  });
+
+  it('unticking a type clears its markers from both timelines', () => {
+    const { container } = renderWith(session(1, 'sessions/a.mp4'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
+
+    expect(container.querySelectorAll('.timeline-bookmark')).toHaveLength(2);
+    expect(container.querySelectorAll('.timeline-tick')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Kill bookmarks' }));
+
+    expect(container.querySelectorAll('.timeline-bookmark')).toHaveLength(1);
+    expect(container.querySelectorAll('.timeline-tick')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Goal at 1:20' })).toBeTruthy();
+  });
+
+  it('B sends a manual bookmark at the current time', () => {
+    const { container, client } = renderWith(session(2, 'sessions/b.mp4'));
+    act(() => clickBarAt(container, 42));
+
+    fireEvent.keyDown(window, { key: 'b' });
+
+    expect(client.sent).toContainEqual({
+      method: 'AddBookmark',
+      parameters: {
+        contentType: 'recording',
+        filePath: 'sessions/b.mp4',
+        id: '',
+        time: 42,
+        type: 'manual',
+      },
+    });
+  });
+
+  it('does not bookmark a clip, which has nowhere to store one', () => {
+    const clip: ContentItem = {
+      ...session(1, 'clips/a.mp4'),
+      contentType: 'clip',
+    };
+    const { client } = renderWith(clip);
+
+    fireEvent.keyDown(window, { key: 'b' });
+
+    expect(client.sent.some((message) => message.method === 'AddBookmark')).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Add a bookmark where you are' })).toBeNull();
+  });
+
+  it('deletes a manual bookmark by id', () => {
+    const item = session(3, 'sessions/manual.mp4');
+    const manualSource: SessionSource = {
+      getSessions: () => [item],
+      getBookmarks: () => [{ id: 'm1', type: 'manual', time: 30 }],
+    };
+    const client = mockClient();
+    render(<PlayerView client={client} source={manualSource} item={item} navigationItems={[item]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the bookmark at 0:30' }));
+
+    expect(client.sent).toContainEqual({
+      method: 'DeleteBookmark',
+      parameters: { contentType: 'recording', filePath: 'sessions/manual.mp4', id: 'm1' },
+    });
   });
 });
 

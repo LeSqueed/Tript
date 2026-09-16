@@ -14,6 +14,8 @@ public interface IRecordingSession
     // Called from whichever thread noticed the event, including a detector's own inference thread.
     // Implementations own the synchronisation.
     void AddBookmark(Bookmark bookmark);
+
+    bool RemoveBookmark(Guid id);
 }
 
 public static class RecordingSessionRegistry

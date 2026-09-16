@@ -55,9 +55,8 @@ export function PlaylistPanel({
   }, [currentIndex, items.length, recenterToken]);
 
   return (
-    <aside className="player-playlist" aria-label="Playlist">
+    <div className="player-panel-body">
       <div className="player-playlist-header">
-        <strong>Playlist</strong>
         <button
           type="button"
           className="player-playlist-jump muted small"
@@ -111,6 +110,6 @@ export function PlaylistPanel({
           })}
         </div>
       </div>
-    </aside>
+    </div>
   );
 }

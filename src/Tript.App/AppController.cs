@@ -54,6 +54,7 @@ internal sealed class AppController
             ["RenameContent"] = (parameters, _) => _host.RenameContent(parameters.Deserialize<RenameContentParameters>()),
             ["ToggleFavorite"] = (parameters, _) => _host.ToggleFavorite(parameters.Deserialize<ToggleFavoriteParameters>()),
             ["ListTrash"] = (_, _) => _host.PushTrash(),
+            ["WatchAudioLevels"] = (_, _) => _host.WatchAudioLevels(),
             ["RestoreTrash"] = (parameters, _) => _host.RestoreTrash(parameters.Deserialize<RestoreTrashParameters>()),
 
             ["PurgeTrash"] = (parameters, _) => _host.PurgeTrash(
@@ -163,6 +164,8 @@ internal sealed class AppController
         _host.PushGameList();
         _host.PushModelStatus();
         _host.PushUpdateStatus();
+        if (!_host.WindowVisible)
+            _host.PushWindowVisibility();
 
         _host.RaiseRecoveryPromptIfNeeded(client);
     }

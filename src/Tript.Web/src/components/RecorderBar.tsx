@@ -77,12 +77,14 @@ export function RecorderBar({
   trainingFeatureEnabled = trainingEnabled,
   clipJobCount = 0,
   nowSeconds,
+  windowVisible = true,
 }: {
   client: IpcClient;
   connectionState: ConnectionState;
   trainingFeatureEnabled?: boolean;
   clipJobCount?: number;
   nowSeconds?: number;
+  windowVisible?: boolean;
 }) {
   const [recordingState, setRecordingState] = useState<RecordingState | null>(null);
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
@@ -150,12 +152,13 @@ export function RecorderBar({
         model.gameId.localeCompare(activeModelGameId, undefined, { sensitivity: 'accent' }) === 0)?.gameId ?? '';
 
   useEffect(() => {
-    if (!recording) {
+    if (!recording || !windowVisible) {
       return;
     }
+    setTick(Date.now() / 1000);
     const timer = setInterval(() => setTick(Date.now() / 1000), 1000);
     return () => clearInterval(timer);
-  }, [recording]);
+  }, [recording, windowVisible]);
 
   const state = deriveRecorderState({
     connection: connectionState,

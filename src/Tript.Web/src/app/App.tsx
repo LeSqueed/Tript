@@ -31,6 +31,7 @@ import type { ContentItem, CreateClipParameters, GameInfo, ImportProgressMessage
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
+import { useWindowVisible } from './useWindowVisible';
 import { TripwireMark } from '../components/TripwireMark';
 import { Icon } from '../components/ui/Icon';
 import { trainingEnabled } from '../buildFeatures';
@@ -88,6 +89,7 @@ function AppShell({
 }) {
   const { client, connectionState } = useIpcClient(ipcOptions);
   const reachability = useHostReachability(connectionState);
+  const windowVisible = useWindowVisible(client);
   const startupRoute = readStartupRoute();
   const [route, setRoute] = useState<Route>(startupRoute);
   const routeRef = useRef(route);
@@ -614,7 +616,7 @@ function AppShell({
   const playerSession = playerItem ? sourceSession(playerItem, items) : null;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-window-hidden={windowVisible ? undefined : ''}>
       <header className="app-topbar">
         <div className="app-brand">
           <TripwireMark size={26} />
@@ -667,6 +669,7 @@ function AppShell({
           connectionState={connectionState}
           trainingFeatureEnabled={trainingFeatureEnabled}
           clipJobCount={clipJobCount}
+          windowVisible={windowVisible}
         />
       </header>
       <main className="app-main">
@@ -746,6 +749,7 @@ function AppShell({
           <div hidden={route !== 'settings'}>
             <SettingsView
               client={client}
+              active={route === 'settings' && windowVisible}
               builtInGameIds={builtInGameIds}
               focusGameId={gameSettingsFocus}
               onFocusGameHandled={() => setGameSettingsFocus(null)}

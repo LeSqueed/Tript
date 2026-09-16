@@ -118,7 +118,7 @@ a {
   stroke-width: 5;
   transform-box: view-box;
   transform-origin: 32px 32px;
-  animation: tripwire-viewfinder-lock var(--motion-snap) cubic-bezier(0.2, 0, 0, 1) infinite;
+  animation: tripwire-viewfinder-lock var(--motion-snap) cubic-bezier(0.2, 0, 0, 1) 1 forwards;
 }
 
 .tripwire-crosshair {

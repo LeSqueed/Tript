@@ -523,6 +523,20 @@ internal static class Program
                 "Tript.Shell: the tray icon could not be registered; Tript will minimize to the taskbar instead of hiding");
         }
 
+        using var visibilityWatch = new Timer(_ =>
+        {
+            try
+            {
+                if (window.WindowHandle == IntPtr.Zero)
+                    return;
+                host.SetWindowVisible(WindowsWindow.IsVisible(window) && !WindowsWindow.IsMinimized(window));
+            }
+            catch (Exception exception)
+            {
+                Log.Debug(exception, "Tript.Shell: could not read the window visibility");
+            }
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
         window.Load(startupUrl);
         try
         {

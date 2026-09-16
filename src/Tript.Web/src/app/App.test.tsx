@@ -124,6 +124,23 @@ describe('App shell', () => {
     });
   }
 
+  it('marks the shell hidden while the desktop window is hidden, so animations pause', () => {
+    const { container } = renderApp();
+    connect();
+    const shell = container.querySelector('.app-shell');
+    expect(shell?.hasAttribute('data-window-hidden')).toBe(false);
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({ method: 'windowVisibility', content: { visible: false } }));
+    });
+    expect(shell?.hasAttribute('data-window-hidden')).toBe(true);
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({ method: 'windowVisibility', content: { visible: true } }));
+    });
+    expect(shell?.hasAttribute('data-window-hidden')).toBe(false);
+  });
+
   it('renders the nav and switches views', () => {
     renderApp();
     const nav = screen.getByRole('navigation', { name: 'Primary' });

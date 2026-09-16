@@ -137,6 +137,10 @@ export interface AudioLevelsMessage {
   levels: { deviceId: string; peak: number }[];
 }
 
+export interface WindowVisibilityMessage {
+  visible: boolean;
+}
+
 export interface AvailableRecordingModel {
   gameId: string;
   name: string;
@@ -753,6 +757,7 @@ export type CommandName =
   | 'DeleteContent'
   | 'DeleteMultipleContent'
   | 'ListTrash'
+  | 'WatchAudioLevels'
   | 'RestoreTrash'
   | 'PurgeTrash'
   | 'RenameContent'
@@ -797,6 +802,7 @@ export type MessageName =
   | 'settings'
   | 'state'
   | 'audioLevels'
+  | 'windowVisibility'
   | 'modelStatus'
   | 'availableRecordingModels'
   | 'content'

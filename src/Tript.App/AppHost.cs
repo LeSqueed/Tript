@@ -62,6 +62,9 @@ internal sealed partial class AppHost : IDisposable
     private readonly Timer? _modelCheckTimer;
     private readonly object _audioLevelGate = new();
     private Timer? _audioLevelTimer;
+    private static readonly TimeSpan AudioLevelLease = TimeSpan.FromSeconds(5);
+    private long _audioLevelsWantedUntilTicks;
+    private int _windowVisible = 1;
     private readonly ObsAudioLevelMonitor? _audioLevelMonitor;
     private readonly AudioDeviceInventory _audioDeviceInventory;
     private readonly object _audioDeviceRefreshGate = new();
@@ -982,6 +985,26 @@ internal sealed partial class AppHost : IDisposable
         }
     }
 
+    internal void WatchAudioLevels() =>
+        Interlocked.Exchange(ref _audioLevelsWantedUntilTicks, (DateTime.UtcNow + AudioLevelLease).Ticks);
+
+    internal bool AudioLevelsWanted => DateTime.UtcNow.Ticks <= Interlocked.Read(ref _audioLevelsWantedUntilTicks);
+
+    internal bool WindowVisible => Volatile.Read(ref _windowVisible) != 0;
+
+    internal void SetWindowVisible(bool visible)
+    {
+        var next = visible ? 1 : 0;
+        if (Interlocked.Exchange(ref _windowVisible, next) != next)
+            PushWindowVisibility();
+    }
+
+    internal void PushWindowVisibility() =>
+        _ipc.Broadcast("windowVisibility", JsonSerializer.SerializeToElement(new
+        {
+            visible = WindowVisible,
+        }, Wire.Options));
+
     private void PushAudioLevels()
     {
         lock (_audioLevelGate)
@@ -993,6 +1016,12 @@ internal sealed partial class AppHost : IDisposable
             {
                 if (_audioLevelMonitor is null)
                     return;
+
+                if (!AudioLevelsWanted)
+                {
+                    _audioLevelMonitor.Read([]);
+                    return;
+                }
 
                 var sources = _settingsStore.Load().Audio.Tracks
                     .SelectMany(track => track.Sources)

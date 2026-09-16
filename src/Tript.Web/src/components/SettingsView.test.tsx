@@ -781,6 +781,49 @@ describe('SettingsView', () => {
     expect(screen.getByRole('meter', { name: 'Audio level for Speakers' }).getAttribute('aria-valuenow')).toBe('37');
   });
 
+  it('asks for audio levels only while the audio page is showing', () => {
+    const watches = (ws: MockWebSocket) => ws.sent
+      .map((frame) => JSON.parse(frame) as { method?: string })
+      .filter((frame) => frame.method === 'WatchAudioLevels').length;
+    const { ws } = renderSettings();
+    expect(watches(ws)).toBe(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));
+    expect(watches(ws)).toBe(1);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    const afterLeaving = watches(ws);
+    act(() => {
+      ws.serverMessage(JSON.stringify({
+        method: 'audioLevels',
+        content: { levels: [{ deviceId: 'speaker-1', peak: 0.5 }] },
+      }));
+    });
+    expect(watches(ws)).toBe(afterLeaving);
+  });
+
+  it('does not ask for audio levels while inactive, even on the audio page', () => {
+    const { factory } = createMockSocketFactory();
+    const client = createIpcClient({ createSocket: factory });
+    const view = (active: boolean) => (
+      <ToastProvider><SettingsView client={client} active={active} /></ToastProvider>
+    );
+    const { rerender } = render(view(false));
+    client.connect();
+    const ws = activeSocket();
+    act(() => {
+      ws.serverOpen();
+    });
+    pushSettings(ws);
+    fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));
+
+    const watchCount = () => ws.sent.filter((frame) => frame.includes('"WatchAudioLevels"')).length;
+    expect(watchCount()).toBe(0);
+
+    rerender(view(true));
+    expect(watchCount()).toBe(1);
+  });
+
   it('audio page: assigning a source to a track routes it with default volume 1', () => {
     const { ws } = renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));

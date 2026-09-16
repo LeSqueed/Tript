@@ -22,16 +22,20 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'hotkeys', label: 'Hotkeys' },
 ];
 
+const AUDIO_LEVEL_RENEW_MS = 2000;
+
 export function SettingsView({
   client,
   builtInGameIds = [],
   focusGameId = null,
   onFocusGameHandled,
+  active = true,
 }: {
   client: IpcClient;
   builtInGameIds?: readonly string[];
   focusGameId?: string | null;
   onFocusGameHandled?: () => void;
+  active?: boolean;
 }) {
   const [page, setPage] = useState<SettingsPageName>('general');
 
@@ -94,17 +98,38 @@ export function SettingsView({
     if (typeof response?.requestId === 'string') setGameAddRequested(response as GameAddRequestedMessage);
   }), [client]);
 
-  useEffect(() => client.on('audioLevels', (content) => {
-    const message = content as Partial<AudioLevelsMessage> | null;
-    if (!Array.isArray(message?.levels)) return;
+  const metersVisible = active && page === 'audio';
 
-    const next: Record<string, number> = {};
-    for (const level of message.levels) {
-      if (typeof level?.deviceId !== 'string' || typeof level.peak !== 'number') continue;
-      next[level.deviceId] = Math.min(1, Math.max(0, Number.isFinite(level.peak) ? level.peak : 0));
+  useEffect(() => {
+    if (!metersVisible) {
+      return;
     }
-    setAudioLevels(next);
-  }), [client]);
+    const watch = () => client.send('WatchAudioLevels');
+    watch();
+    const renew = setInterval(watch, AUDIO_LEVEL_RENEW_MS);
+    const unsubscribeState = client.onStateChange((state) => {
+      if (state === 'connected') {
+        watch();
+      }
+    });
+    const unsubscribeLevels = client.on('audioLevels', (content) => {
+      const message = content as Partial<AudioLevelsMessage> | null;
+      if (!Array.isArray(message?.levels)) return;
+
+      const next: Record<string, number> = {};
+      for (const level of message.levels) {
+        if (typeof level?.deviceId !== 'string' || typeof level.peak !== 'number') continue;
+        next[level.deviceId] = Math.min(1, Math.max(0, Number.isFinite(level.peak) ? level.peak : 0));
+      }
+      setAudioLevels(next);
+    });
+    return () => {
+      clearInterval(renew);
+      unsubscribeState();
+      unsubscribeLevels();
+      setAudioLevels({});
+    };
+  }, [client, metersVisible]);
 
   return (
     <section className="settings-view">

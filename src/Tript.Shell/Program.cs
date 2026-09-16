@@ -105,6 +105,24 @@ internal static class Program
         }
     }
 
+    // The Start Menu shortcut has to point at what the user actually launches - the native
+    // launcher one level above App\ - not at this process's own Tript.Shell.exe. Falls back to the
+    // shell itself when there's no launcher beside it (a dev run straight out of App\).
+    private static string ResolveLauncherExecutablePath()
+    {
+        var shellPath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(shellPath))
+            return string.Empty;
+
+        var appDirectory = Path.GetDirectoryName(shellPath);
+        var installRoot = appDirectory is null ? null : Path.GetDirectoryName(appDirectory);
+        if (installRoot is null)
+            return shellPath;
+
+        var launcherPath = Path.Combine(installRoot, "Tript.exe");
+        return File.Exists(launcherPath) ? launcherPath : shellPath;
+    }
+
     private static void RunHost(AppHost host)
     {
         try
@@ -205,7 +223,9 @@ internal static class Program
         if (OperatingSystem.IsWindows())
         {
             window.NotificationsEnabled = true;
-            window.NotificationRegistrationId = "Tript";
+            window.NotificationRegistrationId = WindowsAppIdentity.AppUserModelId;
+            WindowsAppIdentity.EnsureStartMenuShortcut(
+                ResolveLauncherExecutablePath(), File.Exists(iconPath) ? iconPath : null);
         }
 
         void ShowMainWindow()

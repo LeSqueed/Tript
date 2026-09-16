@@ -603,6 +603,12 @@ public class VisualEventDetector : IDisposable
                     continue;
                 }
 
+                while (_frameQueue.Reader.TryRead(out var newer))
+                {
+                    frameData.ReturnBuffer();
+                    frameData = newer;
+                }
+
                 Log.Debug("DetectionLoop: processing frame {W}x{H}", frameData.Width, frameData.Height);
 
                 try

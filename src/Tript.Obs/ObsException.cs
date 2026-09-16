@@ -3,9 +3,6 @@
 
 namespace Tript.Obs;
 
-// Reserved for the calls that report failure without saying why — obs_startup returning false,
-// obs_reset_audio returning false. Anything with a failure vocabulary returns its code instead;
-// mapping a rich result onto a bare exception is how the reason gets lost.
 public sealed class ObsException : Exception
 {
     public ObsException(string message) : base(message)

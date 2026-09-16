@@ -8,11 +8,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// BookmarkTypeConverter documents itself as "falling back to Manual for unknown/removed values",
-// but it used to reach straight for reader.GetString(), which throws InvalidOperationException on
-// any token that is not a string. A single hand-edited or half-written bookmark in a .json metadata
-// file therefore failed the deserialization of the whole file, losing every other bookmark and the
-// content metadata with it. These tests pin the graceful degradation the doc comment promises.
 public class BookmarkTypeConverterTests
 {
     private static Bookmark Deserialize(string typeToken) =>
@@ -24,7 +19,6 @@ public class BookmarkTypeConverterTests
         Assert.Equal(BookmarkType.Kill, Deserialize("\"Kill\"").Type);
     }
 
-    // The converter parses case-insensitively; older files wrote lowercase names.
     [Fact]
     public void KnownName_IsCaseInsensitive()
     {
@@ -37,8 +31,6 @@ public class BookmarkTypeConverterTests
         Assert.Equal(BookmarkType.Manual, Deserialize("\"RemovedInAnEarlierVersion\"").Type);
     }
 
-    // The pre-fix crash case: a numeric token (e.g. a file written by a serializer that emitted the
-    // enum's ordinal) threw out of GetString() instead of falling back.
     [Fact]
     public void NumericToken_FallsBackToManual()
     {
@@ -66,8 +58,6 @@ public class BookmarkTypeConverterTests
         Assert.Equal(BookmarkType.Manual, Deserialize("true").Type);
     }
 
-    // Structured tokens have to be consumed whole, or the serializer throws "read too much or not
-    // enough" over the tokens the converter left on the reader.
     [Fact]
     public void ObjectToken_FallsBackToManual()
     {

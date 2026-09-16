@@ -102,10 +102,6 @@ public class RecorderStateMachineTests
         Assert.Equal(RecorderState.Stopping, recorder.Snapshot.State);
     }
 
-    // Regression: a second Stop() arriving before the first one's output.Stop() has signalled
-    // completion used to forward to the output a second time — telling libobs to stop an output
-    // already tearing down, which crashes the whole process rather than throwing a catchable
-    // exception. Two "stop recording" clicks landing close together is exactly this window.
     [Fact]
     public void StopWhileStopping_IsRefused_AndDoesNotForwardToTheOutputAgain()
     {

@@ -7,8 +7,6 @@ using Tript.Obs.Interop;
 
 namespace Tript.Obs;
 
-// Values are libobs's own, not an ordinal: they are sparse on purpose so a future level can be
-// inserted between two existing ones.
 public enum ObsLogLevel
 {
     Error = 100,
@@ -17,13 +15,8 @@ public enum ObsLogLevel
     Debug = 400
 }
 
-// Called from whichever libobs thread produced the message — the graphics thread, the audio thread,
-// a module's own — and sometimes from several at once. A handler that touches shared state has to
-// say so itself.
 public delegate void ObsLogHandler(ObsLogLevel level, string message);
 
-// libobs has exactly one log handler for the process, so this is a scope rather than an event:
-// installing hands ownership over, disposing gives it back to whoever had it before.
 public static class ObsLog
 {
     private static readonly Lock Gate = new();
@@ -55,8 +48,7 @@ public static class ObsLog
         }
     }
 
-    // Every message libobs emits arrives here, including during obs_shutdown, so nothing in this
-    // path may allocate a managed object that requires a live OBS context.
+    // Runs during obs_shutdown too: allocate nothing that needs a live OBS context.
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnNativeLog(int level, nint format, nint arguments, nint parameter)
     {
@@ -70,14 +62,10 @@ public static class ObsLog
         }
         catch
         {
-            // An exception crossing back into libobs's frame terminates the process, and the one
-            // thing a log handler must never do is take the program down.
+            // An exception crossing back into libobs terminates the process.
         }
     }
 
-    // libobs's own levels are the only ones it emits, but a module calling blog with an arbitrary
-    // integer is not prevented from doing so; the nearest defined level loses less than a cast to
-    // an undefined enum member would.
     private static ObsLogLevel MapLevel(int level) => level switch
     {
         <= (int)ObsLogLevel.Error => ObsLogLevel.Error,

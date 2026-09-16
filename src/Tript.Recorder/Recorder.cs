@@ -198,11 +198,8 @@ public sealed class Recorder : IDisposable
         {
             ThrowIfDisposed();
 
-            // Recording is the only state Stop() may act from — a second call arriving while the
-            // first stop is still in flight (state already Stopping) must be a no-op. Forwarding to
-            // output.Stop() twice tells libobs to stop an output it is already tearing down, which
-            // crashes the process (STATUS_ACCESS_VIOLATION inside obs.dll) rather than throwing a
-            // catchable .NET exception.
+            // A second output.Stop() while libobs is already tearing the output down crashes the
+            // process (access violation in obs.dll), so only Recording may stop.
             if (_state != RecorderState.Recording || _output is null)
                 return false;
 

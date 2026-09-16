@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Tript.Media.Tests;
 
-// The ffmpeg binaries are located on PATH and verified to exist and run. A missing binary must be
-// a clear error, not a silent empty output — the locator is where that guarantee starts.
 public class FfmpegLocatorTests
 {
     [Fact]
@@ -23,7 +21,6 @@ public class FfmpegLocatorTests
     [Fact]
     public void Locate_SearchDirectoryWithBinaries_FindsThem()
     {
-        // Point at the real binary's directory and confirm the locator uses it.
         var (ffmpeg, ffprobe) = new FfmpegLocator().Locate();
         var dir = Path.GetDirectoryName(ffmpeg)!;
 

@@ -11,8 +11,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// FrameData is a private nested type, so these tests reach it by reflection rather than
-// widening its accessibility for the sake of testing.
 public class FrameBufferPoolingTests
 {
     private static readonly Type FrameDataType =
@@ -48,8 +46,6 @@ public class FrameBufferPoolingTests
         }
     }
 
-    // The fix depends on the .NET 7+ Channel.CreateBounded(options, itemDropped) overload
-    // firing for every item DropOldest evicts. Pin that contract before relying on it.
     [Fact]
     public void BoundedChannel_DropOldest_InvokesCallbackForEveryEvictedItem()
     {
@@ -73,23 +69,18 @@ public class FrameBufferPoolingTests
         Assert.Equal(new[] { 4, 5 }, remaining);
     }
 
-    // Uses a foreign buffer (length 3) so ArrayPool.Return throws, making the first call
-    // visible. Silence on the second call proves Interlocked.Exchange prevents double-return.
     [Fact]
     public void ReturnBuffer_AttemptsPoolReturnExactlyOnce()
     {
-        // Length 3 maps to the 16-byte bucket, so the pool rejects it as foreign.
         var foreign = new byte[3];
         var frameData = NewFrameData(foreign);
 
         Assert.Throws<ArgumentException>(() => ReturnBuffer(frameData));
 
-        // A second attempt would throw again; silence means the pool was never touched.
         ReturnBuffer(frameData);
         ReturnBuffer(frameData);
     }
 
-    // ReturnBuffer clears the instance's reference, preventing use-after-return.
     [Fact]
     public void ReturnBuffer_ClearsBufferReference()
     {
@@ -104,7 +95,6 @@ public class FrameBufferPoolingTests
         Assert.NotSame(rented, BufferOf(frameData));
     }
 
-    // Regression guard: evicted frames get their buffers released rather than leaked.
     [Fact]
     public void FrameQueue_ReleasesBuffersOfDroppedFrames()
     {
@@ -126,13 +116,11 @@ public class FrameBufferPoolingTests
             Assert.True((bool)tryWrite.Invoke(writer, new[] { frameData })!);
         }
 
-        // Capacity is 2, so the first three writes are evicted and must have been released.
         for (int i = 0; i < 3; i++)
         {
             Assert.Empty(BufferOf(frames[i]));
         }
 
-        // The two still queued must retain their buffers.
         for (int i = 3; i < 5; i++)
         {
             Assert.NotEmpty(BufferOf(frames[i]));

@@ -3,8 +3,6 @@
 
 namespace Tript.Obs;
 
-// enum obs_data_type [obs-data.h:46-53]. A settings entry carries exactly one of these, and
-// changing it is what makes a wrongly-typed write destructive rather than merely ignored.
 public enum ObsSettingsValueType
 {
     Null = 0,
@@ -15,8 +13,6 @@ public enum ObsSettingsValueType
     Array = 5
 }
 
-// enum obs_data_number_type [obs-data.h:55]. Only meaningful when the value type is Number:
-// libobs stores integers and doubles in one slot and remembers which was written.
 public enum ObsSettingsNumberType
 {
     Invalid = 0,

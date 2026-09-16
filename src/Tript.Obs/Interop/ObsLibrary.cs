@@ -5,14 +5,8 @@ using System.Runtime.InteropServices;
 
 namespace Tript.Obs.Interop;
 
-// Tript ships its own pinned OBS runtime rather than binding whatever the machine happens to have,
-// so the loader has to be told where that runtime is before the first P/Invoke. The default probing
-// path is kept as the last resort because a development box with OBS installed system-wide is the
-// only place it is correct.
 internal static class ObsLibrary
 {
-    // The name every LibraryImport in this assembly is declared against. It is resolved through
-    // Resolve below, so it never has to match a real file name on either platform.
     internal const string Name = "obs";
 
     internal const string RuntimeDirectoryVariable = "TRIPT_OBS_RUNTIME_DIR";
@@ -21,13 +15,9 @@ internal static class ObsLibrary
     private static string? _runtimeDirectory;
     private static nint _handle;
 
-    // Called from ObsNative's static constructor, which the runtime guarantees runs before the
-    // first generated stub in that class does — and every P/Invoke in the binding lives there.
     internal static void Register() =>
         NativeLibrary.SetDllImportResolver(typeof(ObsLibrary).Assembly, Resolve);
 
-    // Must be called before anything touches libobs; changing it afterwards cannot move a library
-    // that is already mapped, so it throws rather than pretending to take effect.
     internal static void SetRuntimeDirectory(string? directory)
     {
         lock (Gate)
@@ -81,9 +71,6 @@ internal static class ObsLibrary
             $"Set {RuntimeDirectoryVariable} or call ObsRuntime.SetRuntimeDirectory to point at the bundled runtime.");
     }
 
-    // SONAME first on Linux: libobs.so is the development symlink and is absent from a runtime
-    // bundle, which is exactly the layout Tript ships. On Windows the official OBS bundle ships
-    // obs64.dll under bin/64bit, so that is tried before obs.dll (the layout some packaging uses).
     private static string[] CandidateFileNames() =>
         OperatingSystem.IsWindows() ? ["obs64.dll", "obs.dll"] : ["libobs.so.0", "libobs.so"];
 }

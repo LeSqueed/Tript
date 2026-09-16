@@ -7,8 +7,6 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
-// The divisor is relative to OBS's configured recording framerate, not the game's render rate.
-// Target is 3 fps of capture against a 2 Hz consumption rate (detectionIntervalMs = 500).
 public class FrameRateDivisorTests
 {
     [Theory]
@@ -32,10 +30,8 @@ public class FrameRateDivisorTests
         var divisor = VisualEventDetector.ComputeFrameRateDivisor(outputFps);
         var captureFps = (double)outputFps / divisor;
 
-        // Consumption is 2 Hz; capturing below that would starve the detection loop.
         Assert.True(captureFps >= 2.0, $"{outputFps}fps/{divisor} = {captureFps:F2} Hz");
 
-        // And it should not overshoot the 3 fps target by much, or the saving is lost.
         Assert.True(captureFps <= 4.0, $"{outputFps}fps/{divisor} = {captureFps:F2} Hz");
     }
 
@@ -56,8 +52,6 @@ public class FrameRateDivisorTests
         Assert.True(VisualEventDetector.ComputeFrameRateDivisor(outputFps) >= 1);
     }
 
-    // 59.94 (60000/1001) must round to 60 rather than truncate to 59, and must never be read
-    // as the bare numerator.
     [Fact]
     public void FractionalRateRoundsToNearestWholeFps()
     {

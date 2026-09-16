@@ -3,9 +3,7 @@
 
 namespace Tript.Obs;
 
-// enum speaker_layout. The last member is explicitly 8 in the header and there is no member with
-// value 7, so the values are written out — letting the compiler number these would silently shift
-// 7.1 down by one.
+// Explicit values: libobs has no 7, so compiler numbering would shift SevenPointOne.
 public enum ObsSpeakerLayout
 {
     Unknown = 0,

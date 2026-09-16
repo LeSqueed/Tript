@@ -22,7 +22,7 @@ internal sealed class AppController
         _host = host;
         _commands = new Dictionary<string, Action<JsonElement?, ClientHandle>>(StringComparer.Ordinal)
         {
-            ["NewConnection"] = (_, client) => OnNewConnection(client),
+            ["NewConnection"] = (_, _) => OnNewConnection(),
             ["Shutdown"] = (_, _) => _host.Ipc.RequestShutdown(),
 
             ["StartRecording"] = (parameters, _) =>
@@ -34,12 +34,7 @@ internal sealed class AppController
                     parsed?.ApplyDisplay == true);
             },
             ["StopRecording"] = (_, _) => _host.StopRecordingOrReport(),
-            ["ToggleFullscreen"] = (parameters, _) => _host.ToggleFullscreen(
-                parameters.GetPropertyOrDefault("enabled").GetBooleanOr(false)),
             ["ApplyUpdate"] = (_, _) => _host.ApplyUpdate(),
-            ["RefreshStorageStats"] = (_, _) => _host.RefreshStorageStats(),
-            ["OpenLogsLocation"] = (_, _) => _host.OpenLogsLocation(),
-            ["MigrateContent"] = (_, _) => _host.MigrateContent(),
             ["CreateClip"] = (parameters, _) => CreateClip(parameters),
             ["ConvertToSdr"] = (parameters, _) => _host.ConvertToSdr(
                 parameters.Deserialize<ConvertToSdrParameters>()),
@@ -47,7 +42,6 @@ internal sealed class AppController
                 parameters.Deserialize<CreateAutomaticClipsParameters>()),
             ["PauseAutomaticClips"] = (_, _) => _host.ToggleAutomaticClipPause(),
             ["ListGames"] = (_, _) => { _host.PushGameList(); _host.PushModelStatus(); },
-            ["CancelClip"] = (_, _) => {  },
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
                 parameters.Deserialize<DeleteMultipleContentParameters>()),
@@ -59,7 +53,6 @@ internal sealed class AppController
 
             ["PurgeTrash"] = (parameters, _) => _host.PurgeTrash(
                 parameters is null ? new PurgeTrashParameters() : parameters.Deserialize<PurgeTrashParameters>()),
-            ["ImportFile"] = (_, _) => {  },
             ["AddBookmark"] = (parameters, _) => _host.AddBookmark(parameters.Deserialize<AddBookmarkParameters>()),
             ["DeleteBookmark"] = (parameters, _) => _host.DeleteBookmark(parameters.Deserialize<DeleteBookmarkParameters>()),
 
@@ -71,7 +64,6 @@ internal sealed class AppController
             },
             ["SetVideoLocation"] = (_, _) => _host.RequestVideoLocation(),
             ["BrowseTrainingFolder"] = (_, _) => _host.RequestTrainingFolder(),
-            ["SetCacheLocation"] = (_, _) => {  },
             ["SelectGameExecutable"] = (parameters, _) => _host.RequestGameExecutable(
                 parameters.Deserialize<SelectGameExecutableParameters>()?.RequestId ?? string.Empty),
             ["AddGameCandidate"] = (parameters, _) =>
@@ -85,14 +77,9 @@ internal sealed class AppController
                 var parsed = parameters.Deserialize<GameCandidateParameters>();
                 _host.IgnoreGameCandidate(parsed?.ExecutablePath, parsed?.RequestId);
             },
-            ["ApplyVideoPreset"] = (_, _) => {  },
-            ["ApplyClipPreset"] = (_, _) => {  },
             ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
                 parameters.Deserialize<OpenFileLocationParameters>()),
-            ["CopyFileToClipboard"] = (_, _) => {  },
             ["OpenInBrowser"] = (parameters, _) => _host.OpenInBrowser(parameters.Deserialize<OpenInBrowserParameters>()),
-            ["StorageWarningConfirm"] = (_, _) => {  },
-            ["RecoveryConfirm"] = (parameters, _) => _host.RecoveryConfirm(parameters.Deserialize<RecoveryConfirmParameters>()),
 #if TRIPT_TRAINING
             ["CancelTraining"] = (_, _) => _host.CancelTraining(),
 #endif
@@ -157,7 +144,7 @@ internal sealed class AppController
         }
     }
 
-    private void OnNewConnection(ClientHandle client)
+    private void OnNewConnection()
     {
         _host.PushState(_host.IsRecording, _host.CurrentGameId);
         _host.PushSettings();
@@ -166,8 +153,6 @@ internal sealed class AppController
         _host.PushUpdateStatus();
         if (!_host.WindowVisible)
             _host.PushWindowVisibility();
-
-        _host.RaiseRecoveryPromptIfNeeded(client);
     }
 
     private void CreateClip(JsonElement? parameters)
@@ -346,27 +331,6 @@ internal sealed class ClientHandle
 
 internal static class JsonElementExtensions
 {
-    internal static bool GetBooleanOr(this JsonElement? element, bool fallback)
-    {
-        if (element is null)
-            return fallback;
-        try
-        {
-            return element.Value.ValueKind == JsonValueKind.True;
-        }
-        catch
-        {
-            return fallback;
-        }
-    }
-
-    internal static JsonElement? GetPropertyOrDefault(this JsonElement? element, string name)
-    {
-        if (element is null || element.Value.ValueKind != JsonValueKind.Object)
-            return null;
-        return element.Value.TryGetProperty(name, out var value) ? value : null;
-    }
-
     internal static T? Deserialize<T>(this JsonElement? element) where T : class
     {
         if (element is null)

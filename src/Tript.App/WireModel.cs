@@ -317,30 +317,6 @@ internal sealed class PublishTrainingModelParameters
     public string Password { get; set; } = string.Empty;
 }
 
-internal sealed class ToggleFullscreenParameters
-{
-    public bool Enabled { get; set; }
-}
-
-internal sealed class RecoveryConfirmParameters
-{
-    public string RecoveryId { get; set; } = string.Empty;
-
-    public string Action { get; set; } = string.Empty;
-
-    public string? GameOverride { get; set; }
-}
-
-internal sealed class NewConnectionParameters
-{
-    public int ProtocolVersion { get; set; }
-}
-
-internal sealed class CancelClipParameters
-{
-    public string Id { get; set; } = string.Empty;
-}
-
 #if TRIPT_TRAINING
 
 internal sealed class TrainingGameParameters

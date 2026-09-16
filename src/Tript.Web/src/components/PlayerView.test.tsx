@@ -488,11 +488,21 @@ describe('navigation', () => {
     expect(playingItem()).toBe('Session 1');
   });
 
-  it('wires the ToggleFullscreen command to the client', () => {
+  it('toggles fullscreen in the browser without involving the host', () => {
     const client = mockClient();
-    render(<PlayerView client={client} source={source} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle fullscreen' }));
-    expect(client.sent).toContainEqual({ method: 'ToggleFullscreen', parameters: { enabled: true } });
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+    const original = HTMLElement.prototype.requestFullscreen;
+    HTMLElement.prototype.requestFullscreen = requestFullscreen;
+    try {
+      render(<PlayerView client={client} source={source} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle fullscreen' }));
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(client.sent).toEqual([]);
+    } finally {
+      HTMLElement.prototype.requestFullscreen = original;
+      Reflect.deleteProperty(document, 'fullscreenEnabled');
+    }
   });
 
   it('keyboard: space toggles play/pause', () => {

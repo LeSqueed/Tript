@@ -382,7 +382,6 @@ export function PlayerView({
   }, [muted, volume]);
 
   const toggleFullscreen = useCallback(() => {
-    client.send('ToggleFullscreen', { enabled: true });
     const player = playerRootRef.current;
     if (!player || !document.fullscreenEnabled) {
       return;
@@ -392,7 +391,7 @@ export function PlayerView({
     } else {
       void player.requestFullscreen();
     }
-  }, [client]);
+  }, []);
 
   const openClipDialog = useCallback(() => {
     if (item && regions.length > 0) {

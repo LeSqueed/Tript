@@ -527,20 +527,6 @@ internal sealed partial class AppHost : IDisposable
         _ui.Dispose();
     }
 
-    internal bool ToggleFullscreen(bool enabled) => true;
-
-    internal void RefreshStorageStats()
-    {
-    }
-
-    internal void OpenLogsLocation()
-    {
-    }
-
-    internal void MigrateContent()
-    {
-    }
-
     private void MigrateModelFolders()
     {
         var modelsRoot = GameModelPaths.ModelsRoot;
@@ -1492,59 +1478,5 @@ internal sealed partial class AppHost : IDisposable
         return Enum.TryParse<Tript.Core.BookmarkType>(type, ignoreCase: true, out var parsed)
             ? parsed
             : Tript.Core.BookmarkType.Manual;
-    }
-
-    internal void RaiseRecoveryPromptIfNeeded(ClientHandle client)
-    {
-        var orphans = FindOrphanFiles();
-        if (orphans.Count == 0)
-            return;
-
-        var recoveryId = $"recovery-{DateTime.Now:yyyyMMddHHmmss}";
-        client.Push("recoveryPrompt", JsonSerializer.SerializeToElement(new
-        {
-            recoveryId,
-            files = orphans.Select(file => new
-            {
-                type = "recording",
-                typeLabel = Path.GetFileName(file),
-            }),
-        }, Wire.Options));
-    }
-
-    private List<string> FindOrphanFiles()
-    {
-        var orphans = new List<string>();
-        var root = new DirectoryInfo(EffectiveRoot);
-        if (!root.Exists)
-            return orphans;
-
-        foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(EffectiveRoot, file.FullName);
-            var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
-
-            if (IsTrashPath(normalized))
-                continue;
-            var contentDirectory = TopLevelDirectory(normalized);
-            if (contentDirectory.Equals("sessions", StringComparison.Ordinal)
-                || contentDirectory.Equals("clips", StringComparison.Ordinal)
-                || contentDirectory.Equals("highlights", StringComparison.Ordinal))
-                continue;
-
-            orphans.Add(normalized);
-        }
-
-        return orphans;
-    }
-
-    internal void RecoveryConfirm(RecoveryConfirmParameters? parameters)
-    {
-        if (parameters is null)
-            return;
-
-        if (parameters.Action.Equals("delete", StringComparison.OrdinalIgnoreCase))
-        {
-        }
     }
 }

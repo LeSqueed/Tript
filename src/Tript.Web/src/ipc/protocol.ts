@@ -168,24 +168,6 @@ export interface UpdateProgressMessage {
   error?: string;
 }
 
-export interface ShowModalMessage {
-  title: string;
-  subtitle?: string;
-  description?: string;
-  type: 'info' | 'warning' | 'error';
-}
-
-export interface StorageWarningMessage {
-  warningId: string;
-  threshold: number;
-  current: number;
-}
-
-export interface RecoveryPromptMessage {
-  recoveryId: string;
-  files: { type: string; typeLabel: string }[];
-}
-
 export interface SelectedGameExecutableMessage {
   requestId: string;
   filePath: string | null;
@@ -530,14 +512,6 @@ export interface DeleteBookmarkParameters {
   id: string;
 }
 
-export interface ApplyVideoPresetParameters {
-  preset: string;
-}
-
-export interface ApplyClipPresetParameters {
-  preset: string;
-}
-
 export interface UpdateSettingsParameters {
   settings: Partial<Settings>;
   requestId: string;
@@ -584,33 +558,10 @@ export interface IgnoreGameCandidateParameters {
 
 export interface OpenFileLocationParameters {
   filePath: string;
-  gameOverride?: string | null;
-  recoveryId?: string | null;
-}
-
-export interface CopyFileToClipboardParameters {
-  filePath: string;
 }
 
 export interface OpenInBrowserParameters {
   url: string;
-}
-
-export interface StorageWarningConfirmParameters {
-  warningId: string;
-  confirmed: boolean;
-  action?: string | null;
-  actionData?: unknown;
-}
-
-export interface RecoveryConfirmParameters {
-  recoveryId: string;
-  action: string;
-  gameOverride?: string | null;
-}
-
-export interface ToggleFullscreenParameters {
-  enabled: boolean;
 }
 
 export interface TrainingGameParameters {
@@ -709,8 +660,6 @@ export type CommandParameters =
   | ToggleFavoriteParameters
   | AddBookmarkParameters
   | DeleteBookmarkParameters
-  | ApplyVideoPresetParameters
-  | ApplyClipPresetParameters
   | UpdateSettingsParameters
   | SelectGameExecutableParameters
   | SearchGamesParameters
@@ -719,11 +668,7 @@ export type CommandParameters =
   | AddGameCandidateParameters
   | IgnoreGameCandidateParameters
   | OpenFileLocationParameters
-  | CopyFileToClipboardParameters
   | OpenInBrowserParameters
-  | StorageWarningConfirmParameters
-  | RecoveryConfirmParameters
-  | ToggleFullscreenParameters
   | TrainingGameParameters
   | ImportTrainingParameters
   | CaptureTrainingSampleParameters
@@ -740,12 +685,8 @@ export type CommandName =
   | 'StartRecording'
   | 'StopRecording'
   | 'NewConnection'
-  | 'ToggleFullscreen'
   | 'CheckForUpdates'
   | 'ApplyUpdate'
-  | 'RefreshStorageStats'
-  | 'OpenLogsLocation'
-  | 'MigrateContent'
   | 'ListContent'
   | 'ListGames'
   | 'BrowseTrainingFolder'
@@ -753,7 +694,6 @@ export type CommandName =
   | 'CreateAutomaticClips'
   | 'ConvertToSdr'
   | 'PauseAutomaticClips'
-  | 'CancelClip'
   | 'DeleteContent'
   | 'DeleteMultipleContent'
   | 'ListTrash'
@@ -762,26 +702,19 @@ export type CommandName =
   | 'PurgeTrash'
   | 'RenameContent'
   | 'ToggleFavorite'
-  | 'ImportFile'
   | 'AddBookmark'
   | 'DeleteBookmark'
   | 'ListSettings'
   | 'UpdateSettings'
   | 'SetVideoLocation'
-  | 'SetCacheLocation'
   | 'SelectGameExecutable'
   | 'SearchGames'
   | 'ResolveGameSearch'
   | 'RequestGameAdd'
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
-  | 'ApplyVideoPreset'
-  | 'ApplyClipPreset'
   | 'OpenFileLocation'
-  | 'CopyFileToClipboard'
   | 'OpenInBrowser'
-  | 'StorageWarningConfirm'
-  | 'RecoveryConfirm'
   | 'ListTraining'
   | 'ImportTrainingAssets'
   | 'CaptureTrainingSample'
@@ -809,11 +742,6 @@ export type MessageName =
   | 'trash'
   | 'importProgress'
   | 'updateProgress'
-  | 'releaseNotes'
-  | 'showReleaseNotes'
-  | 'showModal'
-  | 'storageWarning'
-  | 'recoveryPrompt'
   | 'selectedGameExecutable'
   | 'gameSearchResults'
   | 'gameSearchResolved'

@@ -553,9 +553,7 @@ internal sealed partial class AppHost
         if (string.IsNullOrWhiteSpace(gameName))
             return null;
 
-        var exact = GameList.FirstOrDefault(game =>
-            string.Equals(game.Id, gameName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(game.Name, gameName, StringComparison.OrdinalIgnoreCase));
+        var exact = FindGameByIdOrName(gameName);
         if (exact is not null)
             return exact.Id;
 
@@ -779,8 +777,7 @@ internal sealed partial class AppHost
                 if (recorder is null || sourcePath is null)
                     return;
 
-                var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
-                    .Replace(Path.DirectorySeparatorChar, '/');
+                var sourceSessionPath = RelativeToRoot(sourcePath);
                 var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
                 Directory.CreateDirectory(replayDirectory);
                 var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
@@ -989,8 +986,7 @@ internal sealed partial class AppHost
         if (pending.Count == 0)
             return;
 
-        var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
+        var sourceSessionPath = RelativeToRoot(sourcePath);
         var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
         Directory.CreateDirectory(replayDirectory);
         var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;

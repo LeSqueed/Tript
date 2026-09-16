@@ -93,18 +93,18 @@ internal sealed partial class AppHost
     {
         lock (_metadata.WriteGate)
         {
-        var existing = _metadata.Read(restoredFileName);
-        if (existing.State != StoredRecordState.Loaded)
-            return existing.State == StoredRecordState.Absent;
+            var existing = _metadata.Read(restoredFileName);
+            if (existing.State != StoredRecordState.Loaded)
+                return existing.State == StoredRecordState.Absent;
 
-        var record = existing.Record!;
-        if (!string.Equals(Path.GetFileName(record.VideoPath), originalFileName, StringComparison.OrdinalIgnoreCase))
-            return false;
-        var separator = record.VideoPath.LastIndexOf('/');
-        record.VideoPath = separator < 0
-            ? restoredFileName
-            : $"{record.VideoPath[..separator]}/{restoredFileName}";
-        return _metadata.Save(record);
+            var record = existing.Record!;
+            if (!string.Equals(Path.GetFileName(record.VideoPath), originalFileName, StringComparison.OrdinalIgnoreCase))
+                return false;
+            var separator = record.VideoPath.LastIndexOf('/');
+            record.VideoPath = separator < 0
+                ? restoredFileName
+                : $"{record.VideoPath[..separator]}/{restoredFileName}";
+            return _metadata.Save(record);
         }
     }
 
@@ -166,10 +166,10 @@ internal sealed partial class AppHost
         if (target is null)
             return;
 
-        var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
         var fileName = Path.GetFileName(target);
+        var relative = RelativeToRoot(target);
 
-        if (TopLevelDirectory(relative) is "clips" or "highlights")
+        if (ContentLayout.IsClipPath(relative))
         {
             RenameClip(fileName, parameters.Title);
             return;
@@ -177,27 +177,24 @@ internal sealed partial class AppHost
 
         lock (_metadata.WriteGate)
         {
-        var existing = _metadata.Read(fileName);
-        if (existing.MustNotBeOverwritten)
-        {
-            Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
-            PushError(
-                "The recording title could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
-            return;
-        }
+            var existing = _metadata.Read(fileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
+                PushError(
+                    "The recording title could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
+                return;
+            }
 
-        var metadata = existing.Record ?? new RecordingMetadata
-        {
-            VideoPath = relative,
-        };
-        metadata.Title = parameters.Title;
+            var metadata = existing.Record ?? new RecordingMetadata { VideoPath = relative };
+            metadata.Title = parameters.Title;
 
-        if (!_metadata.Save(metadata))
-        {
-            PushError("The recording title could not be saved. Check the recording folder is writable.");
-            return;
-        }
-        PushContent();
+            if (!_metadata.Save(metadata))
+            {
+                PushError("The recording title could not be saved. Check the recording folder is writable.");
+                return;
+            }
+            PushContent();
         }
     }
 
@@ -205,22 +202,22 @@ internal sealed partial class AppHost
     {
         lock (_clipTitles.WriteGate)
         {
-        var existing = _clipTitles.Read(fileName);
-        if (existing.MustNotBeOverwritten)
-        {
-            Log.Warning("{FileName} has a clip record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
-            PushError(
-                "The clip title could not be saved: this clip's record could not be read, and overwriting it would lose what else is on it.");
-            return;
-        }
+            var existing = _clipTitles.Read(fileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Log.Warning("{FileName} has a clip record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
+                PushError(
+                    "The clip title could not be saved: this clip's record could not be read, and overwriting it would lose what else is on it.");
+                return;
+            }
 
-        if (!_clipTitles.Save(fileName, title))
-        {
-            PushError("The clip title could not be saved. Check the recording folder is writable.");
-            return;
-        }
+            if (!_clipTitles.Save(fileName, title))
+            {
+                PushError("The clip title could not be saved. Check the recording folder is writable.");
+                return;
+            }
 
-        PushContent();
+            PushContent();
         }
     }
 
@@ -234,8 +231,8 @@ internal sealed partial class AppHost
             return;
 
         var fileName = Path.GetFileName(target);
-        var relative = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/');
-        if (TopLevelDirectory(relative) is "clips" or "highlights")
+        var relative = RelativeToRoot(target);
+        if (ContentLayout.IsClipPath(relative))
         {
             if (!_clipTitles.SaveFavorite(fileName, parameters.Favorite))
             {

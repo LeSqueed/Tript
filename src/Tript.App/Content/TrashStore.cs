@@ -295,9 +295,7 @@ internal sealed class TrashStore
         return new TrashEntryRecord
         {
             Id = Path.GetFileName(entryDirectory),
-            ContentType = relative.Split('/').Any(part =>
-                part.Equals("clips", StringComparison.Ordinal)
-                || part.Equals("highlights", StringComparison.Ordinal))
+            ContentType = relative.Split('/').Any(part => part is ContentLayout.Clips or ContentLayout.Highlights)
                 ? "clip"
                 : "recording",
             FileName = Path.GetFileName(video),

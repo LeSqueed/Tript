@@ -240,14 +240,14 @@ internal sealed partial class AppHost : IDisposable
             _modelManager.StatusChanged += OnModelStatusChanged;
         }
 
-        EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore));
+        EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore.Load()));
 
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller, _token, options.ControlPort, options.UiPort);
-        _metadata = new RecordingMetadataStore(Path.Combine(EffectiveRoot, "metadata"));
-        _clipTitles = new ClipTitleStore(Path.Combine(EffectiveRoot, "metadata"));
-        _thumbnails = new ThumbnailStore(ThumbnailRootFor(EffectiveRoot), CreateThumbnailExtractor);
-        _trash = new TrashStore(TrashRootFor(EffectiveRoot));
+        _metadata = new RecordingMetadataStore(ContentLayout.MetadataRoot(EffectiveRoot));
+        _clipTitles = new ClipTitleStore(ContentLayout.MetadataRoot(EffectiveRoot));
+        _thumbnails = new ThumbnailStore(ContentLayout.ThumbnailRoot(EffectiveRoot), CreateThumbnailExtractor);
+        _trash = new TrashStore(ContentLayout.TrashRoot(EffectiveRoot));
         _content = new ContentServer(EffectiveRoot, _token, _thumbnails, options.ContentPort);
         _ui = new UiHost(options.WebRoot, _token, options.UiPort);
 
@@ -351,20 +351,11 @@ internal sealed partial class AppHost : IDisposable
     private static bool IsAtOrAbove(string candidate, string sensitive)
         => FilePaths.IsAtOrUnder(sensitive, candidate);
 
-    private static string ResolveEffectiveRoot(AppOptions options, SettingsStore settingsStore)
-        => ResolveEffectiveRoot(options, settingsStore.Load());
-
     private static string ResolveEffectiveRoot(AppOptions options, SettingsModel settings)
     {
         var configured = settings.Recording.OutputDirectory;
         return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
     }
-
-    private static string ThumbnailRootFor(string effectiveRoot) =>
-        Path.Combine(effectiveRoot, "metadata", "thumbnails");
-
-    private static string TrashRootFor(string effectiveRoot) =>
-        Path.Combine(effectiveRoot, TrashStore.DirectoryName);
 
     private IThumbnailExtractor? CreateThumbnailExtractor()
     {
@@ -419,10 +410,15 @@ internal sealed partial class AppHost : IDisposable
 
     private static void WaitForShutdown(ManualResetEventSlim shutdownRequested)
     {
-        while (!shutdownRequested.IsSet)
-            Thread.Sleep(100);
-
+        shutdownRequested.Wait();
         Console.WriteLine("SHUTDOWN");
+    }
+
+    private static void WaitForInFlight(object gate)
+    {
+        lock (gate)
+        {
+        }
     }
 
     public void Dispose()
@@ -468,13 +464,9 @@ internal sealed partial class AppHost : IDisposable
         }
         _modelCheckTimer?.Dispose();
         _audioLevelTimer?.Dispose();
-        lock (_audioLevelGate)
-        {
-        }
+        WaitForInFlight(_audioLevelGate);
         _audioDeviceTimer?.Dispose();
-        lock (_audioDeviceRefreshGate)
-        {
-        }
+        WaitForInFlight(_audioDeviceRefreshGate);
         _audioLevelMonitor?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
@@ -709,12 +701,7 @@ internal sealed partial class AppHost : IDisposable
             return false;
         }
 
-        var previousGameKeys = _settingsStore.Load().Game.GameList
-            .Select(game => (game.Id, game.Executable, game.ExecutablePath))
-            .ToList();
-        var previousGameNames = _settingsStore.Load().Game.GameList
-            .Select(game => (game.Id, game.Name))
-            .ToList();
+        var previousGames = GameListFingerprint.Of(_settingsStore.Load().Game.GameList);
         SettingsModel settings;
         string? failure;
         bool saved;
@@ -765,14 +752,9 @@ internal sealed partial class AppHost : IDisposable
         }
 
         ReloadGameList();
-        var gameKeysNow = settings.Game.GameList
-            .Select(game => (game.Id, game.Executable, game.ExecutablePath))
-            .ToList();
-        var gameNamesNow = settings.Game.GameList
-            .Select(game => (game.Id, game.Name))
-            .ToList();
-        var gameKeysChanged = !previousGameKeys.SequenceEqual(gameKeysNow);
-        var gameNamesChanged = !previousGameNames.SequenceEqual(gameNamesNow);
+        var currentGames = GameListFingerprint.Of(settings.Game.GameList);
+        var gameKeysChanged = !previousGames.Keys.SequenceEqual(currentGames.Keys);
+        var gameNamesChanged = !previousGames.Names.SequenceEqual(currentGames.Names);
         if (gameKeysChanged || gameNamesChanged)
         {
             PushGameList();
@@ -787,16 +769,29 @@ internal sealed partial class AppHost : IDisposable
         {
             EffectiveRoot = effectiveRoot;
             _content.UpdateRoot(effectiveRoot);
-            _metadata.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
-            _clipTitles.UpdateRoot(Path.Combine(effectiveRoot, "metadata"));
-            _thumbnails.UpdateRoot(ThumbnailRootFor(effectiveRoot));
-            _trash.UpdateRoot(TrashRootFor(effectiveRoot));
+            _metadata.UpdateRoot(ContentLayout.MetadataRoot(effectiveRoot));
+            _clipTitles.UpdateRoot(ContentLayout.MetadataRoot(effectiveRoot));
+            _thumbnails.UpdateRoot(ContentLayout.ThumbnailRoot(effectiveRoot));
+            _trash.UpdateRoot(ContentLayout.TrashRoot(effectiveRoot));
         }
 
         SettingsChanged?.Invoke(settings);
         PushSettings();
         PushSettingsUpdateResult(requestId, true, null);
         return true;
+    }
+
+    private sealed record GameListFingerprint(
+        List<(string Id, string? Executable, string? ExecutablePath)> Keys,
+        List<(string Id, string Name)> Names)
+    {
+        internal static GameListFingerprint Of(IEnumerable<GameSetting> games)
+        {
+            var list = games.ToList();
+            return new GameListFingerprint(
+                list.Select(game => (game.Id, game.Executable, game.ExecutablePath)).ToList(),
+                list.Select(game => (game.Id, game.Name)).ToList());
+        }
     }
 
     private static string? CreateRecordingRoot(string path)
@@ -1195,7 +1190,7 @@ internal sealed partial class AppHost : IDisposable
                 if (stillReferenced.Contains(path))
                     continue;
 
-                var fileName = FileNameFromWirePath(path);
+                var fileName = ContentLayout.FileNameOf(path);
                 if (trashedNames.Contains(fileName))
                     continue;
 
@@ -1224,7 +1219,7 @@ internal sealed partial class AppHost : IDisposable
         var relative = RelativeToRoot(target);
         var contentType = ResolveContentType(item.ContentType, relative);
         if (item.DeleteLinkedHighlights && contentType == "recording"
-            && TopLevelDirectory(relative) is not ("clips" or "highlights"))
+            && !ContentLayout.IsClipPath(relative))
         {
             DeleteLinkedAutomaticHighlights(target, relative, permanent, clipRecords, processed);
         }
@@ -1342,8 +1337,7 @@ internal sealed partial class AppHost : IDisposable
             files.Add(new TrashedFile(path, RelativeToRoot(path)));
     }
 
-    private string RelativeToRoot(string absolutePath) =>
-        Path.GetRelativePath(EffectiveRoot, absolutePath).Replace(Path.DirectorySeparatorChar, '/');
+    private string RelativeToRoot(string absolutePath) => ContentLayout.ToWirePath(EffectiveRoot, absolutePath);
 
     private static readonly HashSet<string> WireContentTypes =
         new(StringComparer.Ordinal) { "recording", "clip", "highlight", "buffer" };
@@ -1352,7 +1346,7 @@ internal sealed partial class AppHost : IDisposable
     {
         if (requested is not null && WireContentTypes.Contains(requested))
             return requested;
-        return TopLevelDirectory(relativePath) is "clips" or "highlights" ? "clip" : "recording";
+        return ContentLayout.IsClipPath(relativePath) ? "clip" : "recording";
     }
 
     internal void AddBookmark(AddBookmarkParameters? parameters)
@@ -1366,55 +1360,42 @@ internal sealed partial class AppHost : IDisposable
             return;
         }
 
+        var bookmark = CreateBookmark(parameters);
         var session = _sessionTracker.Active;
         if (session is not null && IsActiveRecordingPath(parameters.FilePath))
         {
-            var bookmark = new Tript.Core.Bookmark
-            {
-                Id = ParseBookmarkId(parameters.Id),
-                Type = ParseBookmarkType(parameters.Type),
-                Time = TimeSpan.FromSeconds(parameters.Time),
-            };
             session.AddBookmark(bookmark);
             PushContent();
             return;
         }
 
         var target = ResolveContentFile(parameters.FilePath);
-        if (target is null)
-            return;
+        if (target is not null && TrySaveBookmark(target, bookmark))
+            PushContent();
+    }
 
+    private bool TrySaveBookmark(string target, Bookmark bookmark)
+    {
         var fileName = Path.GetFileName(target);
         lock (_metadata.WriteGate)
         {
-        var existing = _metadata.Read(fileName);
-        if (existing.MustNotBeOverwritten)
-        {
-            Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark is refused rather than replacing it.", fileName, existing.Failure);
-            PushError(
-                "The bookmark could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
-            return;
+            var existing = _metadata.Read(fileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark is refused rather than replacing it.", fileName, existing.Failure);
+                PushError(
+                    "The bookmark could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
+                return false;
+            }
+
+            var metadata = existing.Record ?? new RecordingMetadata { VideoPath = RelativeToRoot(target) };
+            metadata.Bookmarks.Add(bookmark);
+            if (_metadata.Save(metadata))
+                return true;
         }
 
-        var metadata = existing.Record ?? new RecordingMetadata
-        {
-            VideoPath = Path.GetRelativePath(EffectiveRoot, target).Replace(Path.DirectorySeparatorChar, '/'),
-        };
-        metadata.Bookmarks.Add(new Tript.Core.Bookmark
-        {
-            Id = ParseBookmarkId(parameters.Id),
-            Type = ParseBookmarkType(parameters.Type),
-            Time = TimeSpan.FromSeconds(parameters.Time),
-        });
-
-        if (!_metadata.Save(metadata))
-        {
-            PushError("The bookmark could not be saved, check the recording folder is writable.");
-            return;
-        }
-        }
-
-        PushContent();
+        PushError("The bookmark could not be saved, check the recording folder is writable.");
+        return false;
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
@@ -1434,36 +1415,31 @@ internal sealed partial class AppHost : IDisposable
         }
 
         var target = ResolveContentFile(parameters.FilePath);
-        if (target is null)
-            return;
+        if (target is not null && TryRemoveBookmark(Path.GetFileName(target), id))
+            PushContent();
+    }
 
-        var fileName = Path.GetFileName(target);
+    private bool TryRemoveBookmark(string fileName, Guid id)
+    {
         lock (_metadata.WriteGate)
         {
-        var existing = _metadata.Read(fileName);
-        if (existing.MustNotBeOverwritten)
-        {
-            Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark removal is refused rather than replacing it.", fileName, existing.Failure);
-            PushError(
-                "The bookmark could not be removed: this recording's metadata record could not be read.");
-            return;
+            var existing = _metadata.Read(fileName);
+            if (existing.MustNotBeOverwritten)
+            {
+                Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark removal is refused rather than replacing it.", fileName, existing.Failure);
+                PushError("The bookmark could not be removed: this recording's metadata record could not be read.");
+                return false;
+            }
+
+            var metadata = existing.Record;
+            if (metadata is null || metadata.Bookmarks.RemoveAll(bookmark => bookmark.Id == id) == 0)
+                return false;
+            if (_metadata.Save(metadata))
+                return true;
         }
 
-        var metadata = existing.Record;
-        if (metadata is null)
-            return;
-
-        if (metadata.Bookmarks.RemoveAll(b => b.Id == id) == 0)
-            return;
-
-        if (!_metadata.Save(metadata))
-        {
-            PushError("The bookmark could not be removed, check the recording folder is writable.");
-            return;
-        }
-        }
-
-        PushContent();
+        PushError("The bookmark could not be removed, check the recording folder is writable.");
+        return false;
     }
 
     private bool IsActiveRecordingPath(string relativePath)
@@ -1471,18 +1447,13 @@ internal sealed partial class AppHost : IDisposable
         if (!IsRecording || _activeSessionPath is not { Length: > 0 })
             return false;
 
-        var active = Path.GetRelativePath(EffectiveRoot, _activeSessionPath)
-            .Replace(Path.DirectorySeparatorChar, '/');
-        return string.Equals(relativePath, active, ContentPathComparison);
+        return string.Equals(relativePath, RelativeToRoot(_activeSessionPath), ContentPathComparison);
     }
 
-    private static Guid ParseBookmarkId(string id) =>
-        Guid.TryParse(id, out var parsed) ? parsed : Guid.NewGuid();
-
-    private static Tript.Core.BookmarkType ParseBookmarkType(string type)
+    private static Bookmark CreateBookmark(AddBookmarkParameters parameters) => new()
     {
-        return Enum.TryParse<Tript.Core.BookmarkType>(type, ignoreCase: true, out var parsed)
-            ? parsed
-            : Tript.Core.BookmarkType.Manual;
-    }
+        Id = Guid.TryParse(parameters.Id, out var id) ? id : Guid.NewGuid(),
+        Type = Enum.TryParse<BookmarkType>(parameters.Type, ignoreCase: true, out var type) ? type : BookmarkType.Manual,
+        Time = TimeSpan.FromSeconds(parameters.Time),
+    };
 }

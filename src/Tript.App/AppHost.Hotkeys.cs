@@ -80,8 +80,7 @@ internal sealed partial class AppHost
             End = TimeSpan.FromSeconds(nowElapsed),
         };
 
-        var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
+        var sourceSessionPath = RelativeToRoot(sourcePath);
         var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
         Directory.CreateDirectory(replayDirectory);
         var accepted = recorder.SaveReplayBuffer(replayDirectory,

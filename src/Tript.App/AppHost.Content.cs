@@ -117,7 +117,7 @@ internal sealed partial class AppHost
             return items;
 
         var activeRecordingPath = IsRecording && _activeSessionPath is { Length: > 0 }
-            ? Path.GetRelativePath(EffectiveRoot, _activeSessionPath).Replace(Path.DirectorySeparatorChar, '/')
+            ? RelativeToRoot(_activeSessionPath)
             : null;
 
         var gamesByRecording = new Dictionary<string, string>(pathComparer);
@@ -147,13 +147,11 @@ internal sealed partial class AppHost
 
         foreach (var file in root.EnumerateFiles("*.mp4", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(EffectiveRoot, file.FullName)
-                .Replace(Path.DirectorySeparatorChar, '/');
-            if (IsTrashPath(relative))
+            var relative = RelativeToRoot(file.FullName);
+            if (ContentLayout.IsTrashPath(relative))
                 continue;
 
-            var topLevel = TopLevelDirectory(relative);
-            var contentType = topLevel is "clips" or "highlights" ? "clip" : "recording";
+            var contentType = ContentLayout.IsClipPath(relative) ? "clip" : "recording";
 
             var item = new ContentItem
             {
@@ -288,7 +286,7 @@ internal sealed partial class AppHost
             if (spans.Count == 0)
                 continue;
 
-            var sourceFileName = FileNameFromWirePath(clip.SourceSessionPath);
+            var sourceFileName = ContentLayout.FileNameOf(clip.SourceSessionPath);
             if (!sourceMetadata.TryGetValue(sourceFileName, out var metadata))
             {
                 metadata = _metadata.Load(sourceFileName);
@@ -315,7 +313,7 @@ internal sealed partial class AppHost
             if (recordingPaths.Contains(sourcePath))
                 continue;
 
-            var fileName = FileNameFromWirePath(sourcePath);
+            var fileName = ContentLayout.FileNameOf(sourcePath);
             var item = new ContentItem
             {
                 ContentType = "recording",
@@ -367,11 +365,9 @@ internal sealed partial class AppHost
             }
 
             if (item.Game is null && item.GameId is null
-                && GameSegmentFromPath(sourcePath) is { } sessionSegment)
+                && ContentLayout.GameSegment(sourcePath) is { } sessionSegment)
             {
-                var known = GameList.FirstOrDefault(candidate =>
-                    string.Equals(candidate.Id, sessionSegment, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.Name, sessionSegment, StringComparison.OrdinalIgnoreCase));
+                var known = FindGameByIdOrName(sessionSegment);
                 if (known is not null)
                 {
                     item.GameId = known.Id;
@@ -408,17 +404,8 @@ internal sealed partial class AppHost
 
     private string? ResolveLibraryGameName(string? storedName, string? gameId)
     {
-        if (string.IsNullOrWhiteSpace(gameId))
-            return storedName;
-
-        foreach (var game in GameList)
-        {
-            if (!string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase))
-                continue;
-            return string.IsNullOrWhiteSpace(game.Name) ? storedName : game.Name;
-        }
-
-        return storedName;
+        var name = string.IsNullOrWhiteSpace(gameId) ? null : FindGame(gameId)?.Name;
+        return string.IsNullOrWhiteSpace(name) ? storedName : name;
     }
 
     private static string? InheritedGame(ContentItem clip,
@@ -458,17 +445,6 @@ internal sealed partial class AppHost
         return inherited;
     }
 
-    private static string? GameSegmentFromPath(string? relativePath)
-    {
-        if (string.IsNullOrWhiteSpace(relativePath))
-            return null;
-
-        var segment = relativePath.Split(new[] { '/', '\\' }, 2)[0];
-        return segment is "sessions" or "clips" or "highlights" or "metadata" or ".trash"
-            ? null
-            : segment;
-    }
-
     private void BackfillClipGame(ContentItem clip, ClipTitleRecord? record)
     {
         var game = clip.Game;
@@ -479,13 +455,11 @@ internal sealed partial class AppHost
 
         if (game is null && gameId is null)
         {
-            var segment = GameSegmentFromPath(clip.SourceSessionPath)
-                ?? GameSegmentFromPath(clip.FilePath);
+            var segment = ContentLayout.GameSegment(clip.SourceSessionPath)
+                ?? ContentLayout.GameSegment(clip.FilePath);
             if (segment is not null)
             {
-                var known = GameList.FirstOrDefault(candidate =>
-                    string.Equals(candidate.Id, segment, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.Name, segment, StringComparison.OrdinalIgnoreCase));
+                var known = FindGameByIdOrName(segment);
                 if (known is not null)
                 {
                     gameId = known.Id;
@@ -588,19 +562,12 @@ internal sealed partial class AppHost
         if (absolutePath is null)
             return null;
 
-        return Path.GetRelativePath(EffectiveRoot, absolutePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
+        return RelativeToRoot(absolutePath);
     }
 
     private static StringComparer ContentPathComparer => FilePaths.Comparer;
 
     private static StringComparison ContentPathComparison => FilePaths.Comparison;
-
-    private static string FileNameFromWirePath(string path)
-    {
-        var separator = path.LastIndexOf('/');
-        return separator >= 0 ? path[(separator + 1)..] : path;
-    }
 
     private static List<AudioTrackInfo>? ToAudioTrackInfo(RecordingMetadata metadata)
     {
@@ -680,23 +647,6 @@ internal sealed partial class AppHost
             return 0;
         }
     }
-
-    private static string TopLevelDirectory(string relativePath)
-    {
-        foreach (var segment in relativePath.Split('/'))
-        {
-            if (segment.Equals("sessions", StringComparison.Ordinal)
-                || segment.Equals("clips", StringComparison.Ordinal)
-                || segment.Equals("highlights", StringComparison.Ordinal))
-                return segment;
-        }
-
-        var separator = relativePath.IndexOf('/');
-        return separator >= 0 ? relativePath[..separator] : relativePath;
-    }
-
-    private static bool IsTrashPath(string relativePath) =>
-        relativePath.StartsWith(TrashStore.DirectoryName + "/", StringComparison.Ordinal);
 
     private static double? DateTimeToUnixSeconds(DateTime dateTime)
         => dateTime == default ? null : new DateTimeOffset(dateTime).ToUnixTimeSeconds();

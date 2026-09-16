@@ -423,6 +423,15 @@ internal sealed partial class AppHost
     }
 
     [return: NotNullIfNotNull(nameof(gameId))]
-    internal string? GameDisplayName(string? gameId) =>
-        GameList.FirstOrDefault(game => game.Id == gameId)?.Name ?? gameId;
+    internal string? GameDisplayName(string? gameId) => FindGame(gameId)?.Name ?? gameId;
+
+    private GameInfo? FindGame(string? gameId) =>
+        string.IsNullOrEmpty(gameId)
+            ? null
+            : GameList.FirstOrDefault(game => string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase));
+
+    private GameInfo? FindGameByIdOrName(string value) =>
+        GameList.FirstOrDefault(game =>
+            string.Equals(game.Id, value, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(game.Name, value, StringComparison.OrdinalIgnoreCase));
 }

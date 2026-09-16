@@ -36,8 +36,7 @@ internal sealed partial class AppHost
 
         var sourcePath = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
         if (sourcePath is null || !File.Exists(sourcePath)
-            || !TopLevelDirectory(parameters.FilePath.Replace('\\', '/'))
-                .Equals("sessions", StringComparison.Ordinal))
+            || !ContentLayout.IsSessionPath(parameters.FilePath.Replace('\\', '/')))
         {
             PushError("That recording is not inside the sessions library.");
             return;
@@ -59,8 +58,7 @@ internal sealed partial class AppHost
             return;
         }
 
-        var sourceSessionPath = Path.GetRelativePath(EffectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
+        var sourceSessionPath = RelativeToRoot(sourcePath);
         if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates, metadata.GameId))
             PushError("Automatic highlights are already being created for another recording.");
     }
@@ -285,7 +283,7 @@ internal sealed partial class AppHost
             {
                 ContentType = "clip",
                 FileName = Path.GetFileName(results[0]),
-                FilePath = Path.GetRelativePath(EffectiveRoot, results[0]).Replace(Path.DirectorySeparatorChar, '/'),
+                FilePath = RelativeToRoot(results[0]),
                 Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title,
             },
         }, Wire.Options));
@@ -308,10 +306,7 @@ internal sealed partial class AppHost
         }
 
         var source = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath);
-        var relative = source is null ? null
-            : Path.GetRelativePath(EffectiveRoot, source).Replace(Path.DirectorySeparatorChar, '/');
-        var topLevel = relative is null ? string.Empty : TopLevelDirectory(relative);
-        if (source is null || !File.Exists(source) || topLevel is not ("clips" or "highlights"))
+        if (source is null || !File.Exists(source) || !ContentLayout.IsClipPath(RelativeToRoot(source)))
         {
             PushConversionProgress(operationId, "error", "That file is not a clip or highlight inside the recording folder.");
             return;
@@ -365,7 +360,7 @@ internal sealed partial class AppHost
                     {
                         ContentType = parameters.ContentType,
                         FileName = Path.GetFileName(converted),
-                        FilePath = Path.GetRelativePath(EffectiveRoot, converted).Replace(Path.DirectorySeparatorChar, '/'),
+                        FilePath = RelativeToRoot(converted),
                         IsHdr = false,
                     });
                     PushContent();

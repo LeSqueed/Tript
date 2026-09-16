@@ -414,7 +414,7 @@ internal sealed partial class AppHost
 
         var sourceSessionPath = _activeSessionPath;
         var targetSessionPath = Path.Combine(EffectiveRoot, GameFolderName(reassignment.TargetGameId),
-            "sessions", Path.GetFileName(sourceSessionPath));
+            ContentLayout.Sessions, Path.GetFileName(sourceSessionPath));
         var sourceRelative = RelativeToRoot(sourceSessionPath);
         var targetRelative = RelativeToRoot(targetSessionPath);
         var linkedHighlights = _clipTitles.EnumerateRecords()
@@ -531,9 +531,7 @@ internal sealed partial class AppHost
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
             return;
 
-        var relative = Path.GetRelativePath(EffectiveRoot, _activeOutputPath)
-            .Replace(Path.DirectorySeparatorChar, '/');
-        metadata.VideoPath = relative;
+        metadata.VideoPath = RelativeToRoot(_activeOutputPath);
 
         lock (_metadata.WriteGate)
         {
@@ -602,15 +600,15 @@ internal sealed partial class AppHost
 
     internal string GameCaptureName(string gameId)
     {
-        var entry = GameList.FirstOrDefault(g => g.Id == gameId);
+        var entry = FindGame(gameId);
         return ExecutableNames.Normalize(entry is null ? gameId : ExecutableOf(entry));
     }
 
     private string BuildSessionPath(string? gameId, bool createDirectory = true)
     {
         var directory = string.IsNullOrWhiteSpace(gameId)
-            ? Path.Combine(EffectiveRoot, "sessions")
-            : Path.Combine(EffectiveRoot, GameFolderName(gameId), "sessions");
+            ? Path.Combine(EffectiveRoot, ContentLayout.Sessions)
+            : Path.Combine(EffectiveRoot, GameFolderName(gameId), ContentLayout.Sessions);
         if (createDirectory)
             Directory.CreateDirectory(directory);
 
@@ -625,21 +623,8 @@ internal sealed partial class AppHost
         return Path.Combine(directory, "replay-buffer.mp4");
     }
 
-    private string ClipDirectoryForSource(string sourcePath)
-    {
-        var relative = Path.GetRelativePath(EffectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
-        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var sessionsIndex = Array.FindIndex(parts,
-            part => part.Equals("sessions", StringComparison.Ordinal));
-        if (sessionsIndex > 0)
-            return Path.Combine(new[] { EffectiveRoot }
-                .Concat(parts.Take(sessionsIndex))
-                .Append("clips")
-                .ToArray());
-
-        return Path.Combine(EffectiveRoot, "clips");
-    }
+    private string ClipDirectoryForSource(string sourcePath) =>
+        ContentLayout.SiblingOfSessions(EffectiveRoot, sourcePath, ContentLayout.Clips);
 
     private string HighlightsDirectoryForSource(string sourcePath)
     {
@@ -648,25 +633,12 @@ internal sealed partial class AppHost
         return directory;
     }
 
-    private string HighlightsDirectoryPathForSource(string sourcePath)
-    {
-        var relative = Path.GetRelativePath(EffectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
-        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var sessionsIndex = Array.FindIndex(parts,
-            part => part.Equals("sessions", StringComparison.Ordinal));
-        var directory = sessionsIndex > 0
-            ? Path.Combine(new[] { EffectiveRoot }
-                .Concat(parts.Take(sessionsIndex))
-                .Append("highlights")
-                .ToArray())
-            : Path.Combine(EffectiveRoot, "highlights");
-        return directory;
-    }
+    private string HighlightsDirectoryPathForSource(string sourcePath) =>
+        ContentLayout.SiblingOfSessions(EffectiveRoot, sourcePath, ContentLayout.Highlights);
 
     private string GameFolderName(string gameId)
     {
-        var game = GameList.FirstOrDefault(candidate => candidate.Id == gameId)?.Name;
+        var game = FindGame(gameId)?.Name;
         return SafeDirectoryName(string.IsNullOrWhiteSpace(game) ? gameId : game, OperatingSystem.IsWindows());
     }
 

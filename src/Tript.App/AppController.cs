@@ -214,8 +214,7 @@ internal sealed class AppController
         {
             OperationId = parsed.Id,
             SourcePath = sourcePath,
-            SourceSessionPath = Path.GetRelativePath(effectiveRoot, sourcePath)
-                .Replace(Path.DirectorySeparatorChar, '/'),
+            SourceSessionPath = ContentLayout.ToWirePath(effectiveRoot, sourcePath),
             Regions = regions,
             Mode = mode,
             OutputPath = outputPath,
@@ -268,8 +267,8 @@ internal sealed class AppController
         string? sourcePath)
     {
         var outputDirectory = sourcePath is null
-            ? Path.Combine(effectiveRoot, "clips")
-            : ClipDirectoryForSource(sourcePath, effectiveRoot);
+            ? Path.Combine(effectiveRoot, ContentLayout.Clips)
+            : ContentLayout.SiblingOfSessions(effectiveRoot, sourcePath, ContentLayout.Clips);
 
         if (parameters.OutputMode.Equals("separate", StringComparison.OrdinalIgnoreCase))
         {
@@ -278,22 +277,6 @@ internal sealed class AppController
 
         var sourceBaseName = Path.GetFileNameWithoutExtension(parameters.FilePath);
         return Path.Combine(outputDirectory, $"{sourceBaseName}-{SafeClipId(parameters.Id)}.mp4");
-    }
-
-    private static string ClipDirectoryForSource(string sourcePath, string effectiveRoot)
-    {
-        var relative = Path.GetRelativePath(effectiveRoot, sourcePath)
-            .Replace(Path.DirectorySeparatorChar, '/');
-        var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var sessionsIndex = Array.FindIndex(parts,
-            part => part.Equals("sessions", StringComparison.Ordinal));
-        if (sessionsIndex > 0)
-            return Path.Combine(new[] { effectiveRoot }
-                .Concat(parts.Take(sessionsIndex))
-                .Append("clips")
-                .ToArray());
-
-        return Path.Combine(effectiveRoot, "clips");
     }
 
     internal static string SafeClipId(string? id)

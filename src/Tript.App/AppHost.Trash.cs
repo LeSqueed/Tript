@@ -72,7 +72,7 @@ internal sealed partial class AppHost
             if (result.Renamed)
             {
                 if (RelinkRestoredMetadata(result.FileName!, result.RestoredAs!))
-                    PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' — a file with its own name was already there.");
+                    PushError($"'{result.FileName}' was restored as '{result.RestoredAs}' because a file with its own name was already there.");
                 else
                     PushError($"'{result.FileName}' was restored as '{result.RestoredAs}', but its metadata link could not be updated. Check the metadata folder.");
             }
@@ -182,7 +182,7 @@ internal sealed partial class AppHost
         {
             Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
             PushError(
-                "The recording title could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
+                "The recording title could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and bookmarks.");
             return;
         }
 
@@ -194,7 +194,7 @@ internal sealed partial class AppHost
 
         if (!_metadata.Save(metadata))
         {
-            PushError("The recording title could not be saved — check the recording folder is writable.");
+            PushError("The recording title could not be saved. Check the recording folder is writable.");
             return;
         }
         PushContent();
@@ -210,13 +210,13 @@ internal sealed partial class AppHost
         {
             Log.Warning("{FileName} has a clip record that could not be read ({Failure}); the rename is refused rather than replacing it.", fileName, existing.Failure);
             PushError(
-                "The clip title could not be saved — this clip's record could not be read, and overwriting it would lose what else is on it.");
+                "The clip title could not be saved: this clip's record could not be read, and overwriting it would lose what else is on it.");
             return;
         }
 
         if (!_clipTitles.Save(fileName, title))
         {
-            PushError("The clip title could not be saved — check the recording folder is writable.");
+            PushError("The clip title could not be saved. Check the recording folder is writable.");
             return;
         }
 
@@ -239,7 +239,7 @@ internal sealed partial class AppHost
         {
             if (!_clipTitles.SaveFavorite(fileName, parameters.Favorite))
             {
-                PushError("The favorite could not be saved — check the recording folder is writable.");
+                PushError("The favorite could not be saved. Check the recording folder is writable.");
                 return;
             }
         }
@@ -247,7 +247,7 @@ internal sealed partial class AppHost
         {
             if (!_metadata.SaveFavorite(fileName, relative, parameters.Favorite))
             {
-                PushError("The favorite could not be saved — check the recording folder is writable.");
+                PushError("The favorite could not be saved. Check the recording folder is writable.");
                 return;
             }
         }

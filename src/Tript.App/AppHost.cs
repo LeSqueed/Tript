@@ -78,7 +78,7 @@ internal sealed partial class AppHost : IDisposable
         }
         catch (FfmpegNotFoundException exception)
         {
-            Log.Warning("no thumbnails or durations in the library — {Reason}", exception.Message);
+            Log.Warning("no thumbnails or durations in the library: {Reason}", exception.Message);
             return null;
         }
     }, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1386,7 +1386,7 @@ internal sealed partial class AppHost : IDisposable
         {
             Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark is refused rather than replacing it.", fileName, existing.Failure);
             PushError(
-                "The bookmark could not be saved — this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
+                "The bookmark could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
             return;
         }
 
@@ -1439,7 +1439,7 @@ internal sealed partial class AppHost : IDisposable
         {
             Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark removal is refused rather than replacing it.", fileName, existing.Failure);
             PushError(
-                "The bookmark could not be removed — this recording's metadata record could not be read.");
+                "The bookmark could not be removed: this recording's metadata record could not be read.");
             return;
         }
 

@@ -288,7 +288,7 @@ export function ZoomedTimeline({
               className="timeline-markin"
               data-testid="timeline-mark-in"
               style={{ left: bookmarkLeft(markInTime, window, rect) }}
-              title={`In point ${formatTime(markInTime)} — press O to close the segment`}
+              title={`In point ${formatTime(markInTime)}. Press O to close the segment`}
             />
           )}
 
@@ -375,6 +375,6 @@ function regionWidth(region: TimelineRegion, window: WindowState, rect: { left: 
 
 function bookmarkBubbleText(bookmark: BookmarkItem): string {
   const type = bookmark.subtype ? `${bookmark.type} · ${bookmark.subtype}` : bookmark.type;
-  const label = bookmark.label ? ` — ${bookmark.label}` : '';
+  const label = bookmark.label ? ` · ${bookmark.label}` : '';
   return `${type} · ${formatTime(bookmark.time)}${label}`;
 }

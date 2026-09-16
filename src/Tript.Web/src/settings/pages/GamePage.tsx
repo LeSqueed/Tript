@@ -189,14 +189,14 @@ export function GamePage({
 
     setGameRequestState((current) => ({ ...current, [gameId]: gameAddRequested.status as 'accepted' | 'alreadyRequested' | 'rateLimited' }));
     if (gameAddRequested.status === 'accepted') {
-      toast.push({ kind: 'success', message: 'Request received — thanks!' });
+      toast.push({ kind: 'success', message: 'Request received. Thanks!' });
     } else if (gameAddRequested.status === 'alreadyRequested') {
       toast.push({ kind: 'info', message: "You've already requested this game." });
     } else if (gameAddRequested.status === 'rateLimited') {
       const hours = gameAddRequested.retryAfterSeconds
         ? Math.max(1, Math.round(gameAddRequested.retryAfterSeconds / 3600))
         : 6;
-      toast.push({ kind: 'warning', message: `Too many requests — try again in about ${hours} hour${hours === 1 ? '' : 's'}.` });
+      toast.push({ kind: 'warning', message: `Too many requests. Try again in about ${hours} hour${hours === 1 ? '' : 's'}.` });
     }
   }, [gameAddRequested, toast]);
 

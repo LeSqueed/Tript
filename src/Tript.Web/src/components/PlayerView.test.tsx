@@ -62,7 +62,7 @@ function zoomWindowSeconds(container: Element): number {
 }
 
 function playingItem(): string {
-  return (document.querySelector('video')?.getAttribute('aria-label') ?? '').split(' — ')[0];
+  return (document.querySelector('video')?.getAttribute('aria-label') ?? '').split('. Press space')[0];
 }
 
 function currentReadout(): string {

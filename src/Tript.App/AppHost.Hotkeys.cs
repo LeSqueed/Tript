@@ -34,7 +34,7 @@ internal sealed partial class AppHost
         if (_activeRecordingMode?.RecordsSession() != true)
         {
             PushError(
-                "Manual bookmarks aren't available in Replay Buffer Only mode — try Quick Clip instead.");
+                "Manual bookmarks aren't available in Replay Buffer Only mode. Try Quick Clip instead.");
             return;
         }
 
@@ -60,7 +60,7 @@ internal sealed partial class AppHost
 
         if (_activeRecordingMode?.UsesReplayBuffer() != true)
         {
-            PushError("Quick Clip needs a replay buffer — enable it in Recording settings.");
+            PushError("Quick Clip needs a replay buffer. Enable it in Recording settings.");
             return;
         }
 
@@ -102,7 +102,7 @@ internal sealed partial class AppHost
             });
 
         if (!accepted)
-            PushError("Quick Clip could not be created — the replay buffer was not ready.");
+            PushError("Quick Clip could not be created because the replay buffer was not ready.");
     }
 
     internal static bool ValidateHotkeys(SettingsModel settings, out string? failure)
@@ -124,7 +124,7 @@ internal sealed partial class AppHost
 
             if (binding.Modifiers.Count(modifier => !string.IsNullOrWhiteSpace(modifier)) == 0)
             {
-                failure = $"'{action}' needs at least one modifier key (Ctrl, Shift, Alt, or Win) — " +
+                failure = $"'{action}' needs at least one modifier key (Ctrl, Shift, Alt, or Win); " +
                     "a bare key would be captured globally for every application.";
                 return false;
             }

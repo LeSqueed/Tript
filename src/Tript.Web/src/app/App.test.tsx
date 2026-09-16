@@ -904,12 +904,12 @@ describe('App shell', () => {
       ws.serverMessage(
         JSON.stringify({
           method: 'error',
-          content: { message: 'The bookmark could not be saved — check the recording folder is writable.' },
+          content: { message: 'The bookmark could not be saved. Check the recording folder is writable.' },
         }),
       );
     });
     expect(screen.getByRole('alert').textContent).toContain(
-      'The bookmark could not be saved — check the recording folder is writable.',
+      'The bookmark could not be saved. Check the recording folder is writable.',
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));

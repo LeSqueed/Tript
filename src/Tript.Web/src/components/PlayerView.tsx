@@ -794,12 +794,12 @@ export function PlayerView({
           <span id="player-clip-hint" className="player-clip-hint muted small" data-testid="player-clip-hint">
             {!canMark
               ?
-                'Waiting for the video length — clips can only be set once the media reports how long it is.'
+                'Waiting for the video length. Clips can only be set once the media reports how long it is.'
               : markInTime !== null
-              ? `Start at ${formatTime(markInTime)} — press O (or Set end) where you want the clip to end.`
+              ? `Start at ${formatTime(markInTime)}. Press O (or Set end) where you want the clip to end.`
               : regions.length === 0
                  ? 'Quick clip marks the moment, or press I to set a start, then O to set an end.'
-                 : `${regions.length} clip${regions.length === 1 ? '' : 's'} ready — drag one or its edges on the timeline to adjust.`}
+                 : `${regions.length} clip${regions.length === 1 ? '' : 's'} ready. Drag one or its edges on the timeline to adjust.`}
           </span>
           )}
         </div>

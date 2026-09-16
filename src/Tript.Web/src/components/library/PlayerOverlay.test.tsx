@@ -13,7 +13,7 @@ describe('PlayerOverlay', () => {
         <p>player</p>
       </PlayerOverlay>,
     );
-    expect(screen.getByRole('dialog', { name: 'Player — Ranked win' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Player: Ranked win' })).toBeTruthy();
     expect(screen.getByTestId('player-overlay-title').textContent).toBe('Ranked win');
   });
 

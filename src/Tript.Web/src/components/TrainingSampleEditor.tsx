@@ -677,7 +677,7 @@ export function TrainingSampleEditor({
                   onClick={() => setDrawMode((mode) => mode === 'ocrRegion' ? 'label' : 'ocrRegion')}
                 >
                   <span className="training-ocr-tool-icon" aria-hidden="true" />
-                  {drawMode === 'ocrRegion' ? 'Drawing — drag on the frame' : 'Add OCR region'}
+                  {drawMode === 'ocrRegion' ? 'Drawing: drag on the frame' : 'Add OCR region'}
                 </button>
                 <span className="training-ocr-tool-count">
                   {ocrRegions.length} region{ocrRegions.length === 1 ? '' : 's'}

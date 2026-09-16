@@ -23,7 +23,7 @@ export function HotkeysPage({
   }
 
   const quickClipHint = bufferDurationSeconds
-    ? `How many seconds before the hotkey press are included — capped at the replay buffer length (${bufferDurationSeconds}s).`
+    ? `How many seconds before the hotkey press are included, capped at the replay buffer length (${bufferDurationSeconds}s).`
     : 'How many seconds before the hotkey press are included in the clip. Needs a replay buffer enabled.';
 
   return (

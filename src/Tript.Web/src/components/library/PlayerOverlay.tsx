@@ -87,7 +87,7 @@ export function PlayerOverlay({
       data-testid="player-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={`Player — ${title}`}
+      aria-label={`Player: ${title}`}
       ref={containerRef}
     >
       <div className="player-overlay-bar">

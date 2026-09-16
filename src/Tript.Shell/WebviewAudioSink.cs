@@ -38,7 +38,7 @@ internal static class WebviewAudioSink
         Environment.NewLine +
         "  render process without an audio sink: the window would open and sit there frozen while" +
         Environment.NewLine +
-        "  the app host keeps running. The Tript UI plays no audio — WebKitGTK needs the sink" +
+        "  the app host keeps running. The Tript UI plays no audio; WebKitGTK needs the sink" +
         Environment.NewLine +
         "  regardless. Install GStreamer's \"good\" plugin set and start Tript again:" +
         Environment.NewLine +

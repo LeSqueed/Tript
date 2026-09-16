@@ -91,7 +91,7 @@ internal sealed class RecordingMetadataStore
             var videoFileName = metadata.VideoFileName();
             if (string.IsNullOrWhiteSpace(videoFileName))
             {
-                Log.Warning("refusing to write a metadata record with no videoPath — it would not belong to any video.");
+                Log.Warning("refusing to write a metadata record with no videoPath because it would not belong to any video.");
                 return false;
             }
 

@@ -38,7 +38,7 @@ export function PlaybackSurface({
         ref={videoRef}
         className="video-element"
         tabIndex={0}
-        aria-label={`${item.title ?? item.fileName} — press space to play or pause`}
+        aria-label={`${item.title ?? item.fileName}. Press space to play or pause`}
         src={contentUrl(item.filePath)}
         poster={thumbnailUrl(item.filePath)}
         autoPlay

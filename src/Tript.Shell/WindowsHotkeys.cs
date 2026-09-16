@@ -53,7 +53,7 @@ internal sealed class WindowsHotkeys : IDisposable
             if (!RegisterHotKey(_messageWindow, id, modifiers | ModNoRepeat, virtualKey))
             {
                 _onRegistrationFailed(
-                    $"Could not register the {action} hotkey — another application may already be using it.");
+                    $"Could not register the {action} hotkey. Another application may already be using it.");
                 continue;
             }
 

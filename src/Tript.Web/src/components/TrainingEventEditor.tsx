@@ -148,7 +148,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
             <div className="training-ocr-pattern-heading">
               <div>
                 <strong>Text patterns</strong>
-                <p>The recogniser reads the same text regardless of language; the tag just labels each wording. Any one pattern activating means this event fires. Wrap a run of words in braces — {'{name}'} or {'{name:1..4}'} — to match it as a variable.</p>
+                <p>The recogniser reads the same text regardless of language; the tag just labels each wording. Any one pattern activating means this event fires. Wrap a run of words in braces, such as {'{name}'} or {'{name:1..4}'}, to match it as a variable.</p>
               </div>
               <Button
                 variant="ghost"

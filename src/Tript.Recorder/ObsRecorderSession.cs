@@ -561,7 +561,7 @@ public sealed class ObsRecorderSession : IRecorderSession
             candidates,
             configured);
 
-        Log.Information("ObsRecorderSession: recording in {Colour} with '{Encoder}' — {Reason}.",
+        Log.Information("ObsRecorderSession: recording in {Colour} with '{Encoder}': {Reason}.",
             plan.UseHdr ? "HDR (Rec.2100 PQ, 10-bit P010)" : "SDR (Rec.709)", plan.EncoderId, plan.Reason);
 
         return plan;
@@ -574,7 +574,7 @@ public sealed class ObsRecorderSession : IRecorderSession
             return null;
 
         if (Log.IsEnabled(Serilog.Events.LogEventLevel.Debug))
-            Log.Debug("ObsRecorderSession: display probe — {Probes}", string.Join("; ",
+            Log.Debug("ObsRecorderSession: display probe: {Probes}", string.Join("; ",
                 probes.Select(p => $"[{p.MonitorIndex}] {p.ColorSpace} @ {p.SdrWhiteLevelNits} nits")));
 
         var choice = DisplayColourResolver.Choose(probes);

@@ -1112,7 +1112,7 @@ internal sealed partial class AppHost
                 : "OCR recogniser (kept the pretrained model)");
         return parts.Count == 0
             ? "Training complete."
-            : $"Training complete — installed and activated the {string.Join(" and ", parts)}.";
+            : $"Training complete: installed and activated the {string.Join(" and ", parts)}.";
     }
 
     private static TrainingLabel ToTrainingLabel(TrainingLabelParameters label) => new()

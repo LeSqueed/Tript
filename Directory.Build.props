@@ -20,6 +20,6 @@
          publish-shell-win ships Photino.Native's win-x64 payload, and Photino.Native is a TRANSITIVE
          dependency of Photino.NET that nothing else pins. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <Version>0.1.0-alpha.3</Version>
+    <Version>0.1.0-alpha.4</Version>
   </PropertyGroup>
 </Project>

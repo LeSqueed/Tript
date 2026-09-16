@@ -50,7 +50,7 @@ internal sealed partial class AppHost
         }
 
         var candidates = metadata.Bookmarks
-            .Where(IsAutomaticClipCandidate)
+            .Where(AutomaticClipCandidates.Includes)
             .ToList();
         if (candidates.Count == 0)
         {
@@ -62,11 +62,6 @@ internal sealed partial class AppHost
         if (!QueueAutomaticClips(sourcePath, sourceSessionPath, candidates, metadata.GameId))
             PushError("Automatic highlights are already being created for another recording.");
     }
-
-    private static bool IsAutomaticClipCandidate(Bookmark bookmark) =>
-        bookmark.IsAutomaticClipCandidate == true
-        || (bookmark.IsAutomaticClipCandidate is null
-            && bookmark.Type.IsIncludedInHighlights());
 
     internal void ToggleAutomaticClipPause()
     {
@@ -315,7 +310,7 @@ internal sealed partial class AppHost
         MediaProbe? probe;
         try
         {
-            probe = LibraryProbe;
+            probe = _libraryProbe.Probe;
             if (probe is null)
                 throw new InvalidOperationException("Media tools are unavailable.");
             var info = probe.Probe(source);

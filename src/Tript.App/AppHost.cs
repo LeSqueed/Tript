@@ -84,9 +84,10 @@ internal sealed partial class AppHost : IDisposable
         }
     }, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private MediaProbe? _libraryProbe;
-
-    private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
+    private readonly LibraryProbe _libraryProbe;
+    private readonly object _contentPushGate = new();
+    private bool _contentPushRunning;
+    private bool _contentPushPending;
 
     private readonly object _recorderGate = new();
     private readonly TimeSpan _recorderStopTimeout;
@@ -129,6 +130,7 @@ internal sealed partial class AppHost : IDisposable
 
     private readonly object _gameListGate = new();
     private List<GameInfo> _catalogueGames = [];
+    private LibraryGames? _libraryGames;
     private IClipEngine? _clipEngine;
     private readonly object _clipQueueGate = new();
     private readonly Queue<ClipRequest> _clipQueue = [];
@@ -197,6 +199,7 @@ internal sealed partial class AppHost : IDisposable
         _primaryDisplay = primaryDisplay;
         _resolverClient = resolverClient;
         _gameIdAliases = gameIdAliases ?? new GameIdAliasStore();
+        _libraryProbe = new LibraryProbe(() => _libraryTools.Value?.Ffprobe);
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
 #if TRIPT_TRAINING
         MigrateLegacyTrainingFolders(_gameCatalog, TrainingPaths.RootPath,
@@ -943,7 +946,7 @@ internal sealed partial class AppHost : IDisposable
                 game,
                 activeModelGameId = _activeDetectionGameId,
 
-                startedAt = recording ? DateTimeToUnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
+                startedAt = recording ? ContentCatalogue.UnixSeconds(_pendingMetadata?.StartTime ?? default) : null,
                 automaticClips = automaticClipJob is null ? null : new
                 {
                     active = true,
@@ -1129,11 +1132,12 @@ internal sealed partial class AppHost : IDisposable
     {
         var processed = new HashSet<string>(ContentPathComparer);
         var clipRecords = _clipTitles.EnumerateRecords();
+        var referencedSources = ReferencedSourcePaths(clipRecords);
 
         foreach (var item in items)
         {
             if (!string.IsNullOrEmpty(item.FileName))
-                DeleteOne(item, permanent || item.Permanent, clipRecords, processed);
+                DeleteOne(item, permanent || item.Permanent, clipRecords, referencedSources, processed);
         }
 
         ReleaseSourceMetadataOfDeletedClips(clipRecords);
@@ -1151,10 +1155,6 @@ internal sealed partial class AppHost : IDisposable
 
         return referenced;
     }
-
-    private bool IsReferencedByAnyClip(string relativePath,
-        IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords) =>
-        ReferencedSourcePaths(clipRecords).Contains(relativePath);
 
     private void ReleaseSourceMetadataOfDeletedClips(
         IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecordsBeforeDelete)
@@ -1209,7 +1209,7 @@ internal sealed partial class AppHost : IDisposable
 
     private void DeleteOne(DeleteContentParameters item, bool permanent,
         IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords,
-        HashSet<string> processed, ClipTitleRecord? enumeratedClipRecord = null)
+        HashSet<string> referencedSources, HashSet<string> processed, ClipTitleRecord? enumeratedClipRecord = null)
     {
         var target = _content.ResolveWithinRoot(item.FileName);
         if (target is null || !processed.Add(target))
@@ -1221,11 +1221,10 @@ internal sealed partial class AppHost : IDisposable
         if (item.DeleteLinkedHighlights && contentType == "recording"
             && !ContentLayout.IsClipPath(relative))
         {
-            DeleteLinkedAutomaticHighlights(target, relative, permanent, clipRecords, processed);
+            DeleteLinkedAutomaticHighlights(target, relative, permanent, clipRecords, referencedSources, processed);
         }
 
-        var keepMetadataForClips = contentType == "recording"
-            && IsReferencedByAnyClip(relative, clipRecords);
+        var keepMetadataForClips = contentType == "recording" && referencedSources.Contains(relative);
 
         if (permanent)
         {
@@ -1261,7 +1260,7 @@ internal sealed partial class AppHost : IDisposable
         var files = new List<TrashedFile>();
         if (File.Exists(target))
         {
-            seed.FileSizeBytes = SafeLength(new FileInfo(target));
+            seed.FileSizeBytes = ContentCatalogue.SafeLength(new FileInfo(target));
             files.Add(new TrashedFile(target, relative));
         }
 
@@ -1288,7 +1287,7 @@ internal sealed partial class AppHost : IDisposable
 
     private void DeleteLinkedAutomaticHighlights(string sourceTarget, string sourcePath, bool permanent,
         IReadOnlyList<(string ClipFileName, ClipTitleRecord Record)> clipRecords,
-        HashSet<string> processed)
+        HashSet<string> referencedSources, HashSet<string> processed)
     {
         var highlightsDirectory = HighlightsDirectoryPathForSource(sourceTarget);
         foreach (var (clipFileName, record) in clipRecords)
@@ -1303,7 +1302,7 @@ internal sealed partial class AppHost : IDisposable
             {
                 ContentType = "highlight",
                 FileName = RelativeToRoot(Path.Combine(highlightsDirectory, clipFileName)),
-            }, permanent, clipRecords, processed, record);
+            }, permanent, clipRecords, referencedSources, processed, record);
         }
     }
 

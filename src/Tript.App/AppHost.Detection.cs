@@ -532,8 +532,6 @@ internal sealed partial class AppHost
 
     private string? DetectedProcessFor(string gameId) => _detectedGames.LatestOwner(gameId);
 
-    private static string ExecutableOf(GameInfo game) => game.Executable ?? game.Name;
-
     internal string ResolveDetectedGameId(string processName)
     {
         foreach (var game in GameList)
@@ -541,29 +539,15 @@ internal sealed partial class AppHost
             if (game.Id.Length == 0)
                 continue;
 
-            if (ExecutableNames.Comparer.Equals(ExecutableNames.Normalize(ExecutableOf(game)), processName))
+            if (ExecutableNames.Comparer.Equals(ExecutableNames.Normalize(LibraryGames.ExecutableOf(game)), processName))
                 return game.Id;
         }
 
         return processName;
     }
 
-    private string? ResolveLegacyGameId(string? gameName)
-    {
-        if (string.IsNullOrWhiteSpace(gameName))
-            return null;
-
-        var exact = FindGameByIdOrName(gameName);
-        if (exact is not null)
-            return exact.Id;
-
-        return GameList.FirstOrDefault(game => ExecutableNames.Equal(ExecutableOf(game), gameName))?.Id;
-    }
-
-    private string? ResolveStoredGameId(string? storedId, string? gameName)
-        => string.IsNullOrWhiteSpace(storedId)
-            ? ResolveLegacyGameId(gameName)
-            : (_gameIdAliases.Resolve(storedId) ?? ResolveLegacyGameId(storedId) ?? storedId);
+    private string? ResolveStoredGameId(string? storedId, string? gameName) =>
+        Games.ResolveStoredGameId(storedId, gameName);
 
     private (string? Game, string? GameId) ResolveGameForSession(string sourceSessionPath)
     {

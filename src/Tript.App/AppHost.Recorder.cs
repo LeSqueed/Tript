@@ -600,8 +600,8 @@ internal sealed partial class AppHost
 
     internal string GameCaptureName(string gameId)
     {
-        var entry = FindGame(gameId);
-        return ExecutableNames.Normalize(entry is null ? gameId : ExecutableOf(entry));
+        var entry = Games.Find(gameId);
+        return ExecutableNames.Normalize(entry is null ? gameId : LibraryGames.ExecutableOf(entry));
     }
 
     private string BuildSessionPath(string? gameId, bool createDirectory = true)
@@ -638,7 +638,7 @@ internal sealed partial class AppHost
 
     private string GameFolderName(string gameId)
     {
-        var game = FindGame(gameId)?.Name;
+        var game = Games.Find(gameId)?.Name;
         return SafeDirectoryName(string.IsNullOrWhiteSpace(game) ? gameId : game, OperatingSystem.IsWindows());
     }
 

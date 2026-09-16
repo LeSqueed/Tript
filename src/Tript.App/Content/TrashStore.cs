@@ -357,9 +357,9 @@ internal sealed class TrashStore
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         try
         {
-            File.Move(source, destination);
+            SharingViolationRetry.Run(() => File.Move(source, destination));
         }
-        catch (IOException)
+        catch (IOException exception) when (!SharingViolationRetry.IsSharingViolation(exception))
         {
             File.Copy(source, destination, overwrite: false);
             try

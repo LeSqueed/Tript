@@ -1282,7 +1282,7 @@ internal sealed partial class AppHost : IDisposable
             AddIfPresent(files, _metadata.PathFor(fileName));
         AddIfPresent(files, _clipTitles.PathFor(fileName));
 
-        _thumbnails.Invalidate(fileName);
+        using var thumbnailHold = _thumbnails.HoldForRemoval(fileName, ThumbnailStore.ExtractionReleaseWait);
         AddIfPresent(files, _thumbnails.PathFor(fileName));
 
         if (files.Count == 0)
@@ -1322,9 +1322,10 @@ internal sealed partial class AppHost : IDisposable
 
     private void UnlinkContent(string target, string fileName, bool keepMetadataForClips = false)
     {
+        using var thumbnailHold = _thumbnails.HoldForRemoval(fileName, ThumbnailStore.ExtractionReleaseWait);
         try
         {
-            File.Delete(target);
+            SharingViolationRetry.Run(() => File.Delete(target));
 
             var metadataDeleted = keepMetadataForClips || _metadata.Delete(fileName);
             var clipRecordDeleted = _clipTitles.Delete(fileName);

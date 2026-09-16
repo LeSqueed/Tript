@@ -21,6 +21,7 @@ internal sealed class ThumbnailStore : IDisposable
     private readonly Dictionary<string, FailedGeneration> _failed;
     private readonly Dictionary<string, long> _fileVersions;
     private readonly HashSet<string> _verifiedVersions;
+    private readonly Dictionary<string, int> _removing;
     private readonly object _stateGate = new();
     private readonly Thread _worker;
 
@@ -38,6 +39,7 @@ internal sealed class ThumbnailStore : IDisposable
         _failed = new Dictionary<string, FailedGeneration>(comparer);
         _fileVersions = new Dictionary<string, long>(comparer);
         _verifiedVersions = new HashSet<string>(comparer);
+        _removing = new Dictionary<string, int>(comparer);
         _worker = new Thread(ProcessJobs)
         {
             IsBackground = true,
@@ -77,7 +79,7 @@ internal sealed class ThumbnailStore : IDisposable
         GenerationJob job;
         lock (_stateGate)
         {
-            if (_disposed)
+            if (_disposed || _removing.ContainsKey(fileName))
                 return null;
 
             var cached = Path.Combine(_thumbnailRoot, $"{fileName}.jpg");
@@ -232,6 +234,43 @@ internal sealed class ThumbnailStore : IDisposable
                 return false;
             }
         }
+    }
+
+    internal static readonly TimeSpan ExtractionReleaseWait = TimeSpan.FromSeconds(10);
+
+    internal RemovalHold HoldForRemoval(string videoFileName, TimeSpan wait)
+    {
+        Task[] running;
+        lock (_stateGate)
+        {
+            _removing[videoFileName] = _removing.GetValueOrDefault(videoFileName) + 1;
+            InvalidateLocked(videoFileName);
+            running = _pending.Values
+                .Where(job => FilePaths.Comparer.Equals(job.FileName, videoFileName))
+                .Select(job => (Task)job.Completion.Task)
+                .ToArray();
+        }
+
+        if (running.Length > 0)
+            Task.WaitAll(running, wait);
+        return new RemovalHold(this, videoFileName);
+    }
+
+    private void ReleaseRemoval(string videoFileName)
+    {
+        lock (_stateGate)
+        {
+            var holds = _removing.GetValueOrDefault(videoFileName) - 1;
+            if (holds > 0)
+                _removing[videoFileName] = holds;
+            else
+                _removing.Remove(videoFileName);
+        }
+    }
+
+    internal readonly struct RemovalHold(ThumbnailStore store, string videoFileName) : IDisposable
+    {
+        public void Dispose() => store?.ReleaseRemoval(videoFileName);
     }
 
     internal void Invalidate(string videoFileName)

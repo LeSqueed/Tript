@@ -176,6 +176,60 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.False(File.Exists(store.PathFor(Path.GetFileName(video))));
     }
 
+    [Fact]
+    public async Task HoldForRemoval_QueuesNoExtractionUntilReleased()
+    {
+        var video = WriteVideo("being-deleted.mp4");
+        var extractor = new CountingExtractor();
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+
+        using (store.HoldForRemoval(Path.GetFileName(video), TimeSpan.FromSeconds(1)))
+        {
+            Assert.Null(await store.EnsureAsync(video).WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal(0, extractor.Calls);
+        }
+
+        Assert.NotNull(await store.EnsureAsync(video).WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, extractor.Calls);
+    }
+
+    [Fact]
+    public void HoldForRemoval_WaitsForARunningExtractionToLetGoOfTheVideo()
+    {
+        var video = WriteVideo("in-use.mp4");
+        var extractor = new BlockingExtractor();
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+
+        _ = store.EnsureAsync(video);
+        Assert.True(extractor.Entered.Wait(TimeSpan.FromSeconds(2)), "the background worker did not start");
+
+        var holdTask = Task.Run(() => store.HoldForRemoval(Path.GetFileName(video), TimeSpan.FromSeconds(10)));
+        Assert.False(holdTask.Wait(TimeSpan.FromMilliseconds(300)), "the hold must not return while ffmpeg still has the file");
+
+        extractor.Release.Set();
+        Assert.True(holdTask.Wait(TimeSpan.FromSeconds(5)), "the hold must return once the extraction finished");
+        holdTask.Result.Dispose();
+    }
+
+    [Fact]
+    public async Task HoldForRemoval_OverlappingHoldsOnOneName_KeepBlockingUntilTheLastIsReleased()
+    {
+        var video = WriteVideo("twice.mp4");
+        var extractor = new CountingExtractor();
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
+        var name = Path.GetFileName(video);
+
+        var first = store.HoldForRemoval(name, TimeSpan.Zero);
+        var second = store.HoldForRemoval(name, TimeSpan.Zero);
+        first.Dispose();
+
+        Assert.Null(await store.EnsureAsync(video).WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(0, extractor.Calls);
+
+        second.Dispose();
+        Assert.NotNull(await store.EnsureAsync(video).WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+
     private string ThumbnailRoot => Path.Combine(_root, "metadata", "thumbnails");
 
     private string WriteVideo(string name)

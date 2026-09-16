@@ -428,4 +428,15 @@ internal sealed partial class AppHost
             ?? throw new FfmpegNotFoundException("ffmpeg was not found. Install ffmpeg and ensure it is on PATH.");
         return new ClipEngine(ffmpeg, new MediaProbe(ffprobe));
     }
+
+    private sealed class AutomaticClipJob
+    {
+        internal required string SourceSessionPath { get; init; }
+
+        internal required int Total { get; init; }
+
+        internal int Completed { get; set; }
+
+        internal bool PausedByUser { get; set; }
+    }
 }

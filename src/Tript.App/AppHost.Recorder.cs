@@ -665,4 +665,10 @@ internal sealed partial class AppHost
             || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal)
                 || stem.StartsWith("LPT", StringComparison.Ordinal)) && stem[3] is >= '1' and <= '9');
     }
+
+    private sealed record PendingSessionReassignment(
+        string? OriginalGame,
+        string? OriginalGameId,
+        string TargetGame,
+        string TargetGameId);
 }

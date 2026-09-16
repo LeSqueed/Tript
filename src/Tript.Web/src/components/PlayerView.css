@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* The player and playlist share the available height. The video row takes what remains after the
- * header and console, so controls stay visible without a hand-measured viewport subtraction. */
-
 .player-view {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
@@ -101,8 +98,6 @@
   border-bottom: 1px solid var(--color-line);
 }
 
-/* The counter doubles as the re-centre: in a long list the scrollbar thumb is a sliver, so this is
- * the practical way back to the playing item. */
 .player-playlist-jump {
   padding: 0;
   background: transparent;
@@ -387,12 +382,6 @@
   flex: none;
 }
 
-/* ---------------------------------------------------------------------------
- * The console — one surface under the video holding the transport and both
- * timelines. It used to be three separate bordered boxes stacked on four more,
- * which is what "blocky" meant (design-system §3).
- * ------------------------------------------------------------------------- */
-
 .player-console {
   display: grid;
   gap: 10px;
@@ -405,7 +394,6 @@
 .video-frame {
   position: relative;
   flex: 1 1 auto;
-  /* A flex item will not shrink below its content's natural size without this. */
   min-height: 0;
   background: transparent;
   overflow: hidden;
@@ -445,7 +433,6 @@
   display: block;
   width: 100%;
   height: 100%;
-  /* The frame decides the height; the picture keeps its own ratio inside it. */
   object-fit: contain;
   background: transparent;
   cursor: pointer;
@@ -455,10 +442,6 @@
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
-
-/* ---------------------------------------------------------------------------
- * Transport row
- * ------------------------------------------------------------------------- */
 
 .transport-bar {
   display: grid;
@@ -494,9 +477,6 @@
   accent-color: var(--color-accent);
 }
 
-/* A native select, deliberately: a hand-built menu here would be decoration, and this one is
- * keyboard- and screen-reader-correct for free. */
-
 .transport-time {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -518,18 +498,10 @@
   opacity: 0.5;
 }
 
-/* ---------------------------------------------------------------------------
- * Dual timeline stack
- * ------------------------------------------------------------------------- */
-
 .timeline-stack {
   display: grid;
   gap: var(--space-3);
 }
-
-/* The thin full-session bar. */
-
-/* The scrub bar. A border here made it read as an empty text input rather than a progress bar. */
 
 .timeline-bar {
   position: relative;
@@ -579,8 +551,6 @@
   pointer-events: none;
 }
 
-/* The zoomed precision timeline. */
-
 .timeline-scale {
   display: flex;
   justify-content: space-between;
@@ -588,9 +558,6 @@
   color: var(--color-muted);
   font-variant-numeric: tabular-nums;
 }
-
-/* No box of its own: it sits inside the console, and its padding used to inset the track by 11px so
- * the scrub bar above it and this track below were showing the same seconds at different x. */
 
 .timeline-zoomed {
   position: relative;
@@ -652,9 +619,6 @@
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
-/* A region the caller lets us change is draggable: the body slides the segment, the edges trim it.
- * The cursor is the whole discoverability story for the gesture, so it is not decoration. */
-
 .timeline-region.adjustable {
   cursor: grab;
 }
@@ -663,9 +627,6 @@
   cursor: grabbing;
   border-color: var(--color-accent);
 }
-
-/* The grab area is deliberately wider than the visible grip — an invisible 1px border is not a
- * target anyone can hit. */
 
 .timeline-region-handle {
   position: absolute;
@@ -701,8 +662,6 @@
   opacity: 1;
 }
 
-/* The pending in point, waiting for its out point. */
-
 .timeline-markin {
   position: absolute;
   top: 0;
@@ -731,13 +690,6 @@
   z-index: 5;
 }
 
-/* ---------------------------------------------------------------------------
- * Segment marking row (in/out points)
- * ------------------------------------------------------------------------- */
-
-/* One container for both rows, sharing the console's horizontal inset — the clip row used to start
- * 12px to the left of the transport above it — and one gap between them rather than two paddings. */
-
 .player-clip-tools {
   display: grid;
   gap: 10px;
@@ -757,24 +709,17 @@
   gap: var(--space-2);
 }
 
-/* The two clip rows are labelled the same way, so they read as one area rather than two. */
-
 .player-clip-mode-label {
   color: var(--color-muted-strong);
   font-size: 12px;
   font-weight: 600;
 }
 
-/* Never had a rule: the old markup relied on whitespace between raw elements for its spacing, which
- * JSX strips once they are components — the label ended up touching the first radio. */
-
 .player-clip-mode {
   display: flex;
   align-items: center;
   gap: var(--space-3);
 }
-
-/* Directly under the buttons it describes. Right-aligned, it sat a thousand pixels from them. */
 
 .player-clip-hint {
   min-width: 12ch;

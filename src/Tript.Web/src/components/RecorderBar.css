@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* A cluster inside the topbar, not a strip across the app. It kept the background, bottom border,
- * wrapping and auto margin from when it WAS the top strip, which is why it read as a panel
- * overflowing the shell's right edge. */
-
 .recorder-bar {
   display: flex;
   align-items: center;
@@ -113,8 +109,6 @@
     animation: none;
   }
 }
-
-/* The headline while recording: mono so an 8-hour clock does not jitter digit by digit. */
 
 .rec-elapsed {
   color: var(--color-base-content);

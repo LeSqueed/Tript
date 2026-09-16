@@ -166,8 +166,6 @@ describe('App shell', () => {
       .map((frame) => JSON.parse(frame) as { method?: string })
       .filter((frame) => frame.method === 'ListGames').length;
 
-    // One request from App's own builtInGameIds tracking, one from the (always-mounted, hidden)
-    // SettingsView's Games page catalogue fetch — each independent, neither should double-fire.
     const afterConnect = listGamesCount();
     expect(afterConnect).toBeGreaterThan(0);
     act(() => socket.serverMessage(JSON.stringify({
@@ -186,10 +184,6 @@ describe('App shell', () => {
       .map((frame) => JSON.parse(frame) as { method?: string })
       .filter((frame) => frame.method === method).length;
 
-    // SettingsView is mounted up front (hidden), so its data-fetch effects have already run
-    // once before the user ever opens the tab. (There's more than one independent subscriber for
-    // each of these — App's own builtInGameIds/HDR-default tracking, plus SettingsView's own —
-    // so the baseline isn't necessarily 1, just stable.)
     const settingsAfterConnect = countOf('ListSettings');
     const gamesAfterConnect = countOf('ListGames');
     expect(settingsAfterConnect).toBeGreaterThan(0);

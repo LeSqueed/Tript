@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// A minimal controllable WebSocket for exercising the IPC client without a real socket. Matches
-// the DOM WebSocket shape the client touches: constructor, readyState, OPEN, send, close, and the
-// event handlers onopen/onmessage/onclose/onerror. This is a test double, not a browser polyfill.
 
 export const CONNECTING = 0;
 export const OPEN = 1;
@@ -28,7 +24,6 @@ export class MockWebSocket {
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
-  /** Whether the factory should throw on construction, simulating a refused connection. */
   static throwOnNextConstruct = false;
 
   constructor(url: string) {
@@ -54,7 +49,6 @@ export class MockWebSocket {
     }
   }
 
-  /** Test helper: open the socket, firing onopen. */
   serverOpen(): void {
     this.readyState = OPEN;
     if (this.onopen) {
@@ -62,14 +56,12 @@ export class MockWebSocket {
     }
   }
 
-  /** Test helper: push a frame from the server. */
   serverMessage(data: string): void {
     if (this.onmessage) {
       this.onmessage({ data });
     }
   }
 
-  /** Test helper: drop the connection, firing onclose. */
   serverClose(): void {
     this.readyState = CLOSED;
     if (this.onclose) {

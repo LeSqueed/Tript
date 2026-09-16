@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// The deterministic timeline geometry model: the zoom window, the time↔position mapping, and
-// time formatting. These are the pure functions the two timeline levels share.
 
 import { describe, expect, it } from 'vitest';
 import {

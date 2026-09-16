@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* A column with a definite height. The deleted .app-frame used to supply this; without it
- * .app-content's `overflow: auto` has no height to scroll inside, so the document grows instead and
- * the topbar scrolls off the top of the screen. */
-
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -16,8 +12,6 @@
 .app-shell[data-window-hidden] *::after {
   animation-play-state: paused !important;
 }
-
-/* In the topbar now, not above a rail. */
 
 .app-brand {
   display: flex;
@@ -69,7 +63,6 @@
   color: var(--color-base-content);
 }
 
-/* The accent earns its place on the active row through the glyph, not a filled pill. */
 .nav-item.active .nav-glyph {
   color: var(--color-accent);
 }
@@ -121,10 +114,7 @@
   padding: 20px 20px 32px;
 }
 
-/* The player route sizes itself to the column rather than scrolling inside it. */
-
 .app-content-player {
-  /* Hands the player a definite height, which is what lets its picture flex. */
   display: flex;
   min-height: 0;
   overflow: hidden;
@@ -135,8 +125,6 @@
   flex: 1 1 auto;
   min-height: 0;
 }
-
-/* The token-less screen (see App.tsx). Not part of the shell grid — there is no shell. */
 
 .missing-key {
   display: grid;

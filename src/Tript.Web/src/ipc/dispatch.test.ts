@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Dispatch tests: the frontend narrows on `method`, handlers are per-method, unknown methods are
-// ignored, and the `cause` on settings/state pushes is preserved for the caller (the UI uses it to
-// distinguish its own edits echoing back from external changes — dropping it makes the UI fight the
-// user's typing).
 
 import { describe, expect, it, vi } from 'vitest';
 import { createDispatcher } from './dispatch';
@@ -116,7 +111,6 @@ describe('createDispatcher', () => {
 
     expect(() => dispatcher.dispatch({ method: 'state', content: {} })).toThrow();
     expect(good).toHaveBeenCalledOnce();
-    // Still works afterwards.
     expect(() => dispatcher.dispatch({ method: 'state', content: {} })).toThrow();
   });
 });

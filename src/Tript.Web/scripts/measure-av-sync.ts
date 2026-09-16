@@ -19,8 +19,6 @@ const page = `<!doctype html><meta charset="utf-8">
 <script>
 const v = document.getElementById('v'), a = document.getElementById('a');
 window.__drift = [];
-// The video is the clock. The audio is paused for the duration of a seek and re-pinned when the
-// video lands, so a scrub does not fire one decoder seek per pointer move.
 v.addEventListener('play', () => a.play());
 v.addEventListener('pause', () => a.pause());
 v.addEventListener('seeking', () => a.pause());

@@ -10,8 +10,6 @@ export function UpdateToasts({ client }: { client: IpcClient }) {
 
   useEffect(() => client.on('updateProgress', (content) => {
     const status = content as UpdateProgressMessage | null;
-    // 'idle'/'checking'/'downloading' are transient — leave whatever toast is already showing
-    // alone rather than flashing it away for the moment a periodic re-check is in flight.
     if (!status || status.stage === 'idle' || status.stage === 'checking' || status.stage === 'downloading') {
       return;
     }

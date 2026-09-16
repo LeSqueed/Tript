@@ -10,22 +10,18 @@
 :root[data-theme='tript'] {
   color-scheme: dark;
 
-  /* Identity */
-  --color-accent: #f08a72; /* warm coral — the identity colour */
-  --color-accent-content: #25110d; /* dark text, legible on the accent */
-  --color-primary: #1b1d24; /* dark primary surface */
+  --color-accent: #f08a72;
+  --color-accent-content: #25110d;
+  --color-primary: #1b1d24;
   --color-primary-content: #ffffff;
 
-  /* Surfaces (dark) */
-  --color-base-100: #101116; /* page ground */
-  --color-base-200: #181a21; /* raised surface */
-  --color-base-300: #22252e; /* deepest surface */
+  --color-base-100: #101116;
+  --color-base-200: #181a21;
+  --color-base-300: #22252e;
   --color-neutral: #15171d;
 
-  /* Text */
   --color-base-content: #eee9e4;
   --color-cyber-secondary: #a79be3;
-  /* The hover ground for a nav item. Named for the row, not the rail it used to sit in. */
   --color-nav-hover: #171920;
   --color-panel: #17191f;
   --color-panel-raised: #1d2028;
@@ -35,13 +31,11 @@
   --color-muted: #777b87;
   --color-muted-strong: #b4b1b0;
 
-  /* Semantic */
   --color-info: #4aa8ff;
   --color-success: #36d399;
   --color-warning: #f0b429;
   --color-error: #f87171;
 
-  /* Structure */
   --radius: 6px;
   --radius-sm: 4px;
   --radius-panel: 10px;
@@ -54,15 +48,11 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Motion — functional feedback for state and hover. The one ambient exception is the mark's
-   * snap below, which is the logo's identity rather than UI decoration. */
   --motion-fast: 100ms;
   --motion-standard: 160ms;
   --motion-ease-out: cubic-bezier(0.2, 0, 0, 1);
   --motion-snap: 1800ms;
 
-  /* Typography — one sans stack for everything; the mono stack is reserved for timecodes, where
-   * digits must not jitter as the playhead moves. No serif ships. */
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;

@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* The stack: pinned to the bottom-right, newest at the bottom. It floats above every view,
- * including the player, and the window is never scrolled by it. */
-
 .toast-stack {
   position: fixed;
   right: 16px;
@@ -13,8 +10,6 @@
   gap: 8px;
   width: min(380px, calc(100vw - 32px));
 }
-
-/* A toast is a raised card with its tone as a bar on the leading edge. */
 
 .toast {
   --toast-tone: var(--color-info);
@@ -71,8 +66,6 @@
   overflow-wrap: anywhere;
 }
 
-/* A correlated failure, under the message that caused it. */
-
 .toast-note {
   color: var(--color-error);
   overflow-wrap: anywhere;
@@ -84,15 +77,11 @@
   margin-top: 6px;
 }
 
-/* The dismiss button, and the countdown ring a timed toast draws around its X. */
-
 .toast-dismiss {
   position: relative;
   flex: none;
   width: 22px;
   height: 22px;
-  /* The button's UA padding (1px 6px) would shift the content box, and with it the X, off the
-     ring's centre. The 22px box is the whole control. */
   padding: 0;
   display: grid;
   place-items: center;
@@ -108,9 +97,6 @@
   opacity: 1;
 }
 
-/* The ring keeps running to the end even if the toast is held by a hovering pointer; when it is
- * empty the toast has simply run out of time and waits for the pointer to leave. */
-
 .toast-timer {
   position: absolute;
   inset: 0;
@@ -125,8 +111,6 @@
   stroke-dashoffset: 0;
   animation: toast-ring var(--toast-duration) linear forwards;
 }
-
-/* The exit: the toast keeps its place in the stack while it fades, so the others do not jump. */
 
 .toast-leaving {
   animation: toast-out 180ms var(--motion-ease-out) forwards;

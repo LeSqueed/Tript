@@ -39,10 +39,6 @@
   margin: 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Output + mode                                                        */
-/* ------------------------------------------------------------------ */
-
 .clip-field {
   display: flex;
   flex-direction: column;
@@ -58,10 +54,6 @@
   opacity: 0.6;
   font-size: 12px;
 }
-
-/* ------------------------------------------------------------------ */
-/* Region list                                                          */
-/* ------------------------------------------------------------------ */
 
 .clip-regions {
   display: flex;
@@ -106,9 +98,6 @@
   align-items: center;
   gap: var(--space-2);
 }
-
-/* The bounds editor: typed seconds plus a snap-to-playhead button per bound. Always visible — the
- * whole point of the row is that a marked segment can be adjusted without guessing. */
 
 .clip-region-edit {
   display: flex;
@@ -177,10 +166,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ------------------------------------------------------------------ */
-/* Audio tracks                                                         */
-/* ------------------------------------------------------------------ */
-
 .clip-audio {
   display: flex;
   flex-direction: column;
@@ -213,10 +198,6 @@
   text-overflow: ellipsis;
   font-size: 13px;
 }
-
-/* ------------------------------------------------------------------ */
-/* Actions                                                              */
-/* ------------------------------------------------------------------ */
 
 .clip-actions {
   display: flex;

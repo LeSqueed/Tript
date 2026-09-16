@@ -11,15 +11,6 @@
   gap: var(--space-4);
 }
 
-/* Controls stop at a readable measure — the column itself is the measure now, rather than the page
- * being wide and each field capped inside it. Full-bleed selects made a two-character frame rate
- * occupy 880px, which reads as a form to fill in rather than a setting to check; a field narrower
- * than the tab strip above it left the strip's underline dangling past the last control. */
-
-/* Page tabs, not navigation. The topbar's pills say which destination you are in; these say which
- * section of Settings you are reading. An underline strip is subordinate by shape, so a row of
- * tabs directly beneath the nav row cannot be mistaken for a second one. */
-
 .settings-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -47,16 +38,10 @@
   color: var(--color-base-content);
 }
 
-/* Weight stays constant across states: bolding the active tab reflows the strip under the cursor.
- * The accent marks where you are, the same job it does on the active topbar destination. */
-
 .settings-tab.active {
   border-bottom-color: var(--color-accent);
   color: var(--color-base-content);
 }
-
-/* The body owns the rhythm between whatever it holds — the page, and the disconnected notice that
- * can precede it — so no child carries a margin of its own. */
 
 .settings-body {
   display: flex;
@@ -86,11 +71,6 @@
   font-size: 12px;
 }
 
-/* ------------------------------------------------------------------ */
-/* Field layout                                                        */
-/* ------------------------------------------------------------------ */
-
-/* An input with an adjacent control (e.g. the output-directory field next to its Browse button). */
 .settings-row {
   display: flex;
   align-items: center;
@@ -101,13 +81,6 @@
   flex: 1;
   min-width: 0;
 }
-
-/* ------------------------------------------------------------------ */
-/* Advanced disclosure                                                 */
-/* ------------------------------------------------------------------ */
-
-/* The collapsed area a page keeps for its unavoidably technical options. Closed by default: the
- * default user never needs it, and the summary text is what a technical user looks for. */
 
 .settings-advanced {
   border-top: 1px solid var(--color-line);
@@ -131,13 +104,10 @@
   margin-top: var(--space-3);
 }
 
-/* Author display rules outrank the browser's details stylesheet in some engines. Keep closed
- * disclosure content genuinely hidden while leaving the native summary keyboard behavior intact. */
 .settings-advanced:not([open]) > .settings-advanced-body {
   display: none;
 }
 
-/* Marks a disclosure that already carries a non-default choice, so it is found without opening it. */
 .settings-advanced-marker {
   margin-left: var(--space-2);
   color: var(--color-accent);
@@ -145,23 +115,11 @@
   font-weight: 500;
 }
 
-/* ------------------------------------------------------------------ */
-/* Toggle                                                              */
-/* ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------ */
-/* Actions                                                             */
-/* ------------------------------------------------------------------ */
-
 .settings-actions {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-
-/* ------------------------------------------------------------------ */
-/* Audio page — tracks and sources                                     */
-/* ------------------------------------------------------------------ */
 
 .audio-header {
   display: flex;
@@ -239,10 +197,6 @@
   align-items: center;
   gap: var(--space-2);
 }
-
-/* ------------------------------------------------------------------ */
-/* Game page                                                           */
-/* ------------------------------------------------------------------ */
 
 .game-list {
   display: flex;

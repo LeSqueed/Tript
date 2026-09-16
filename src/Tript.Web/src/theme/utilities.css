@@ -1,12 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/* Shared primitives — the vocabulary every view writes in, as opposed to the control layer's
- * components (docs/design-system.md §4). They used to live in LibraryView.css because it was the
- * first view written, which made a view stylesheet the source of truth for classes the settings
- * pages and the clip dialog also use.
- *
- * Anything here must be genuinely cross-cutting. A class one view uses belongs to that view. */
-
 .panel {
   background: var(--color-base-200);
   border: var(--border);

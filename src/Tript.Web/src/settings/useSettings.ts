@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
+import { useSendOnConnect } from '../app/useConnection';
 import type {
   DisplayFallbackWarning,
   DisplayInfo,
@@ -140,19 +141,7 @@ export function useSettings(client: IpcClient): SettingsController {
     return unsubscribe;
   }, [client]);
 
-  useEffect(() => {
-    // SettingsView (and this hook with it) is mounted up front, often before the socket has
-    // finished connecting — a send() issued before then is silently dropped (no queueing), so
-    // request once immediately if already connected, and again on every future connect/reconnect.
-    if (client.state === 'connected') {
-      client.send('ListSettings');
-    }
-    return client.onStateChange((state) => {
-      if (state === 'connected') {
-        client.send('ListSettings');
-      }
-    });
-  }, [client]);
+  useSendOnConnect(client, 'ListSettings');
 
   useEffect(() => client.on('settingsUpdateResult', (content) => {
     const result = content as Partial<SettingsUpdateResultMessage> | null;

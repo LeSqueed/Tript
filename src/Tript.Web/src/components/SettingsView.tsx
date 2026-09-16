@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { AudioLevelsMessage, GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ModelStatusMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
+import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ModelStatusMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
+import { useIpcMessage, useSendOnConnect } from '../app/useConnection';
+import { useAudioLevels } from '../settings/useAudioLevels';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
 import { RecordingPage } from '../settings/pages/RecordingPage';
 import { HighlightsPage } from '../settings/pages/HighlightsPage';
@@ -22,7 +24,14 @@ const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'hotkeys', label: 'Hotkeys' },
 ];
 
-const AUDIO_LEVEL_RENEW_MS = 2000;
+function LiveAudioPage({
+  client,
+  visible,
+  ...page
+}: Omit<ComponentProps<typeof AudioPage>, 'levels'> & { client: IpcClient; visible: boolean }) {
+  const levels = useAudioLevels(client, visible);
+  return <AudioPage {...page} levels={levels} />;
+}
 
 export function SettingsView({
   client,
@@ -45,91 +54,45 @@ export function SettingsView({
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
-  const [audioLevels, setAudioLevels] = useState<Record<string, number>>({});
   const [catalogueGames, setCatalogueGames] = useState<GameInfo[]>([]);
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
 
-  useEffect(() => {
-    // Mounted up front, often before the socket finishes connecting — a send() issued before
-    // then is silently dropped, so request once immediately if already connected, and again on
-    // every future connect/reconnect.
-    if (client.state === 'connected') {
-      client.send('ListGames');
-    }
-    return client.onStateChange((state) => {
-      if (state === 'connected') {
-        client.send('ListGames');
-      }
-    });
-  }, [client]);
+  useSendOnConnect(client, 'ListGames');
 
-  useEffect(() => client.on('selectedGameExecutable', (content) => {
+  useIpcMessage(client, 'selectedGameExecutable', (content) => {
     const selected = content as Partial<SelectedGameExecutableMessage> | null;
     if (typeof selected?.requestId === 'string' && (typeof selected.filePath === 'string' || selected.filePath === null)) {
       setSelectedGameExecutable(selected as SelectedGameExecutableMessage);
     }
-  }), [client]);
+  });
 
-  useEffect(() => client.on('gameSearchResolved', (content) => {
+  useIpcMessage(client, 'gameSearchResolved', (content) => {
     const response = content as Partial<ResolvedGameSearchMessage> | null;
     if (typeof response?.requestId === 'string') setResolvedGameSearch(response as ResolvedGameSearchMessage);
-  }), [client]);
+  });
 
-  useEffect(() => client.on('gameSearchResults', (content) => {
+  useIpcMessage(client, 'gameSearchResults', (content) => {
     const response = content as Partial<GameSearchResultsMessage> | null;
     if (typeof response?.requestId === 'string' && Array.isArray(response.results)) {
       setGameSearchResults(response as GameSearchResultsMessage);
     }
-  }), [client]);
+  });
 
-  useEffect(() => client.on('gameList', (content) => {
+  useIpcMessage(client, 'gameList', (content) => {
     if (Array.isArray(content)) setCatalogueGames(content as GameInfo[]);
-  }), [client]);
+  });
 
-  useEffect(() => client.on('modelStatus', (content) => {
+  useIpcMessage(client, 'modelStatus', (content) => {
     const message = content as Partial<ModelStatusMessage> | null;
     if (Array.isArray(message?.models)) setModelStatuses(message.models);
-  }), [client]);
+  });
 
-  useEffect(() => client.on('gameAddRequested', (content) => {
+  useIpcMessage(client, 'gameAddRequested', (content) => {
     const response = content as Partial<GameAddRequestedMessage> | null;
     if (typeof response?.requestId === 'string') setGameAddRequested(response as GameAddRequestedMessage);
-  }), [client]);
-
-  const metersVisible = active && page === 'audio';
-
-  useEffect(() => {
-    if (!metersVisible) {
-      return;
-    }
-    const watch = () => client.send('WatchAudioLevels');
-    watch();
-    const renew = setInterval(watch, AUDIO_LEVEL_RENEW_MS);
-    const unsubscribeState = client.onStateChange((state) => {
-      if (state === 'connected') {
-        watch();
-      }
-    });
-    const unsubscribeLevels = client.on('audioLevels', (content) => {
-      const message = content as Partial<AudioLevelsMessage> | null;
-      if (!Array.isArray(message?.levels)) return;
-
-      const next: Record<string, number> = {};
-      for (const level of message.levels) {
-        if (typeof level?.deviceId !== 'string' || typeof level.peak !== 'number') continue;
-        next[level.deviceId] = Math.min(1, Math.max(0, Number.isFinite(level.peak) ? level.peak : 0));
-      }
-      setAudioLevels(next);
-    });
-    return () => {
-      clearInterval(renew);
-      unsubscribeState();
-      unsubscribeLevels();
-      setAudioLevels({});
-    };
-  }, [client, metersVisible]);
+  });
 
   return (
     <section className="settings-view">
@@ -191,7 +154,13 @@ export function SettingsView({
           />
           )}
           {page === 'audio' && (
-          <AudioPage settings={controller.settings.audio} levels={audioLevels} update={controller.update} page={page} />
+          <LiveAudioPage
+            client={client}
+            visible={active}
+            settings={controller.settings.audio}
+            update={controller.update}
+            page={page}
+          />
           )}
           {page === 'capture' && (
           <CapturePage

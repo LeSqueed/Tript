@@ -17,6 +17,8 @@ export interface IpcSessionSource extends SessionSource {
 
 export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
   let items: ContentItem[] = [];
+  let sessions: ContentItem[] = [];
+  let clips: ContentItem[] = [];
   let version = 0;
   const subscribers = new Set<() => void>();
 
@@ -32,6 +34,8 @@ export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
       return;
     }
     items = message.content;
+    sessions = items.filter((item) => item.contentType === 'recording');
+    clips = items.filter((item) => item.contentType === 'clip' || item.contentType === 'highlight');
     version += 1;
     notify();
   }
@@ -46,10 +50,10 @@ export function createIpcSessionSource(client: IpcClient): IpcSessionSource {
 
   return {
     getSessions(): ContentItem[] {
-      return items.filter((item) => item.contentType === 'recording');
+      return sessions;
     },
     getClips(): ContentItem[] {
-      return items.filter((item) => item.contentType === 'clip' || item.contentType === 'highlight');
+      return clips;
     },
     getItems(): ContentItem[] {
       return items;

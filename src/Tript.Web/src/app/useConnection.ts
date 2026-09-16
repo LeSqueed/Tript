@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// A hook that owns an IpcClient instance for the lifetime of a component tree.
 
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -9,7 +7,7 @@ import {
   type IpcClient,
   type IpcClientOptions,
 } from '../ipc/websocketClient';
-import type { CommandName, CommandParameters } from '../ipc/protocol';
+import type { CommandName, CommandParameters, MessageName } from '../ipc/protocol';
 
 export function useIpcClient(options: IpcClientOptions = {}): {
   client: IpcClient;
@@ -42,4 +40,29 @@ export function useCommand(client: IpcClient) {
   return (method: CommandName, parameters?: CommandParameters) => {
     client.send(method, parameters);
   };
+}
+
+export function useSendOnConnect(client: IpcClient, method: CommandName): void {
+  useEffect(() => {
+    if (client.state === 'connected') {
+      client.send(method);
+    }
+    return client.onStateChange((state) => {
+      if (state === 'connected') {
+        client.send(method);
+      }
+    });
+  }, [client, method]);
+}
+
+export function useIpcMessage(
+  client: IpcClient,
+  method: MessageName,
+  handler: (content: unknown) => void,
+): void {
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  });
+  useEffect(() => client.on(method, (content) => handlerRef.current(content)), [client, method]);
 }

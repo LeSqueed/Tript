@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useIpcClient } from './useConnection';
+import { useIpcClient, useIpcMessage } from './useConnection';
 import { RecorderBar } from '../components/RecorderBar';
 import { ToastProvider } from '../components/ui/toast/ToastProvider';
 import { ErrorToasts } from '../components/toasts/ErrorToasts';
@@ -147,25 +147,11 @@ function AppShell({
     return remove;
   }, [client]);
 
-  useEffect(() => {
-    // Mounted before the socket has necessarily finished connecting — a send() issued before
-    // then is silently dropped (no queueing), so request once immediately if already connected,
-    // and again on every future connect/reconnect.
-    if (client.state === 'connected') {
-      client.send('ListSettings');
-    }
-    return client.onStateChange((state) => {
-      if (state === 'connected') {
-        client.send('ListSettings');
-      }
-    });
-  }, [client]);
-
-  useEffect(() => client.on('state', (content) => {
+  useIpcMessage(client, 'state', (content) => {
     const state = (content as { state?: RecordingState }).state;
     if (state)
       setRecording(state.recording === true);
-  }), [client]);
+  });
 
   useEffect(() => {
     const onHashChange = () => {

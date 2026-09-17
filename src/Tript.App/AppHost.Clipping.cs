@@ -369,6 +369,8 @@ internal sealed partial class AppHost
             _backgroundWorkSuspendedForRecording = suspended;
             Monitor.PulseAll(_automaticClipGate);
         }
+
+        _maintenance.SetRecording(suspended);
     }
 
     private IClipEngine BuildClipEngine()

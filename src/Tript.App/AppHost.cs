@@ -101,6 +101,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly object _automaticClipGate = new();
     private AutomaticClipJob? _automaticClipJob;
     private bool _backgroundWorkSuspendedForRecording;
+    private readonly RecordingDeferral _maintenance = new();
     private readonly LiveHighlightTracker _liveHighlights = new();
 
     private CancellationTokenSource? _captureWaitCancellation;
@@ -142,7 +143,8 @@ internal sealed partial class AppHost : IDisposable
             runtime is null ? null : new ObsAudioLevelMonitor(),
             audioDeviceInventory ?? new AudioDeviceInventory(),
             BroadcastAudioLevels,
-            PushSettings);
+            PushSettings,
+            deferDeviceRefresh: () => _maintenance.IsRecording);
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _resolverClient = resolverClient;
@@ -217,11 +219,11 @@ internal sealed partial class AppHost : IDisposable
         ReloadGameList();
         if (_modelManager is not null)
         {
-            _modelCheckTimer = new Timer(_ =>
+            _modelCheckTimer = new Timer(_ => _maintenance.Run("model check", () =>
             {
                 EnsureModelsForGameList();
                 _ = ReconcileCustomGameIdentitiesAsync();
-            }, null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
+            }), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
         }
     }
 
@@ -280,13 +282,15 @@ internal sealed partial class AppHost : IDisposable
             _audioLevels.Start();
 
             PurgeExpiredTrash();
-            _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
+            _trashPurgeTimer = new Timer(_ => _maintenance.Run("trash purge", PurgeExpiredTrash), null,
+                TrashPurgeInterval, TrashPurgeInterval);
 
             if (_updateManager is not null)
             {
                 if (_settingsStore.Load().General.CheckForUpdatesAutomatically)
                     _ = CheckForUpdatesAutomaticAsync();
-                _updateCheckTimer = new Timer(_ => { _ = CheckForUpdatesAutomaticAsync(); }, null,
+                _updateCheckTimer = new Timer(
+                    _ => _maintenance.Run("update check", () => { _ = CheckForUpdatesAutomaticAsync(); }), null,
                     UpdateCheckInterval, UpdateCheckInterval);
             }
 

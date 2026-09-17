@@ -119,6 +119,35 @@ public sealed class AudioLevelFeedTests : IDisposable
     }
 
     [Fact]
+    public void RefreshDevices_WaitsWhileRecording_UnlessTheLevelsAreWatched()
+    {
+        var devices = new List<AudioDeviceSetting>();
+        var changes = 0;
+        var recording = true;
+        var enumerations = 0;
+        using var feed = new AudioLevelFeed(_store, monitor: null,
+            new AudioDeviceInventory(_ =>
+            {
+                enumerations++;
+                return (true, devices.ToList());
+            }), _published.Add, () => changes++, _clock, deferDeviceRefresh: () => recording);
+
+        devices.Add(new AudioDeviceSetting { Id = "mic", Name = "Mic", Direction = AudioSourceKind.Input });
+        feed.RefreshDevices();
+        Assert.Equal(0, enumerations);
+
+        feed.Watch();
+        feed.RefreshDevices();
+        Assert.Equal(2, enumerations);
+        Assert.Equal(1, changes);
+
+        _clock.Advance(TimeSpan.FromSeconds(10));
+        recording = false;
+        feed.RefreshDevices();
+        Assert.Equal(4, enumerations);
+    }
+
+    [Fact]
     public void AfterDispose_NothingIsPublished()
     {
         var feed = CreateFeed();

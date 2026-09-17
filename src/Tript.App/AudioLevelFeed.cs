@@ -19,6 +19,7 @@ internal sealed class AudioLevelFeed : IDisposable
     private readonly Action<IReadOnlyDictionary<string, float>> _publishLevels;
     private readonly Action _devicesChanged;
     private readonly TimeProvider _time;
+    private readonly Func<bool> _deferDeviceRefresh;
     private readonly Lock _levelGate = new();
     private readonly Lock _deviceGate = new();
     private Timer? _levelTimer;
@@ -29,7 +30,7 @@ internal sealed class AudioLevelFeed : IDisposable
 
     internal AudioLevelFeed(SettingsStore settingsStore, ObsAudioLevelMonitor? monitor,
         AudioDeviceInventory devices, Action<IReadOnlyDictionary<string, float>> publishLevels,
-        Action devicesChanged, TimeProvider? time = null)
+        Action devicesChanged, TimeProvider? time = null, Func<bool>? deferDeviceRefresh = null)
     {
         _settingsStore = settingsStore;
         _monitor = monitor;
@@ -37,6 +38,7 @@ internal sealed class AudioLevelFeed : IDisposable
         _publishLevels = publishLevels;
         _devicesChanged = devicesChanged;
         _time = time ?? TimeProvider.System;
+        _deferDeviceRefresh = deferDeviceRefresh ?? (() => false);
     }
 
     internal IReadOnlyList<AudioDeviceSetting> Devices => _devices.Snapshot;
@@ -93,7 +95,7 @@ internal sealed class AudioLevelFeed : IDisposable
     {
         lock (_deviceGate)
         {
-            if (_disposed || !_devices.Refresh())
+            if (_disposed || (_deferDeviceRefresh() && !Wanted) || !_devices.Refresh())
                 return;
             _devicesChanged();
         }

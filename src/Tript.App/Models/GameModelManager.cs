@@ -2,12 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Collections.Concurrent;
-using System.IO.Compression;
-using System.Net;
-using System.Net.Http.Headers;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text.Json;
 using Serilog;
 using Tript.Detection;
 
@@ -16,26 +11,9 @@ namespace Tript.App.Models;
 internal sealed class GameModelManager : IDisposable
 {
     internal const int SupportedModelApiVersion = ModelApiV1Compatibility.Version;
-    internal const int SupportedManifestVersion = 1;
-
-    private const long MaximumPackageBytes = 1024L * 1024 * 1024;
-    private const long MaximumExtractedBytes = 2L * 1024 * 1024 * 1024;
-    private const int MaximumManifestBytes = 1024 * 1024;
-    private static readonly TimeSpan ManifestCheckInterval = TimeSpan.FromHours(24);
-    private static readonly TimeSpan ManifestRetryInterval = TimeSpan.FromMinutes(15);
-    private static readonly Uri DefaultManifestUri = new(
-        "https://raw.githubusercontent.com/LeSqueed/Tript/main/data/model-manifest.json");
-    private static readonly JsonSerializerOptions JsonOptions = new(Wire.Options)
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-    };
 
     private readonly string _modelsRoot;
-    private readonly string _manifestPath;
-    private readonly string _manifestStatePath;
-    private readonly string? _bundledManifestPath;
-    private readonly Uri _manifestUri;
+    private readonly GameModelManifestSource _manifest;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly Func<string, bool>? _hasCustomModel;
@@ -64,14 +42,14 @@ internal sealed class GameModelManager : IDisposable
     {
         _activate = activate ?? throw new ArgumentNullException(nameof(activate));
         _modelsRoot = Path.GetFullPath(modelsRoot ?? GameModelPaths.ModelsRoot);
-        _manifestPath = Path.GetFullPath(manifestPath ?? GameModelPaths.ManifestPath);
-        _manifestStatePath = Path.GetFullPath(manifestStatePath ?? GameModelPaths.ManifestStatePath);
-        _bundledManifestPath = bundledManifestPath;
-        _manifestUri = manifestUri ?? DefaultManifestUri;
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         _ownsHttp = httpClient is null;
         _hasCustomModel = hasCustomModel;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        _manifest = new GameModelManifestSource(
+            Path.GetFullPath(manifestPath ?? GameModelPaths.ManifestPath),
+            Path.GetFullPath(manifestStatePath ?? GameModelPaths.ManifestStatePath),
+            bundledManifestPath, manifestUri, _http, _utcNow);
         _appVersion = appVersion ?? Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0);
 
         Directory.CreateDirectory(_modelsRoot);
@@ -120,7 +98,7 @@ internal sealed class GameModelManager : IDisposable
         try
         {
             SetStatus(gameId, GameModelStage.Checking);
-            var manifest = await GetManifestAsync(cancellationToken).ConfigureAwait(false);
+            var manifest = await _manifest.GetAsync(cancellationToken).ConfigureAwait(false);
             var game = manifest?.Games.FirstOrDefault(entry =>
                 string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
             if (game is null)
@@ -131,7 +109,7 @@ internal sealed class GameModelManager : IDisposable
             }
 
             var release = game.Releases
-                .Where(IsCompatible)
+                .Where(candidate => GameModelPackage.IsCompatible(candidate, _appVersion))
                 .OrderByDescending(candidate => candidate.Revision)
                 .FirstOrDefault();
             var hasUsableModel = ModelService.HasModelForGame(gameId);
@@ -148,9 +126,9 @@ internal sealed class GameModelManager : IDisposable
                 return;
             }
 
-            var installed = ReadJson<InstalledGameModel>(
+            var installed = ModelJsonFiles.Read<InstalledGameModel>(
                 Path.Combine(_modelsRoot, gameId, "installed.json"));
-            var officialHealthy = installed is not null && IsInstalledPackageHealthy(gameId, installed);
+            var officialHealthy = installed is not null && GameModelPackage.IsInstalledHealthy(_modelsRoot, gameId, installed);
             if (installed is not null && installed.ModelApiVersion == SupportedModelApiVersion &&
                 installed.Revision >= release.Revision && officialHealthy)
             {
@@ -172,116 +150,6 @@ internal sealed class GameModelManager : IDisposable
         }
     }
 
-    private bool IsCompatible(GameModelRelease release)
-    {
-        if (release.ModelApiVersion != SupportedModelApiVersion || release.Revision <= 0 ||
-            release.SizeBytes <= 0 || release.SizeBytes > MaximumPackageBytes ||
-            !Uri.TryCreate(release.Url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttps
-                && (uri.Scheme != Uri.UriSchemeHttp || !uri.IsLoopback)) ||
-            release.Sha256.Length != 64)
-        {
-            return false;
-        }
-
-        return string.IsNullOrWhiteSpace(release.MinimumAppVersion) ||
-            (Version.TryParse(release.MinimumAppVersion, out var minimum) && _appVersion >= minimum);
-    }
-
-    private async Task<GameModelManifest?> GetManifestAsync(CancellationToken cancellationToken)
-    {
-        var cached = ReadJson<GameModelManifest>(_manifestPath) ?? ReadJson<GameModelManifest>(_bundledManifestPath);
-        var cacheState = ReadJson<GameModelManifestCache>(_manifestStatePath);
-        if (cached is not null && cacheState is not null &&
-            _utcNow() - cacheState.CheckedAt < ManifestCheckInterval)
-        {
-            return ValidateManifest(cached);
-        }
-        if (cached is not null && cacheState is not null &&
-            _utcNow() - cacheState.LastAttemptAt < ManifestRetryInterval)
-        {
-            return ValidateManifest(cached);
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, _manifestUri);
-            if (!string.IsNullOrWhiteSpace(cacheState?.ETag) &&
-                EntityTagHeaderValue.TryParse(cacheState.ETag, out var etag))
-            {
-                request.Headers.IfNoneMatch.Add(etag);
-            }
-
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.NotModified && cached is not null)
-            {
-                WriteJsonAtomic(_manifestStatePath, new GameModelManifestCache
-                {
-                    CheckedAt = _utcNow(),
-                    LastAttemptAt = _utcNow(),
-                    ETag = cacheState?.ETag,
-                });
-                return ValidateManifest(cached);
-            }
-
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is > MaximumManifestBytes)
-                throw new InvalidDataException("The model manifest exceeded its allowed size.");
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            using var manifestBytes = new MemoryStream();
-            var buffer = new byte[16 * 1024];
-            int read;
-            while ((read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                if (manifestBytes.Length + read > MaximumManifestBytes)
-                    throw new InvalidDataException("The model manifest exceeded its allowed size.");
-                manifestBytes.Write(buffer, 0, read);
-            }
-            var downloaded = JsonSerializer.Deserialize<GameModelManifest>(manifestBytes.ToArray(), JsonOptions)
-                ?? throw new InvalidDataException("The model manifest was empty.");
-            ValidateManifest(downloaded);
-            WriteJsonAtomic(_manifestPath, downloaded);
-            WriteJsonAtomic(_manifestStatePath, new GameModelManifestCache
-            {
-                CheckedAt = _utcNow(),
-                LastAttemptAt = _utcNow(),
-                ETag = response.Headers.ETag?.ToString(),
-            });
-            return downloaded;
-        }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
-        {
-            if (cached is not null)
-            {
-                Log.Debug(exception, "GameModelManager: using cached model manifest");
-                WriteJsonAtomic(_manifestStatePath, new GameModelManifestCache
-                {
-                    CheckedAt = cacheState?.CheckedAt ?? default,
-                    LastAttemptAt = _utcNow(),
-                    ETag = cacheState?.ETag,
-                });
-                return ValidateManifest(cached);
-            }
-            throw;
-        }
-    }
-
-    private static GameModelManifest ValidateManifest(GameModelManifest manifest)
-    {
-        if (manifest.SchemaVersion != SupportedManifestVersion)
-            throw new InvalidDataException($"Unsupported model manifest version {manifest.SchemaVersion}.");
-        if (manifest.Games.GroupBy(game => game.GameId, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
-            throw new InvalidDataException("The model manifest contains duplicate game IDs.");
-        foreach (var game in manifest.Games)
-        {
-            GameModelPaths.ValidateGameId(game.GameId);
-            if (game.Releases.GroupBy(release => (release.ModelApiVersion, release.Revision)).Any(group => group.Count() > 1))
-                throw new InvalidDataException($"The model manifest contains duplicate releases for {game.GameId}.");
-        }
-        return manifest;
-    }
-
     private async Task DownloadValidateAndActivateAsync(string gameId, GameModelRelease release,
         CancellationToken cancellationToken)
     {
@@ -297,86 +165,15 @@ internal sealed class GameModelManager : IDisposable
         {
             SetStatus(gameId, GameModelStage.Downloading, release.Revision,
                 completedBytes: 0, totalBytes: release.SizeBytes);
-            using var response = await _http.GetAsync(release.Url, HttpCompletionOption.ResponseHeadersRead,
+            await GameModelPackage.DownloadAsync(_http, release, archivePath,
+                received => SetStatus(gameId, GameModelStage.Downloading, release.Revision,
+                    received, release.SizeBytes),
                 cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is { } contentLength && contentLength != release.SizeBytes)
-                throw new InvalidDataException("The model package size does not match the manifest.");
-
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            await using var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[1024 * 1024];
-            long received = 0;
-            long lastReported = 0;
-            int read;
-            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                received += read;
-                if (received > release.SizeBytes || received > MaximumPackageBytes)
-                    throw new InvalidDataException("The model package exceeded its declared size.");
-                hash.AppendData(buffer, 0, read);
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                if (received - lastReported >= 256 * 1024 || received == release.SizeBytes)
-                {
-                    lastReported = received;
-                    SetStatus(gameId, GameModelStage.Downloading, release.Revision,
-                        received, release.SizeBytes);
-                }
-            }
-            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
-            await output.DisposeAsync().ConfigureAwait(false);
-            if (received != release.SizeBytes)
-                throw new InvalidDataException("The downloaded model package was incomplete.");
-            var archiveHash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-            if (!CryptographicOperations.FixedTimeEquals(
-                    Convert.FromHexString(archiveHash), Convert.FromHexString(release.Sha256)))
-            {
-                throw new InvalidDataException("The model package checksum did not match the manifest.");
-            }
 
             SetStatus(gameId, GameModelStage.Verifying, release.Revision);
-            Directory.CreateDirectory(stagingPath);
-            ExtractPackage(archivePath, stagingPath);
-            var package = ReadJson<GameModelPackageMetadata>(Path.Combine(stagingPath, "package.json"))
-                ?? throw new InvalidDataException("The model package has no package.json.");
-            ValidatePackageIdentity(gameId, release, package);
-            ValidatePackageFiles(stagingPath, package);
-
-            var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
-                File.ReadAllText(Path.Combine(stagingPath, "events.json")), JsonOptions) ?? [];
-            var hasObjectEvents = definitions.Any(definition => definition.DetectionKind == DetectionKind.Object);
-            if (hasObjectEvents)
-            {
-                var objectModelPath = Path.Combine(stagingPath, "model.onnx");
-                if (!File.Exists(objectModelPath))
-                    throw new InvalidDataException("The model package has object events but no object model.");
-                var metadata = OnnxModelInspector.Inspect(objectModelPath);
-                var mismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
-                if (mismatch is not null)
-                    throw new InvalidDataException($"The model package is incompatible: {mismatch}");
-            }
-            var hasOcrEvents = definitions.Any(definition => definition.DetectionKind == DetectionKind.Ocr);
-            if (hasOcrEvents && (!File.Exists(Path.Combine(stagingPath, "ocr_model.onnx"))
-                || !File.Exists(Path.Combine(stagingPath, "ocr_dict.txt"))))
-            {
-                throw new InvalidDataException("The model package has OCR events but no OCR model and dictionary.");
-            }
-
-            WriteJsonAtomic(Path.Combine(stagingPath, "installed.json"), new InstalledGameModel
-            {
-                GameId = gameId,
-                ModelApiVersion = release.ModelApiVersion,
-                Revision = release.Revision,
-                PackageSha256 = release.Sha256,
-                ModelSha256 = package.Files.GetValueOrDefault("model.onnx")?.Sha256,
-                EventsSha256 = package.Files["events.json"].Sha256,
-                OcrModelSha256 = package.Files.GetValueOrDefault("ocr_model.onnx")?.Sha256,
-                OcrDetectorSha256 = package.Files.GetValueOrDefault("ocr_detector.onnx")?.Sha256,
-                OcrDictionarySha256 = package.Files.GetValueOrDefault("ocr_dict.txt")?.Sha256,
-                InstalledAt = _utcNow(),
-            });
+            var package = GameModelPackage.ExtractAndVerify(archivePath, stagingPath, gameId, release);
+            ModelJsonFiles.WriteAtomic(Path.Combine(stagingPath, "installed.json"),
+                GameModelPackage.InstalledRecord(gameId, release, package, _utcNow()));
 
             SetStatus(gameId, GameModelStage.Installing, release.Revision);
             await _activate(gameId, stagingPath, cancellationToken).ConfigureAwait(false);
@@ -389,121 +186,6 @@ internal sealed class GameModelManager : IDisposable
             if (!string.IsNullOrEmpty(stagingPath) && Directory.Exists(stagingPath))
                 Directory.Delete(stagingPath, recursive: true);
         }
-    }
-
-    private static void ExtractPackage(string archivePath, string stagingPath)
-    {
-        var required = new HashSet<string>(["events.json", "package.json"], StringComparer.Ordinal);
-        var allowed = new HashSet<string>(required, StringComparer.Ordinal)
-        {
-            "model.onnx",
-            "ocr_detector.onnx",
-            "ocr_model.onnx",
-            "ocr_dict.txt",
-        };
-
-        var modelGraphs = new HashSet<string>(
-            ["model.onnx", "ocr_model.onnx", "ocr_detector.onnx"], StringComparer.Ordinal);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        using var archive = ZipFile.OpenRead(archivePath);
-        long extractedBytes = 0;
-        foreach (var entry in archive.Entries)
-        {
-            if (!allowed.Contains(entry.FullName) || entry.Name != entry.FullName)
-                throw new InvalidDataException($"Unexpected model package entry '{entry.FullName}'.");
-            if (!seen.Add(entry.FullName))
-                throw new InvalidDataException($"Duplicate model package entry '{entry.FullName}'.");
-            required.Remove(entry.FullName);
-            extractedBytes = checked(extractedBytes + entry.Length);
-            if (extractedBytes > MaximumExtractedBytes ||
-                (!modelGraphs.Contains(entry.Name) && entry.Length > 10 * 1024 * 1024))
-            {
-                throw new InvalidDataException("The model package expands beyond its allowed size.");
-            }
-            entry.ExtractToFile(Path.Combine(stagingPath, entry.Name));
-        }
-        if (required.Count > 0)
-            throw new InvalidDataException($"The model package is missing {string.Join(", ", required)}.");
-    }
-
-    private static void ValidatePackageIdentity(string gameId, GameModelRelease release,
-        GameModelPackageMetadata package)
-    {
-        if (package.PackageFormatVersion != 1 ||
-            !string.Equals(package.GameId, gameId, StringComparison.OrdinalIgnoreCase) ||
-            package.ModelApiVersion != release.ModelApiVersion || package.Revision != release.Revision)
-        {
-            throw new InvalidDataException("The model package identity does not match the manifest.");
-        }
-    }
-
-    private static void ValidatePackageFiles(string stagingPath, GameModelPackageMetadata package)
-    {
-        var actual = Directory.EnumerateFiles(stagingPath)
-            .Select(Path.GetFileName)
-            .OfType<string>()
-            .Where(name => name != "package.json")
-            .ToHashSet(StringComparer.Ordinal);
-        if (!actual.SetEquals(package.Files.Keys))
-            throw new InvalidDataException("The model package file metadata does not match its payload entries.");
-        if (!package.Files.ContainsKey("events.json"))
-            throw new InvalidDataException("The model package has no events.json metadata.");
-        foreach (var name in package.Files.Keys)
-        {
-            if (name is not ("model.onnx" or "events.json" or "ocr_detector.onnx" or "ocr_model.onnx" or "ocr_dict.txt"))
-                throw new InvalidDataException($"The model package contains unsupported metadata for {name}.");
-            if (!package.Files.TryGetValue(name, out var expected) || expected.SizeBytes <= 0 ||
-                expected.Sha256.Length != 64)
-            {
-                throw new InvalidDataException($"The model package has no valid metadata for {name}.");
-            }
-            var path = Path.Combine(stagingPath, name);
-            var info = new FileInfo(path);
-            if (info.Length != expected.SizeBytes ||
-                !string.Equals(HashFile(path), expected.Sha256, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"The model package file {name} failed verification.");
-            }
-        }
-    }
-
-    private static string HashFile(string path)
-    {
-        using var input = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-    }
-
-    private bool IsInstalledPackageHealthy(string gameId, InstalledGameModel installed)
-    {
-        if (!string.Equals(installed.GameId, gameId, StringComparison.OrdinalIgnoreCase) ||
-            installed.ModelApiVersion != SupportedModelApiVersion || installed.Revision <= 0 ||
-            (installed.ModelSha256 is not null && installed.ModelSha256.Length != 64)
-            || installed.EventsSha256.Length != 64)
-        {
-            return false;
-        }
-
-        var gamePath = Path.Combine(_modelsRoot, gameId);
-        var modelPath = Path.Combine(gamePath, "model.onnx");
-        var eventsPath = Path.Combine(gamePath, "events.json");
-        var ocrModelPath = Path.Combine(gamePath, "ocr_model.onnx");
-        var ocrDetectorPath = Path.Combine(gamePath, "ocr_detector.onnx");
-        var ocrDictionaryPath = Path.Combine(gamePath, "ocr_dict.txt");
-        var ocrHealthy = installed.OcrModelSha256 is null && installed.OcrDictionarySha256 is null
-            || installed.OcrModelSha256 is not null && installed.OcrDictionarySha256 is not null
-                && File.Exists(ocrModelPath) && File.Exists(ocrDictionaryPath)
-                && string.Equals(HashFile(ocrModelPath), installed.OcrModelSha256,
-                    StringComparison.OrdinalIgnoreCase)
-                && string.Equals(HashFile(ocrDictionaryPath), installed.OcrDictionarySha256,
-                    StringComparison.OrdinalIgnoreCase);
-        var ocrDetectorHealthy = installed.OcrDetectorSha256 is null
-            || File.Exists(ocrDetectorPath) && string.Equals(HashFile(ocrDetectorPath), installed.OcrDetectorSha256,
-                StringComparison.OrdinalIgnoreCase);
-        var objectHealthy = installed.ModelSha256 is null
-            || File.Exists(modelPath) && string.Equals(HashFile(modelPath), installed.ModelSha256,
-                StringComparison.OrdinalIgnoreCase);
-        return File.Exists(eventsPath) && objectHealthy && ocrHealthy && ocrDetectorHealthy &&
-            string.Equals(HashFile(eventsPath), installed.EventsSha256, StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetStatus(string gameId, GameModelStage stage, int? revision = null,
@@ -554,38 +236,6 @@ internal sealed class GameModelManager : IDisposable
         }
         if (snapshot is not null)
             StatusChanged?.Invoke(snapshot);
-    }
-
-    private static T? ReadJson<T>(string? path) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            return null;
-        try
-        {
-            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOptions);
-        }
-        catch (JsonException exception)
-        {
-            Log.Warning(exception, "GameModelManager: ignoring invalid JSON at {Path}", path);
-            return null;
-        }
-    }
-
-    private static void WriteJsonAtomic<T>(string path, T value)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-        var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value, JsonOptions));
-            File.Move(temporary, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporary))
-                File.Delete(temporary);
-        }
     }
 
     public void Dispose()

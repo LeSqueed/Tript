@@ -154,6 +154,80 @@ public class ModelSessionLifetimeTests
     }
 
     [Fact]
+    public void ReleasingTheLastUser_KeepsTheSessionForTheNextLoad()
+    {
+        AssertModelIsOnDisk();
+
+        var first = ModelService.LoadModel(GameId);
+        ModelService.UnloadModel(GameId);
+
+        Assert.Equal(0, ModelService.GetSessionRefCount(GameId));
+        Assert.True(ModelService.IsModelLoaded(GameId));
+
+        var second = ModelService.LoadModel(GameId);
+        try
+        {
+            Assert.Same(first, second);
+            AssertStillUsable(second);
+        }
+        finally
+        {
+            ModelService.UnloadModel(GameId);
+        }
+    }
+
+    [Fact]
+    public void InvalidatingAnIdleModel_DropsIt()
+    {
+        AssertModelIsOnDisk();
+
+        ModelService.LoadModel(GameId);
+        ModelService.UnloadModel(GameId);
+        ModelService.InvalidateModel(GameId);
+
+        Assert.False(ModelService.IsModelLoaded(GameId));
+    }
+
+    [Fact]
+    public void AnIdleModel_IsReloadedWhenItsFileChanges_AndReplacedByAnotherGamesModel()
+    {
+        AssertModelIsOnDisk();
+
+        var root = Path.Combine(Path.GetTempPath(), "tript-idle-model-" + Guid.NewGuid().ToString("N"));
+        var copiedGame = "IdleCache" + Guid.NewGuid().ToString("N");
+        var copiedDirectory = Path.Combine(root, copiedGame);
+        Directory.CreateDirectory(copiedDirectory);
+        var shippedDirectory = Path.GetDirectoryName(ModelService.GetModelPath(GameId))!;
+        File.Copy(Path.Combine(shippedDirectory, "model.onnx"), Path.Combine(copiedDirectory, "model.onnx"));
+        File.Copy(Path.Combine(shippedDirectory, "events.json"), Path.Combine(copiedDirectory, "events.json"));
+        ModelService.ConfigureModelRoots(root);
+        try
+        {
+            var original = ModelService.LoadModel(copiedGame);
+            ModelService.UnloadModel(copiedGame);
+
+            File.SetLastWriteTimeUtc(Path.Combine(copiedDirectory, "model.onnx"), DateTime.UtcNow.AddMinutes(1));
+            var reloaded = ModelService.LoadModel(copiedGame);
+            ModelService.UnloadModel(copiedGame);
+
+            Assert.NotSame(original, reloaded);
+
+            var shipped = ModelService.LoadModel(GameId);
+            ModelService.UnloadModel(GameId);
+
+            Assert.False(ModelService.IsModelLoaded(copiedGame));
+            Assert.True(ModelService.IsModelLoaded(GameId));
+            AssertStillUsable(shipped);
+        }
+        finally
+        {
+            ModelService.InvalidateModel(copiedGame);
+            ModelService.ConfigureUserModelRoot(ModelService.BasePath);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FailedLoad_LeavesNoReferenceAndNoPoisonedEntry()
     {
         const string missing = "not-a-real-game-for-session-lifetime";

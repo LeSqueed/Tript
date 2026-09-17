@@ -19,11 +19,14 @@ public static class ModelService
     private sealed class ModelHandle
     {
         public required Lazy<InferenceSession> Session { get; init; }
+        public required string ModelPath { get; init; }
+        public required DateTime ModelWrittenUtc { get; init; }
         public int RefCount { get; set; }
     }
 
     private static readonly Dictionary<string, ModelHandle> _models = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _modelsLock = new();
+    private static string? _idleModelKey;
     private static readonly ConcurrentDictionary<string, List<EventDefinition>> _definitions =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, List<RegionGroupDefinition>> _regionGroups =
@@ -116,22 +119,38 @@ public static class ModelService
         var key = CanonicalGameId(gameId);
         ModelHandle handle;
         int refCount;
+        InferenceSession? stale = null;
 
         lock (_modelsLock)
         {
-            if (!_models.TryGetValue(key, out var existing))
+            if (_models.TryGetValue(key, out var existing) && existing.RefCount == 0 && !IsCurrent(key, existing))
             {
+                _models.Remove(key);
+                stale = CreatedSession(existing);
+                existing = null;
+            }
+
+            if (existing is null)
+            {
+                var modelPath = GetModelPath(key);
                 existing = new ModelHandle
                 {
                     Session = new Lazy<InferenceSession>(() => CreateSession(key),
                         LazyThreadSafetyMode.ExecutionAndPublication),
+                    ModelPath = modelPath,
+                    ModelWrittenUtc = File.GetLastWriteTimeUtc(modelPath),
                 };
                 _models[key] = existing;
             }
 
+            if (string.Equals(_idleModelKey, key, StringComparison.OrdinalIgnoreCase))
+                _idleModelKey = null;
+
             handle = existing;
             refCount = ++handle.RefCount;
         }
+
+        stale?.Dispose();
 
         try
         {
@@ -174,15 +193,46 @@ public static class ModelService
                 return;
             }
 
-            _models.Remove(key);
             _definitions.TryRemove(key, out _);
 
             if (handle.Session.IsValueCreated)
-                released = handle.Session.Value;
+            {
+                if (_idleModelKey is { } previousKey
+                    && !string.Equals(previousKey, key, StringComparison.OrdinalIgnoreCase)
+                    && _models.TryGetValue(previousKey, out var previous) && previous.RefCount == 0)
+                {
+                    _models.Remove(previousKey);
+                    released = CreatedSession(previous);
+                }
+
+                _idleModelKey = key;
+            }
+            else
+            {
+                _models.Remove(key);
+            }
         }
 
         released?.Dispose();
-        Log.Information("Unloaded ONNX model for game {GameId}", key);
+        Log.Information("Released ONNX model for game {GameId}; it stays loaded until another game's model is used",
+            key);
+    }
+
+    private static bool IsCurrent(string key, ModelHandle handle)
+    {
+        var modelPath = GetModelPath(key);
+        return string.Equals(modelPath, handle.ModelPath, StringComparison.OrdinalIgnoreCase)
+               && File.GetLastWriteTimeUtc(modelPath) == handle.ModelWrittenUtc;
+    }
+
+    private static InferenceSession? CreatedSession(ModelHandle handle) =>
+        handle.Session.IsValueCreated ? handle.Session.Value : null;
+
+    internal static bool IsModelLoaded(string gameId)
+    {
+        var key = CanonicalGameId(gameId);
+        lock (_modelsLock)
+            return _models.TryGetValue(key, out var handle) && handle.Session.IsValueCreated;
     }
 
     internal static int GetSessionRefCount(string gameId)
@@ -420,8 +470,22 @@ public static class ModelService
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var released = new List<InferenceSession>();
         lock (_modelsLock)
+        {
             _rejectedBundles.Clear();
+            foreach (var (key, handle) in _models.Where(entry => entry.Value.RefCount == 0).ToList())
+            {
+                _models.Remove(key);
+                if (CreatedSession(handle) is { } session)
+                    released.Add(session);
+            }
+
+            _idleModelKey = null;
+        }
+
+        foreach (var session in released)
+            session.Dispose();
     }
 
     internal static bool RejectCurrentBundle(string gameId, out string rejectedPath)
@@ -454,10 +518,11 @@ public static class ModelService
                     throw new InvalidOperationException($"The model for {gameId} is still in use.");
 
                 _models.Remove(key);
-                if (handle.Session.IsValueCreated)
-                    released = handle.Session.Value;
+                released = CreatedSession(handle);
             }
 
+            if (string.Equals(_idleModelKey, key, StringComparison.OrdinalIgnoreCase))
+                _idleModelKey = null;
             _definitions.TryRemove(key, out _);
             _regionGroups.TryRemove(key, out _);
         }

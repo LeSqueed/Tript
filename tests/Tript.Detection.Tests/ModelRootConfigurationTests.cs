@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Tript.Detection.Tests;
 
+[Collection(ModelSessionCollection.Name)]
 public sealed class ModelRootConfigurationTests : IDisposable
 {
     private readonly string _userRoot = Path.Combine(Path.GetTempPath(), "tript-model-roots-" + Guid.NewGuid().ToString("N"));

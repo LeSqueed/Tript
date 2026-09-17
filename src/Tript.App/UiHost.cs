@@ -7,64 +7,22 @@ using Tript.Core;
 
 namespace Tript.App;
 
-internal sealed class UiHost : IDisposable
+internal sealed class UiHost : LocalHttpListener
 {
-    private readonly int _port;
-
     private readonly string _webRoot;
     private readonly SessionToken _token;
-    private readonly HttpListener _listener = new();
-
-    private Thread? _serverThread;
-    private volatile bool _running;
 
     internal UiHost(string webRoot, SessionToken token, int port = LocalPorts.Ui)
+        : base(port, "Tript.App.Ui.Accept")
     {
         _webRoot = Path.GetFullPath(webRoot);
         _token = token;
-        _port = port;
     }
 
-    public void Start()
+    protected override Task HandleAsync(HttpListenerContext context)
     {
-        lock (_listener)
-        {
-            if (_running)
-                return;
-
-            _listener.Prefixes.Add($"http://localhost:{_port}/");
-            _listener.Start();
-            _running = true;
-
-            _serverThread = new Thread(AcceptLoop)
-            {
-                IsBackground = true,
-                Name = "Tript.App.Ui.Accept",
-            };
-            _serverThread.Start();
-        }
-    }
-
-    private void AcceptLoop()
-    {
-        while (_running)
-        {
-            try
-            {
-                var context = _listener.GetContext();
-                ThreadPool.QueueUserWorkItem(_ => Handle(context));
-            }
-            catch (HttpListenerException)
-            {
-                if (_running)
-                    continue;
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-        }
+        Handle(context);
+        return Task.CompletedTask;
     }
 
     private void Handle(HttpListenerContext context)
@@ -172,25 +130,5 @@ internal sealed class UiHost : IDisposable
             ".map" => "application/json",
             _ => "application/octet-stream",
         };
-    }
-
-    public void Dispose()
-    {
-        _running = false;
-        try
-        {
-            _listener.Stop();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            _listener.Close();
-        }
-        catch
-        {
-        }
     }
 }

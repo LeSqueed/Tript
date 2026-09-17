@@ -11,10 +11,8 @@ using Tript.Core;
 
 namespace Tript.App.Content;
 
-internal sealed class ContentServer : IDisposable
+internal sealed class ContentServer : LocalHttpListener
 {
-    private readonly int _port;
-
     private static readonly Regex ContentRoute =
         new(@"^/api/content/(.+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -28,7 +26,6 @@ internal sealed class ContentServer : IDisposable
         new(@"(^|/)\.\.(/|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private volatile string _contentRoot;
-    private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
 
     private readonly CancellationToken _shutdown;
@@ -39,17 +36,13 @@ internal sealed class ContentServer : IDisposable
 
     private readonly SessionToken _token;
 
-    private Thread? _serverThread;
-    private volatile bool _running;
-    private int _disposed;
-
     internal ContentServer(string contentRoot, SessionToken token, ThumbnailStore? thumbnails = null,
         int port = LocalPorts.Content)
+        : base(port, "Tript.App.Content.Accept")
     {
         _contentRoot = Path.GetFullPath(contentRoot);
         _token = token;
         _thumbnails = thumbnails;
-        _port = port;
         _shutdown = _cts.Token;
     }
 
@@ -60,49 +53,7 @@ internal sealed class ContentServer : IDisposable
         _contentRoot = Path.GetFullPath(contentRoot);
     }
 
-    public void Start()
-    {
-        lock (_listener)
-        {
-            if (_running)
-                return;
-
-            _listener.Prefixes.Add($"http://localhost:{_port}/");
-            _listener.Start();
-            _running = true;
-
-            _serverThread = new Thread(AcceptLoop)
-            {
-                IsBackground = true,
-                Name = "Tript.App.Content.Accept",
-            };
-            _serverThread.Start();
-        }
-    }
-
-    private void AcceptLoop()
-    {
-        while (_running)
-        {
-            try
-            {
-                var context = _listener.GetContext();
-                ThreadPool.QueueUserWorkItem(_ => _ = HandleAsync(context));
-            }
-            catch (HttpListenerException)
-            {
-                if (_running)
-                    continue;
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-        }
-    }
-
-    private async Task HandleAsync(HttpListenerContext context)
+    protected override async Task HandleAsync(HttpListenerContext context)
     {
         try
         {
@@ -383,30 +334,7 @@ internal sealed class ContentServer : IDisposable
         context.Response.Close();
     }
 
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
+    protected override void OnStopping() => _cts.Cancel();
 
-        _running = false;
-        _cts.Cancel();
-        try
-        {
-            _listener.Stop();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            _listener.Close();
-        }
-        catch
-        {
-        }
-
-        _serverThread?.Join(TimeSpan.FromSeconds(2));
-        _cts.Dispose();
-    }
+    protected override void OnStopped() => _cts.Dispose();
 }

@@ -251,6 +251,9 @@ internal sealed class ContentCatalogue
 
     private void ProbeMissingFacts(ContentItem item, FileInfo file, string relative, ref int probeBudget)
     {
+        if (item.Recording == true)
+            return;
+
         var isRecording = item.ContentType == "recording";
         if (item.DurationSeconds is null && probeBudget > 0 && _probe.CanProbe(file.FullName))
         {

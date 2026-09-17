@@ -80,18 +80,39 @@ public sealed class ContentCatalogueBuilderTests : IDisposable
     }
 
     [Fact]
+    public void TheFileStillBeingRecorded_IsNotProbed()
+    {
+        Write("sessions/live.mp4");
+        var lookups = 0;
+        var probe = new LibraryProbe(() =>
+        {
+            lookups++;
+            return null;
+        });
+
+        var items = Build(probe: probe, state: new LibraryState("sessions/live.mp4", null, [], null));
+
+        Assert.True(Assert.Single(items).Recording);
+        Assert.Equal(0, lookups);
+
+        Build(probe: probe);
+        Assert.Equal(1, lookups);
+    }
+
+    [Fact]
     public void AMissingRoot_ListsNothing()
     {
         Assert.Empty(Build());
     }
 
-    private List<ContentItem> Build(LibraryGames? games = null, List<LibraryBackfill>? backfills = null)
+    private List<ContentItem> Build(LibraryGames? games = null, List<LibraryBackfill>? backfills = null,
+        LibraryProbe? probe = null, LibraryState? state = null)
     {
         var metadataRoot = ContentLayout.MetadataRoot(_root);
         return new ContentCatalogue(_root, new RecordingMetadataStore(metadataRoot), new ClipTitleStore(metadataRoot),
-                new LibraryProbe(() => null), games ?? new LibraryGames([], Aliases()),
+                probe ?? new LibraryProbe(() => null), games ?? new LibraryGames([], Aliases()),
                 backfill => backfills?.Add(backfill))
-            .Build(new LibraryState(null, null, [], null));
+            .Build(state ?? new LibraryState(null, null, [], null));
     }
 
     private GameIdAliasStore Aliases() => new(Path.Combine(_root + "-data", "game-id-aliases.json"));

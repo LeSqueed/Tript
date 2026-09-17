@@ -13,6 +13,7 @@ const TRAINING_REGION_SURFACES = new Set([
   join(SRC_ROOT, 'components', 'TrainingSampleEditor.tsx'),
   join(SRC_ROOT, 'components', 'TrainingView.tsx'),
 ]);
+const TRAINING = join(SRC_ROOT, 'components', 'training');
 const IPC = join(SRC_ROOT, 'ipc');
 const EM_DASH = '—';
 const RETIRED: { word: RegExp; instead: string }[] = [
@@ -62,7 +63,8 @@ describe('plain language outside settings', () => {
     for (const file of scanned) {
       for (const candidate of userFacingStrings(readFileSync(file, 'utf8'))) {
         for (const { word, instead } of RETIRED) {
-          if (word.source.includes('region') && TRAINING_REGION_SURFACES.has(file)) continue;
+          const trainingSurface = TRAINING_REGION_SURFACES.has(file) || file.startsWith(TRAINING);
+          if (word.source.includes('region') && trainingSurface) continue;
           if (word.test(candidate)) {
             offenders.push(`${relative(SRC_ROOT, file)}: "${candidate.trim()}" — say ${instead}`);
           }

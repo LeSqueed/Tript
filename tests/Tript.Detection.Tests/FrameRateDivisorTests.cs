@@ -17,7 +17,7 @@ public class FrameRateDivisorTests
     [InlineData(240, 80)]
     public void DerivesDivisorFromOutputFps(int outputFps, int expected)
     {
-        Assert.Equal(expected, VisualEventDetector.ComputeFrameRateDivisor(outputFps));
+        Assert.Equal(expected, DetectionCaptureSettings.ComputeFrameRateDivisor(outputFps));
     }
 
     [Theory]
@@ -27,7 +27,7 @@ public class FrameRateDivisorTests
     [InlineData(240)]
     public void ResultingCaptureRateStaysAboveConsumptionRate(int outputFps)
     {
-        var divisor = VisualEventDetector.ComputeFrameRateDivisor(outputFps);
+        var divisor = DetectionCaptureSettings.ComputeFrameRateDivisor(outputFps);
         var captureFps = (double)outputFps / divisor;
 
         Assert.True(captureFps >= 2.0, $"{outputFps}fps/{divisor} = {captureFps:F2} Hz");
@@ -40,7 +40,7 @@ public class FrameRateDivisorTests
     [InlineData(-1)]
     public void FallsBackToConstantWhenFpsUnavailable(int outputFps)
     {
-        Assert.Equal(30, VisualEventDetector.ComputeFrameRateDivisor(outputFps));
+        Assert.Equal(30, DetectionCaptureSettings.ComputeFrameRateDivisor(outputFps));
     }
 
     [Theory]
@@ -49,7 +49,7 @@ public class FrameRateDivisorTests
     [InlineData(3)]
     public void NeverReturnsZeroForLowFps(int outputFps)
     {
-        Assert.True(VisualEventDetector.ComputeFrameRateDivisor(outputFps) >= 1);
+        Assert.True(DetectionCaptureSettings.ComputeFrameRateDivisor(outputFps) >= 1);
     }
 
     [Fact]
@@ -57,14 +57,14 @@ public class FrameRateDivisorTests
     {
         var fps = (int)Math.Round(60000.0 / 1001.0);
         Assert.Equal(60, fps);
-        Assert.Equal(20, VisualEventDetector.ComputeFrameRateDivisor(fps));
+        Assert.Equal(20, DetectionCaptureSettings.ComputeFrameRateDivisor(fps));
     }
 
     [Fact]
     public void BareNumeratorWouldProduceAWildlyWrongDivisor()
     {
         Assert.NotEqual(
-            VisualEventDetector.ComputeFrameRateDivisor(60),
-            VisualEventDetector.ComputeFrameRateDivisor(60000));
+            DetectionCaptureSettings.ComputeFrameRateDivisor(60),
+            DetectionCaptureSettings.ComputeFrameRateDivisor(60000));
     }
 }

@@ -19,7 +19,7 @@ public class OcrSnapshotMergeTests
         var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         var matches = OneMatch();
 
-        var result = VisualEventDetector.FreshMatches(matches, now.AddMilliseconds(-1000), now, 2500);
+        var result = OcrFramePass.FreshMatches(matches, now.AddMilliseconds(-1000), now, 2500);
 
         Assert.Same(matches, result);
     }
@@ -29,7 +29,7 @@ public class OcrSnapshotMergeTests
     {
         var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
-        var result = VisualEventDetector.FreshMatches(OneMatch(), now.AddMilliseconds(-4000), now, 2500);
+        var result = OcrFramePass.FreshMatches(OneMatch(), now.AddMilliseconds(-4000), now, 2500);
 
         Assert.Empty(result);
     }
@@ -37,7 +37,7 @@ public class OcrSnapshotMergeTests
     [Fact]
     public void FreshMatches_WithNoSnapshot_IsEmpty()
     {
-        var result = VisualEventDetector.FreshMatches(null, default, DateTime.UtcNow, 2500);
+        var result = OcrFramePass.FreshMatches(null, default, DateTime.UtcNow, 2500);
 
         Assert.Empty(result);
     }

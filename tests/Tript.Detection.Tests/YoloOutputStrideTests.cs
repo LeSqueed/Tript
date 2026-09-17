@@ -49,7 +49,7 @@ public class YoloOutputStrideTests
         var outputName = session.OutputMetadata.Keys.First();
         var dimensions = session.OutputMetadata[outputName].Dimensions;
 
-        Assert.True(VisualEventDetector.TryDeriveClassCount(dimensions, out var numClasses),
+        Assert.True(OnnxModelInspector.TryDeriveClassCount(dimensions, out var numClasses),
             $"Output {outputName} has shape [{string.Join(',', dimensions)}] and carries no static " +
             "class dimension, so the stride under test is not defined.");
 

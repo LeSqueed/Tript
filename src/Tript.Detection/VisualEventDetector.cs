@@ -12,15 +12,7 @@ namespace Tript.Detection;
 
 public class VisualEventDetector : IDisposable
 {
-    private const int ModelInputSize = 640;
-    private const int FpsDivisor = 30;
-    private const int TargetCaptureFps = 3;
-    private const int ObsSubscribeWidth = 1920;
-    private const int ObsSubscribeHeight = 1080;
-
-    private const int OcrSubscribeMaxWidth = 2560;
-    private const int OcrSubscribeMaxHeight = 1440;
-
+    private const int ModelInputSize = DetectionModelLoader.ModelInputSize;
     private const int StopJoinTimeoutSeconds = 3;
 
     private const int OcrStopJoinSeconds = 3;
@@ -123,7 +115,7 @@ public class VisualEventDetector : IDisposable
 
             try
             {
-                (var definitions, session) = LoadCompatibleModel(gameId);
+                (var definitions, session) = DetectionModelLoader.LoadCompatibleModel(gameId);
                 modelLoaded = session is not null;
 
                 var ocrDefinitions = definitions
@@ -138,14 +130,18 @@ public class VisualEventDetector : IDisposable
                         ModelService.GetOcrDetectorPath(gameId));
                 }
 
-                var inference = session is null ? null : CreateInferenceState(session, definitions, gameId);
+                var inference = session is null
+                    ? null
+                    : DetectionModelLoader.CreateInferenceState(session, definitions, gameId);
                 var regionGroups = inference?.RegionGroups ?? [];
                 var ocrRegionPlans = OcrRegionPlanner.Build(definitions,
                     ModelService.LoadRegionGroups(gameId));
                 var grayscaleStrategy = DetectionFramePreprocessor.SelectGrayscaleStrategy(regionGroups);
-                var divisor = ComputeFrameRateDivisor(GetConfiguredOutputFps());
+                var divisor = DetectionCaptureSettings.ComputeFrameRateDivisor(
+                    DetectionCaptureSettings.GetConfiguredOutputFps());
 
-                var (subscribeWidth, subscribeHeight) = ResolveSubscribeSize(ocrDefinitions.Count > 0);
+                var (subscribeWidth, subscribeHeight) =
+                    DetectionCaptureSettings.ResolveSubscribeSize(ocrDefinitions.Count > 0);
 
                 cts = new CancellationTokenSource();
                 subscription = FrameSourceRegistry.Current.Subscribe(
@@ -240,64 +236,6 @@ public class VisualEventDetector : IDisposable
                 throw;
             }
         }
-    }
-
-    private static (List<EventDefinition> Definitions, InferenceSession? Session) LoadCompatibleModel(string gameId)
-    {
-        InferenceSession? session = null;
-        try
-        {
-            while (true)
-            {
-                var definitions = ModelService.LoadEventDefinitions(gameId);
-                if (!definitions.Any(definition => definition.DetectionKind == DetectionKind.Object))
-                    return (definitions, null);
-
-                session = ModelService.LoadModel(gameId);
-                var metadata = OnnxModelInspector.Inspect(session, ModelService.GetModelPath(gameId));
-                var apiMismatch = ModelApiV1Compatibility.FindMismatch(definitions, metadata);
-                if (apiMismatch is null)
-                    return (definitions, session);
-
-                ModelService.UnloadModel(gameId);
-                session = null;
-                if (!ModelService.RejectCurrentBundle(gameId, out var rejectedPath))
-                {
-                    throw new InvalidDataException(
-                        $"Model API v1 compatibility failed for {gameId}: {apiMismatch}");
-                }
-
-                Log.Warning(
-                    "VisualEventDetector: skipping incompatible model bundle {ModelPath} for {GameId}: {Mismatch}",
-                    rejectedPath, gameId, apiMismatch);
-            }
-        }
-        catch
-        {
-            if (session is not null)
-                ModelService.UnloadModel(gameId);
-            throw;
-        }
-    }
-
-    private sealed record InferenceState(
-        float[] InputBuffer,
-        DenseTensor<float> InputTensor,
-        List<string> OutputNames,
-        List<NamedOnnxValue> InputContainer,
-        int NumClasses,
-        List<RegionGroup> RegionGroups);
-
-    private static InferenceState CreateInferenceState(InferenceSession session, List<EventDefinition> definitions,
-        string gameId)
-    {
-        var inputBuffer = new float[ModelInputSize * ModelInputSize * 3];
-        var inputTensor = new DenseTensor<float>(inputBuffer.AsMemory(), new[] { 1, 3, ModelInputSize, ModelInputSize });
-        var outputNames = session.OutputMetadata.Keys.ToList();
-        List<NamedOnnxValue> inputContainer = [NamedOnnxValue.CreateFromTensor(session.InputNames[0], inputTensor)];
-        var numClasses = ResolveClassCount(session, outputNames[0], definitions, gameId);
-        return new InferenceState(inputBuffer, inputTensor, outputNames, inputContainer, numClasses,
-            BuildRuntimeRegionGroups(definitions, numClasses));
     }
 
     public void Stop()
@@ -418,7 +356,8 @@ public class VisualEventDetector : IDisposable
 
                 try
                 {
-                    var matches = RunOcrPass(recognizer, regionPlans, frame, token);
+                    var matches = OcrFramePass.Run(recognizer, regionPlans, frame.Buffer, frame.Width,
+                        frame.Height, token);
                     _ocrSnapshot = new OcrSnapshot(matches, DateTime.UtcNow);
                 }
                 catch (OperationCanceledException) { break; }
@@ -465,68 +404,6 @@ public class VisualEventDetector : IDisposable
             stale.ReturnBuffer();
         while (_ocrFrameQueue.Reader.TryRead(out var stale))
             stale.ReturnBuffer();
-    }
-
-    private static int ResolveClassCount(InferenceSession session, string outputName,
-        List<EventDefinition> definitions, string gameId)
-    {
-        var dimensions = session.OutputMetadata[outputName].Dimensions;
-        var modelClassNames = ReadModelClassNames(session);
-
-        if (!TryDeriveClassCount(dimensions, out var numClasses))
-        {
-            numClasses = definitions.Count(definition => definition.DetectionKind == DetectionKind.Object);
-            Log.Warning("VisualEventDetector: output {OutputName} of model {GameId} has no static class dimension ({Dimensions}), falling back to {NumClasses} classes from events.json",
-                outputName, gameId, string.Join('x', dimensions), numClasses);
-        }
-
-        var mismatch = FindClassMapMismatch(definitions, numClasses, modelClassNames);
-        if (mismatch != null)
-        {
-            Log.Error("VisualEventDetector: events.json does not match model.onnx for {GameId}: {Mismatch}",
-                gameId, mismatch);
-            throw new InvalidOperationException(
-                $"Event definitions for {gameId} do not match model.onnx: {mismatch}");
-        }
-
-        Log.Information("VisualEventDetector: model {GameId} declares {NumClasses} classes for {EventCount} event definitions",
-            gameId, numClasses, definitions.Count);
-        return numClasses;
-    }
-
-    internal static bool TryDeriveClassCount(IReadOnlyList<int>? outputDimensions, out int numClasses)
-        => OnnxModelInspector.TryDeriveClassCount(outputDimensions, out numClasses);
-
-    private static IReadOnlyDictionary<int, string>? ReadModelClassNames(InferenceSession session)
-    {
-        try
-        {
-            return session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var names)
-                ? ParseClassNames(names)
-                : null;
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "VisualEventDetector: could not read the model class map, skipping the events.json name check");
-            return null;
-        }
-    }
-
-    internal static IReadOnlyDictionary<int, string>? ParseClassNames(string? names)
-        => OnnxModelInspector.ParseClassNames(names);
-
-    internal static string? FindClassMapMismatch(IReadOnlyList<EventDefinition> definitions,
-        int numClasses, IReadOnlyDictionary<int, string>? modelClassNames)
-        => ModelEventCompatibility.FindMismatch(definitions, numClasses, modelClassNames);
-
-    internal static List<RegionGroup> BuildRuntimeRegionGroups(
-        IReadOnlyList<EventDefinition> definitions, int numClasses)
-    {
-        var modelDefinitions = definitions
-            .Where(definition => definition.DetectionKind == DetectionKind.Object
-                && (uint)definition.ClassId < (uint)numClasses)
-            .ToList();
-        return DetectionFramePreprocessor.BuildRegionGroups(modelDefinitions);
     }
 
     private void OnFrame(in VideoFrame frame)
@@ -626,7 +503,6 @@ public class VisualEventDetector : IDisposable
 
                 try
                 {
-                    var allResults = new List<DetectionResult>();
                     var fW = frameData.Width;
                     var fH = frameData.Height;
 
@@ -638,66 +514,9 @@ public class VisualEventDetector : IDisposable
                         continue;
                     }
 
-                    var frameGray = session is not null
-                        && _grayscaleStrategy == GrayscaleStrategy.WholeFrameOnce
-                        ? DetectionFramePreprocessor.BgraToGray(frameData.Buffer, fW, fH)
-                        : null;
-
-                    try
-                    {
-                        if (session is not null)
-                        {
-                            foreach (var group in _regionGroups)
-                            {
-                                if (!DetectionFramePreprocessor.TryGetCropRect(group, fW, fH, out var cropX,
-                                        out var cropY, out var cropW, out var cropH))
-                                    continue;
-
-                                byte[] resized;
-                                if (frameGray != null)
-                                {
-                                    resized = DetectionFramePreprocessor.CropAndResizeGray(frameGray, fW, fH,
-                                        cropX, cropY, cropW, cropH, ModelInputSize, ModelInputSize);
-                                }
-                                else
-                                {
-                                    var crop = DetectionFramePreprocessor.CropBgraToGray(frameData.Buffer, fW,
-                                        cropX, cropY, cropW, cropH);
-                                    try
-                                    {
-                                        resized = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH,
-                                            ModelInputSize, ModelInputSize);
-                                    }
-                                    finally
-                                    {
-                                        ArrayPool<byte>.Shared.Return(crop);
-                                    }
-                                }
-
-                                try
-                                {
-                                    var results = RunInferenceOnGray(session, resized);
-                                    if (results != null)
-                                    {
-                                        foreach (var result in results) result.Timestamp = frameData.Timestamp;
-                                        DetectionFramePreprocessor.MapDetectionsToFullFrame(results, cropX, cropY,
-                                            cropW, cropH, fW, fH);
-                                        DetectionFramePreprocessor.FilterDetectionsToEventRegions(results,
-                                            _objectDefinitions);
-                                        allResults.AddRange(results);
-                                    }
-                                }
-                                finally
-                                {
-                                    ArrayPool<byte>.Shared.Return(resized);
-                                }
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        if (frameGray != null) ArrayPool<byte>.Shared.Return(frameGray);
-                    }
+                    List<DetectionResult> allResults = session is null
+                        ? []
+                        : DetectObjects(session, frameData);
 
                     Log.Debug("DetectionLoop: {Count} results across {Groups} groups", allResults.Count, _regionGroups.Count);
                     if (allResults.Count == 0 && DateTime.UtcNow - _lastEmptyInferenceLog >= TimeSpan.FromSeconds(5))
@@ -727,111 +546,76 @@ public class VisualEventDetector : IDisposable
         }
     }
 
+    private List<DetectionResult> DetectObjects(InferenceSession session, FrameData frameData)
+    {
+        var allResults = new List<DetectionResult>();
+        var fW = frameData.Width;
+        var fH = frameData.Height;
+        var frameGray = _grayscaleStrategy == GrayscaleStrategy.WholeFrameOnce
+            ? DetectionFramePreprocessor.BgraToGray(frameData.Buffer, fW, fH)
+            : null;
+
+        try
+        {
+            foreach (var group in _regionGroups)
+            {
+                if (!DetectionFramePreprocessor.TryGetCropRect(group, fW, fH, out var cropX,
+                        out var cropY, out var cropW, out var cropH))
+                    continue;
+
+                byte[] resized;
+                if (frameGray != null)
+                {
+                    resized = DetectionFramePreprocessor.CropAndResizeGray(frameGray, fW, fH,
+                        cropX, cropY, cropW, cropH, ModelInputSize, ModelInputSize);
+                }
+                else
+                {
+                    var crop = DetectionFramePreprocessor.CropBgraToGray(frameData.Buffer, fW,
+                        cropX, cropY, cropW, cropH);
+                    try
+                    {
+                        resized = DetectionFramePreprocessor.ResizeGray(crop, cropW, cropH,
+                            ModelInputSize, ModelInputSize);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(crop);
+                    }
+                }
+
+                try
+                {
+                    var results = RunInferenceOnGray(session, resized);
+                    if (results != null)
+                    {
+                        foreach (var result in results) result.Timestamp = frameData.Timestamp;
+                        DetectionFramePreprocessor.MapDetectionsToFullFrame(results, cropX, cropY,
+                            cropW, cropH, fW, fH);
+                        DetectionFramePreprocessor.FilterDetectionsToEventRegions(results,
+                            _objectDefinitions);
+                        allResults.AddRange(results);
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(resized);
+                }
+            }
+        }
+        finally
+        {
+            if (frameGray != null) ArrayPool<byte>.Shared.Return(frameGray);
+        }
+
+        return allResults;
+    }
+
     private List<OcrMatch> TakeOcrMatches()
     {
         var snapshot = _ocrSnapshot;
-        return FreshMatches(snapshot?.Matches, snapshot?.CompletedAtUtc ?? default,
+        return OcrFramePass.FreshMatches(snapshot?.Matches, snapshot?.CompletedAtUtc ?? default,
             DateTime.UtcNow, OcrSnapshotMaxAgeMs);
-    }
-
-    internal static List<OcrMatch> FreshMatches(List<OcrMatch>? matches, DateTime completedAtUtc,
-        DateTime nowUtc, int maxAgeMs)
-
-        => matches is not null && (nowUtc - completedAtUtc).Duration() <= TimeSpan.FromMilliseconds(maxAgeMs)
-            ? matches
-            : [];
-
-    private static List<OcrMatch> RunOcrPass(PaddleOcrRecognizer recognizer,
-        IReadOnlyList<OcrRegionPlan> regionPlans, FrameData frame, CancellationToken token)
-    {
-        var matches = new List<OcrMatch>();
-        var fW = frame.Width;
-        var fH = frame.Height;
-        if (fW <= 0 || fH <= 0) return matches;
-
-        foreach (var plan in regionPlans)
-        {
-            token.ThrowIfCancellationRequested();
-            if (!DetectionFramePreprocessor.TryGetCropRect(plan.Region, fW, fH,
-                    out var cropX, out var cropY, out var cropW, out var cropH))
-                continue;
-
-            var recognitions = recognizer.RecognizeAll(frame.Buffer, fW, fH, cropX, cropY, cropW, cropH);
-            foreach (var recognition in recognitions)
-            foreach (var binding in plan.Bindings)
-            {
-                var ocr = binding.Definition.Ocr;
-                if (ocr is null
-                    || recognition.Confidence < OcrTokenTemplateMatcher.EffectiveMinimumConfidence(ocr.MinimumConfidence))
-                    continue;
-                var match = OcrTokenTemplateMatcher.FindBestMatch(recognition.Text, ocr.Patterns);
-                if (match is null) continue;
-                matches.Add(new OcrMatch
-                {
-                    EventId = binding.Definition.Id,
-                    Text = recognition.Text,
-                    NormalizedText = match.NormalizedText,
-                    LanguageTag = match.LanguageTag,
-                    SegmentId = binding.SegmentId,
-                    Confidence = recognition.Confidence,
-                    X = (float)recognition.X / fW,
-                    Y = (float)recognition.Y / fH,
-                    Width = (float)recognition.Width / fW,
-                    Height = (float)recognition.Height / fH,
-                });
-            }
-        }
-
-        return matches;
-    }
-
-    internal static int ComputeFrameRateDivisor(int outputFps)
-    {
-        if (outputFps <= 0) return FpsDivisor;
-        return Math.Max(1, outputFps / TargetCaptureFps);
-    }
-
-    private static (int Width, int Height) ResolveSubscribeSize(bool hasOcr)
-    {
-        if (!hasOcr) return (ObsSubscribeWidth, ObsSubscribeHeight);
-        try
-        {
-            if (FrameSourceRegistry.Current.GetVideoTiming() is { Width: > 0, Height: > 0 } timing)
-            {
-                return (
-                    Math.Clamp((int)timing.Width, ObsSubscribeWidth, OcrSubscribeMaxWidth),
-                    Math.Clamp((int)timing.Height, ObsSubscribeHeight, OcrSubscribeMaxHeight));
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "VisualEventDetector: could not read OBS output size, using {W}x{H}",
-                ObsSubscribeWidth, ObsSubscribeHeight);
-        }
-        return (ObsSubscribeWidth, ObsSubscribeHeight);
-    }
-
-    private static int GetConfiguredOutputFps()
-    {
-        try
-        {
-            var info = FrameSourceRegistry.Current.GetVideoTiming();
-            if (info == null)
-            {
-                Log.Warning("VisualEventDetector: OBS reported no video info, using default divisor");
-                return 0;
-            }
-
-            var num = info.Value.FpsNumerator;
-            var den = info.Value.FpsDenominator;
-            if (num == 0 || den == 0) return 0;
-            return (int)Math.Round((double)num / den);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "VisualEventDetector: could not read OBS output fps, using default divisor");
-            return 0;
-        }
     }
 
     private List<DetectionResult>? RunInferenceOnGray(

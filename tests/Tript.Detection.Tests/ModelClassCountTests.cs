@@ -46,21 +46,21 @@ public class ModelClassCountTests
     public void TryDeriveClassCount_ReadsTheClassRowsOrRefusesToGuess(
         bool expected, int expectedClasses, int[] dimensions)
     {
-        Assert.Equal(expected, VisualEventDetector.TryDeriveClassCount(dimensions, out var numClasses));
+        Assert.Equal(expected, OnnxModelInspector.TryDeriveClassCount(dimensions, out var numClasses));
         Assert.Equal(expectedClasses, numClasses);
     }
 
     [Fact]
     public void TryDeriveClassCount_WithoutDimensions_Refuses()
     {
-        Assert.False(VisualEventDetector.TryDeriveClassCount(null, out var numClasses));
+        Assert.False(OnnxModelInspector.TryDeriveClassCount(null, out var numClasses));
         Assert.Equal(0, numClasses);
     }
 
     [Fact]
     public void ParseClassNames_ReadsTheUltralyticsDictLiteral()
     {
-        var names = VisualEventDetector.ParseClassNames(UltralyticsNames);
+        var names = OnnxModelInspector.ParseClassNames(UltralyticsNames);
 
         Assert.NotNull(names);
         Assert.Equal(7, names!.Count);
@@ -72,21 +72,21 @@ public class ModelClassCountTests
     [Fact]
     public void ParseClassNames_AcceptsDoubleQuotes_AndYieldsNullWhenUnreadable()
     {
-        var doubleQuoted = VisualEventDetector.ParseClassNames("{0: \"Class zero\", 1: \"Class one\"}");
+        var doubleQuoted = OnnxModelInspector.ParseClassNames("{0: \"Class zero\", 1: \"Class one\"}");
         Assert.NotNull(doubleQuoted);
         Assert.Equal("Class zero", doubleQuoted![0]);
         Assert.Equal("Class one", doubleQuoted[1]);
 
-        Assert.Null(VisualEventDetector.ParseClassNames(null));
-        Assert.Null(VisualEventDetector.ParseClassNames("   "));
-        Assert.Null(VisualEventDetector.ParseClassNames("detect"));
+        Assert.Null(OnnxModelInspector.ParseClassNames(null));
+        Assert.Null(OnnxModelInspector.ParseClassNames("   "));
+        Assert.Null(OnnxModelInspector.ParseClassNames("detect"));
     }
 
     [Fact]
     public void ParseClassNames_AcceptsJsonObjectAndArrayMetadata()
     {
-        var objectNames = VisualEventDetector.ParseClassNames("{\"0\":\"Class zero\",\"1\":\"Class one\"}");
-        var arrayNames = VisualEventDetector.ParseClassNames("[\"Class zero\",\"Class one\"]");
+        var objectNames = OnnxModelInspector.ParseClassNames("{\"0\":\"Class zero\",\"1\":\"Class one\"}");
+        var arrayNames = OnnxModelInspector.ParseClassNames("[\"Class zero\",\"Class one\"]");
 
         Assert.Equal("Class zero", objectNames![0]);
         Assert.Equal("Class one", objectNames[1]);
@@ -97,9 +97,9 @@ public class ModelClassCountTests
     [Fact]
     public void FindClassMapMismatch_AcceptsDefinitionsThatMatchTheModel()
     {
-        var names = VisualEventDetector.ParseClassNames(UltralyticsNames);
+        var names = OnnxModelInspector.ParseClassNames(UltralyticsNames);
 
-        Assert.Null(VisualEventDetector.FindClassMapMismatch(Definitions(), 7, names));
+        Assert.Null(ModelEventCompatibility.FindMismatch(Definitions(), 7, names));
     }
 
     [Fact]
@@ -108,8 +108,8 @@ public class ModelClassCountTests
         var definitions = Definitions();
         definitions.Add(Def(7, "Class seven"));
 
-        Assert.Null(VisualEventDetector.FindClassMapMismatch(
-            definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames)));
+        Assert.Null(ModelEventCompatibility.FindMismatch(
+            definitions, 7, OnnxModelInspector.ParseClassNames(UltralyticsNames)));
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class ModelClassCountTests
             new() { ClassId = 1 },
         };
 
-        var group = Assert.Single(VisualEventDetector.BuildRuntimeRegionGroups(definitions, 1));
+        var group = Assert.Single(DetectionModelLoader.BuildRuntimeRegionGroups(definitions, 1));
 
         Assert.Equal(0.1f, group.X);
         Assert.Equal(0.2f, group.Y);
@@ -140,8 +140,8 @@ public class ModelClassCountTests
         var definitions = Definitions();
         definitions[2].Name = "Renamed class";
 
-        var mismatch = VisualEventDetector.FindClassMapMismatch(
-            definitions, 7, VisualEventDetector.ParseClassNames(UltralyticsNames));
+        var mismatch = ModelEventCompatibility.FindMismatch(
+            definitions, 7, OnnxModelInspector.ParseClassNames(UltralyticsNames));
 
         Assert.NotNull(mismatch);
         Assert.Contains("Renamed class", mismatch);
@@ -152,10 +152,10 @@ public class ModelClassCountTests
     public void FindClassMapMismatch_WithoutAModelClassMap_AcceptsAppendedClassIds()
     {
         var definitions = Definitions();
-        Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
+        Assert.Null(ModelEventCompatibility.FindMismatch(definitions, 7, null));
 
         definitions.Add(Def(9, "Class nine"));
-        Assert.Null(VisualEventDetector.FindClassMapMismatch(definitions, 7, null));
+        Assert.Null(ModelEventCompatibility.FindMismatch(definitions, 7, null));
     }
 
     [Fact]
@@ -171,10 +171,10 @@ public class ModelClassCountTests
         var outputName = session.OutputMetadata.Keys.First();
         var dimensions = session.OutputMetadata[outputName].Dimensions;
 
-        Assert.True(VisualEventDetector.TryDeriveClassCount(dimensions, out var numClasses),
+        Assert.True(OnnxModelInspector.TryDeriveClassCount(dimensions, out var numClasses),
             $"Output {outputName} has shape [{string.Join(',', dimensions)}], which carries no " +
             "static class dimension — the detector would be falling back to events.json.");
-        var names = VisualEventDetector.ParseClassNames(
+        var names = OnnxModelInspector.ParseClassNames(
             session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw) ? raw : null);
         Assert.NotNull(names);
         Assert.Equal(numClasses, names!.Count);
@@ -182,7 +182,7 @@ public class ModelClassCountTests
         var definitions = ModelService.LoadEventDefinitions(GameId);
         Assert.Equal(numClasses, definitions.Count);
 
-        var mismatch = VisualEventDetector.FindClassMapMismatch(definitions, numClasses, names);
+        var mismatch = ModelEventCompatibility.FindMismatch(definitions, numClasses, names);
         Assert.True(mismatch == null,
             $"data/training/{GameId}/events.json disagrees with model.onnx: {mismatch}");
 

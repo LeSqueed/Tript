@@ -24,7 +24,7 @@ public sealed class TrainingModelPathTests
 
         try
         {
-            Assert.Equal(installed, AppHost.ResolveTrainingModelPath(installed, workspace));
+            Assert.Equal(installed, Tript.App.Training.TrainingWorkspaceEditor.ResolveModelPath(installed, workspace));
         }
         finally
         {
@@ -44,7 +44,7 @@ public sealed class TrainingModelPathTests
 
         try
         {
-            Assert.Equal(workspace, AppHost.ResolveTrainingModelPath(installed, workspace));
+            Assert.Equal(workspace, Tript.App.Training.TrainingWorkspaceEditor.ResolveModelPath(installed, workspace));
         }
         finally
         {

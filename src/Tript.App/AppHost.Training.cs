@@ -48,67 +48,8 @@ internal sealed partial class AppHost
         }
     }
 
-    internal static void MigrateLegacyTrainingFolders(GameCatalog catalog, string trainingRoot,
-        string installedModelsRoot)
-    {
-        foreach (var entry in catalog.Entries)
-        {
-            foreach (var legacyId in entry.LegacyGameIds ?? [])
-            {
-                try
-                {
-                    MigrateWorkspaceDirectory(Path.Combine(trainingRoot, legacyId),
-                        Path.Combine(trainingRoot, entry.GameId));
-                    MigrateModelDirectory(Path.Combine(installedModelsRoot, legacyId),
-                        Path.Combine(installedModelsRoot, entry.GameId));
-                }
-                catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
-                {
-                    Log.Warning(exception, "Could not migrate training files from {LegacyGameId} to {GameId}",
-                        legacyId, entry.GameId);
-                }
-            }
-        }
-    }
-
-    private static void MigrateWorkspaceDirectory(string source, string destination)
-    {
-        if (!Directory.Exists(source)) return;
-        if (!Directory.Exists(destination))
-        {
-            Directory.Move(source, destination);
-            return;
-        }
-
-        foreach (var path in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            var target = Path.Combine(destination, Path.GetRelativePath(source, path));
-            if (File.Exists(target)) continue;
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Move(path, target);
-        }
-
-        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories)
-                     .OrderByDescending(path => path.Length))
-        {
-            if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
-        }
-        if (!Directory.EnumerateFileSystemEntries(source).Any()) Directory.Delete(source);
-    }
-
-    private static void MigrateModelDirectory(string source, string destination)
-    {
-        if (!Directory.Exists(source)) return;
-        if (!Directory.Exists(destination)) Directory.Move(source, destination);
-    }
-
-    private readonly TrainingRunner _trainingRunner = new();
-    private readonly object _trainingGate = new();
+    private readonly TrainingSession _training = new();
     private readonly SemaphoreSlim _trainingWorkspaceGate = new(1, 1);
-    private CancellationTokenSource? _trainingCancellation;
-    private string? _trainingGameId;
-
-    private string? _trainingPhase;
 
     private async Task WithTrainingWorkspaceLockAsync(Func<Task> action)
     {
@@ -121,92 +62,6 @@ internal sealed partial class AppHost
         {
             _trainingWorkspaceGate.Release();
         }
-    }
-
-    internal TrainingInstallResult InstallTrainingModel(string gameId, string? modelSourcePath,
-        string? ocrModelSourcePath = null, string? ocrDictionarySourcePath = null,
-        string? ocrDetectorSourcePath = null)
-    {
-        lock (_recorderGate)
-        {
-            var restart = ShouldRestartDetectionForModelInstall(IsRecording, _activeDetectionGameId, gameId);
-            if (restart)
-                StopDetection();
-
-            try
-            {
-                var definitions = TrainingWorkspace.ForGame(gameId).LoadDefinitions();
-                if (definitions.Any(definition => definition.DetectionKind == DetectionKind.Object)
-                    && modelSourcePath is null)
-                {
-                    var runtimeModel = ModelService.GetModelPath(gameId);
-                    if (File.Exists(runtimeModel)) modelSourcePath = runtimeModel;
-                }
-                if (definitions.Any(definition => definition.DetectionKind == DetectionKind.Ocr)
-                    && (ocrModelSourcePath is null || ocrDictionarySourcePath is null))
-                {
-                    var runtimeOcrModel = ModelService.GetOcrModelPath(gameId);
-                    var runtimeOcrDictionary = ModelService.GetOcrDictionaryPath(gameId);
-                    var runtimeOcrDetector = ModelService.GetOcrDetectorPath(gameId);
-                    if (File.Exists(runtimeOcrModel) && File.Exists(runtimeOcrDictionary))
-                    {
-                        ocrModelSourcePath ??= runtimeOcrModel;
-                        ocrDictionarySourcePath ??= runtimeOcrDictionary;
-                        if (File.Exists(runtimeOcrDetector)) ocrDetectorSourcePath ??= runtimeOcrDetector;
-                    }
-                }
-                ModelService.InvalidateModel(gameId);
-                var result = TrainingModelInstaller.Install(TrainingWorkspace.ForGame(gameId), modelSourcePath,
-                    ocrModelSourcePath, ocrDictionarySourcePath, ocrDetectorSourcePath);
-                if (restart)
-                    StartDetection(gameId);
-                PushAvailableRecordingModels();
-                return result;
-            }
-            catch
-            {
-                if (restart)
-                    StartDetection(gameId);
-                throw;
-            }
-        }
-    }
-
-    internal static bool ShouldRestartDetectionForModelInstall(bool isRecording,
-        string? activeDetectionGameId, string installedGameId) =>
-        isRecording && string.Equals(activeDetectionGameId, installedGameId,
-            StringComparison.OrdinalIgnoreCase);
-
-    private TrainingWorkspace EnsureTrainingWorkspace(string gameId)
-    {
-        var workspace = TrainingWorkspace.ForGame(gameId);
-        if (File.Exists(workspace.EventsPath))
-            return workspace;
-
-        var runtimeRoot = ModelService.GetGamePath(gameId);
-        var runtimeEvents = Path.Combine(runtimeRoot, "events.json");
-        if (File.Exists(runtimeEvents))
-        {
-            workspace.EnsureDirectories();
-            File.Copy(runtimeEvents, workspace.EventsPath, overwrite: true);
-            var runtimeGroups = Path.Combine(runtimeRoot, "regionGroups.json");
-            if (File.Exists(runtimeGroups))
-                File.Copy(runtimeGroups, workspace.RegionGroupsPath, overwrite: true);
-            var runtimeModel = Path.Combine(runtimeRoot, "model.onnx");
-            if (File.Exists(runtimeModel))
-                File.Copy(runtimeModel, workspace.ModelPath, overwrite: true);
-            var runtimeOcrModel = Path.Combine(runtimeRoot, "ocr_model.onnx");
-            var runtimeOcrDetector = Path.Combine(runtimeRoot, "ocr_detector.onnx");
-            var runtimeOcrDict = Path.Combine(runtimeRoot, "ocr_dict.txt");
-            if (File.Exists(runtimeOcrModel) && File.Exists(runtimeOcrDict))
-            {
-                File.Copy(runtimeOcrModel, Path.Combine(workspace.RootPath, "ocr_model.onnx"), overwrite: true);
-                File.Copy(runtimeOcrDict, Path.Combine(workspace.RootPath, "ocr_dict.txt"), overwrite: true);
-                if (File.Exists(runtimeOcrDetector))
-                    File.Copy(runtimeOcrDetector, workspace.OcrDetectorPath, overwrite: true);
-            }
-        }
-        return workspace;
     }
 
     internal Task PushTraining(string? requestedGameId) => WithTrainingWorkspaceLockAsync(() =>
@@ -228,20 +83,11 @@ internal sealed partial class AppHost
             return;
         }
 
-        var workspace = EnsureTrainingWorkspace(gameId);
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(gameId);
         var definitions = workspace.LoadDefinitions();
         var regionGroups = workspace.LoadRegionGroups();
         var samples = new TrainingSampleStore(workspace).List();
-        var invalidSamples = samples.Select(sample =>
-        {
-            var labelError = TrainingLabelValidator.FindError(sample.Labels, definitions,
-                requireLabel: false, regionGroups: regionGroups);
-            var regionError = TrainingOcrRegionValidator.FindError(sample.OcrRegions);
-            var reason = labelError ?? regionError;
-            if (reason is null && sample.Labels.Count == 0 && sample.OcrRegions.Count == 0)
-                reason = "a sample must contain an object label or OCR region";
-            return new { sample.Id, Reason = reason };
-        }).Where(sample => sample.Reason is not null).ToList();
+        var invalidSamples = TrainingWorkspaceEditor.FindInvalidSamples(samples, definitions, regionGroups);
         TrainingDatasetExportSummary? exportSummary = null;
         try
         {
@@ -253,8 +99,8 @@ internal sealed partial class AppHost
         }
         var dataset = new
         {
-            trainingImages = CountTrainingImages(workspace.DatasetPath, "train"),
-            validationImages = CountTrainingImages(workspace.DatasetPath, "val"),
+            trainingImages = TrainingWorkspaceEditor.CountImages(workspace.DatasetPath, "train"),
+            validationImages = TrainingWorkspaceEditor.CountImages(workspace.DatasetPath, "val"),
             eventCoverage = exportSummary?.EventCoverage ?? [],
             warnings = exportSummary?.Warnings ?? [],
         };
@@ -274,13 +120,7 @@ internal sealed partial class AppHost
             }
         }
 
-        bool trainingActive;
-        string? trainingPhase;
-        lock (_trainingGate)
-        {
-            trainingActive = string.Equals(_trainingGameId, gameId, StringComparison.OrdinalIgnoreCase);
-            trainingPhase = trainingActive ? _trainingPhase : null;
-        }
+        var (trainingActive, trainingPhase) = _training.StateFor(gameId);
 
         _ipc.Broadcast("training", JsonSerializer.SerializeToElement(new
         {
@@ -321,11 +161,7 @@ internal sealed partial class AppHost
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
             throw new ArgumentException("A game id is required to import training assets.");
 
-        lock (_trainingGate)
-        {
-            if (_trainingCancellation is not null)
-                throw new InvalidOperationException("Stop training before importing a workspace.");
-        }
+        _training.ThrowIfRunning("Stop training before importing a workspace.");
 
         var existingWorkspace = TrainingWorkspace.ForGame(parameters.GameId);
         var currentRevision = existingWorkspace.Revision();
@@ -353,33 +189,6 @@ internal sealed partial class AppHost
         PushTrainingCore(parameters.GameId);
     }
 
-    private void RemoveInstalledTrainingModel(string gameId)
-    {
-        lock (_recorderGate)
-        {
-            var restart = IsRecording
-                && string.Equals(_activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase);
-            if (restart)
-                StopDetection();
-            try
-            {
-                ModelService.InvalidateModel(gameId);
-                var installedRoot = TrainingWorkspace.ForGame(gameId, TrainingPaths.InstalledModelsPath).RootPath;
-                if (Directory.Exists(installedRoot))
-                    Directory.Delete(installedRoot, recursive: true);
-                if (restart)
-                    StartDetection(gameId);
-                PushAvailableRecordingModels();
-            }
-            catch
-            {
-                if (restart)
-                    StartDetection(gameId);
-                throw;
-            }
-        }
-    }
-
     internal async Task CaptureTrainingSample(CaptureTrainingSampleParameters? parameters)
         => await WithTrainingWorkspaceLockAsync(() => CaptureTrainingSampleCore(parameters));
 
@@ -387,7 +196,7 @@ internal sealed partial class AppHost
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
         var sourcePath = ContentServer.ResolveWithinRoot(EffectiveRoot, parameters.FilePath)
             ?? throw new InvalidDataException("The sample source is not inside the recording folder.");
         var tools = _libraryTools.Value
@@ -395,7 +204,7 @@ internal sealed partial class AppHost
         var media = new MediaProbe(tools.Ffprobe).Probe(sourcePath);
         var definitions = workspace.LoadDefinitions();
         var regionGroups = workspace.LoadRegionGroups();
-        var labels = parameters.Labels.Select(ToTrainingLabel).ToList();
+        var labels = parameters.Labels.Select(TrainingWorkspaceEditor.ToLabel).ToList();
         var id = TrainingSampleStore.SampleId(sourcePath, parameters.TimestampSeconds);
         var temporaryPath = Path.Combine(workspace.SamplesPath, id + ".capture-" + Guid.NewGuid().ToString("N") + ".png");
         try
@@ -478,86 +287,14 @@ internal sealed partial class AppHost
         {
             throw new InvalidDataException("Training event ids must be unique.");
         }
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
-        var orderedEvents = parameters.Events.ToList();
-        TrainingEventValidator.ValidateDetectionKinds(orderedEvents);
-        var objectEvents = orderedEvents
-            .Where(eventDefinition => eventDefinition.DetectionKind == DetectionKind.Object)
-            .OrderBy(eventDefinition => eventDefinition.ClassId)
-            .ToList();
-        var regionGroups = workspace.LoadRegionGroups();
-        var classIdMap = objectEvents
-            .Select((eventDefinition, index) => new { Old = eventDefinition.ClassId, New = index })
-            .ToDictionary(pair => pair.Old, pair => pair.New);
-        var sampleStore = new TrainingSampleStore(workspace);
-        var existingClassIds = workspace.LoadDefinitions()
-            .Where(eventDefinition => eventDefinition.DetectionKind == DetectionKind.Object)
-            .Select(eventDefinition => eventDefinition.ClassId).ToHashSet();
-        var deletesClass = existingClassIds.Any(classId => !classIdMap.ContainsKey(classId));
-        foreach (var eventDefinition in orderedEvents.Where(eventDefinition =>
-                     eventDefinition.DetectionKind == DetectionKind.Ocr || !eventDefinition.FixedPosition))
-        {
-            if (eventDefinition.DetectionKind == DetectionKind.Ocr)
-                eventDefinition.FixedPosition = false;
-            eventDefinition.FixedLabelCenterX = null;
-            eventDefinition.FixedLabelCenterY = null;
-            eventDefinition.FixedLabelWidth = null;
-            eventDefinition.FixedLabelHeight = null;
-        }
-        InitializeFixedPositions(orderedEvents, sampleStore.List());
-        TrainingEventValidator.ValidateRegions(orderedEvents);
-        TrainingEventValidator.ValidateRegionGroupReferences(orderedEvents, regionGroups);
-        TrainingEventValidator.ValidateFixedPositions(orderedEvents);
-        TrainingEventValidator.ValidateSubtractorReferences(orderedEvents);
-        var lastReportedPercent = -1;
-        Action<int, int>? deleteProgress = deletesClass ? (completed, total) =>
-        {
-            var percent = (int)Math.Floor(completed * 100.0 / Math.Max(1, total));
-            if (percent == lastReportedPercent) return;
-            lastReportedPercent = percent;
-            PushTrainingProgress(parameters.GameId, "eventDeleteProgress",
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
+        var removedLabelCount = TrainingWorkspaceEditor.ReplaceEvents(workspace, parameters.Events.ToList(),
+            percent => PushTrainingProgress(parameters.GameId, "eventDeleteProgress",
                 $"Removing labels from training samples… {percent}%", percent,
-                requestId: parameters.RequestId);
-        } : null;
-        var fixedPositions = orderedEvents
-            .Where(eventDefinition => eventDefinition.DetectionKind == DetectionKind.Object
-                && eventDefinition.FixedPosition
-                && eventDefinition.FixedLabelCenterX is not null
-                && eventDefinition.FixedLabelCenterY is not null
-                && eventDefinition.FixedLabelWidth is not null
-                && eventDefinition.FixedLabelHeight is not null)
-            .ToDictionary(eventDefinition => eventDefinition.ClassId, eventDefinition => new TrainingLabel
-            {
-                ClassId = eventDefinition.ClassId,
-                CenterX = eventDefinition.FixedLabelCenterX!.Value,
-                CenterY = eventDefinition.FixedLabelCenterY!.Value,
-                Width = eventDefinition.FixedLabelWidth!.Value,
-                Height = eventDefinition.FixedLabelHeight!.Value,
-            });
-        var remap = sampleStore.RemapClassIds(classIdMap, fixedPositions, deleteProgress);
-        foreach (var eventDefinition in objectEvents)
-            eventDefinition.ClassId = classIdMap[eventDefinition.ClassId];
-        foreach (var eventDefinition in orderedEvents.Where(eventDefinition =>
-                     eventDefinition.DetectionKind == DetectionKind.Ocr))
-            eventDefinition.ClassId = -1;
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        };
-        try
-        {
-            var serializedEvents = JsonSerializer.SerializeToUtf8Bytes(orderedEvents, options);
-            TrainingSampleStore.WriteAtomically(workspace.EventsPath, serializedEvents);
-        }
-        catch
-        {
-            sampleStore.RestoreMetadata(remap.Originals);
-            throw;
-        }
-        var removedMessage = remap.RemovedLabelCount > 0
-            ? $"Training events updated. Removed {remap.RemovedLabelCount} label"
-                + $"{(remap.RemovedLabelCount == 1 ? string.Empty : "s")}."
+                requestId: parameters.RequestId));
+        var removedMessage = removedLabelCount > 0
+            ? $"Training events updated. Removed {removedLabelCount} label"
+                + $"{(removedLabelCount == 1 ? string.Empty : "s")}."
             : "Training events updated.";
         PushTrainingProgress(parameters.GameId, "eventsUpdated", removedMessage,
             requestId: parameters.RequestId);
@@ -586,65 +323,11 @@ internal sealed partial class AppHost
             throw new ArgumentException("A game id is required to update training region groups.");
 
         TrainingEventValidator.ValidateRegionGroups(parameters.RegionGroups);
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
-        var events = workspace.LoadDefinitions();
-        var groupIds = parameters.RegionGroups.Select(group => group.Id).ToHashSet();
-        var detached = false;
-        foreach (var eventDefinition in events)
-        {
-            if (eventDefinition.RegionGroupId is int groupId && !groupIds.Contains(groupId))
-            {
-                eventDefinition.RegionGroupId = null;
-                detached = true;
-            }
-        }
-
-        var originals = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase)
-        {
-            [workspace.EventsPath] = File.Exists(workspace.EventsPath)
-                ? File.ReadAllBytes(workspace.EventsPath) : null,
-            [workspace.RegionGroupsPath] = File.Exists(workspace.RegionGroupsPath)
-                ? File.ReadAllBytes(workspace.RegionGroupsPath) : null,
-        };
-        try
-        {
-            workspace.SaveRegionGroups(parameters.RegionGroups);
-            if (detached)
-            {
-                TrainingSampleStore.WriteAtomically(workspace.EventsPath,
-                    JsonSerializer.SerializeToUtf8Bytes(events,
-                        TrainingRegionResolver.WriteJsonOptions));
-            }
-        }
-        catch
-        {
-            new TrainingSampleStore(workspace).RestoreMetadata(originals);
-            throw;
-        }
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
+        TrainingWorkspaceEditor.ReplaceRegionGroups(workspace, parameters.RegionGroups);
         PushTrainingProgress(parameters.GameId, "regionGroupsUpdated", "Training region groups updated.",
             requestId: parameters.RequestId);
         PushTrainingCore(parameters.GameId, parameters.RequestId, "regionGroups");
-    }
-
-    private static void InitializeFixedPositions(IReadOnlyList<EventDefinition> events,
-        IReadOnlyList<TrainingSampleRecord> samples)
-    {
-        foreach (var eventDefinition in events.Where(eventDefinition => eventDefinition.FixedPosition
-                     && eventDefinition.FixedLabelCenterX is null
-                     && eventDefinition.FixedLabelCenterY is null
-                     && eventDefinition.FixedLabelWidth is null
-                     && eventDefinition.FixedLabelHeight is null))
-        {
-            var label = samples.SelectMany(sample => sample.Labels)
-                .Where(candidate => candidate.ClassId == eventDefinition.ClassId)
-                .OrderBy(candidate => candidate.Width * candidate.Height)
-                .FirstOrDefault();
-            if (label is null) continue;
-            eventDefinition.FixedLabelCenterX = label.CenterX;
-            eventDefinition.FixedLabelCenterY = label.CenterY;
-            eventDefinition.FixedLabelWidth = label.Width;
-            eventDefinition.FixedLabelHeight = label.Height;
-        }
     }
 
     internal async Task UpdateTrainingSample(UpdateTrainingSampleParameters? parameters)
@@ -667,9 +350,9 @@ internal sealed partial class AppHost
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
-        var labels = parameters.Labels.Select(ToTrainingLabel).ToList();
-        var ocrRegions = parameters.OcrRegions.Select(ToTrainingOcrRegion).ToList();
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
+        var labels = parameters.Labels.Select(TrainingWorkspaceEditor.ToLabel).ToList();
+        var ocrRegions = parameters.OcrRegions.Select(TrainingWorkspaceEditor.ToOcrRegion).ToList();
         var sample = new TrainingSampleStore(workspace).UpdateLabels(parameters.SampleId, labels,
             workspace.LoadDefinitions(), workspace.LoadRegionGroups(), ocrRegions);
         PushTrainingProgress(parameters.GameId, "sampleUpdated", sample.Id,
@@ -689,7 +372,7 @@ internal sealed partial class AppHost
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
             throw new ArgumentException("A game id is required to suggest training labels.");
 
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
         var sample = new TrainingSampleStore(workspace).LoadById(parameters.SampleId);
         var imagePath = Path.Combine(workspace.SamplesPath, sample.ImageFile);
         if (!File.Exists(imagePath))
@@ -725,7 +408,7 @@ internal sealed partial class AppHost
     {
         if (parameters is null)
             throw new ArgumentException("Training sample parameters are required.");
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
         new TrainingSampleStore(workspace).Delete(parameters.SampleId);
         PushTrainingProgress(parameters.GameId, "sampleDeleted", parameters.SampleId);
         PushTrainingCore(parameters.GameId);
@@ -748,151 +431,27 @@ internal sealed partial class AppHost
         TrainingRunner.ValidateEpochs(parameters.Epochs);
         TrainingRunner.ValidateEpochs(ocrEpochs);
         TrainingRunner.ValidateAugmentCopies(augmentCopies);
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
         var imageSize = parameters.ImageSize;
-        var currentModelPath = ResolveTrainingModelPath(
+        var currentModelPath = TrainingWorkspaceEditor.ResolveModelPath(
             ModelService.GetModelPath(workspace.GameId), workspace.ModelPath);
         if (imageSize is null && File.Exists(currentModelPath))
             imageSize = OnnxModelInspector.Inspect(currentModelPath).InputWidth;
         imageSize ??= 640;
-        lock (_trainingGate)
-        {
-            if (_trainingCancellation is not null)
-                throw new InvalidOperationException("Training is already running.");
-
+        var cancellation = _training.Begin(parameters.GameId, "exporting", () =>
             workspace.SavePreferences(new TrainingPreferences
             {
                 Epochs = parameters.Epochs,
                 Device = parameters.Device,
                 AugmentCopies = augmentCopies,
                 OcrEpochs = ocrEpochs,
-            });
-            _trainingCancellation = new CancellationTokenSource();
-            _trainingGameId = parameters.GameId;
-            _trainingPhase = "exporting";
-            var cancellation = _trainingCancellation;
-            _ = RunTrainingAsync(workspace, imageSize.Value, augmentCopies, parameters, cancellation);
-        }
+            }));
+        _ = RunTrainingAsync(workspace, imageSize.Value, augmentCopies, parameters, cancellation);
         PushTrainingProgress(parameters.GameId, "exporting",
             $"Preparing the training data. Requested device: {parameters.Device}; epochs: {parameters.Epochs}.");
     }
 
-    internal void CancelTraining()
-    {
-        lock (_trainingGate)
-        {
-            _trainingRunner.Cancel();
-            _trainingCancellation?.Cancel();
-        }
-    }
-
-    internal void PushAvailableRecordingModels()
-    {
-        var models = ModelService.GetLoadableDetectionGameIds()
-            .Select(gameId => new AvailableRecordingModel
-            {
-                GameId = gameId,
-                Name = GameList.FirstOrDefault(game => game.Id.Equals(gameId,
-                    StringComparison.OrdinalIgnoreCase))?.Name ?? gameId,
-            })
-            .ToList();
-        _ipc.Broadcast("availableRecordingModels", new AvailableRecordingModelsMessage { Models = models });
-    }
-
-    internal void ActivateRecordingModel(string? gameId)
-    {
-        if (string.IsNullOrWhiteSpace(gameId))
-        {
-            PushError("Choose a model to load.");
-            return;
-        }
-
-        lock (_recorderGate)
-        {
-            if (!IsRecording)
-            {
-                PushError("Start a recording before loading a model.");
-                return;
-            }
-            if (!ModelService.HasDetectionBundleForGame(gameId))
-            {
-                PushError($"No model is available for {gameId}.");
-                return;
-            }
-            if (string.Equals(_activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase))
-            {
-                AssignActiveRecordingToGame(gameId);
-                PushState(true, _currentGameId);
-                return;
-            }
-
-            var previousGameId = _activeDetectionGameId;
-
-            ActivateRecordingModelCore(gameId, previousGameId, StartDetection,
-                () => AssignActiveRecordingToGame(gameId),
-                () => PushError($"The model for {gameId} could not be loaded."),
-                () => PushState(true, _currentGameId));
-        }
-    }
-
-    internal static void ActivateRecordingModelCore(string gameId, string? previousGameId,
-        Func<string, bool> startDetection, Action onActivated, Action pushError, Action pushState)
-    {
-        var activated = false;
-        try
-        {
-            activated = startDetection(gameId);
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "AppHost: detection for {GameId} could not start.", gameId);
-        }
-
-        if (!activated)
-        {
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(previousGameId))
-                    startDetection(previousGameId);
-            }
-            catch (Exception exception)
-            {
-                Log.Warning(exception, "AppHost: detection for {GameId} could not be restored.", previousGameId);
-            }
-            pushError();
-        }
-        else
-        {
-            onActivated();
-        }
-        pushState();
-    }
-
-    private void AssignActiveRecordingToGame(string gameId)
-    {
-        if (_pendingMetadata is null)
-            return;
-
-        var game = GameList.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, gameId, StringComparison.OrdinalIgnoreCase))?.Name ?? gameId;
-        var originalGame = _pendingSessionReassignment?.OriginalGame ?? _pendingMetadata.Game;
-        var originalGameId = _pendingSessionReassignment?.OriginalGameId ?? _pendingMetadata.GameId;
-
-        if (string.Equals(originalGameId, gameId, StringComparison.OrdinalIgnoreCase))
-        {
-            _pendingSessionReassignment = null;
-            _pendingMetadata.Game = originalGame;
-            _pendingMetadata.GameId = originalGameId;
-            _currentGameId = originalGameId;
-            return;
-        }
-
-        _pendingSessionReassignment = new PendingSessionReassignment(
-            originalGame, originalGameId, game, gameId);
-        _pendingMetadata.Game = game;
-        _pendingMetadata.GameId = gameId;
-        _currentGameId = gameId;
-    }
+    internal void CancelTraining() => _training.Cancel();
 
     internal async Task InstallTrainingModelCommand(TrainingGameParameters? parameters)
         => await WithTrainingWorkspaceLockAsync(() =>
@@ -905,12 +464,8 @@ internal sealed partial class AppHost
     {
         if (parameters is null || string.IsNullOrWhiteSpace(parameters.GameId))
             throw new ArgumentException("A game id is required to install a model.");
-        lock (_trainingGate)
-        {
-            if (_trainingCancellation is not null)
-                throw new InvalidOperationException("Stop training before installing a model.");
-        }
-        var workspace = EnsureTrainingWorkspace(parameters.GameId);
+        _training.ThrowIfRunning("Stop training before installing a model.");
+        var workspace = TrainingWorkspaceEditor.EnsureWorkspace(parameters.GameId);
         var definitions = workspace.LoadDefinitions();
         var hasObjectEvents = definitions.Any(d => d.DetectionKind == DetectionKind.Object);
         var hasOcrEvents = definitions.Any(d => d.DetectionKind == DetectionKind.Ocr);
@@ -923,16 +478,10 @@ internal sealed partial class AppHost
         else
             InstallTrainingModel(parameters.GameId, modelSource);
         if (modelSource is not null)
-            RefreshWorkspaceModel(workspace, modelSource);
+            TrainingWorkspaceEditor.RefreshWorkspaceModel(workspace, modelSource);
         PushTrainingProgress(parameters.GameId, "completed",
-            DescribeTrainingOutcome(modelSource is not null, haveDatasetOcr, haveDatasetOcr));
+            TrainingWorkspaceEditor.DescribeOutcome(modelSource is not null, haveDatasetOcr, haveDatasetOcr));
         PushTrainingCore(parameters.GameId);
-    }
-
-    private void SetTrainingPhase(string? phase)
-    {
-        lock (_trainingGate)
-            _trainingPhase = phase;
     }
 
     private async Task RunTrainingAsync(TrainingWorkspace workspace, int imageSize, int augmentCopies,
@@ -974,13 +523,13 @@ internal sealed partial class AppHost
                     + "details are in the console window." + augmentNote);
                 if (trainObject)
                 {
-                    await _trainingRunner.PrepareDatasetAsync(workspace, imageSize, augmentCopies,
+                    await _training.Runner.PrepareDatasetAsync(workspace, imageSize, augmentCopies,
                         (message, _) => PushTrainingProgress(parameters.GameId, "progress", message),
                         cancellation.Token).ConfigureAwait(false);
                 }
                 if (trainOcr)
                 {
-                    await _trainingRunner.PrepareOcrDatasetAsync(workspace,
+                    await _training.Runner.PrepareOcrDatasetAsync(workspace,
                         Environment.GetEnvironmentVariable("TRIPT_OCR_OBJECT_SAMPLES"),
                         message => PushTrainingProgress(parameters.GameId, "progress", message),
                         cancellation.Token).ConfigureAwait(false);
@@ -992,7 +541,7 @@ internal sealed partial class AppHost
                 _trainingWorkspaceGate.Release();
             }
 
-            SetTrainingPhase("training");
+            _training.SetPhase("training");
             PushTrainingCore(parameters.GameId);
             string? modelPath = null;
             string? ocrModelPath = null;
@@ -1001,7 +550,7 @@ internal sealed partial class AppHost
             var ocrFineTuned = false;
             if (trainObject)
             {
-                modelPath = await _trainingRunner.TrainModelAsync(workspace, imageSize, parameters.Epochs,
+                modelPath = await _training.Runner.TrainModelAsync(workspace, imageSize, parameters.Epochs,
                     parameters.Device, parameters.BaseModel,
                     (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
                         details is null || details.Epochs == 0 ? null
@@ -1015,7 +564,7 @@ internal sealed partial class AppHost
                 if (!File.Exists(ocrDetectorPath)) ocrDetectorPath = null;
                 try
                 {
-                    ocrModelPath = await _trainingRunner.TrainOcrModelAsync(workspace,
+                    ocrModelPath = await _training.Runner.TrainOcrModelAsync(workspace,
                         parameters.OcrEpochs ?? parameters.Epochs, "cpu",
                         (message, details) => PushTrainingProgress(parameters.GameId, "progress", message,
                             details is null || details.Epochs == 0 ? null
@@ -1050,14 +599,14 @@ internal sealed partial class AppHost
                 }
                 if (modelPath is not null)
                 {
-                    _trainingRunner.ValidateTrainingResult(workspace, modelPath,
+                    _training.Runner.ValidateTrainingResult(workspace, modelPath,
                         message => PushTrainingProgress(parameters.GameId, "progress", message));
                 }
                 var installed = InstallTrainingModel(parameters.GameId, modelPath,
                     ocrModelPath, ocrDictionaryPath, ocrDetectorPath);
-                if (modelPath is not null) RefreshWorkspaceModel(workspace, modelPath);
+                if (modelPath is not null) TrainingWorkspaceEditor.RefreshWorkspaceModel(workspace, modelPath);
                 PushTrainingProgress(parameters.GameId, "completed",
-                    DescribeTrainingOutcome(trainObject, trainOcr, ocrFineTuned));
+                    TrainingWorkspaceEditor.DescribeOutcome(trainObject, trainOcr, ocrFineTuned));
                 PushTrainingCore(parameters.GameId);
             }
             finally
@@ -1075,16 +624,7 @@ internal sealed partial class AppHost
         }
         finally
         {
-            lock (_trainingGate)
-            {
-                if (ReferenceEquals(_trainingCancellation, cancellation))
-                {
-                    _trainingCancellation = null;
-                    _trainingGameId = null;
-                    _trainingPhase = null;
-                }
-            }
-            cancellation.Dispose();
+            _training.End(cancellation);
             try
             {
                 await _trainingWorkspaceGate.WaitAsync().ConfigureAwait(false);
@@ -1101,73 +641,6 @@ internal sealed partial class AppHost
             {
                 Log.Warning(exception, "Training: could not refresh workspace state after training ended");
             }
-        }
-    }
-
-    private static string DescribeTrainingOutcome(bool trainedObject, bool trainedOcr, bool ocrFineTuned)
-    {
-        var parts = new List<string>();
-        if (trainedObject) parts.Add("object detector");
-        if (trainedOcr)
-            parts.Add(ocrFineTuned
-                ? "fine-tuned OCR recogniser"
-                : "OCR recogniser (kept the pretrained model)");
-        return parts.Count == 0
-            ? "Training complete."
-            : $"Training complete: installed and activated the {string.Join(" and ", parts)}.";
-    }
-
-    private static TrainingLabel ToTrainingLabel(TrainingLabelParameters label) => new()
-    {
-        ClassId = label.ClassId,
-        CenterX = label.CenterX,
-        CenterY = label.CenterY,
-        Width = label.Width,
-        Height = label.Height,
-    };
-
-    private static TrainingOcrRegion ToTrainingOcrRegion(TrainingOcrRegionParameters region) => new()
-    {
-        X = region.X,
-        Y = region.Y,
-        Width = region.Width,
-        Height = region.Height,
-        Text = region.Text.Trim(),
-    };
-
-    private static int CountTrainingImages(string datasetPath, string split)
-    {
-        var path = Path.Combine(datasetPath, "images", split);
-        if (!Directory.Exists(path))
-            return 0;
-        try
-        {
-            return Directory.EnumerateFiles(path)
-                .Count(file => !Path.GetFileName(file).Contains(".tmp-", StringComparison.OrdinalIgnoreCase)
-                    && IsTrainingImage(file));
-        }
-        catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
-        {
-            return 0;
-        }
-    }
-
-    private static bool IsTrainingImage(string path) =>
-        Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg";
-
-    internal static string ResolveTrainingModelPath(string installedModelPath, string workspaceModelPath) =>
-        File.Exists(installedModelPath) ? installedModelPath : workspaceModelPath;
-
-    private static void RefreshWorkspaceModel(TrainingWorkspace workspace, string sourcePath)
-    {
-        try
-        {
-            File.Copy(sourcePath, workspace.ModelPath, overwrite: true);
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "Training: could not refresh the workspace model copy for {GameId}",
-                workspace.GameId);
         }
     }
 

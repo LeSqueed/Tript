@@ -30,7 +30,7 @@ public sealed class TrainingLegacyMigrationTests : IDisposable
         Directory.CreateDirectory(legacyModel.RootPath);
         File.WriteAllText(legacyModel.ModelPath, "model");
 
-        AppHost.MigrateLegacyTrainingFolders(GameCatalog.Load(cataloguePath), trainingRoot, modelsRoot);
+        Tript.App.Training.TrainingWorkspaceMigration.Migrate(GameCatalog.Load(cataloguePath), trainingRoot, modelsRoot);
 
         Assert.Equal("canonical-events", File.ReadAllText(canonical.EventsPath));
         Assert.Equal("legacy-events", File.ReadAllText(legacy.EventsPath));

@@ -150,7 +150,7 @@ internal sealed partial class AppHost : IDisposable
         _libraryProbe = new LibraryProbe(() => _libraryTools.Value?.Ffprobe);
         _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
 #if TRIPT_TRAINING
-        MigrateLegacyTrainingFolders(_gameCatalog, TrainingPaths.RootPath,
+        TrainingWorkspaceMigration.Migrate(_gameCatalog, TrainingPaths.RootPath,
             TrainingPaths.InstalledModelsPath);
 #endif
         _gameInventory = new GameInventoryScanner(OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
@@ -329,8 +329,7 @@ internal sealed partial class AppHost : IDisposable
             Monitor.PulseAll(_automaticClipGate);
         }
 #if TRIPT_TRAINING
-        _trainingRunner.Cancel();
-        _trainingCancellation?.Cancel();
+        _training.Cancel();
 #endif
         lock (_recorderGate)
             _shuttingDown = true;

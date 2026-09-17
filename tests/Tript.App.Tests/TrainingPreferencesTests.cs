@@ -120,10 +120,10 @@ public sealed class TrainingPreferencesTests
             AugmentCopies = 2,
         });
         using var fixture = new HostFixture();
-        var active = new CancellationTokenSource();
-        var field = typeof(AppHost).GetField("_trainingCancellation",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        field.SetValue(fixture.Host, active);
+        var session = (TrainingSession)typeof(AppHost).GetField("_training",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(fixture.Host)!;
+        var active = session.Begin("another-game", "training", () => { });
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Host.StartTraining(
@@ -142,8 +142,7 @@ public sealed class TrainingPreferencesTests
         }
         finally
         {
-            field.SetValue(fixture.Host, null);
-            active.Dispose();
+            session.End(active);
             if (Directory.Exists(workspace.RootPath)) Directory.Delete(workspace.RootPath, recursive: true);
         }
     }

@@ -9,11 +9,12 @@ namespace Tript.Recorder;
 
 internal sealed class GameCaptureHookProbe : IDisposable
 {
-    private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ProbeInterval = TimeSpan.FromMilliseconds(500);
 
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ObsSource? _source;
+    private readonly ObsSceneItem? _fallbackItem;
     private readonly CapturePolicy _policy;
     private readonly Lock _gate = new();
     private Timer? _timer;
@@ -22,10 +23,11 @@ internal sealed class GameCaptureHookProbe : IDisposable
     private bool _timeoutReported;
     private bool _disposed;
 
-    internal GameCaptureHookProbe(ObsSource? source, CapturePolicy policy)
+    internal GameCaptureHookProbe(ObsSource? source, CapturePolicy policy, ObsSceneItem? fallbackItem = null)
     {
         _source = source;
         _policy = policy;
+        _fallbackItem = fallbackItem;
     }
 
     internal bool IsHooked
@@ -74,6 +76,7 @@ internal sealed class GameCaptureHookProbe : IDisposable
         }
 
         probe?.Dispose();
+        SetFallbackVisible(true);
     }
 
     private void Probe(object? state)
@@ -89,6 +92,7 @@ internal sealed class GameCaptureHookProbe : IDisposable
             if (hooked != _hooked)
             {
                 _hooked = hooked;
+                SetFallbackVisible(!hooked);
                 if (hooked)
                 {
                     Log.Information("ObsRecorderSession: game capture hooked at {Width}x{Height}",
@@ -113,6 +117,20 @@ internal sealed class GameCaptureHookProbe : IDisposable
                 Log.Warning("ObsRecorderSession: game capture has not hooked after {Seconds}s; " +
                             "continuing to retry while recording.", deadline.TotalSeconds);
             }
+        }
+    }
+
+    private void SetFallbackVisible(bool visible)
+    {
+        if (_fallbackItem is null)
+            return;
+
+        try
+        {
+            _fallbackItem.SetVisible(visible);
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

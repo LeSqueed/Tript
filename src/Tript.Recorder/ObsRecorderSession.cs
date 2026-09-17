@@ -65,7 +65,7 @@ public sealed class ObsRecorderSession : IRecorderSession
                 }
             }
 
-            _hookProbe = new GameCaptureHookProbe(_gameCaptureSource, Policy);
+            _hookProbe = new GameCaptureHookProbe(_gameCaptureSource, Policy, _displayItem);
         }
         catch
         {

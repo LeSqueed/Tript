@@ -23,6 +23,8 @@ public class VisualEventDetector : IDisposable
 
     private const int FrameCallbackQuiesceTimeoutMs = 1000;
 
+    private const int FrameWaitSlackMs = 500;
+
     private readonly int _detectionIntervalMs;
     private readonly object _lifecycleGate = new();
     private IFrameSubscription? _subscription;
@@ -41,6 +43,8 @@ public class VisualEventDetector : IDisposable
             FullMode = BoundedChannelFullMode.DropOldest
         },
         static dropped => dropped.ReturnBuffer());
+    private readonly ManualResetEventSlim _frameArrived = new(false);
+    private volatile bool _frameHungry;
     private Thread? _ocrThread;
     private volatile bool _ocrActive;
     private volatile bool _ocrHungry;
@@ -168,6 +172,7 @@ public class VisualEventDetector : IDisposable
                 _numClasses = inference?.NumClasses ?? 0;
                 _subscription = subscription;
                 _cts = cts;
+                _frameHungry = false;
 
                 var token = cts.Token;
 
@@ -349,10 +354,7 @@ public class VisualEventDetector : IDisposable
             {
                 if (token.WaitHandle.WaitOne(OcrPollIntervalMs)) break;
                 if (!_ocrFrameQueue.Reader.TryRead(out var frame))
-                {
-                    _ocrHungry = true;
                     continue;
-                }
 
                 try
                 {
@@ -369,7 +371,6 @@ public class VisualEventDetector : IDisposable
                 finally
                 {
                     frame.ReturnBuffer();
-                    _ocrHungry = true;
                 }
             }
         }
@@ -408,6 +409,11 @@ public class VisualEventDetector : IDisposable
 
     private void OnFrame(in VideoFrame frame)
     {
+        var wantsDetection = _frameHungry;
+        var wantsOcr = _ocrActive && _ocrHungry;
+        if (!wantsDetection && !wantsOcr)
+            return;
+
         if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0)
             return;
 
@@ -421,20 +427,33 @@ public class VisualEventDetector : IDisposable
             var height = (int)frame.Height;
             var rowBytes = width * 4;
             var timestamp = DateTime.UtcNow;
-            buffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
-
             var src = frame.GetPlane(0, (uint)height);
-            DetectionFramePreprocessor.CopyPlane(src, srcStride, buffer, rowBytes, height);
 
-            queued = _frameQueue.Writer.TryWrite(new FrameData
+            if (wantsDetection)
             {
-                Buffer = buffer,
-                Width = width,
-                Height = height,
-                Timestamp = timestamp,
-            });
+                buffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
+                DetectionFramePreprocessor.CopyPlane(src, srcStride, buffer, rowBytes, height);
 
-            if (_ocrActive && _ocrHungry)
+                queued = _frameQueue.Writer.TryWrite(new FrameData
+                {
+                    Buffer = buffer,
+                    Width = width,
+                    Height = height,
+                    Timestamp = timestamp,
+                });
+
+                if (queued)
+                {
+                    _frameHungry = false;
+                    _frameArrived.Set();
+                }
+                else
+                {
+                    Log.Warning("VisualEventDetector: frame queue rejected a frame, dropping it");
+                }
+            }
+
+            if (wantsOcr)
             {
                 var ocrBuffer = ArrayPool<byte>.Shared.Rent(height * rowBytes);
                 try
@@ -461,9 +480,6 @@ public class VisualEventDetector : IDisposable
             if (queued && Interlocked.Increment(ref _diagnosticFrameCount) % 15 == 0)
                 Log.Debug("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
                     _diagnosticFrameCount, width, height);
-
-            if (!queued)
-                Log.Warning("VisualEventDetector: frame queue rejected a frame, dropping it");
         }
         catch (Exception ex)
         {
@@ -481,11 +497,25 @@ public class VisualEventDetector : IDisposable
         var session = _session;
         if (session is null && !_ocrActive) return;
 
+        var framePeriodMs = DetectionCaptureSettings.FramePeriodMs;
+        var nextTick = Environment.TickCount64 + _detectionIntervalMs;
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (ct.WaitHandle.WaitOne(_detectionIntervalMs)) break;
+                var now = Environment.TickCount64;
+                if (nextTick < now)
+                    nextTick = now;
+                var wait = nextTick - framePeriodMs - now;
+                nextTick += _detectionIntervalMs;
+                if (ct.WaitHandle.WaitOne((int)Math.Max(0, wait))) break;
+
+                _frameArrived.Reset();
+                _frameHungry = true;
+                if (_ocrActive)
+                    _ocrHungry = true;
+
+                _frameArrived.Wait(framePeriodMs + FrameWaitSlackMs, ct);
 
                 if (!_frameQueue.Reader.TryRead(out var frameData))
                 {

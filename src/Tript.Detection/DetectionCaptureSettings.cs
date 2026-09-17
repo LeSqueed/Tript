@@ -9,12 +9,14 @@ namespace Tript.Detection;
 internal static class DetectionCaptureSettings
 {
     private const int FpsDivisor = 30;
-    private const int TargetCaptureFps = 3;
+    private const int TargetCaptureFps = 2;
     private const int ObsSubscribeWidth = 1920;
     private const int ObsSubscribeHeight = 1080;
 
     private const int OcrSubscribeMaxWidth = 2560;
     private const int OcrSubscribeMaxHeight = 1440;
+
+    internal static int FramePeriodMs => 1000 / TargetCaptureFps;
 
     internal static int ComputeFrameRateDivisor(int outputFps)
     {

@@ -10,11 +10,11 @@ namespace Tript.Detection.Tests;
 public class FrameRateDivisorTests
 {
     [Theory]
-    [InlineData(30, 10)]
-    [InlineData(60, 20)]
-    [InlineData(120, 40)]
-    [InlineData(144, 48)]
-    [InlineData(240, 80)]
+    [InlineData(30, 15)]
+    [InlineData(60, 30)]
+    [InlineData(120, 60)]
+    [InlineData(144, 72)]
+    [InlineData(240, 120)]
     public void DerivesDivisorFromOutputFps(int outputFps, int expected)
     {
         Assert.Equal(expected, DetectionCaptureSettings.ComputeFrameRateDivisor(outputFps));
@@ -57,7 +57,7 @@ public class FrameRateDivisorTests
     {
         var fps = (int)Math.Round(60000.0 / 1001.0);
         Assert.Equal(60, fps);
-        Assert.Equal(20, DetectionCaptureSettings.ComputeFrameRateDivisor(fps));
+        Assert.Equal(30, DetectionCaptureSettings.ComputeFrameRateDivisor(fps));
     }
 
     [Fact]

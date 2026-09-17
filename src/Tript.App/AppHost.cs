@@ -60,16 +60,8 @@ internal sealed partial class AppHost : IDisposable
     private readonly ResolverClient? _resolverClient;
     private readonly bool _ownsResolverClient;
     private readonly Timer? _modelCheckTimer;
-    private readonly object _audioLevelGate = new();
-    private Timer? _audioLevelTimer;
-    private static readonly TimeSpan AudioLevelLease = TimeSpan.FromSeconds(5);
-    private long _audioLevelsWantedUntilTicks;
-    private string? _lastAudioLevelFailure;
+    private readonly AudioLevelFeed _audioLevels;
     private int _windowVisible = 1;
-    private readonly ObsAudioLevelMonitor? _audioLevelMonitor;
-    private readonly AudioDeviceInventory _audioDeviceInventory;
-    private readonly object _audioDeviceRefreshGate = new();
-    private Timer? _audioDeviceTimer;
 
     private readonly Lazy<(string Ffmpeg, string Ffprobe)?> _libraryTools = new(() =>
     {
@@ -85,9 +77,7 @@ internal sealed partial class AppHost : IDisposable
     }, LazyThreadSafetyMode.ExecutionAndPublication);
 
     private readonly LibraryProbe _libraryProbe;
-    private readonly object _contentPushGate = new();
-    private bool _contentPushRunning;
-    private bool _contentPushPending;
+    private readonly CoalescingRunner _contentPush;
 
     private readonly object _recorderGate = new();
     private readonly TimeSpan _recorderStopTimeout;
@@ -158,11 +148,15 @@ internal sealed partial class AppHost : IDisposable
         AudioDeviceInventory? audioDeviceInventory = null,
         GameIdAliasStore? gameIdAliases = null)
     {
+        _contentPush = new CoalescingRunner(BroadcastContent, ReportContentFailure);
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
-        _audioLevelMonitor = runtime is null ? null : new ObsAudioLevelMonitor();
-        _audioDeviceInventory = audioDeviceInventory ?? new AudioDeviceInventory();
+        _audioLevels = new AudioLevelFeed(settingsStore,
+            runtime is null ? null : new ObsAudioLevelMonitor(),
+            audioDeviceInventory ?? new AudioDeviceInventory(),
+            BroadcastAudioLevels,
+            PushSettings);
         _sessionTracker = sessionTracker;
         _primaryDisplay = primaryDisplay;
         _resolverClient = resolverClient;
@@ -211,7 +205,7 @@ internal sealed partial class AppHost : IDisposable
             _modelManager.StatusChanged += OnModelStatusChanged;
         }
 
-        EffectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(options, settingsStore.Load()));
+        EffectiveRoot = RecordingRootPolicy.Resolve(options, settingsStore.Load());
 
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller, _token, options.ControlPort, options.UiPort);
@@ -278,56 +272,6 @@ internal sealed partial class AppHost : IDisposable
 
     internal bool ConvertHdrClipsToSdr => _settingsStore.Load().General.ConvertHdrClipsToSdr;
 
-    internal static string? UnsafeRecordingRoot(string candidate)
-    {
-        if (!Path.IsPathRooted(candidate))
-            return "it is not an absolute path";
-
-        string full;
-        try
-        {
-            full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException
-                                             or PathTooLongException)
-        {
-            return "it is not a usable path";
-        }
-
-        if (Path.GetPathRoot(full) is { } root &&
-            string.Equals(Path.TrimEndingDirectorySeparator(root), full, StringComparison.Ordinal))
-        {
-            return "a filesystem root would expose the whole machine over the content server";
-        }
-
-        foreach (var folder in new[]
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            SettingsFilePaths.ConfigDirectory,
-        })
-        {
-            if (string.IsNullOrEmpty(folder))
-                continue;
-
-            var sensitive = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
-            if (IsAtOrAbove(full, sensitive))
-                return $"it contains '{sensitive}', which would expose it over the content server";
-        }
-
-        return null;
-    }
-
-    private static bool IsAtOrAbove(string candidate, string sensitive)
-        => FilePaths.IsAtOrUnder(sensitive, candidate);
-
-    private static string ResolveEffectiveRoot(AppOptions options, SettingsModel settings)
-    {
-        var configured = settings.Recording.OutputDirectory;
-        return string.IsNullOrWhiteSpace(configured) ? options.ContentRoot : configured;
-    }
-
     private IThumbnailExtractor? CreateThumbnailExtractor()
     {
         var tools = _libraryTools.Value;
@@ -342,15 +286,11 @@ internal sealed partial class AppHost : IDisposable
 
         try
         {
-            _audioDeviceInventory.Refresh();
+            _audioLevels.LoadDevices();
             _ipc.Start();
             _content.Start();
             _ui.Start();
-            if (_audioLevelMonitor is not null)
-                _audioLevelTimer = new Timer(_ => PushAudioLevels(), null, TimeSpan.Zero,
-                    TimeSpan.FromMilliseconds(250));
-            _audioDeviceTimer = new Timer(_ => RefreshAudioDevices(), null, TimeSpan.FromSeconds(5),
-                TimeSpan.FromSeconds(5));
+            _audioLevels.Start();
 
             PurgeExpiredTrash();
             _trashPurgeTimer = new Timer(_ => PurgeExpiredTrash(), null, TrashPurgeInterval, TrashPurgeInterval);
@@ -385,18 +325,12 @@ internal sealed partial class AppHost : IDisposable
         Console.WriteLine("SHUTDOWN");
     }
 
-    private static void WaitForInFlight(object gate)
-    {
-        lock (gate)
-        {
-        }
-    }
-
     public void Dispose()
     {
         if (_disposed)
             return;
         _disposed = true;
+        _audioLevels.Dispose();
 
         _captureWaitCancellation?.Cancel();
         _discoveryCancellation.Cancel();
@@ -434,11 +368,6 @@ internal sealed partial class AppHost : IDisposable
             _updateManager.Dispose();
         }
         _modelCheckTimer?.Dispose();
-        _audioLevelTimer?.Dispose();
-        WaitForInFlight(_audioLevelGate);
-        _audioDeviceTimer?.Dispose();
-        WaitForInFlight(_audioDeviceRefreshGate);
-        _audioLevelMonitor?.Dispose();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
@@ -693,7 +622,7 @@ internal sealed partial class AppHost : IDisposable
                 string effectiveRoot;
                 try
                 {
-                    effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, candidate));
+                    effectiveRoot = RecordingRootPolicy.Resolve(_options, candidate);
                 }
                 catch (Exception exception) when (exception is ArgumentException or IOException
                     or NotSupportedException or PathTooLongException)
@@ -701,9 +630,7 @@ internal sealed partial class AppHost : IDisposable
                     return "the recording directory is not a usable path.";
                 }
 
-                return UnsafeRecordingRoot(effectiveRoot) is { } refusal
-                    ? $"the recording directory was refused because {refusal}."
-                    : CreateRecordingRoot(effectiveRoot);
+                return RecordingRootPolicy.Prepare(effectiveRoot);
             }, out settings, out failure);
         }
         catch (JsonException exception)
@@ -735,7 +662,7 @@ internal sealed partial class AppHost : IDisposable
         if (gameNamesChanged)
             PushContent();
 
-        var effectiveRoot = Path.GetFullPath(ResolveEffectiveRoot(_options, settings));
+        var effectiveRoot = RecordingRootPolicy.Resolve(_options, settings);
         if (!string.Equals(effectiveRoot, EffectiveRoot, StringComparison.Ordinal))
         {
             EffectiveRoot = effectiveRoot;
@@ -763,12 +690,6 @@ internal sealed partial class AppHost : IDisposable
                 list.Select(game => (game.Id, game.Executable, game.ExecutablePath)).ToList(),
                 list.Select(game => (game.Id, game.Name)).ToList());
         }
-    }
-
-    private static string? CreateRecordingRoot(string path)
-    {
-        Directory.CreateDirectory(path);
-        return null;
     }
 
     private void PushSettingsUpdateResult(string? requestId, bool success, string? error)
@@ -821,20 +742,9 @@ internal sealed partial class AppHost : IDisposable
         StateChanged?.Invoke(recording, representedGameId);
     }
 
-    private void RefreshAudioDevices()
-    {
-        lock (_audioDeviceRefreshGate)
-        {
-            if (_disposed || !_audioDeviceInventory.Refresh())
-                return;
-            PushSettings();
-        }
-    }
+    internal void WatchAudioLevels() => _audioLevels.Watch();
 
-    internal void WatchAudioLevels() =>
-        Interlocked.Exchange(ref _audioLevelsWantedUntilTicks, (DateTime.UtcNow + AudioLevelLease).Ticks);
-
-    internal bool AudioLevelsWanted => DateTime.UtcNow.Ticks <= Interlocked.Read(ref _audioLevelsWantedUntilTicks);
+    internal bool AudioLevelsWanted => _audioLevels.Wanted;
 
     internal bool WindowVisible => Volatile.Read(ref _windowVisible) != 0;
 
@@ -851,46 +761,11 @@ internal sealed partial class AppHost : IDisposable
             visible = WindowVisible,
         }, Wire.Options));
 
-    private void PushAudioLevels()
-    {
-        lock (_audioLevelGate)
+    private void BroadcastAudioLevels(IReadOnlyDictionary<string, float> levels) =>
+        _ipc.Broadcast("audioLevels", JsonSerializer.SerializeToElement(new
         {
-            if (_disposed)
-                return;
-
-            try
-            {
-                if (_audioLevelMonitor is null)
-                    return;
-
-                if (!AudioLevelsWanted)
-                {
-                    _audioLevelMonitor.Read([]);
-                    return;
-                }
-
-                var sources = _settingsStore.Load().Audio.Tracks
-                    .SelectMany(track => track.Sources)
-                    .Where(source => !string.IsNullOrWhiteSpace(source.DeviceId))
-                    .Select(source => new AudioLevelSource(source.Kind, source.DeviceId!))
-                    .Distinct()
-                    .ToList();
-                var levels = _audioLevelMonitor.Read(sources);
-                _ipc.Broadcast("audioLevels", JsonSerializer.SerializeToElement(new
-                {
-                    levels = levels.Select(level => new { deviceId = level.Key, peak = level.Value }).ToList(),
-                }, Wire.Options));
-            }
-            catch (Exception exception)
-            {
-                if (_lastAudioLevelFailure != exception.Message)
-                {
-                    _lastAudioLevelFailure = exception.Message;
-                    Log.Warning(exception, "AppHost: audio levels could not be read.");
-                }
-            }
-        }
-    }
+            levels = levels.Select(level => new { deviceId = level.Key, peak = level.Value }).ToList(),
+        }, Wire.Options));
 
     internal void PushSettings()
     {
@@ -898,7 +773,7 @@ internal sealed partial class AppHost : IDisposable
         var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
 
         if (settingsNode?["audio"] is JsonObject audioNode)
-            audioNode["devices"] = JsonSerializer.SerializeToNode(_audioDeviceInventory.Snapshot,
+            audioNode["devices"] = JsonSerializer.SerializeToNode(_audioLevels.Devices,
                 SettingsSerialization.Options);
         var settingsElement = JsonSerializer.Deserialize<JsonElement>(
             settingsNode?.ToJsonString() ?? "{}", SettingsSerialization.Options);

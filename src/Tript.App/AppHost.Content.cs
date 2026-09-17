@@ -75,52 +75,18 @@ internal sealed partial class AppHost
         }
     }
 
-    internal void PushContent()
+    internal void PushContent() => _contentPush.Run();
+
+    private void BroadcastContent() =>
+        _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
+        {
+            content = ListContent(),
+        }, Wire.Options));
+
+    private void ReportContentFailure(Exception exception)
     {
-        lock (_contentPushGate)
-        {
-            if (_contentPushRunning)
-            {
-                _contentPushPending = true;
-                return;
-            }
-
-            _contentPushRunning = true;
-        }
-
-        try
-        {
-            do
-            {
-                _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
-                {
-                    content = ListContent(),
-                }, Wire.Options));
-            }
-            while (TakePendingContentPush());
-        }
-        catch (Exception exception)
-        {
-            lock (_contentPushGate)
-                _contentPushRunning = false;
-            Log.Warning(exception, "AppHost: the library could not be listed");
-            PushError($"The library could not be listed ({exception.Message}).");
-        }
-    }
-
-    private bool TakePendingContentPush()
-    {
-        lock (_contentPushGate)
-        {
-            if (_contentPushPending)
-            {
-                _contentPushPending = false;
-                return true;
-            }
-
-            _contentPushRunning = false;
-            return false;
-        }
+        Log.Warning(exception, "AppHost: the library could not be listed");
+        PushError($"The library could not be listed ({exception.Message}).");
     }
 
     private static bool IsUsableOffsetSeconds(double seconds) =>

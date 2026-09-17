@@ -49,9 +49,9 @@ public sealed class RecordingRootGuardTests : IDisposable
     public void AFilesystemRoot_IsRefused()
     {
         var root = Path.GetPathRoot(Path.GetTempPath())!;
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(root));
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(root));
 
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(Path.TrimEndingDirectorySeparator(root)
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(Path.TrimEndingDirectorySeparator(root)
             + Path.DirectorySeparatorChar));
     }
 
@@ -61,7 +61,7 @@ public sealed class RecordingRootGuardTests : IDisposable
     [InlineData("../recordings")]
     public void ARelativePath_IsRefused(string candidate)
     {
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(candidate));
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(candidate));
     }
 
     [SkippableFact]
@@ -70,7 +70,7 @@ public sealed class RecordingRootGuardTests : IDisposable
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         Skip.If(string.IsNullOrEmpty(home), "this machine reports no home directory");
 
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(home));
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(home));
     }
 
     [SkippableFact]
@@ -80,8 +80,8 @@ public sealed class RecordingRootGuardTests : IDisposable
             Path.TrimEndingDirectorySeparator(SettingsFilePaths.ConfigDirectory));
         Skip.If(string.IsNullOrEmpty(parent), "this machine reports no config directory");
 
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(parent));
-        Assert.NotNull(AppHost.UnsafeRecordingRoot(SettingsFilePaths.ConfigDirectory));
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(parent));
+        Assert.NotNull(RecordingRootPolicy.WhyUnsafe(SettingsFilePaths.ConfigDirectory));
     }
 
     [SkippableFact]
@@ -92,13 +92,39 @@ public sealed class RecordingRootGuardTests : IDisposable
 
         var candidate = Path.Combine(home, "Videos", "Tript-" + Guid.NewGuid().ToString("N"));
 
-        Assert.Null(AppHost.UnsafeRecordingRoot(candidate));
+        Assert.Null(RecordingRootPolicy.WhyUnsafe(candidate));
     }
 
     [Fact]
     public void ADirectoryUnderTheTempRoot_IsAccepted()
     {
-        Assert.Null(AppHost.UnsafeRecordingRoot(_contentRoot));
+        Assert.Null(RecordingRootPolicy.WhyUnsafe(_contentRoot));
+    }
+
+    [Fact]
+    public void Prepare_CreatesAnAcceptedDirectory()
+    {
+        var candidate = Path.Combine(_contentRoot, "prepared", "recordings");
+
+        Assert.Null(RecordingRootPolicy.Prepare(candidate));
+        Assert.True(Directory.Exists(candidate));
+    }
+
+    [Fact]
+    public void Prepare_ExplainsARefusalWithoutCreatingAnything()
+    {
+        var refusal = RecordingRootPolicy.Prepare(Path.GetPathRoot(Path.GetTempPath())!);
+
+        Assert.NotNull(refusal);
+        Assert.StartsWith("the recording directory was refused because ", refusal);
+    }
+
+    [Fact]
+    public void Resolve_FallsBackToTheContentRootWhenNothingIsConfigured()
+    {
+        var options = new AppOptions { ContentRoot = _contentRoot };
+
+        Assert.Equal(Path.GetFullPath(_contentRoot), RecordingRootPolicy.Resolve(options, new Tript.Settings.Settings()));
     }
 
     [Fact]

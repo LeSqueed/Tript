@@ -17,6 +17,7 @@ public sealed record FullscreenGameCandidate(
 public sealed class FullscreenGameDetector : IDisposable
 {
     private const uint MonitorDefaultToNearest = 2;
+    private static readonly ProcessPathCache ProbedPaths = new();
     private readonly TimeSpan _pollInterval;
     private readonly Func<FullscreenGameCandidate?> _candidateProbe;
     private readonly object _gate = new();
@@ -245,15 +246,16 @@ public sealed class FullscreenGameDetector : IDisposable
         try
         {
             using var process = Process.GetProcessById((int)nativeProcessId);
-            var path = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(path))
+            DateTimeOffset startTime = process.StartTime.ToUniversalTime();
+            var path = ProbedPaths.Resolve((int)nativeProcessId, startTime, () => process.MainModule?.FileName);
+            if (path is null)
                 return null;
 
             return new FullscreenGameCandidate(
                 (int)nativeProcessId,
                 ExecutableNames.Normalize(path),
                 path,
-                process.StartTime.ToUniversalTime());
+                startTime);
         }
         catch (Exception exception) when (exception is ArgumentException
             or InvalidOperationException or System.ComponentModel.Win32Exception

@@ -7,14 +7,11 @@ import type {
   ContentItem,
   RecordingState,
   CreateClipParameters,
-  TrainingEventDefinition,
-  TrainingRegionGroup,
-  TrainingSampleMessage,
 } from '../ipc/protocol';
 import { DEFAULT_SESSION_SECONDS, type SessionSource } from './player/sessionSource';
 import { useIpcSessionSource, useSessionSource } from './player/useSessionSource';
 import type { TimelineRegion } from './player/clipSeam';
-import { clampWindow, zoomWindow, type WindowState } from './player/timelineModel';
+import { clampWindow } from './player/timelineModel';
 import { usePlayback } from './player/usePlayback';
 import { FullSessionBar } from './player/FullSessionBar';
 import { ZoomedTimeline } from './player/ZoomedTimeline';
@@ -25,17 +22,24 @@ import { PlaybackSurface } from './player/PlaybackSurface';
 import { filterBookmarks } from './player/bookmarks';
 import { useClipDialog } from './player/useClipDialog';
 import { ClipDialog } from './player/clipDialog';
-import { computeEditSeek, computeLoopDecision } from './player/clipLoop';
 import {
-  buildDefaultRegion,
   clampTime,
   DEFAULT_REGION_SECONDS,
   markableDuration,
   MIN_REGION_SECONDS,
-  newRegionId,
   resolveClipBounds,
 } from './player/clipModel';
 import { formatTime } from './player/timelineModel';
+import { usePlaylistItem } from './player/usePlaylistItem';
+import { useHostRecordingState } from './player/useHostRecordingState';
+import { useSdrConversion } from './player/useSdrConversion';
+import { useTimelineWindow } from './player/useTimelineWindow';
+import { usePlayerTraining } from './player/usePlayerTraining';
+import { usePlayerVolume } from './player/usePlayerVolume';
+import { useFullscreen } from './player/useFullscreen';
+import { useClipMarks } from './player/useClipMarks';
+import { usePlayerShortcuts } from './player/usePlayerShortcuts';
+import { useRegionLooping } from './player/useRegionLooping';
 import { Button, RadioOption } from '../components/ui/controls';
 import { TrainingSampleEditor } from './TrainingSampleEditor';
 
@@ -84,49 +88,13 @@ export function PlayerView({
   const source = injectedSource ?? ipcSource;
   const { sessions } = useSessionSource(source);
   const navigation = navigationItems ?? sessions;
-  const [itemIndex, setItemIndex] = useState(() => {
-    const initialIndex = requestedItem
-      ? navigation.findIndex((candidate) => candidate.filePath === requestedItem.filePath)
-      : -1;
-    return initialIndex >= 0 ? initialIndex : 0;
-  });
+  const { item, itemIndex, setItemIndex } = usePlaylistItem(navigation, requestedItem);
 
-  useEffect(() => {
-    if (itemIndex >= navigation.length) {
-      setItemIndex(0);
-    }
-  }, [itemIndex, navigation.length]);
-
-  const requestedIndex = useMemo(
-    () => (requestedItem ? navigation.findIndex((s) => s.filePath === requestedItem.filePath) : -1),
-    [requestedItem, navigation],
-  );
-  useEffect(() => {
-    if (requestedIndex >= 0) {
-      setItemIndex(requestedIndex);
-    }
-  }, [requestedIndex]);
-
-  const item: ContentItem | undefined =
-    requestedIndex >= 0 && itemIndex === requestedIndex
-      ? navigation[requestedIndex]
-      : requestedIndex < 0
-        ? (requestedItem ?? navigation[itemIndex] ?? navigation[0])
-        : (navigation[itemIndex] ?? navigation[0]);
-
-  const [automaticClips, setAutomaticClips] = useState<RecordingState['automaticClips']>(null);
-  const [recordingFromState, setRecordingFromState] = useState(false);
-  useEffect(() => client.on('state', (content) => {
-    const state = (content as { state?: RecordingState }).state;
-    const job = state?.automaticClips;
-    setRecordingFromState(state?.recording === true);
-    setAutomaticClips(job?.sourceSessionPath === item?.filePath ? job : null);
-  }), [client, item?.filePath]);
-
+  const hostState = useHostRecordingState(client, item?.filePath);
   const creatingHighlights = item?.contentType === 'recording'
-    && (item.automaticClipsProcessing === true || automaticClips?.active === true);
-  const highlightsPaused = item?.automaticClipsPaused === true || automaticClips?.paused === true;
-  const recording = recordingProp ?? recordingFromState;
+    && (item.automaticClipsProcessing === true || hostState.automaticClips?.active === true);
+  const highlightsPaused = item?.automaticClipsPaused === true || hostState.automaticClips?.paused === true;
+  const recording = recordingProp ?? hostState.recording;
 
   useEffect(() => {
     if (item) {
@@ -157,16 +125,7 @@ export function PlayerView({
   const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
   const [hasStartedPlayback, setHasStartedPlayback] = useState(false);
-  const [sdrJobId, setSdrJobId] = useState<string | null>(null);
-  const [sdrError, setSdrError] = useState<string | null>(null);
-
-  useEffect(() => client.on('importProgress', (content) => {
-    const message = content as { id?: string; status?: string; error?: string };
-    if (message.id !== sdrJobId || (message.status !== 'done' && message.status !== 'error'))
-      return;
-    setSdrJobId(null);
-    setSdrError(message.status === 'error' ? message.error ?? 'SDR conversion failed.' : null);
-  }), [client, sdrJobId]);
+  const sdr = useSdrConversion(client);
 
   useEffect(() => {
     setHasStartedPlayback(false);
@@ -179,32 +138,7 @@ export function PlayerView({
   const clipBounds = resolveClipBounds(durationKnown ? duration : undefined, declaredDuration);
   const clipDuration = markableDuration(clipBounds);
   const canMark = clipDuration >= MIN_REGION_SECONDS;
-
-  const [viewWindow, setViewWindow] = useState<WindowState>(() =>
-    zoomWindow(0, duration, duration),
-  );
-  const viewWindowItem = useRef(item?.filePath);
-  const viewWindowAdjusted = useRef(false);
-
-  useEffect(() => {
-    if (viewWindowItem.current === item?.filePath) {
-      return;
-    }
-    viewWindowItem.current = item?.filePath;
-    viewWindowAdjusted.current = false;
-    setViewWindow(zoomWindow(0, duration, duration));
-  }, [item?.filePath, duration]);
-
-  useEffect(() => {
-    setViewWindow((prev) => viewWindowAdjusted.current
-      ? zoomWindow(currentTime, prev.seconds, duration)
-      : zoomWindow(0, duration, duration));
-  }, [currentTime, duration]);
-
-  const setAdjustedViewWindow = useCallback((next: WindowState) => {
-    viewWindowAdjusted.current = true;
-    setViewWindow(next);
-  }, []);
+  const { viewWindow, setAdjustedViewWindow } = useTimelineWindow(item?.filePath, currentTime, duration);
 
   const dialog = useClipDialog(clipDuration);
   useEffect(() => {
@@ -242,8 +176,7 @@ export function PlayerView({
 
   useEffect(() => {
     return client.on('importProgress', (content) => {
-      const message = content as Parameters<typeof dialog.applyImportProgress>[0];
-      dialog.applyImportProgress(message as Parameters<typeof dialog.applyImportProgress>[0]);
+      dialog.applyImportProgress(content as Parameters<typeof dialog.applyImportProgress>[0]);
     });
   }, [dialog, client]);
 
@@ -280,118 +213,19 @@ export function PlayerView({
       playback.prepareItemChange(playing);
       setItemIndex((index) => Math.max(0, Math.min(navigation.length - 1, index + delta)));
     },
-    [navigation.length, playback, playing],
+    [navigation.length, playback, playing, setItemIndex],
   );
 
   const selectNavigationItem = useCallback((index: number) => {
     if (index === itemIndex || !navigation[index]) return;
     playback.prepareItemChange(playing);
     setItemIndex(index);
-  }, [itemIndex, navigation, playback, playing]);
+  }, [itemIndex, navigation, playback, playing, setItemIndex]);
 
-  const captureTrainingFrame = useCallback(() => {
-    const video = videoRef.current;
-    const gameId = item.gameId ?? item.game;
-    if (!trainingEnabled || !gameId || !video || video.videoWidth === 0 || video.videoHeight === 0) {
-      return;
-    }
-    client.send('CaptureTrainingSample', {
-      gameId,
-      filePath: item.filePath,
-      timestampSeconds: currentTime,
-      imageWidth: video.videoWidth,
-      imageHeight: video.videoHeight,
-      labels: [],
-    });
-  }, [client, currentTime, item, trainingEnabled]);
-
-  const [trainingEvents, setTrainingEvents] = useState<TrainingEventDefinition[]>([]);
-  const [trainingRegionGroups, setTrainingRegionGroups] = useState<TrainingRegionGroup[]>([]);
-  const [trainingModelAvailable, setTrainingModelAvailable] = useState(false);
-  const [labelingSample, setLabelingSample] = useState<TrainingSampleMessage | null>(null);
   const currentGameId = item?.gameId ?? item?.game;
-
-  useEffect(() => {
-    setLabelingSample(null);
-    setTrainingModelAvailable(false);
-    setTrainingRegionGroups([]);
-  }, [currentGameId]);
-
-  useEffect(() => {
-    if (!trainingEnabled || !currentGameId) return;
-    const removeTraining = client.on('training', (content) => {
-      const message = (content as { training?: {
-        gameId?: string;
-        events?: TrainingEventDefinition[];
-        regionGroups?: TrainingRegionGroup[];
-      } }).training;
-      if (message?.events && (!message.gameId || message.gameId === currentGameId)) {
-        setTrainingEvents(message.events);
-        setTrainingRegionGroups(message.regionGroups ?? []);
-      }
-      if (message?.gameId === currentGameId) {
-        setTrainingModelAvailable(Boolean((message as { model?: unknown }).model));
-      }
-    });
-    const removeSample = client.on('trainingSample', (content) => {
-      const message = content as TrainingSampleMessage & { gameId?: string };
-      if (!message.gameId || message.gameId === currentGameId) {
-        setLabelingSample(message);
-      }
-    });
-    client.send('ListTraining', { gameId: currentGameId });
-    return () => {
-      removeTraining();
-      removeSample();
-    };
-  }, [client, currentGameId, trainingEnabled]);
-
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const lastAudibleVolume = useRef(1);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-    video.volume = volume;
-    video.muted = muted;
-    video.playbackRate = playbackRate;
-    video.defaultPlaybackRate = playbackRate;
-  }, [volume, muted, playbackRate, item]);
-
-  const changeVolume = useCallback((next: number) => {
-    setVolume(next);
-    setMuted(next === 0);
-    if (next > 0) {
-      lastAudibleVolume.current = next;
-    }
-  }, []);
-
-  const toggleMute = useCallback(() => {
-    if (!muted) {
-      setMuted(true);
-      return;
-    }
-    if (volume === 0) {
-      setVolume(lastAudibleVolume.current || 1);
-    }
-    setMuted(false);
-  }, [muted, volume]);
-
-  const toggleFullscreen = useCallback(() => {
-    const player = playerRootRef.current;
-    if (!player || !document.fullscreenEnabled) {
-      return;
-    }
-    if (document.fullscreenElement === player) {
-      void document.exitFullscreen();
-    } else {
-      void player.requestFullscreen();
-    }
-  }, []);
+  const training = usePlayerTraining(client, trainingEnabled, currentGameId);
+  const volume = usePlayerVolume(videoRef, item);
+  const { rootRef: playerRootRef, isFullscreen, toggleFullscreen } = useFullscreen<HTMLElement>();
 
   const openClipDialog = useCallback(() => {
     if (item && regions.length > 0) {
@@ -399,19 +233,11 @@ export function PlayerView({
     }
   }, [item, currentTime, dialog, regions.length]);
 
-  const [markInTime, setMarkInTime] = useState<number | null>(null);
   const canAdjustRegions = externalRegions === undefined;
-  const playerRootRef = useRef<HTMLElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const marks = useClipMarks({ dialog, currentTime, clipDuration, canMark, filePath: item?.filePath });
+  const { markInTime } = marks;
 
   useEffect(() => {
-    const onFullscreenChange = () => setIsFullscreen(document.fullscreenElement === playerRootRef.current);
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-  }, []);
-
-  useEffect(() => {
-    setMarkInTime(null);
     setHiddenKinds(new Set());
     awaitingAddedBookmark.current = false;
   }, [item?.filePath]);
@@ -453,33 +279,6 @@ export function PlayerView({
     [client, item],
   );
 
-  const markIn = useCallback(() => {
-    if (!canMark) {
-      return;
-    }
-    setMarkInTime(clampTime(currentTime, clipDuration));
-  }, [canMark, currentTime, clipDuration]);
-
-  const markOut = useCallback(() => {
-    if (markInTime === null) {
-      return;
-    }
-    const out = clampTime(currentTime, clipDuration);
-    if (out <= markInTime) {
-      return;
-    }
-    dialog.markRegion(markInTime, out);
-    if (Math.abs(out - markInTime) >= MIN_REGION_SECONDS) {
-      setMarkInTime(null);
-    }
-  }, [markInTime, currentTime, clipDuration, dialog]);
-
-  const markSegmentAtPlayhead = useCallback(() => {
-    const region = buildDefaultRegion(currentTime, clipDuration, newRegionId());
-    dialog.markRegion(region.start, region.end);
-    setMarkInTime(null);
-  }, [currentTime, clipDuration, dialog]);
-
   const updateRegionBounds = useCallback(
     (id: string, bounds: { start: number; end: number }) => {
       dialog.updateRegion(id, bounds.start, bounds.end);
@@ -487,120 +286,26 @@ export function PlayerView({
     [dialog],
   );
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent): void {
-      const eventTarget = event.target instanceof HTMLElement ? event.target : null;
-      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const target = eventTarget && eventTarget !== document.body ? eventTarget : activeElement;
-      if (document.querySelector('[role="dialog"]')
-        || target?.closest('button, a[href], input, textarea, select, [contenteditable="true"], [role="slider"], [role="radio"]')) {
-        return;
+  usePlayerShortcuts({
+    onEscape: () => {
+      if (markInTime !== null) {
+        marks.clearMarkIn();
+      } else {
+        onBack?.();
       }
-      if (event.ctrlKey || event.metaKey || event.altKey) {
-        return;
-      }
-      const key = event.key.toLowerCase();
-      if (event.repeat && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (markInTime !== null) {
-          setMarkInTime(null);
-        } else {
-          onBack?.();
-        }
-        return;
-      }
-      if (key === 'delete' && item && onDelete) {
-        event.preventDefault();
-        onDelete(item);
-        return;
-      }
-      if (key === 'f' && onToggleFavorite) {
-        event.preventDefault();
-        handleToggleFavorite();
-        return;
-      }
-      if (key === 'i') {
-        event.preventDefault();
-        markIn();
-        return;
-      }
-      if (key === 'o') {
-        event.preventDefault();
-        markOut();
-        return;
-      }
-      if (key === 'm') {
-        event.preventDefault();
-        markSegmentAtPlayhead();
-        return;
-      }
-      if (key === 'b') {
-        event.preventDefault();
-        addBookmark();
-        return;
-      }
-      if (event.code === 'Space') {
-        event.preventDefault();
-        playback.togglePlayPause();
-      } else if (event.shiftKey && event.key === 'ArrowLeft') {
-        event.preventDefault();
-        navigate(-1);
-      } else if (event.shiftKey && event.key === 'ArrowRight') {
-        event.preventDefault();
-        navigate(1);
-      } else if (event.key === 'ArrowLeft') {
-        event.preventDefault();
-        seek(currentTime - 5);
-      } else if (event.key === 'ArrowRight') {
-        event.preventDefault();
-        seek(currentTime + 5);
-      }
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [playback, currentTime, seek, markIn, markOut, markSegmentAtPlayhead, addBookmark, onToggleFavorite, handleToggleFavorite, item, onDelete, navigate, markInTime, onBack]);
+    },
+    onDelete: item && onDelete ? () => onDelete(item) : undefined,
+    onFavorite: onToggleFavorite ? handleToggleFavorite : undefined,
+    onMarkIn: marks.markIn,
+    onMarkOut: marks.markOut,
+    onQuickClip: marks.markSegmentAtPlayhead,
+    onBookmark: addBookmark,
+    onTogglePlay: playback.togglePlayPause,
+    onNavigate: navigate,
+    onSeekBy: (seconds) => seek(currentTime + seconds),
+  });
 
-  const lastSampleRef = useRef<number | null>(null);
-  useEffect(() => {
-    const previousTime = lastSampleRef.current;
-    lastSampleRef.current = currentTime;
-    if (previousTime === null) {
-      return;
-    }
-    const decision = computeLoopDecision(currentTime, previousTime, playing, regions, selectedRegionId);
-    if (decision.shouldLoopBack && decision.region) {
-      seek(clampTime(decision.region.start, duration));
-    }
-  }, [currentTime, playing, regions, selectedRegionId, seek, duration]);
-
-  const selectedRegion = useMemo(
-    () => regions.find((region) => region.id === selectedRegionId) ?? null,
-    [regions, selectedRegionId],
-  );
-  const loopBoundsRef = useRef<TimelineRegion | null>(null);
-  const loopDurationRef = useRef(clipDuration);
-  const reconcilingRef = useRef(false);
-  useEffect(() => {
-    const previousBounds = loopBoundsRef.current;
-    loopBoundsRef.current = selectedRegion;
-    const spendingGrace = reconcilingRef.current;
-    if (loopDurationRef.current !== clipDuration) {
-      loopDurationRef.current = clipDuration;
-      reconcilingRef.current = true;
-      return;
-    }
-    reconcilingRef.current = false;
-    if (spendingGrace) {
-      return;
-    }
-    const target = computeEditSeek(previousBounds, selectedRegion, currentTime);
-    if (target !== null) {
-      seek(clampTime(target, duration));
-    }
-  }, [selectedRegion, currentTime, clipDuration, duration, seek]);
+  useRegionLooping({ currentTime, playing, regions, selectedRegionId, duration, clipDuration, seek });
 
   if (!item) {
     return (
@@ -619,13 +324,10 @@ export function PlayerView({
   };
 
   const handleConvertToSdr = () => {
-    if (recording || !convertHdrClipsToSdr || item.isHdr !== true || sdrJobId
+    if (recording || !convertHdrClipsToSdr || item.isHdr !== true || sdr.jobId
       || (item.contentType !== 'clip' && item.contentType !== 'highlight'))
       return;
-    const id = `sdr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setSdrError(null);
-    setSdrJobId(id);
-    client.send('ConvertToSdr', { id, contentType: item.contentType, filePath: item.filePath });
+    sdr.start({ contentType: item.contentType, filePath: item.filePath });
   };
 
   const handleRename = (renamedItem: ContentItem, title: string) => {
@@ -656,9 +358,9 @@ export function PlayerView({
         onReviewSession={onReviewSession}
         convertHdrClipsToSdr={convertHdrClipsToSdr}
         recording={recording}
-        convertingToSdr={sdrJobId !== null}
+        convertingToSdr={sdr.jobId !== null}
         onConvertToSdr={handleConvertToSdr}
-        conversionError={sdrError}
+        conversionError={sdr.error}
       />
       <PlaybackSurface
         item={item}
@@ -681,20 +383,19 @@ export function PlayerView({
         onError={() => setHasStartedPlayback(false)}
       />
 
-      {}
       <div className="player-console">
         <TransportBar
           playing={playing}
           currentTime={currentTime}
           duration={duration}
-          volume={volume}
-          muted={muted}
+          volume={volume.volume}
+          muted={volume.muted}
           onTogglePlayPause={playback.togglePlayPause}
           onToggleFullscreen={toggleFullscreen}
-          playbackRate={playbackRate}
-          onVolumeChange={changeVolume}
-          onToggleMute={toggleMute}
-          onPlaybackRateChange={setPlaybackRate}
+          playbackRate={volume.playbackRate}
+          onVolumeChange={volume.changeVolume}
+          onToggleMute={volume.toggleMute}
+          onPlaybackRateChange={volume.setPlaybackRate}
           onPrevious={() => navigate(-1)}
           onNext={() => navigate(1)}
           canNavigatePrevious={itemIndex > 0}
@@ -706,29 +407,28 @@ export function PlayerView({
         />
 
         <div className="timeline-stack">
-        <FullSessionBar
-          currentTime={currentTime}
-          duration={duration}
-          bookmarks={visibleBookmarks}
-          window={clampWindow(viewWindow, duration)}
-          onSeek={seek}
-        />
-        {}
-        {!isFullscreen && (
-          <ZoomedTimeline
+          <FullSessionBar
             currentTime={currentTime}
             duration={duration}
-            window={clampWindow(viewWindow, duration)}
             bookmarks={visibleBookmarks}
-            regions={regions}
-            selectedRegionId={selectedRegionId}
-            markInTime={canAdjustRegions ? markInTime : null}
-            onWindowChange={setAdjustedViewWindow}
+            window={clampWindow(viewWindow, duration)}
             onSeek={seek}
-            onRegionSelect={onRegionSelect}
-            onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
           />
-        )}
+          {!isFullscreen && (
+            <ZoomedTimeline
+              currentTime={currentTime}
+              duration={duration}
+              window={clampWindow(viewWindow, duration)}
+              bookmarks={visibleBookmarks}
+              regions={regions}
+              selectedRegionId={selectedRegionId}
+              markInTime={canAdjustRegions ? markInTime : null}
+              onWindowChange={setAdjustedViewWindow}
+              onSeek={seek}
+              onRegionSelect={onRegionSelect}
+              onRegionChange={canAdjustRegions ? updateRegionBounds : undefined}
+            />
+          )}
         </div>
         <div className="player-clip-tools">
         {(canAdjustRegions || canBookmark) && (
@@ -745,23 +445,21 @@ export function PlayerView({
           {canAdjustRegions && (
           <>
           <Button variant="primary" size="small"
-            onClick={markSegmentAtPlayhead}
+            onClick={marks.markSegmentAtPlayhead}
             disabled={!canMark}
             aria-label={`Make a ${DEFAULT_REGION_SECONDS}-second clip around where you are`}
             title={`A ${DEFAULT_REGION_SECONDS}s clip around where you are (M)`}>
             Quick clip (M)
           </Button>
           <Button variant="ghost" size="small"
-
-            onClick={markIn}
+            onClick={marks.markIn}
             disabled={!canMark}
             aria-label="Set the clip start"
             title="Start a clip where you are (I)">
             Set start (I)
           </Button>
           <Button variant="ghost" size="small"
-
-            onClick={markOut}
+            onClick={marks.markOut}
             disabled={!canMark || markInTime === null}
             aria-label="Set the clip end"
             title="End the clip where you are (O)">
@@ -769,8 +467,7 @@ export function PlayerView({
           </Button>
           {markInTime !== null && (
             <Button variant="ghost" size="small"
-
-              onClick={() => setMarkInTime(null)}
+              onClick={marks.clearMarkIn}
               aria-label="Clear the clip start"
             >
               Clear start
@@ -783,7 +480,7 @@ export function PlayerView({
             <Button
               variant="ghost"
               size="small"
-              onClick={captureTrainingFrame}
+              onClick={() => training.captureFrame(item, currentTime, videoRef.current)}
               disabled={!durationKnown || !videoRef.current?.videoWidth}
               title="Save this full frame in the training workspace"
             >
@@ -806,7 +503,6 @@ export function PlayerView({
         )}
 
         {regions.length > 0 && <div className="player-footer">
-        {}
           <div className="player-clip-mode" role="radiogroup" aria-label="Create as">
             <span className="player-clip-mode-label">Create as</span>
             <RadioOption
@@ -825,7 +521,6 @@ export function PlayerView({
             />
           </div>
         <Button variant="primary" size="small"
-
           onClick={dialog.create}
           disabled={regions.length === 0 || clipInFlight}
           title={regions.length === 0 ? 'Set at least one clip first' : 'Create clips from the ones you set'}
@@ -834,7 +529,6 @@ export function PlayerView({
           {clipInFlight ? 'Creating clips…' : 'Create clips'}
         </Button>
         <Button variant="ghost" size="small"
-
           onClick={openClipDialog}
           disabled={regions.length === 0}
           aria-label="Open clip dialog">
@@ -862,17 +556,17 @@ export function PlayerView({
       )}
 
       <ClipDialog dialog={dialog} currentTime={currentTime} />
-      {labelingSample && currentGameId && (
+      {training.sample && currentGameId && (
         <TrainingSampleEditor
           client={client}
           gameId={currentGameId}
-          sample={labelingSample}
-          events={trainingEvents}
-          regionGroups={trainingRegionGroups}
-          hasModel={trainingModelAvailable}
+          sample={training.sample}
+          events={training.events}
+          regionGroups={training.regionGroups}
+          hasModel={training.modelAvailable}
           onEventsChange={(events, requestId) => client.send('UpdateTrainingEvents', { gameId: currentGameId, requestId, events })}
           onRegionGroupsChange={(regionGroups, requestId) => client.send('UpdateTrainingRegionGroups', { gameId: currentGameId, requestId, regionGroups })}
-          onClose={() => setLabelingSample(null)}
+          onClose={training.closeSample}
         />
       )}
     </section>

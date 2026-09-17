@@ -99,17 +99,10 @@ internal sealed partial class AppHost : IDisposable
     private PendingSessionReassignment? _pendingSessionReassignment;
     private RecordingMode? _activeRecordingMode;
     private readonly object _automaticClipGate = new();
-    private readonly List<Bookmark> _automaticClipBookmarks = [];
     private AutomaticClipJob? _automaticClipJob;
     private bool _backgroundWorkSuspendedForRecording;
-    private CancellationTokenSource? _liveHighlightCancellation;
-    private readonly List<Task> _liveHighlightTasks = [];
-    private readonly List<LiveHighlightRegion> _liveHighlightRegions = [];
-    private readonly HashSet<Guid> _liveHighlightBookmarkIds = [];
-    private DateTime _recordingStartUtc;
-    private bool _liveHighlightsEnabled;
+    private readonly LiveHighlightTracker _liveHighlights = new();
 
-    private bool _liveHighlightsEnabledAtSessionStart;
     private CancellationTokenSource? _captureWaitCancellation;
     private int _recordingStopRequested;
     private readonly DetectedGameTracker _detectedGames = new();

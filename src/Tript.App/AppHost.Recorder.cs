@@ -102,8 +102,7 @@ internal sealed partial class AppHost
             if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
                 return StartRecordingResult.AlreadyRunning;
 
-            lock (_automaticClipGate)
-                _liveHighlightsEnabledAtSessionStart = false;
+            _liveHighlights.DisarmSessionStart();
 
             settings = _settingsStore.Load();
             resolved = SettingsResolver.Resolve(settings, effectiveGameId);
@@ -231,21 +230,8 @@ internal sealed partial class AppHost
             };
 
             _sessionTracker.Start(startedUtc);
-            lock (_automaticClipGate)
-            {
-                _automaticClipBookmarks.Clear();
-                _liveHighlightRegions.Clear();
-                _liveHighlightBookmarkIds.Clear();
-                _recordingStartUtc = startedUtc;
-                _liveHighlightsEnabled = settings.Recording.AutomaticClipsEnabled
-                    && resolved.Mode.UsesReplayBuffer();
-                _liveHighlightsEnabledAtSessionStart = _liveHighlightsEnabled;
-                _liveHighlightCancellation?.Dispose();
-                _liveHighlightCancellation = _liveHighlightsEnabled
-                    ? new CancellationTokenSource()
-                    : null;
-                _liveHighlightTasks.Clear();
-            }
+            _liveHighlights.Begin(startedUtc,
+                settings.Recording.AutomaticClipsEnabled && resolved.Mode.UsesReplayBuffer());
 
             if (processOwner is not null && effectiveGameId is not null)
                 StartDetection(effectiveGameId);
@@ -358,20 +344,7 @@ internal sealed partial class AppHost
 
         var sourcePath = _activeOutputPath;
         var recordsSession = _activeRecordingMode?.RecordsSession() == true;
-        List<Bookmark> automaticBookmarks;
-        HashSet<Guid> liveBookmarkIds;
-        bool automaticClipsWereLive;
-        lock (_automaticClipGate)
-        {
-            automaticBookmarks = _automaticClipBookmarks.ToList();
-            _automaticClipBookmarks.Clear();
-            liveBookmarkIds = _liveHighlightBookmarkIds.ToHashSet();
-            _liveHighlightRegions.Clear();
-            _liveHighlightBookmarkIds.Clear();
-            automaticClipsWereLive = _liveHighlightsEnabledAtSessionStart;
-            _liveHighlightsEnabledAtSessionStart = false;
-            _liveHighlightsEnabled = false;
-        }
+        var live = _liveHighlights.Finish();
 
         var session = _sessionTracker.Stop();
         if (session is not null && _pendingMetadata is not null && recordsSession)
@@ -380,10 +353,10 @@ internal sealed partial class AppHost
             WriteMetadataRecord(_pendingMetadata);
 
             if (sourcePath is not null && _pendingMetadata.VideoPath.Length > 0
-                && automaticClipsWereLive)
+                && live.WereLive)
             {
-                var unsavedBookmarks = automaticBookmarks
-                    .Where(bookmark => !liveBookmarkIds.Contains(bookmark.Id))
+                var unsavedBookmarks = live.Candidates
+                    .Where(bookmark => !live.SavedBookmarkIds.Contains(bookmark.Id))
                     .ToList();
                 if (unsavedBookmarks.Count > 0)
                     QueueAutomaticClips(sourcePath, _pendingMetadata.VideoPath, unsavedBookmarks,

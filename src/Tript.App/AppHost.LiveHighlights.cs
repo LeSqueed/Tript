@@ -12,61 +12,14 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    private sealed class LiveHighlightRegion
-    {
-        internal required TimeSpan Start { get; set; }
-
-        internal required TimeSpan End { get; set; }
-
-        internal HashSet<Guid> BookmarkIds { get; } = [];
-
-        internal bool SaveRequested { get; set; }
-
-        internal bool Abandoned { get; set; }
-    }
-
-    private static readonly TimeSpan LiveHighlightBoundaryGrace = TimeSpan.FromSeconds(1);
-
     private void RememberAutomaticClipBookmark(Bookmark bookmark)
     {
         var (before, after) = SettingsResolver.ResolveAutomaticClipWindow(_settingsStore.Load(), _currentGameId);
         bookmark.IsAutomaticClipCandidate = true;
-        LiveHighlightRegion? regionToSchedule = null;
-        CancellationToken token = default;
-        lock (_automaticClipGate)
-        {
-            _automaticClipBookmarks.Add(bookmark);
+        if (_liveHighlights.Remember(bookmark, before, after) is not { } schedule)
+            return;
 
-            if (!_liveHighlightsEnabled || _liveHighlightCancellation is null)
-                return;
-
-            var start = bookmark.Time > before
-                ? bookmark.Time - before
-                : TimeSpan.Zero;
-            var existing = _liveHighlightRegions.FirstOrDefault(region =>
-                !region.SaveRequested && bookmark.Time - before <= region.End);
-            if (existing is not null)
-            {
-                existing.End = existing.End > bookmark.Time + after
-                    ? existing.End
-                    : bookmark.Time + after;
-                existing.BookmarkIds.Add(bookmark.Id);
-                return;
-            }
-
-            regionToSchedule = new LiveHighlightRegion
-            {
-                Start = start,
-                End = bookmark.Time + after,
-            };
-            regionToSchedule.BookmarkIds.Add(bookmark.Id);
-            _liveHighlightRegions.Add(regionToSchedule);
-            token = _liveHighlightCancellation.Token;
-        }
-
-        var task = SaveLiveAutomaticHighlightWhenReady(regionToSchedule, token);
-        lock (_automaticClipGate)
-            _liveHighlightTasks.Add(task);
+        _liveHighlights.Track(SaveLiveAutomaticHighlightWhenReady(schedule.Region, schedule.Token));
     }
 
     private async Task SaveLiveAutomaticHighlightWhenReady(LiveHighlightRegion region,
@@ -77,25 +30,17 @@ internal sealed partial class AppHost
             while (true)
             {
                 var (before, _) = SettingsResolver.ResolveAutomaticClipWindow(_settingsStore.Load(), _currentGameId);
-                TimeSpan delay;
-                lock (_automaticClipGate)
-                {
-                    if (region.SaveRequested || !_liveHighlightsEnabled)
-                        return;
-                    delay = _recordingStartUtc + region.End + before + LiveHighlightBoundaryGrace - DateTime.UtcNow;
-                }
+                if (_liveHighlights.TimeUntilDue(region, before) is not { } delay)
+                    return;
 
                 if (delay > TimeSpan.Zero)
                     await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
-                lock (_automaticClipGate)
-                {
-                    if (region.SaveRequested || !_liveHighlightsEnabled)
-                        return;
-                    if (_recordingStartUtc + region.End + before + LiveHighlightBoundaryGrace > DateTime.UtcNow)
-                        continue;
-                    region.SaveRequested = true;
-                }
+                var claim = _liveHighlights.TryClaim(region, before);
+                if (claim == LiveHighlightClaim.Stop)
+                    return;
+                if (claim == LiveHighlightClaim.NotYet)
+                    continue;
 
                 var recorder = _recorder;
                 var sourcePath = _activeSessionPath;
@@ -105,7 +50,7 @@ internal sealed partial class AppHost
                 var sourceSessionPath = RelativeToRoot(sourcePath);
                 var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
                 Directory.CreateDirectory(replayDirectory);
-                var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
+                var saveElapsed = _liveHighlights.ElapsedSeconds;
                 var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var accepted = recorder.SaveReplayBuffer(replayDirectory,
                     "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss",
@@ -132,8 +77,7 @@ internal sealed partial class AppHost
 
                 if (!accepted)
                 {
-                    lock (_automaticClipGate)
-                        region.SaveRequested = false;
+                    _liveHighlights.Release([region]);
                     await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken)
                         .ConfigureAwait(false);
                     continue;
@@ -148,11 +92,7 @@ internal sealed partial class AppHost
         }
         catch (TimeoutException)
         {
-            lock (_automaticClipGate)
-            {
-                region.Abandoned = true;
-                region.SaveRequested = false;
-            }
+            _liveHighlights.Abandon([region]);
             Log.Warning("AppHost: replay buffer save did not complete for live automatic highlight");
         }
         catch (Exception exception)
@@ -166,7 +106,7 @@ internal sealed partial class AppHost
     {
         try
         {
-            if (!File.Exists(replayPath) || IsAbandonedLiveRegion(region))
+            if (!File.Exists(replayPath) || _liveHighlights.IsAbandoned(region))
                 return;
 
             var bufferSeconds = Math.Max(1,
@@ -195,7 +135,7 @@ internal sealed partial class AppHost
                 PreferStreamCopy = true,
             });
 
-            if (IsAbandonedLiveRegion(region))
+            if (_liveHighlights.IsAbandoned(region))
             {
                 foreach (var result in results)
                 {
@@ -225,11 +165,7 @@ internal sealed partial class AppHost
                 return;
             }
 
-            lock (_automaticClipGate)
-            {
-                foreach (var bookmarkId in region.BookmarkIds)
-                    _liveHighlightBookmarkIds.Add(bookmarkId);
-            }
+            _liveHighlights.MarkSaved(region);
             PushContent();
         }
         finally
@@ -243,49 +179,9 @@ internal sealed partial class AppHost
         }
     }
 
-    private bool IsAbandonedLiveRegion(LiveHighlightRegion region)
-    {
-        lock (_automaticClipGate)
-            return region.Abandoned;
-    }
-
     private void StopLiveAutomaticHighlights()
     {
-        Task[] tasks;
-        CancellationTokenSource? cancellation;
-        lock (_automaticClipGate)
-        {
-            _liveHighlightsEnabled = false;
-            cancellation = _liveHighlightCancellation;
-            cancellation?.Cancel();
-            _liveHighlightCancellation = null;
-            tasks = _liveHighlightTasks.ToArray();
-        }
-
-        try
-        {
-            Task.WaitAll(tasks, TimeSpan.FromSeconds(2));
-        }
-        catch (Exception exception) when (exception is AggregateException or ObjectDisposedException)
-        {
-            Log.Debug(exception, "AppHost: live automatic highlight tasks did not all settle before stop");
-        }
-        finally
-        {
-            lock (_automaticClipGate)
-            {
-                foreach (var region in _liveHighlightRegions)
-                {
-                    if (region.SaveRequested && !_liveHighlightBookmarkIds.Overlaps(region.BookmarkIds))
-                    {
-                        region.Abandoned = true;
-                        region.SaveRequested = false;
-                    }
-                }
-            }
-            cancellation?.Dispose();
-        }
-
+        _liveHighlights.Stop();
         SavePendingLiveHighlightsAtStop();
     }
 
@@ -296,25 +192,14 @@ internal sealed partial class AppHost
         if (recorder is null || sourcePath is null)
             return;
 
-        List<LiveHighlightRegion> pending;
-        lock (_automaticClipGate)
-        {
-            pending = _liveHighlightRegions
-                .Where(region => !region.Abandoned
-                    && !region.SaveRequested
-                    && !_liveHighlightBookmarkIds.Overlaps(region.BookmarkIds))
-                .ToList();
-            foreach (var region in pending)
-                region.SaveRequested = true;
-        }
-
+        var pending = _liveHighlights.ClaimUnsaved();
         if (pending.Count == 0)
             return;
 
         var sourceSessionPath = RelativeToRoot(sourcePath);
         var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
         Directory.CreateDirectory(replayDirectory);
-        var saveElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
+        var saveElapsed = _liveHighlights.ElapsedSeconds;
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = recorder.SaveReplayBuffer(replayDirectory,
             "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss",
@@ -344,11 +229,7 @@ internal sealed partial class AppHost
 
         if (!accepted)
         {
-            lock (_automaticClipGate)
-            {
-                foreach (var region in pending)
-                    region.SaveRequested = false;
-            }
+            _liveHighlights.Release(pending);
             return;
         }
 
@@ -356,14 +237,7 @@ internal sealed partial class AppHost
         {
             if (!completed.Task.Wait(TimeSpan.FromSeconds(5)))
             {
-                lock (_automaticClipGate)
-                {
-                    foreach (var region in pending)
-                    {
-                        region.Abandoned = true;
-                        region.SaveRequested = false;
-                    }
-                }
+                _liveHighlights.Abandon(pending);
                 Log.Warning("AppHost: pending live automatic highlights timed out at stop");
             }
         }

@@ -81,9 +81,7 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         Assert.NotNull(typeof(AppHost).GetField("_activeSessionPath", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(_host));
 
-        var bookmarks = (List<Bookmark>)typeof(AppHost).GetField("_automaticClipBookmarks",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
-        bookmarks.Add(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
+        LiveHighlights().AddCandidate(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
 
         Assert.True(_host.StopRecording());
         Assert.Equal(0, _clipEngine.CreateClipsCalls);
@@ -115,9 +113,8 @@ public sealed class AutomaticClipStopGateTests : IDisposable
     [Fact]
     public void FailedRecordingAttempt_ClearsAStaleSessionStartGate()
     {
-        var gate = typeof(AppHost).GetField("_liveHighlightsEnabledAtSessionStart",
-            BindingFlags.Instance | BindingFlags.NonPublic)!;
-        gate.SetValue(_host, true);
+        LiveHighlights().Begin(DateTime.UtcNow, enabled: true);
+        Assert.True(SessionStartGate());
         _store.Load().Capture.Method = DisplayCaptureMethod.Game;
         _store.Save();
 
@@ -136,9 +133,7 @@ public sealed class AutomaticClipStopGateTests : IDisposable
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
         File.WriteAllText(outputPath, string.Empty);
 
-        var bookmarks = (List<Bookmark>)typeof(AppHost).GetField("_automaticClipBookmarks",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
-        bookmarks.Add(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
+        LiveHighlights().AddCandidate(new Bookmark { Type = BookmarkType.Kill, Time = TimeSpan.FromSeconds(10) });
 
         Assert.True(_host.StopRecording());
 
@@ -147,8 +142,10 @@ public sealed class AutomaticClipStopGateTests : IDisposable
         Assert.True(SpinWait.SpinUntil(() => jobField.GetValue(_host) is null, TimeSpan.FromSeconds(5)));
     }
 
-    private bool SessionStartGate() =>
-        (bool)typeof(AppHost).GetField("_liveHighlightsEnabledAtSessionStart",
+    private bool SessionStartGate() => LiveHighlights().EnabledAtSessionStart;
+
+    private LiveHighlightTracker LiveHighlights() =>
+        (LiveHighlightTracker)typeof(AppHost).GetField("_liveHighlights",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
 
     private sealed class RecordingClipEngine : IClipEngine

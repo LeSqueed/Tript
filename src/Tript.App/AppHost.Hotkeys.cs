@@ -68,7 +68,7 @@ internal sealed partial class AppHost
         }
 
         var quickClipSeconds = Math.Max(1, _settingsStore.Load().Hotkeys.QuickClipSeconds);
-        var nowElapsed = (DateTime.UtcNow - _recordingStartUtc).TotalSeconds;
+        var nowElapsed = _liveHighlights.ElapsedSeconds;
         var region = new LiveHighlightRegion
         {
             Start = TimeSpan.FromSeconds(Math.Max(0, nowElapsed - quickClipSeconds)),

@@ -254,54 +254,65 @@ internal static class DetectionFramePreprocessor
     }
 
     internal static byte[] CropAndResizeGray(byte[] srcGray, int srcW, int srcH,
-        int cropX, int cropY, int cropW, int cropH, int dstW, int dstH)
-    {
-        var crop = ArrayPool<byte>.Shared.Rent(cropW * cropH);
-        try
-        {
-            for (int y = 0; y < cropH; y++)
-            {
-                Array.Copy(srcGray, (cropY + y) * srcW + cropX, crop, y * cropW, cropW);
-            }
+        int cropX, int cropY, int cropW, int cropH, int dstW, int dstH) =>
+        ResizeGrayRegion(srcGray, srcW, cropX, cropY, cropW, cropH, dstW, dstH);
 
-            return ResizeGray(crop, cropW, cropH, dstW, dstH);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(crop);
-        }
-    }
+    internal static byte[] ResizeGray(byte[] crop, int cropW, int cropH, int dstW, int dstH) =>
+        ResizeGrayRegion(crop, cropW, 0, 0, cropW, cropH, dstW, dstH);
 
-    internal static byte[] ResizeGray(byte[] crop, int cropW, int cropH, int dstW, int dstH)
+    private static byte[] ResizeGrayRegion(byte[] src, int stride, int originX, int originY,
+        int cropW, int cropH, int dstW, int dstH)
     {
         var maxX = cropW - 1;
         var maxY = cropH - 1;
 
-        var dst = ArrayPool<byte>.Shared.Rent(dstW * dstH);
-        for (int dy = 0; dy < dstH; dy++)
+        var left = ArrayPool<int>.Shared.Rent(dstW);
+        var right = ArrayPool<int>.Shared.Rent(dstW);
+        var xWeights = ArrayPool<float>.Shared.Rent(dstW);
+        try
         {
-            float sy = (dy + 0.5f) * cropH / dstH - 0.5f;
-            if (sy < 0) sy = 0;
-            if (sy >= maxY) sy = Math.Max(cropH - 1.001f, 0f);
-            int sy0 = (int)sy, sy1 = Math.Min(sy0 + 1, maxY);
-            float fy = sy - sy0;
-
             for (int dx = 0; dx < dstW; dx++)
             {
                 float sx = (dx + 0.5f) * cropW / dstW - 0.5f;
                 if (sx < 0) sx = 0;
                 if (sx >= maxX) sx = Math.Max(cropW - 1.001f, 0f);
                 int sx0 = (int)sx, sx1 = Math.Min(sx0 + 1, maxX);
-                float fx = sx - sx0;
-
-                var v = (1 - fx) * (1 - fy) * crop[sy0 * cropW + sx0]
-                      + fx * (1 - fy) * crop[sy0 * cropW + sx1]
-                      + (1 - fx) * fy * crop[sy1 * cropW + sx0]
-                      + fx * fy * crop[sy1 * cropW + sx1];
-                dst[dy * dstW + dx] = (byte)v;
+                xWeights[dx] = sx - sx0;
+                left[dx] = originX + sx0;
+                right[dx] = originX + sx1;
             }
+
+            var dst = ArrayPool<byte>.Shared.Rent(dstW * dstH);
+            for (int dy = 0; dy < dstH; dy++)
+            {
+                float sy = (dy + 0.5f) * cropH / dstH - 0.5f;
+                if (sy < 0) sy = 0;
+                if (sy >= maxY) sy = Math.Max(cropH - 1.001f, 0f);
+                int sy0 = (int)sy, sy1 = Math.Min(sy0 + 1, maxY);
+                float fy = sy - sy0;
+                var top = (originY + sy0) * stride;
+                var bottom = (originY + sy1) * stride;
+                var rowStart = dy * dstW;
+
+                for (int dx = 0; dx < dstW; dx++)
+                {
+                    var fx = xWeights[dx];
+                    var v = (1 - fx) * (1 - fy) * src[top + left[dx]]
+                          + fx * (1 - fy) * src[top + right[dx]]
+                          + (1 - fx) * fy * src[bottom + left[dx]]
+                          + fx * fy * src[bottom + right[dx]];
+                    dst[rowStart + dx] = (byte)v;
+                }
+            }
+
+            return dst;
         }
-        return dst;
+        finally
+        {
+            ArrayPool<int>.Shared.Return(left);
+            ArrayPool<int>.Shared.Return(right);
+            ArrayPool<float>.Shared.Return(xWeights);
+        }
     }
 
     private static bool VectorFillSupported =>

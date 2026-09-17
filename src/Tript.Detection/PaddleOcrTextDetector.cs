@@ -18,6 +18,9 @@ internal sealed class PaddleOcrTextDetector : IDisposable
     private readonly InferenceSession _session;
     private readonly string _inputName;
     private readonly string _outputName;
+    private float[] _input = [];
+    private bool[] _visited = [];
+    private int[] _queue = [];
 
     internal PaddleOcrTextDetector(string modelPath)
     {
@@ -45,9 +48,12 @@ internal sealed class PaddleOcrTextDetector : IDisposable
         int cropX, int cropY, int cropWidth, int cropHeight)
     {
         var (inputWidth, inputHeight) = ResizeDimensions(cropWidth, cropHeight);
-        var input = PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight,
-            inputWidth, inputHeight);
-        var tensor = new DenseTensor<float>(input, [1, 3, inputHeight, inputWidth]);
+        var inputLength = inputWidth * inputHeight * 3;
+        if (_input.Length < inputLength)
+            _input = new float[inputLength];
+        PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight,
+            inputWidth, inputHeight, _input);
+        var tensor = new DenseTensor<float>(_input.AsMemory(0, inputLength), [1, 3, inputHeight, inputWidth]);
         using var results = _session.Run(
             [NamedOnnxValue.CreateFromTensor(_inputName, tensor)], [_outputName]);
         var output = results.Single().AsTensor<float>();
@@ -59,7 +65,13 @@ internal sealed class PaddleOcrTextDetector : IDisposable
         }
 
         var span = output is DenseTensor<float> dense ? dense.Buffer.Span : output.ToArray().AsSpan();
-        return FindRegions(span, dimensions[3], dimensions[2], cropWidth, cropHeight);
+        if (_visited.Length < span.Length)
+        {
+            _visited = new bool[span.Length];
+            _queue = new int[span.Length];
+        }
+
+        return FindRegions(span, dimensions[3], dimensions[2], cropWidth, cropHeight, _visited, _queue);
     }
 
     internal static (int Width, int Height) ResizeDimensions(int width, int height)
@@ -76,41 +88,46 @@ internal sealed class PaddleOcrTextDetector : IDisposable
     internal static float[] PrepareInput(byte[] bgra, int frameWidth, int frameHeight,
         int cropX, int cropY, int cropWidth, int cropHeight, int inputWidth, int inputHeight)
     {
-        if (frameWidth <= 0 || frameHeight <= 0 || cropWidth <= 0 || cropHeight <= 0)
-            throw new ArgumentOutOfRangeException(nameof(cropWidth));
-        if (cropX < 0 || cropY < 0 || cropX + cropWidth > frameWidth || cropY + cropHeight > frameHeight)
-            throw new ArgumentOutOfRangeException(nameof(cropX));
-        if (bgra.Length < checked(frameWidth * frameHeight * 4))
-            throw new ArgumentException("BGRA frame buffer is too short.", nameof(bgra));
-
-        var planeSize = inputWidth * inputHeight;
-        var output = new float[planeSize * 3];
-        for (var targetY = 0; targetY < inputHeight; targetY++)
-        {
-            var sourceY = (targetY + 0.5) * cropHeight / inputHeight - 0.5;
-            for (var targetX = 0; targetX < inputWidth; targetX++)
-            {
-                var sourceX = (targetX + 0.5) * cropWidth / inputWidth - 0.5;
-                var target = targetY * inputWidth + targetX;
-                output[target] = (PaddleOcrRecognizer.SampleBilinear(bgra, frameWidth, cropX, cropY,
-                    cropWidth, cropHeight, sourceX, sourceY, 0) / 255f - 0.485f) / 0.229f;
-                output[planeSize + target] = (PaddleOcrRecognizer.SampleBilinear(bgra, frameWidth,
-                    cropX, cropY, cropWidth, cropHeight, sourceX, sourceY, 1) / 255f - 0.456f) / 0.224f;
-                output[planeSize * 2 + target] = (PaddleOcrRecognizer.SampleBilinear(bgra, frameWidth,
-                    cropX, cropY, cropWidth, cropHeight, sourceX, sourceY, 2) / 255f - 0.406f) / 0.225f;
-            }
-        }
+        var output = new float[inputWidth * inputHeight * 3];
+        PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight, inputWidth, inputHeight,
+            output);
         return output;
     }
 
+    internal static void PrepareInput(byte[] bgra, int frameWidth, int frameHeight,
+        int cropX, int cropY, int cropWidth, int cropHeight, int inputWidth, int inputHeight, Span<float> output)
+    {
+        BgraBilinearSampler.Validate(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight);
+
+        var planeSize = inputWidth * inputHeight;
+        output = output[..(planeSize * 3)];
+        BgraBilinearSampler.SamplePlanes(bgra, frameWidth, cropX, cropY, cropWidth, cropHeight,
+            inputWidth, inputHeight, inputWidth, output);
+
+        Normalize(output.Slice(0, planeSize), 0.485f, 0.229f);
+        Normalize(output.Slice(planeSize, planeSize), 0.456f, 0.224f);
+        Normalize(output.Slice(planeSize * 2, planeSize), 0.406f, 0.225f);
+    }
+
+    private static void Normalize(Span<float> plane, float mean, float deviation)
+    {
+        for (var index = 0; index < plane.Length; index++)
+            plane[index] = (plane[index] / 255f - mean) / deviation;
+    }
+
     internal static IReadOnlyList<OcrTextRegion> FindRegions(ReadOnlySpan<float> probabilities,
-        int mapWidth, int mapHeight, int destinationWidth, int destinationHeight)
+        int mapWidth, int mapHeight, int destinationWidth, int destinationHeight) =>
+        FindRegions(probabilities, mapWidth, mapHeight, destinationWidth, destinationHeight,
+            new bool[probabilities.Length], new int[probabilities.Length]);
+
+    private static IReadOnlyList<OcrTextRegion> FindRegions(ReadOnlySpan<float> probabilities,
+        int mapWidth, int mapHeight, int destinationWidth, int destinationHeight, Span<bool> visited, Span<int> queue)
     {
         if (mapWidth <= 0 || mapHeight <= 0 || probabilities.Length != mapWidth * mapHeight)
             throw new ArgumentException("The detection probability map has invalid dimensions.", nameof(probabilities));
 
-        var visited = new bool[probabilities.Length];
-        var queue = new int[probabilities.Length];
+        visited = visited[..probabilities.Length];
+        visited.Clear();
         var regions = new List<OcrTextRegion>();
         for (var start = 0; start < probabilities.Length; start++)
         {

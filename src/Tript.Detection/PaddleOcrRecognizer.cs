@@ -18,6 +18,7 @@ internal sealed class PaddleOcrRecognizer : IDisposable
     private readonly int _inputHeight;
     private readonly int _inputWidth;
     private readonly PaddleOcrTextDetector? _detector;
+    private readonly float[] _input;
 
     internal PaddleOcrRecognizer(string modelPath, string dictionaryPath, string? detectorPath = null)
     {
@@ -50,6 +51,7 @@ internal sealed class PaddleOcrRecognizer : IDisposable
             throw new InvalidDataException("PaddleOCR recognition input must use NCHW shape [N,3,H,W].");
         _inputHeight = dimensions[2] > 0 ? dimensions[2] : 48;
         _inputWidth = dimensions[3] > 0 ? dimensions[3] : 320;
+        _input = new float[_inputWidth * _inputHeight * 3];
         if (!string.IsNullOrWhiteSpace(detectorPath) && File.Exists(detectorPath))
             _detector = new PaddleOcrTextDetector(detectorPath);
     }
@@ -78,9 +80,9 @@ internal sealed class PaddleOcrRecognizer : IDisposable
     internal OcrRecognition Recognize(byte[] bgra, int frameWidth, int frameHeight,
         int cropX, int cropY, int cropWidth, int cropHeight)
     {
-        var input = PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight,
-            _inputWidth, _inputHeight);
-        var tensor = new DenseTensor<float>(input, [1, 3, _inputHeight, _inputWidth]);
+        PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight,
+            _inputWidth, _inputHeight, _input);
+        var tensor = new DenseTensor<float>(_input, [1, 3, _inputHeight, _inputWidth]);
         var inputValue = NamedOnnxValue.CreateFromTensor(_inputName, tensor);
         using var results = _session.Run([inputValue], [_outputName]);
         var output = results.Single().AsTensor<float>();
@@ -95,34 +97,34 @@ internal sealed class PaddleOcrRecognizer : IDisposable
     internal static float[] PrepareInput(byte[] bgra, int frameWidth, int frameHeight,
         int cropX, int cropY, int cropWidth, int cropHeight, int inputWidth, int inputHeight)
     {
-        if (frameWidth <= 0 || frameHeight <= 0 || cropWidth <= 0 || cropHeight <= 0)
-            throw new ArgumentOutOfRangeException(nameof(cropWidth));
-        if (cropX < 0 || cropY < 0 || cropX + cropWidth > frameWidth || cropY + cropHeight > frameHeight)
-            throw new ArgumentOutOfRangeException(nameof(cropX));
-        if (bgra.Length < checked(frameWidth * frameHeight * 4))
-            throw new ArgumentException("BGRA frame buffer is too short.", nameof(bgra));
+        var output = new float[inputWidth * inputHeight * 3];
+        PrepareInput(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight, inputWidth, inputHeight,
+            output);
+        return output;
+    }
+
+    internal static void PrepareInput(byte[] bgra, int frameWidth, int frameHeight,
+        int cropX, int cropY, int cropWidth, int cropHeight, int inputWidth, int inputHeight, Span<float> output)
+    {
+        BgraBilinearSampler.Validate(bgra, frameWidth, frameHeight, cropX, cropY, cropWidth, cropHeight);
 
         var resizedWidth = Math.Min(inputWidth,
             Math.Max(1, (int)Math.Round((double)cropWidth * inputHeight / cropHeight)));
         var planeSize = inputWidth * inputHeight;
-        var output = new float[planeSize * 3];
-        for (var targetY = 0; targetY < inputHeight; targetY++)
+        output = output[..(planeSize * 3)];
+        output.Clear();
+        BgraBilinearSampler.SamplePlanes(bgra, frameWidth, cropX, cropY, cropWidth, cropHeight,
+            resizedWidth, inputHeight, inputWidth, output);
+
+        for (var channel = 0; channel < 3; channel++)
         {
-            var sourceY = (targetY + 0.5) * cropHeight / inputHeight - 0.5;
-            for (var targetX = 0; targetX < resizedWidth; targetX++)
+            for (var targetY = 0; targetY < inputHeight; targetY++)
             {
-                var sourceX = (targetX + 0.5) * cropWidth / resizedWidth - 0.5;
-                var target = targetY * inputWidth + targetX;
-                output[target] = SampleBilinear(bgra, frameWidth, cropX, cropY, cropWidth, cropHeight,
-                    sourceX, sourceY, 0) / 127.5f - 1f;
-                output[planeSize + target] = SampleBilinear(bgra, frameWidth, cropX, cropY, cropWidth,
-                    cropHeight, sourceX, sourceY, 1) / 127.5f - 1f;
-                output[planeSize * 2 + target] = SampleBilinear(bgra, frameWidth, cropX, cropY, cropWidth,
-                    cropHeight, sourceX, sourceY, 2) / 127.5f - 1f;
+                var row = output.Slice(planeSize * channel + targetY * inputWidth, resizedWidth);
+                for (var targetX = 0; targetX < row.Length; targetX++)
+                    row[targetX] = row[targetX] / 127.5f - 1f;
             }
         }
-
-        return output;
     }
 
     internal static OcrRecognition DecodeCtc(ReadOnlySpan<float> output, int timeSteps, int classCount,
@@ -178,26 +180,6 @@ internal sealed class PaddleOcrRecognizer : IDisposable
         for (var index = 0; index < count; index++)
             denominator += Math.Exp(values[offset + index] - maximum);
         return Math.Exp(value - maximum) / denominator;
-    }
-
-    internal static float SampleBilinear(byte[] bgra, int frameWidth, int cropX, int cropY,
-        int cropWidth, int cropHeight, double x, double y, int channel)
-    {
-        x = Math.Clamp(x, 0, cropWidth - 1);
-        y = Math.Clamp(y, 0, cropHeight - 1);
-        var x0 = Math.Clamp((int)Math.Floor(x), 0, cropWidth - 1);
-        var y0 = Math.Clamp((int)Math.Floor(y), 0, cropHeight - 1);
-        var x1 = Math.Min(x0 + 1, cropWidth - 1);
-        var y1 = Math.Min(y0 + 1, cropHeight - 1);
-        var xWeight = Math.Clamp(x - Math.Floor(x), 0, 1);
-        var yWeight = Math.Clamp(y - Math.Floor(y), 0, 1);
-        var topLeft = bgra[((cropY + y0) * frameWidth + cropX + x0) * 4 + channel];
-        var topRight = bgra[((cropY + y0) * frameWidth + cropX + x1) * 4 + channel];
-        var bottomLeft = bgra[((cropY + y1) * frameWidth + cropX + x0) * 4 + channel];
-        var bottomRight = bgra[((cropY + y1) * frameWidth + cropX + x1) * 4 + channel];
-        var top = topLeft + (topRight - topLeft) * xWeight;
-        var bottom = bottomLeft + (bottomRight - bottomLeft) * xWeight;
-        return (float)(top + (bottom - top) * yWeight);
     }
 
     public void Dispose()

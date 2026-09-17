@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useIpcClient, useIpcMessage } from './useConnection';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useIpcClient } from './useConnection';
 import { RecorderBar } from '../components/RecorderBar';
 import { ToastProvider } from '../components/ui/toast/ToastProvider';
 import { ErrorToasts } from '../components/toasts/ErrorToasts';
@@ -18,29 +18,25 @@ import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
 import { useTrash } from '../components/trash/useTrash';
-import {
-  cascadableLinkedHighlights,
-  itemLabel,
-  lacksMainVideo,
-  sessionPlaylist,
-  sourceSession,
-} from '../components/library/libraryModel';
-import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from '../components/library/ConfirmDeleteDialog';
+import { sourceSession } from '../components/library/libraryModel';
+import { ConfirmDeleteDialog } from '../components/library/ConfirmDeleteDialog';
 import { useIpcSessionSource, useSessionSource } from '../components/player/useSessionSource';
-import type { ContentItem, CreateClipParameters, GameInfo, ImportProgressMessage, RecordingState } from '../ipc/protocol';
+import type { ContentItem } from '../ipc/protocol';
 import type { IpcClientOptions } from '../ipc/websocketClient';
 import { hasSessionToken } from '../ipc/sessionToken';
 import { useHostReachability } from './useHostReachability';
 import { useWindowVisible } from './useWindowVisible';
+import { useAppNavigation } from './useAppNavigation';
+import { useClipJobs, type ClipJobResult } from './useClipJobs';
+import { useDeleteFlow } from './useDeleteFlow';
+import { useHostPreferences } from './useHostPreferences';
 import { TripwireMark } from '../components/TripwireMark';
 import { Icon } from '../components/ui/Icon';
 import { trainingEnabled } from '../buildFeatures';
 import { TrainingView } from '../components/TrainingView';
 import './app.css';
 
-export type Route = 'library' | 'sessions' | 'session' | 'settings' | 'player' | 'training';
-
-const FALLBACK_BUILT_IN_GAME_IDS = ['57ZZVAZ0PJK8VQGPKB728QE57C'] as const;
+export type { Route } from './useAppNavigation';
 
 type PhotinoShellWindow = Window & {
   external?: {
@@ -90,93 +86,7 @@ function AppShell({
   const { client, connectionState } = useIpcClient(ipcOptions);
   const reachability = useHostReachability(connectionState);
   const windowVisible = useWindowVisible(client);
-  const startupRoute = readStartupRoute();
-  const [route, setRoute] = useState<Route>(startupRoute);
-  const routeRef = useRef(route);
-  routeRef.current = route;
-  const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
-  const [playerTitle, setPlayerTitle] = useState('');
-  const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
-  const [playerReturnRoute, setPlayerReturnRoute] = useState<'library' | 'sessions' | 'session'>('library');
-  const [sessionReview, setSessionReview] = useState<{ recording: ContentItem; clips: ContentItem[] } | null>(null);
-  const [sessionPlayerOrigin, setSessionPlayerOrigin] = useState<{
-    recording: ContentItem;
-    item: ContentItem;
-    navigation: ContentItem[];
-    returnRoute: 'library' | 'sessions' | 'session';
-  } | null>(null);
-  const [sessionReturnRoute, setSessionReturnRoute] = useState<'library' | 'player'>('library');
-  const [convertHdrClipsToSdr, setConvertHdrClipsToSdr] = useState(false);
-  const [deleteLinkedHighlightsByDefault, setDeleteLinkedHighlightsByDefault] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<{ item: ContentItem; advancePlayer: boolean } | null>(null);
-  const [builtInGameIds, setBuiltInGameIds] = useState<readonly string[]>(FALLBACK_BUILT_IN_GAME_IDS);
-  const [clipJobCount, setClipJobCount] = useState(0);
-  const queuedClipJobs = useRef<CreateClipParameters[]>([]);
-  const activeClipJob = useRef<CreateClipParameters | null>(null);
-
-  useEffect(() => {
-    const remove = client.on('gameList', (content) => {
-      const list = Array.isArray(content) ? (content as GameInfo[]) : [];
-      const builtIn = list
-        .filter((game) => game.builtIn === true && typeof game.id === 'string')
-        .map((game) => String(game.id));
-      if (builtIn.length > 0) {
-        setBuiltInGameIds(builtIn);
-      }
-    });
-    if (connectionState === 'connected') {
-      client.send('ListGames');
-    }
-    return remove;
-  }, [client, connectionState]);
-
-  useEffect(() => {
-    const remove = client.on('settings', (content) => {
-      const settings = (content as {
-        settings?: {
-          general?: { convertHdrClipsToSdr?: boolean };
-          recording?: { deleteLinkedHighlightsByDefault?: boolean };
-        };
-      }).settings;
-      setConvertHdrClipsToSdr(settings?.general?.convertHdrClipsToSdr === true);
-      setDeleteLinkedHighlightsByDefault(
-        settings?.recording?.deleteLinkedHighlightsByDefault === true,
-      );
-    });
-    return remove;
-  }, [client]);
-
-  useIpcMessage(client, 'state', (content) => {
-    const state = (content as { state?: RecordingState }).state;
-    if (state)
-      setRecording(state.recording === true);
-  });
-
-  useEffect(() => {
-    const onHashChange = () => {
-      setRoute(readStartupRoute());
-      setPlayerItem(null);
-      setPlayerTitle('');
-      setPlayerNavigation([]);
-    };
-    const onNativeNavigation = (event: Event) => {
-      if ((event as CustomEvent<string>).detail !== 'settings') {
-        return;
-      }
-      replaceRouteHash('settings');
-      setRoute('settings');
-      setPlayerItem(null);
-      setPlayerTitle('');
-      setPlayerNavigation([]);
-    };
-    window.addEventListener('hashchange', onHashChange);
-    window.addEventListener('tript:navigate', onNativeNavigation);
-    return () => {
-      window.removeEventListener('hashchange', onHashChange);
-      window.removeEventListener('tript:navigate', onNativeNavigation);
-    };
-  }, []);
+  const preferences = useHostPreferences(client, connectionState);
 
   useEffect(() => {
     (window as PhotinoShellWindow).external?.sendMessage?.('tript:ready');
@@ -187,69 +97,32 @@ function AppShell({
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  const trash = useTrash(client);
-  const { push, dismiss } = useToast();
-  const [pendingRestore, setPendingRestore] = useState<ContentItem | null>(null);
-  const restoreSentRef = useRef(false);
-  const [gameSettingsFocus, setGameSettingsFocus] = useState<string | null>(null);
-
   const contentRef = useRef<HTMLDivElement>(null);
-  const savedScrollTop = useRef(0);
-  const overlayWasOpen = useRef(false);
+  const navigation = useAppNavigation(items, contentRef);
+  const {
+    route,
+    routeRef,
+    playerItem,
+    playerTitle,
+    playerNavigation,
+    playerReturnRoute,
+    sessionReview,
+    sessionReturnRoute,
+    openInPlayer,
+    adoptPlayerItem,
+    showSettings,
+  } = navigation;
 
-  const openSessionReview = useCallback((recording: ContentItem, returnRoute: 'library' | 'player' = 'player') => {
-    const clips = items.filter((item) => item.automated && item.sourceSessionPath === recording.filePath);
-    setSessionReview({ recording, clips });
-    setSessionReturnRoute(returnRoute);
-    setSessionPlayerOrigin(returnRoute === 'player'
-      ? { recording, item: playerItem ?? recording, navigation: playerNavigation, returnRoute: playerReturnRoute }
-      : null);
-    setRoute('session');
-  }, [items, playerItem, playerNavigation, playerReturnRoute]);
-
-  const openInPlayer = useCallback(
-    (
-      item: ContentItem,
-      resultItems: ContentItem[],
-      origin: 'library' | 'session' = 'library',
-      returnRoute: 'library' | 'sessions' = 'library',
-    ) => {
-      savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
-      const isSession = item.contentType === 'recording' || item.contentType === 'buffer';
-      const recording = isSession && (origin === 'session' || lacksMainVideo(item)) ? item : null;
-      const navigation = recording ? sessionPlaylist(recording, items) : resultItems;
-      const requested = navigation.find((candidate) => candidate.filePath === item.filePath) ?? navigation[0];
-      if (!requested) {
-        if (recording) openSessionReview(recording, 'library');
-        return;
-      }
-      setPlayerItem(requested);
-      setPlayerTitle(itemLabel(requested));
-      setPlayerNavigation(navigation);
-      setPlayerReturnRoute(returnRoute);
-      setRoute('player');
-    },
-    [items, openSessionReview],
-  );
-
-  const openFromSessions = useCallback((item: ContentItem, resultItems: ContentItem[]) => {
-    openInPlayer(item, resultItems, 'session', 'sessions');
-  }, [openInPlayer]);
-
-  const closePlayer = useCallback(() => {
-    setPlayerItem(null);
-    setPlayerTitle('');
-    setPlayerNavigation([]);
-    setRoute((current) => (current === 'player' ? playerReturnRoute : current));
-  }, [playerReturnRoute]);
-
-  const openSessionClip = useCallback((item: ContentItem, navigation: ContentItem[]) => {
-    setPlayerItem(item);
-    setPlayerTitle(itemLabel(item));
-    setPlayerNavigation(navigation);
-    setPlayerReturnRoute('session');
-    setRoute('player');
-  }, []);
+  const trash = useTrash(client);
+  const deletion = useDeleteFlow({
+    client,
+    items,
+    trash,
+    navigation,
+    deleteLinkedHighlightsByDefault: preferences.deleteLinkedHighlightsByDefault,
+  });
+  const { push, dismiss } = useToast();
+  const [gameSettingsFocus, setGameSettingsFocus] = useState<string | null>(null);
 
   const toggleFavorite = useCallback((item: ContentItem) => {
     if (item.highlightsOnly === true) {
@@ -262,12 +135,7 @@ function AppShell({
     });
   }, [client]);
 
-  const adoptPlayerItem = useCallback((item: ContentItem) => {
-    setPlayerItem(item);
-    setPlayerTitle(itemLabel(item));
-  }, []);
-
-  const notifyClipCreated = useCallback((result: { title: string; item?: ContentItem; error?: string }) => {
+  const notifyClipCreated = useCallback((result: ClipJobResult) => {
     const clip = result.item;
     if (clip) {
       push({
@@ -296,310 +164,18 @@ function AppShell({
       message: `Creating "${result.title}" failed.`,
       note: result.error,
     });
-  }, [push, dismiss, adoptPlayerItem, openInPlayer]);
+  }, [push, dismiss, adoptPlayerItem, openInPlayer, routeRef]);
 
-  const startNextClip = useCallback(() => {
-    if (activeClipJob.current !== null) {
-      return;
-    }
-    const next = queuedClipJobs.current.shift();
-    if (next !== undefined) {
-      activeClipJob.current = next;
-      client.send('CreateClip', next);
-    }
-  }, [client]);
+  const { clipJobCount, enqueueClip } = useClipJobs(client, connectionState, notifyClipCreated);
 
-  const enqueueClip = useCallback((parameters: CreateClipParameters) => {
-    if (connectionState !== 'connected') {
-      notifyClipCreated({ title: parameters.title, error: 'Tript is not connected.' });
-      return;
-    }
-    queuedClipJobs.current.push(parameters);
-    setClipJobCount(queuedClipJobs.current.length + (activeClipJob.current === null ? 0 : 1));
-    startNextClip();
-  }, [connectionState, notifyClipCreated, startNextClip]);
-
-  useEffect(() => client.on('importProgress', (content) => {
-    const message = content as ImportProgressMessage;
-    const active = activeClipJob.current;
-    if (active === null || message.id !== active.id
-      || (message.status !== 'done' && message.status !== 'error')) {
-      return;
-    }
-
-    activeClipJob.current = null;
-    notifyClipCreated(message.status === 'done'
-      ? { title: active.title, item: message.content }
-      : { title: active.title, error: message.error ?? 'Clip creation failed' });
-    startNextClip();
-    setClipJobCount(queuedClipJobs.current.length + (activeClipJob.current === null ? 0 : 1));
-  }), [client, notifyClipCreated, startNextClip]);
-
-  useEffect(() => {
-    if (connectionState === 'connected' || clipJobCount === 0) {
-      return;
-    }
-    const interrupted = [activeClipJob.current, ...queuedClipJobs.current]
-      .filter((job): job is CreateClipParameters => job !== null);
-    activeClipJob.current = null;
-    queuedClipJobs.current = [];
-    setClipJobCount(0);
-    for (const job of interrupted) {
-      notifyClipCreated({ title: job.title, error: 'The connection was lost during clip creation.' });
-    }
-  }, [connectionState, clipJobCount, notifyClipCreated]);
-
-  const advanceAfterPlayerDelete = useCallback((item: ContentItem) => {
-    const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
-    const deletedIndex = playerNavigation.findIndex((candidate) => candidate.filePath === item.filePath);
-    const replacement = remaining[deletedIndex] ?? remaining[deletedIndex - 1];
-    setPlayerNavigation(remaining);
-    if (replacement) {
-      setPlayerItem(replacement);
-      setPlayerTitle(itemLabel(replacement));
-    } else {
-      setPlayerItem(null);
-      setPlayerTitle('');
-      setRoute(playerReturnRoute);
-    }
-  }, [playerNavigation, playerReturnRoute]);
-
-  const deleteItem = useCallback((
-    item: ContentItem,
-    permanent: boolean,
-    deleteLinkedHighlights: boolean,
-    advancePlayer: boolean,
-  ) => {
-    client.send('DeleteContent', {
-      contentType: item.contentType,
-      fileName: item.filePath,
-      ...(permanent ? { permanent: true } : {}),
-      ...(item.contentType === 'recording' && deleteLinkedHighlights
-        ? { deleteLinkedHighlights: true }
-        : {}),
-    });
-    if (advancePlayer) {
-      advanceAfterPlayerDelete(item);
-    }
-  }, [client, advanceAfterPlayerDelete]);
-
-  const beginRestore = useCallback((item: ContentItem) => {
-    restoreSentRef.current = false;
-    setPendingRestore(item);
-  }, []);
-
-  const requestPlayerDelete = useCallback((item: ContentItem) => {
-    if (playerReturnRoute === 'session') {
-      deleteItem(item, false, false, true);
-      push({
-        key: `trashed-${item.filePath}`,
-        kind: 'success',
-        message: `Moved "${itemLabel(item)}" to trash.`,
-        duration: 10_000,
-        actions: [{ label: 'Restore', onClick: () => beginRestore(item) }],
-      });
-      return;
-    }
-    setPendingDelete({ item, advancePlayer: true });
-  }, [deleteItem, playerReturnRoute, push, beginRestore]);
-
-  const requestSessionDelete = useCallback((item: ContentItem) => {
-    setPendingDelete({ item, advancePlayer: false });
-  }, []);
-
-  const confirmDelete = useCallback((permanent: boolean, deleteLinkedHighlights: boolean) => {
-    if (pendingDelete) {
-      deleteItem(
-        pendingDelete.item,
-        permanent,
-        deleteLinkedHighlights,
-        pendingDelete.advancePlayer,
-      );
-    }
-    setPendingDelete(null);
-  }, [deleteItem, pendingDelete]);
-
-  const deleteConfirmation: DeleteConfirmation | null = pendingDelete ? (() => {
-    const item = pendingDelete.item;
-    const isRecording = item.contentType === 'recording';
-    const placeholder = isRecording && (item.videoMissing === true || item.highlightsOnly === true);
-    return makeDeleteConfirmation({
-      names: [itemLabel(item)],
-      retentionHours: trash.retentionHours,
-      affectedCount: placeholder ? 0 : 1,
-      hasCascade: isRecording,
-      cascadeCount: isRecording ? cascadableLinkedHighlights(item, items).length : 0,
-      deleteLinkedHighlightsDefault: deleteLinkedHighlightsByDefault,
-      title: `Delete ${itemLabel(item)}?`,
-    });
-  })() : null;
-
-  useLayoutEffect(() => {
-    if (playerItem !== null) {
-      overlayWasOpen.current = true;
-      return;
-    }
-    if (overlayWasOpen.current) {
-      overlayWasOpen.current = false;
-      if (contentRef.current) {
-        contentRef.current.scrollTop = savedScrollTop.current;
-      }
-    }
-  }, [playerItem]);
-
-  useEffect(() => {
-    if (!playerItem) {
-      return;
-    }
-    const byPath = new Map<string, ContentItem>();
-    for (const entry of items) {
-      if (!byPath.has(entry.filePath)) {
-        byPath.set(entry.filePath, entry);
-      }
-    }
-    const currentItem = byPath.get(playerItem.filePath);
-    if (!currentItem) {
-      closePlayer();
-      return;
-    }
-    setPlayerItem(currentItem);
-    setPlayerTitle(itemLabel(currentItem));
-    setPlayerNavigation((previous) =>
-      previous
-        .map((candidate) => byPath.get(candidate.filePath))
-        .filter((entry): entry is ContentItem => entry !== undefined),
-    );
-  }, [items, playerItem, closePlayer]);
-
-  useEffect(() => {
-    if (pendingRestore === null || restoreSentRef.current) {
-      return;
-    }
-    const entry = trash.entries.find(
-      (candidate) =>
-        candidate.contentType === pendingRestore.contentType
-        && candidate.fileName === pendingRestore.fileName,
-    );
-    if (entry !== undefined) {
-      restoreSentRef.current = true;
-      trash.restore([entry.id]);
-    }
-  }, [pendingRestore, trash]);
-
-  useEffect(() => {
-    if (pendingRestore === null || !restoreSentRef.current) {
-      return;
-    }
-    const restored = items.find((candidate) => candidate.filePath === pendingRestore.filePath);
-    if (restored !== undefined) {
-      setPendingRestore(null);
-      dismiss(`trashed-${restored.filePath}`);
-      if (sessionReview !== null
-        && restored.automated === true
-        && restored.sourceSessionPath === sessionReview.recording.filePath) {
-        const clips = items
-          .filter((candidate) => candidate.automated && candidate.sourceSessionPath === sessionReview.recording.filePath)
-          .sort((left, right) => (left.clipStartTime ?? Number.POSITIVE_INFINITY) - (right.clipStartTime ?? Number.POSITIVE_INFINITY));
-        openSessionClip(restored, clips);
-      } else {
-        openInPlayer(restored, items);
-      }
-    }
-  }, [pendingRestore, items, dismiss, openInPlayer, openSessionClip, sessionReview]);
-
-  useEffect(() => {
-    if (sessionReview
-      && !items.some((item) => item.filePath === sessionReview.recording.filePath)) {
-      setRoute((current) => current === 'session' ? 'library' : current);
-    }
-    setSessionReview((previous) => {
-      if (!previous) {
-        return previous;
-      }
-      const recording = items.find((item) => item.filePath === previous.recording.filePath);
-      if (!recording) {
-        return null;
-      }
-
-      const clips = items.filter(
-        (item) => item.automated && item.sourceSessionPath === recording.filePath,
-      );
-      return { recording, clips };
-    });
-  }, [items]);
-
-  useEffect(() => {
-    if (!sessionPlayerOrigin) {
-      return;
-    }
-    const recording = items.find((item) => item.filePath === sessionPlayerOrigin.recording.filePath);
-    if (!recording) {
-      setSessionPlayerOrigin(null);
-      setSessionReview(null);
-      setPlayerItem(null);
-      setPlayerTitle('');
-      setPlayerNavigation([]);
-      setRoute((current) => current === 'player' || current === 'session' ? 'library' : current);
-      return;
-    }
-    if (recording !== sessionPlayerOrigin.recording) {
-      setSessionPlayerOrigin((previous) => previous ? { ...previous, recording } : null);
-    }
-  }, [items, sessionPlayerOrigin]);
-
-  const leaveFor = useCallback((next: Route) => {
-    setRoute(next);
-    setPlayerItem(null);
-    if (next !== 'session') {
-      setSessionReview(null);
-      setSessionPlayerOrigin(null);
-    }
-  }, []);
-  const showLibrary = useCallback(() => {
-    replaceRouteHash('library');
-    leaveFor('library');
-  }, [leaveFor]);
-  const showSessions = useCallback(() => {
-    replaceRouteHash('sessions');
-    leaveFor('sessions');
-  }, [leaveFor]);
-  const showSettings = useCallback(() => {
-    replaceRouteHash('settings');
-    leaveFor('settings');
-  }, [leaveFor]);
   const openGameSettings = useCallback((gameId: string) => {
     setGameSettingsFocus(gameId);
     showSettings();
   }, [showSettings]);
-  const showTraining = useCallback(() => leaveFor('training'), [leaveFor]);
-  const backFromPlayer = useCallback(() => {
-    if (playerReturnRoute === 'session') {
-      setPlayerItem(null);
-      setPlayerTitle('');
-      setPlayerNavigation([]);
-      setRoute('session');
-      return;
-    }
-    if (playerReturnRoute === 'sessions') {
-      showSessions();
-      return;
-    }
-    showLibrary();
-  }, [playerReturnRoute, showLibrary, showSessions]);
-  const backFromSession = useCallback(() => {
-    if (sessionReturnRoute === 'player' && sessionPlayerOrigin) {
-      setPlayerItem(sessionPlayerOrigin.item);
-      setPlayerTitle(itemLabel(sessionPlayerOrigin.item));
-      setPlayerNavigation(sessionPlayerOrigin.navigation);
-      setPlayerReturnRoute(sessionPlayerOrigin.returnRoute);
-      setSessionReview(null);
-      setSessionPlayerOrigin(null);
-      setRoute('player');
-      return;
-    }
-    showLibrary();
-  }, [sessionPlayerOrigin, sessionReturnRoute, showLibrary]);
   const playerSession = playerItem ? sourceSession(playerItem, items) : null;
+  const libraryActive = route === 'library' || route === 'session'
+    || (route === 'player' && playerReturnRoute !== 'sessions');
+  const sessionsActive = route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions');
 
   return (
     <div className="app-shell" data-window-hidden={windowVisible ? undefined : ''}>
@@ -608,22 +184,21 @@ function AppShell({
           <TripwireMark size={26} />
           <strong>Tript</strong>
         </div>
-        {}
         <nav className="app-nav" aria-label="Primary">
           <button
             type="button"
-            className={route === 'library' || route === 'session' || (route === 'player' && playerReturnRoute !== 'sessions') ? 'nav-item active' : 'nav-item'}
-            aria-current={route === 'library' || route === 'session' || (route === 'player' && playerReturnRoute !== 'sessions') ? 'page' : undefined}
-            onClick={showLibrary}
+            className={libraryActive ? 'nav-item active' : 'nav-item'}
+            aria-current={libraryActive ? 'page' : undefined}
+            onClick={navigation.showLibrary}
           >
             <Icon name="library" className="nav-glyph" />
             <span>Library</span>
           </button>
           <button
             type="button"
-            className={route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions') ? 'nav-item active' : 'nav-item'}
-            aria-current={route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions') ? 'page' : undefined}
-            onClick={showSessions}
+            className={sessionsActive ? 'nav-item active' : 'nav-item'}
+            aria-current={sessionsActive ? 'page' : undefined}
+            onClick={navigation.showSessions}
           >
             <Icon name="monitor" className="nav-glyph" />
             <span>Sessions</span>
@@ -642,7 +217,7 @@ function AppShell({
               type="button"
               className={route === 'training' ? 'nav-item active' : 'nav-item'}
               aria-current={route === 'training' ? 'page' : undefined}
-              onClick={showTraining}
+              onClick={navigation.showTraining}
             >
               <Icon name="clip" className="nav-glyph" />
               <span>Training</span>
@@ -680,7 +255,7 @@ function AppShell({
                 contentLoaded={loaded}
                 onOpen={openInPlayer}
                 retentionHours={trash.retentionHours}
-                deleteLinkedHighlightsByDefault={deleteLinkedHighlightsByDefault}
+                deleteLinkedHighlightsByDefault={preferences.deleteLinkedHighlightsByDefault}
                 trash={trash}
               />
             </div>
@@ -692,30 +267,30 @@ function AppShell({
               source={source}
               item={playerItem}
               navigationItems={playerNavigation}
-              onBack={backFromPlayer}
-              onDelete={requestPlayerDelete}
+              onBack={navigation.backFromPlayer}
+              onDelete={deletion.requestPlayerDelete}
               onToggleFavorite={toggleFavorite}
-              onReviewSession={openSessionReview}
-              convertHdrClipsToSdr={convertHdrClipsToSdr}
-              recording={recording}
+              onReviewSession={navigation.openSessionReview}
+              convertHdrClipsToSdr={preferences.convertHdrClipsToSdr}
+              recording={preferences.recording}
               reviewRecording={playerSession ?? undefined}
               highlightCount={playerSession
                 ? items.filter((candidate) => candidate.automated && candidate.sourceSessionPath === playerSession.filePath).length
                 : 0}
-               onItemChange={adoptPlayerItem}
-               onCreateClip={enqueueClip}
-             />
-           )}
+              onItemChange={adoptPlayerItem}
+              onCreateClip={enqueueClip}
+            />
+          )}
           {route === 'session' && sessionReview && (
             <SessionClipsView
               recording={sessionReview.recording}
               clips={sessionReview.clips}
               client={client}
-              onBack={backFromSession}
+              onBack={navigation.backFromSession}
               backLabel={sessionReturnRoute === 'player' ? 'Back to session' : 'Back to library'}
-              onOpen={openSessionClip}
+              onOpen={navigation.openSessionClip}
               onToggleFavorite={toggleFavorite}
-              onDelete={requestSessionDelete}
+              onDelete={deletion.requestSessionDelete}
             />
           )}
           {(route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions')) && (
@@ -726,9 +301,9 @@ function AppShell({
                 thumbnailLoadingActive={route === 'sessions'}
                 connectionState={connectionState}
                 contentLoaded={loaded}
-                onOpen={openFromSessions}
+                onOpen={navigation.openFromSessions}
                 retentionHours={trash.retentionHours}
-                deleteLinkedHighlightsByDefault={deleteLinkedHighlightsByDefault}
+                deleteLinkedHighlightsByDefault={preferences.deleteLinkedHighlightsByDefault}
               />
             </div>
           )}
@@ -736,7 +311,7 @@ function AppShell({
             <SettingsView
               client={client}
               active={route === 'settings' && windowVisible}
-              builtInGameIds={builtInGameIds}
+              builtInGameIds={preferences.builtInGameIds}
               focusGameId={gameSettingsFocus}
               onFocusGameHandled={() => setGameSettingsFocus(null)}
             />
@@ -744,32 +319,13 @@ function AppShell({
           {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}
         </div>
       </main>
-      {deleteConfirmation && (
+      {deletion.deleteConfirmation && (
         <ConfirmDeleteDialog
-          confirmation={deleteConfirmation}
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={confirmDelete}
+          confirmation={deletion.deleteConfirmation}
+          onCancel={deletion.cancelDelete}
+          onConfirm={deletion.confirmDelete}
         />
       )}
-      </div>
+    </div>
   );
-}
-
-function readStartupRoute(): Route {
-  const hash = window.location.hash.slice(1).toLowerCase();
-  if (hash === 'settings' || hash.startsWith('settings-')) {
-      return 'settings';
-  }
-  if (hash === 'sessions') {
-    return 'sessions';
-  }
-  return 'library';
-}
-
-function replaceRouteHash(route: 'library' | 'sessions' | 'settings'): void {
-  const hash = `#${route}`;
-  if (window.location.hash === hash) {
-    return;
-  }
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
 }

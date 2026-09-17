@@ -85,7 +85,7 @@ public sealed class GameCaptureTargetingTests
     {
         var properties = GameCaptureProperties();
 
-        Assert.Equal("window", ObsRecorderSession.ResolveWindowCaptureMode(properties));
+        Assert.Equal("window", CaptureSourceFactory.ResolveWindowCaptureMode(properties));
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class GameCaptureTargetingTests
             ])
         };
 
-        Assert.Equal("window", ObsRecorderSession.ResolveWindowCaptureMode(properties));
+        Assert.Equal("window", CaptureSourceFactory.ResolveWindowCaptureMode(properties));
     }
 
     [Fact]
@@ -118,13 +118,13 @@ public sealed class GameCaptureTargetingTests
             new("priority", ObsPropertyType.List, [])
         };
 
-        Assert.Null(ObsRecorderSession.ResolveWindowCaptureMode(properties));
-        Assert.Null(ObsRecorderSession.ResolveWindowCaptureMode([]));
+        Assert.Null(CaptureSourceFactory.ResolveWindowCaptureMode(properties));
+        Assert.Null(CaptureSourceFactory.ResolveWindowCaptureMode([]));
     }
 
     [Fact]
     public void ResolveWindowCaptureMode_RejectsANullPropertyList() =>
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.ResolveWindowCaptureMode(null!));
+        Assert.Throws<ArgumentNullException>(() => CaptureSourceFactory.ResolveWindowCaptureMode(null!));
 
     private static IReadOnlyList<ObsSourceProperty> GameCaptureProperties() =>
     [

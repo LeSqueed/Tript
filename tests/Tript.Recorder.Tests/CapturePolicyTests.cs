@@ -76,10 +76,10 @@ public sealed class CapturePolicyTests
     {
         var timeout = TimeSpan.FromSeconds(3);
 
-        Assert.Equal(timeout, ObsRecorderSession.HookDeadlineFor(
+        Assert.Equal(timeout, GameCaptureHookProbe.DeadlineFor(
             new CapturePolicy(DisplayCaptureMethod.Game, null, timeout)));
 
-        Assert.NotEqual(timeout, ObsRecorderSession.HookDeadlineFor(
+        Assert.NotEqual(timeout, GameCaptureHookProbe.DeadlineFor(
             new CapturePolicy(DisplayCaptureMethod.Auto, null, timeout)));
     }
 
@@ -87,6 +87,6 @@ public sealed class CapturePolicyTests
     public void CapturePolicy_RejectsNullArguments()
     {
         Assert.Throws<ArgumentNullException>(() => CapturePolicy.From(null!));
-        Assert.Throws<ArgumentNullException>(() => ObsRecorderSession.HookDeadlineFor(null!));
+        Assert.Throws<ArgumentNullException>(() => GameCaptureHookProbe.DeadlineFor(null!));
     }
 }

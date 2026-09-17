@@ -195,48 +195,17 @@ internal sealed partial class AppHost
 
     internal void CreateClip(ClipRequest request)
     {
-        lock (_clipQueueGate)
-        {
-            _clipEngine ??= BuildClipEngine();
-            _clipQueue.Enqueue(request);
-            if (_clipQueueActive)
-                return;
-
-            _clipQueueActive = true;
-        }
-
-        ThreadPool.QueueUserWorkItem(_ => ProcessClipQueue());
+        _clipEngine ??= BuildClipEngine();
+        _clipQueue.Enqueue(request);
     }
 
-    private void ProcessClipQueue()
-    {
-        while (true)
+    private void ReportClipFailure(ClipRequest request, Exception exception) =>
+        _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
         {
-            ClipRequest request;
-            lock (_clipQueueGate)
-            {
-                if (!_clipQueue.TryDequeue(out request!))
-                {
-                    _clipQueueActive = false;
-                    return;
-                }
-            }
-
-            try
-            {
-                ProcessClip(request);
-            }
-            catch (Exception exception)
-            {
-                _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
-                {
-                    id = request.OperationId,
-                    status = "error",
-                    error = exception.Message,
-                }, Wire.Options));
-            }
-        }
-    }
+            id = request.OperationId,
+            status = "error",
+            error = exception.Message,
+        }, Wire.Options));
 
     private void ProcessClip(ClipRequest request)
     {
@@ -319,16 +288,10 @@ internal sealed partial class AppHost
             if (!double.IsFinite(info.DurationSeconds) || info.DurationSeconds <= 0)
                 throw new InvalidOperationException("The selected file has no usable duration.");
 
-            string output;
-            lock (_sdrConversionGate)
+            if (!_sdrOutputs.TryReserve(source, out var output))
             {
-                if (!_sdrConversions.Add(source))
-                {
-                    PushConversionProgress(operationId, "error", "An SDR conversion is already running for this file.");
-                    return;
-                }
-                output = NextSdrPath(source);
-                _reservedClipOutputs.Add(output);
+                PushConversionProgress(operationId, "error", "An SDR conversion is already running for this file.");
+                return;
             }
 
             ThreadPool.QueueUserWorkItem(_ =>
@@ -369,11 +332,7 @@ internal sealed partial class AppHost
                 }
                 finally
                 {
-                    lock (_sdrConversionGate)
-                    {
-                        _sdrConversions.Remove(source);
-                        _reservedClipOutputs.Remove(output);
-                    }
+                    _sdrOutputs.Release(source, output);
                 }
             });
         }
@@ -392,16 +351,6 @@ internal sealed partial class AppHost
         }
 
         _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new { id, status, content }, Wire.Options));
-    }
-
-    private string NextSdrPath(string source)
-    {
-        var directory = Path.GetDirectoryName(source)!;
-        var stem = Path.GetFileNameWithoutExtension(source) + "-sdr";
-        var candidate = Path.Combine(directory, stem + ".mp4");
-        for (var suffix = 2; File.Exists(candidate) || _reservedClipOutputs.Contains(candidate); suffix++)
-            candidate = Path.Combine(directory, $"{stem}-{suffix}.mp4");
-        return candidate;
     }
 
     internal bool BackgroundWorkSuspendedForRecording

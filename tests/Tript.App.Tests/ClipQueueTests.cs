@@ -47,9 +47,9 @@ public sealed class ClipQueueTests : IDisposable
 
         engine.ReleaseFirst.Set();
         Assert.True(engine.Completed.Wait(TimeSpan.FromSeconds(5)));
-        var active = typeof(AppHost).GetField("_clipQueueActive",
-            BindingFlags.Instance | BindingFlags.NonPublic)!;
-        Assert.True(SpinWait.SpinUntil(() => !(bool)active.GetValue(_host)!, TimeSpan.FromSeconds(5)));
+        var queue = (SerialWorkQueue<ClipRequest>)typeof(AppHost).GetField("_clipQueue",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(_host)!;
+        Assert.True(SpinWait.SpinUntil(() => !queue.IsActive, TimeSpan.FromSeconds(5)));
         Assert.Equal(["clip-01", "clip-02"], engine.Order);
         Assert.Equal(1, engine.MaximumConcurrency);
     }

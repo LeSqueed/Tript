@@ -123,12 +123,8 @@ internal sealed partial class AppHost : IDisposable
     private List<GameInfo> _catalogueGames = [];
     private LibraryGames? _libraryGames;
     private IClipEngine? _clipEngine;
-    private readonly object _clipQueueGate = new();
-    private readonly Queue<ClipRequest> _clipQueue = [];
-    private bool _clipQueueActive;
-    private readonly object _sdrConversionGate = new();
-    private readonly HashSet<string> _sdrConversions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _reservedClipOutputs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SerialWorkQueue<ClipRequest> _clipQueue;
+    private readonly SdrOutputReservations _sdrOutputs = new();
 
     private static readonly TimeSpan TrashPurgeInterval = TimeSpan.FromHours(1);
 
@@ -150,6 +146,7 @@ internal sealed partial class AppHost : IDisposable
         GameIdAliasStore? gameIdAliases = null)
     {
         _contentPush = new CoalescingRunner(BroadcastContent, ReportContentFailure);
+        _clipQueue = new SerialWorkQueue<ClipRequest>(ProcessClip, ReportClipFailure);
         _options = options;
         _settingsStore = settingsStore;
         _runtime = runtime;
@@ -208,10 +205,10 @@ internal sealed partial class AppHost : IDisposable
 
         EffectiveRoot = RecordingRootPolicy.Resolve(options, settingsStore.Load());
 
-        _bookmarks = new RecordingBookmarks(_metadata, RelativeToRoot, PushError);
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller, _token, options.ControlPort, options.UiPort);
         _metadata = new RecordingMetadataStore(ContentLayout.MetadataRoot(EffectiveRoot));
+        _bookmarks = new RecordingBookmarks(_metadata, RelativeToRoot, PushError);
         _clipTitles = new ClipTitleStore(ContentLayout.MetadataRoot(EffectiveRoot));
         _thumbnails = new ThumbnailStore(ContentLayout.ThumbnailRoot(EffectiveRoot), CreateThumbnailExtractor);
         _trash = new TrashStore(ContentLayout.TrashRoot(EffectiveRoot));

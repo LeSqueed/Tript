@@ -199,6 +199,54 @@ public sealed class HdrPlanTests
     }
 
     [Fact]
+    public void AnSdrRecording_WithNoConfiguredEncoder_PrefersHardwareOverX264()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
+            displayIsHdr: false,
+            hdrEnabledInSettings: true,
+            [X264, new VideoEncoderCandidate("h264_fallback_amf", "h264"), Nvenc],
+            configuredEncoderId: null);
+
+        Assert.False(plan.UseHdr);
+        Assert.Equal("obs_nvenc_h264_tex", plan.EncoderId);
+    }
+
+    [Fact]
+    public void AnSdrRecording_WithOnlyX264_UsesX264()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
+            displayIsHdr: false,
+            hdrEnabledInSettings: true,
+            [X264],
+            configuredEncoderId: null);
+
+        Assert.Equal("obs_x264", plan.EncoderId);
+    }
+
+    [Fact]
+    public void AnSdrRecording_KeepsRegistrationOrderWithinTheSameRank()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Srgb,
+            displayIsHdr: false,
+            hdrEnabledInSettings: true,
+            [X264, new VideoEncoderCandidate("h264_texture_amf", "h264"), new VideoEncoderCandidate("av1_texture_amf", "av1")],
+            configuredEncoderId: null);
+
+        Assert.Equal("h264_texture_amf", plan.EncoderId);
+    }
+
+    [Theory]
+    [InlineData("obs_nvenc_h264_tex", 0)]
+    [InlineData("h264_texture_amf", 0)]
+    [InlineData("obs_qsv11_v2", 1)]
+    [InlineData("obs_x264", 2)]
+    public void HardwarePreference_RanksTextureEncodersFirst(string id, int rank) =>
+        Assert.Equal(rank, HdrPlanner.HardwarePreference(new VideoEncoderCandidate(id, "h264")));
+
+    [Fact]
     public void AnHdrGame_RecordsHdr_EvenWhenTheDisplayProbeSaysOtherwise()
     {
         var plan = HdrPlanner.Decide(

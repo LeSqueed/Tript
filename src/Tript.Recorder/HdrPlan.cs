@@ -99,7 +99,7 @@ public static class HdrPlanner
             return chosen.Id;
         }
 
-        return registered[0].Id;
+        return registered.OrderBy(HardwarePreference).First().Id;
     }
 
     private static VideoEncoderCandidate? ResolveHdrEncoder(
@@ -125,7 +125,10 @@ public static class HdrPlanner
         if (SoftwareEncoderIds.Contains(candidate.Id, StringComparer.OrdinalIgnoreCase))
             return 2;
 
-        return candidate.Id.Contains("texture", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        return candidate.Id.Contains("texture", StringComparison.OrdinalIgnoreCase) ||
+               candidate.Id.EndsWith("_tex", StringComparison.OrdinalIgnoreCase)
+            ? 0
+            : 1;
     }
 
     private static readonly string[] SoftwareEncoderIds = ["obs_x264", "ffmpeg_svt_av1", "ffmpeg_aom_av1"];

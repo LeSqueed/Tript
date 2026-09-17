@@ -30,16 +30,6 @@ internal static class ObsEncoderPolicy
     internal const int MaxBitrateKbps = 100_000;
     internal const int DefaultBitrateKbps = 15_000;
 
-    internal static string? ResolveVideoEncoderId(string? configuredEncoder)
-    {
-        if (IsUsableId(configuredEncoder))
-            return configuredEncoder;
-
-        var usable = EnumerateUsableEncoderIds();
-        return usable.FirstOrDefault(id => !string.Equals(id, X264Id, StringComparison.Ordinal))
-               ?? usable.FirstOrDefault();
-    }
-
     internal static (string RateControl, string QualityKey) ResolveRateControlKeys(string encoderId)
     {
         ArgumentException.ThrowIfNullOrEmpty(encoderId);

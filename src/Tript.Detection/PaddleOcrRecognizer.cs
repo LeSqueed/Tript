@@ -35,7 +35,7 @@ internal sealed class PaddleOcrRecognizer : IDisposable
         using var options = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            IntraOpNumThreads = 2,
+            IntraOpNumThreads = 1,
             InterOpNumThreads = 1,
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
         };

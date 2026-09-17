@@ -110,8 +110,8 @@ public sealed class WindowsStartupRegistrationTests
             ErrorsSound = true,
         };
 
-        Assert.True(Tript.Shell.Program.NotificationEnabled(settings, kind));
-        Assert.True(Tript.Shell.Program.SoundEnabled(settings, kind));
+        Assert.True(Tript.Shell.ShellNotifications.NotificationEnabled(settings, kind));
+        Assert.True(Tript.Shell.ShellNotifications.SoundEnabled(settings, kind));
     }
 
     [Fact]

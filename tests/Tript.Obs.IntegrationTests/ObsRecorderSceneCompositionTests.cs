@@ -59,6 +59,54 @@ public sealed class ObsRecorderSceneCompositionTests
     }
 
     [SkippableFact]
+    public void SessionAndReplayBuffer_ShareOneEncoder_AndBothWriteAFile()
+    {
+        using var session = ObsSession.StartWithSourceTypes();
+        using var colour = ObsSource.CreatePrivate(ColourSourceId, "shared encoder colour");
+        using var recorderSession = new ObsRecorderSession(session.Runtime, colour);
+
+        var directory = Path.Combine(Path.GetTempPath(), $"tript-shared-encoder-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var settings = RecorderSettings(RecordingMode.SessionWithReplayBuffer,
+                Path.Combine(directory, "session.mp4"));
+
+            recorderSession.PlaceSourceOnChannel();
+            string? replayPath = null;
+            using (var output = recorderSession.CreateOutput(settings))
+            {
+                Skip.IfNot(output.Start(), $"The output did not start: {output.LastError}");
+                Thread.Sleep(TimeSpan.FromSeconds(3));
+
+                var replayOutput = Assert.IsAssignableFrom<IReplayBufferOutput>(output);
+                Assert.True(replayOutput.SaveReplay(directory, "replay-%hh-%mm-%ss", path => replayPath = path));
+                Assert.True(replayOutput.WaitForReplaySave(TimeSpan.FromSeconds(15)));
+
+                Thread.Sleep(TimeSpan.FromSeconds(1));
+                output.Stop();
+                Assert.True(output.WaitForStop(TimeSpan.FromSeconds(15)));
+            }
+
+            recorderSession.ClearSourceFromChannel();
+
+            Assert.True(new FileInfo(settings.OutputPath).Length > 0, "the session file is empty");
+            Assert.NotNull(replayPath);
+            Assert.True(new FileInfo(replayPath).Length > 0, "the replay file is empty");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    [SkippableFact]
     public void WithoutAGameCaptureSource_TheHookStateIsFalseRatherThanUnknown()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -106,10 +154,11 @@ public sealed class ObsRecorderSceneCompositionTests
         return scene.EnumerateItems();
     }
 
-    private static ResolvedRecorderSettings RecorderSettings() => new()
+    private static ResolvedRecorderSettings RecorderSettings(RecordingMode mode = RecordingMode.Session,
+        string? outputPath = null) => new()
     {
-        Mode = RecordingMode.Session,
-        OutputPath = Path.Combine(Path.GetTempPath(), $"tript-composition-{Guid.NewGuid():N}.mp4"),
+        Mode = mode,
+        OutputPath = outputPath ?? Path.Combine(Path.GetTempPath(), $"tript-composition-{Guid.NewGuid():N}.mp4"),
         ResolutionWidth = CanvasWidth,
         ResolutionHeight = CanvasHeight,
         Fps = 30,

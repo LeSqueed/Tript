@@ -88,33 +88,21 @@ public sealed class ObsRecorderSession : IRecorderSession
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (settings.Mode is RecordingMode.ReplayBufferOnly)
-            return CreateEncodedOutput(settings, ReplayBufferId, "replay buffer");
-
-        var session = CreateEncodedOutput(settings, FfmpegMuxerId, "recorder output");
-        if (!settings.Mode.UsesReplayBuffer())
-            return session;
-
-        try
+        var outputIds = settings.Mode switch
         {
-            var replay = CreateEncodedOutput(settings, ReplayBufferId, "replay buffer",
-                includeCaptureSources: false);
-            return new CombinedRecorderOutput(session, replay);
-        }
-        catch
+            RecordingMode.ReplayBufferOnly => new[] { ReplayBufferId },
+            _ when settings.Mode.UsesReplayBuffer() => [FfmpegMuxerId, ReplayBufferId],
+            _ => [FfmpegMuxerId]
+        };
+
+        foreach (var outputId in outputIds)
         {
-            session.Dispose();
-            throw;
+            if (!ObsOutput.IsTypeRegistered(outputId))
+                throw new ObsException($"No loaded module registers the output type '{outputId}'.");
         }
-    }
 
-    private MuxerOutput CreateEncodedOutput(ResolvedRecorderSettings settings, string outputId, string outputName,
-        bool includeCaptureSources = true)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-
-        if (!ObsOutput.IsTypeRegistered(outputId))
-            throw new ObsException($"No loaded module registers the output type '{outputId}'.");
+        if (!ObsEncoder.IsTypeRegistered(FfmpegAacId))
+            throw new ObsException($"No loaded module registers the audio encoder '{FfmpegAacId}'.");
 
         var plan = RecorderColourPolicy.Resolve(Runtime, settings);
         plan = RecorderColourPolicy.ApplyToCanvas(Runtime, plan, PlaceSourceOnChannel, ApplyCaptureColour);
@@ -129,11 +117,73 @@ public sealed class ObsRecorderSession : IRecorderSession
         SizeColourSourceToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
         FitItemsToCanvas(settings.ResolutionWidth, settings.ResolutionHeight);
 
-        var videoEncoderId = plan.EncoderId;
+        var videoEncoder = CreateVideoEncoder(settings, plan, video);
+        MuxerOutput? session = null;
+        try
+        {
+            if (settings.Mode is RecordingMode.ReplayBufferOnly)
+            {
+                return CreateMuxerOutput(settings, ReplayBufferId, "replay buffer", audio, videoEncoder,
+                    ownsVideoEncoder: true);
+            }
 
-        if (!ObsEncoder.IsTypeRegistered(FfmpegAacId))
-            throw new ObsException($"No loaded module registers the audio encoder '{FfmpegAacId}'.");
+            session = CreateMuxerOutput(settings, FfmpegMuxerId, "recorder output", audio, videoEncoder,
+                ownsVideoEncoder: true);
+            if (!settings.Mode.UsesReplayBuffer())
+                return session;
 
+            var replay = CreateMuxerOutput(settings, ReplayBufferId, "replay buffer", audio, videoEncoder,
+                ownsVideoEncoder: false, includeCaptureSources: false);
+            return new CombinedRecorderOutput(session, replay);
+        }
+        catch
+        {
+            if (session is not null)
+                session.Dispose();
+            else
+                videoEncoder.Dispose();
+            throw;
+        }
+    }
+
+    private static ObsEncoder CreateVideoEncoder(ResolvedRecorderSettings settings, HdrPlan plan, nint video)
+    {
+        var rateControl = ObsEncoderPolicy.ResolveRateControl(plan.EncoderId, settings.RateControl);
+        using var videoSettings = new ObsSettings();
+        videoSettings.SetString("rate_control", rateControl.Mode);
+
+        if (rateControl.QuantiserKey is { } quantiserKey)
+            videoSettings.SetInt(quantiserKey, ObsEncoderPolicy.MapQualityToQuantiser(settings.Quality));
+
+        if (rateControl.BitrateKey is { } bitrateKey)
+            videoSettings.SetInt(bitrateKey, ObsEncoderPolicy.ClampBitrateKbps(settings.BitrateKbps));
+
+        if (rateControl.MaxBitrateKey is { } maxBitrateKey)
+            videoSettings.SetInt(maxBitrateKey,
+                ObsEncoderPolicy.ResolveMaxBitrateKbps(settings.BitrateKbps, settings.MaxBitrateKbps));
+
+        videoSettings.SetInt("keyint_sec", KeyframeIntervalSeconds);
+
+        if (plan.Profile is { } profile)
+            videoSettings.SetString("profile", profile);
+
+        var videoEncoder = ObsEncoder.CreateVideo(plan.EncoderId, "recorder video", videoSettings);
+        try
+        {
+            videoEncoder.BindToVideo(video);
+            videoEncoder.SetScaledSize((uint)settings.ResolutionWidth, (uint)settings.ResolutionHeight);
+            return videoEncoder;
+        }
+        catch
+        {
+            videoEncoder.Dispose();
+            throw;
+        }
+    }
+
+    private MuxerOutput CreateMuxerOutput(ResolvedRecorderSettings settings, string outputId, string outputName,
+        nint audio, ObsEncoder videoEncoder, bool ownsVideoEncoder, bool includeCaptureSources = true)
+    {
         using var outputSettings = new ObsSettings();
         if (outputId == FfmpegMuxerId)
         {
@@ -151,37 +201,12 @@ public sealed class ObsRecorderSession : IRecorderSession
 
         var output = ObsOutput.Create(outputId, outputName, outputSettings);
 
-        ObsEncoder? videoEncoder = null;
         ObsEncoder? audioEncoder = null;
         AudioRouting? audioRouting = null;
 
         try
         {
-            var rateControl = ObsEncoderPolicy.ResolveRateControl(videoEncoderId, settings.RateControl);
-            using (var videoSettings = new ObsSettings())
-            {
-                videoSettings.SetString("rate_control", rateControl.Mode);
-
-                if (rateControl.QuantiserKey is { } quantiserKey)
-                    videoSettings.SetInt(quantiserKey, ObsEncoderPolicy.MapQualityToQuantiser(settings.Quality));
-
-                if (rateControl.BitrateKey is { } bitrateKey)
-                    videoSettings.SetInt(bitrateKey, ObsEncoderPolicy.ClampBitrateKbps(settings.BitrateKbps));
-
-                if (rateControl.MaxBitrateKey is { } maxBitrateKey)
-                    videoSettings.SetInt(maxBitrateKey,
-                        ObsEncoderPolicy.ResolveMaxBitrateKbps(settings.BitrateKbps, settings.MaxBitrateKbps));
-
-                videoSettings.SetInt("keyint_sec", KeyframeIntervalSeconds);
-
-                if (plan.Profile is { } profile)
-                    videoSettings.SetString("profile", profile);
-
-                videoEncoder = ObsEncoder.CreateVideo(videoEncoderId, "recorder video", videoSettings);
-                videoEncoder.BindToVideo(video);
-                videoEncoder.SetScaledSize((uint)settings.ResolutionWidth, (uint)settings.ResolutionHeight);
-                output.SetVideoEncoder(videoEncoder);
-            }
+            output.SetVideoEncoder(videoEncoder);
 
             if (settings.AudioTracks.Count > 0)
             {
@@ -191,21 +216,19 @@ public sealed class ObsRecorderSession : IRecorderSession
             }
             else
             {
-                using (var audioSettings = new ObsSettings())
-                {
-                    audioSettings.SetInt("bitrate", 160);
-                    audioEncoder = ObsEncoder.CreateAudio(FfmpegAacId, "recorder audio", audioSettings, mixerIndex: 0);
-                    audioEncoder.BindToAudio(audio);
-                    output.SetAudioEncoder(audioEncoder, 0);
-                }
+                using var audioSettings = new ObsSettings();
+                audioSettings.SetInt("bitrate", 160);
+                audioEncoder = ObsEncoder.CreateAudio(FfmpegAacId, "recorder audio", audioSettings, mixerIndex: 0);
+                audioEncoder.BindToAudio(audio);
+                output.SetAudioEncoder(audioEncoder, 0);
             }
 
-            return new MuxerOutput(output, videoEncoder, audioEncoder, audioRouting, outputId == ReplayBufferId);
+            return new MuxerOutput(output, ownsVideoEncoder ? videoEncoder : null, audioEncoder, audioRouting,
+                outputId == ReplayBufferId);
         }
         catch
         {
             output.Dispose();
-            videoEncoder?.Dispose();
             audioEncoder?.Dispose();
             audioRouting?.Dispose();
             throw;

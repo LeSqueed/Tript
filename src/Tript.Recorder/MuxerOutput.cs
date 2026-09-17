@@ -8,7 +8,7 @@ namespace Tript.Recorder;
 internal sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
 {
     private readonly ObsOutput _output;
-    private readonly ObsEncoder _videoEncoder;
+    private readonly ObsEncoder? _ownedVideoEncoder;
     private readonly ObsEncoder? _audioEncoder;
     private readonly AudioRouting? _audioRouting;
     private readonly bool _isReplayBuffer;
@@ -17,11 +17,11 @@ internal sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
     private Action<string>? _replaySaved;
     private bool _replaySavePending;
 
-    internal MuxerOutput(ObsOutput output, ObsEncoder videoEncoder, ObsEncoder? audioEncoder,
+    internal MuxerOutput(ObsOutput output, ObsEncoder? ownedVideoEncoder, ObsEncoder? audioEncoder,
         AudioRouting? audioRouting, bool isReplayBuffer)
     {
         _output = output;
-        _videoEncoder = videoEncoder;
+        _ownedVideoEncoder = ownedVideoEncoder;
         _audioEncoder = audioEncoder;
         _audioRouting = audioRouting;
         _isReplayBuffer = isReplayBuffer;
@@ -106,7 +106,7 @@ internal sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
         if (_isReplayBuffer)
             _output.Saved -= OnReplaySaved;
         _output.Dispose();
-        _videoEncoder.Dispose();
+        _ownedVideoEncoder?.Dispose();
         _audioEncoder?.Dispose();
         _audioRouting?.Dispose();
     }

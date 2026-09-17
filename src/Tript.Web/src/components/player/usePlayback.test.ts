@@ -69,6 +69,20 @@ describe('usePlayback', () => {
     expect(result.current.currentTime).toBe(45);
   });
 
+  it('HidingTheWindow_PausesPlayback', () => {
+    const { result, rerender } = renderHook(({ visible }) => usePlayback('a.mp4', 120, visible), {
+      initialProps: { visible: true },
+    });
+    const video = attachVideo(result);
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {});
+
+    rerender({ visible: true });
+    expect(pause).not.toHaveBeenCalled();
+
+    rerender({ visible: false });
+    expect(pause).toHaveBeenCalledTimes(1);
+  });
+
   it('Seek_WhilePlaying_IsNotOverwrittenByTheNextSample', () => {
     const { result } = renderHook(() => usePlayback('a.mp4', 120));
     const video = attachVideo(result);

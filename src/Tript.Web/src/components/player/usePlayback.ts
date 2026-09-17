@@ -19,7 +19,7 @@ export interface PlaybackState {
   videoRef: RefObject<HTMLVideoElement | null>;
 }
 
-export function usePlayback(itemKey: string, fallbackDuration: number): PlaybackState {
+export function usePlayback(itemKey: string, fallbackDuration: number, visible = true): PlaybackState {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
@@ -44,6 +44,12 @@ export function usePlayback(itemKey: string, fallbackDuration: number): Playback
       }
     }
   }, [itemKey]);
+
+  useEffect(() => {
+    if (!visible) {
+      videoRef.current?.pause();
+    }
+  }, [visible]);
 
   useEffect(() => {
     if (!playing || typeof requestAnimationFrame !== 'function') {

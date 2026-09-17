@@ -273,6 +273,7 @@ function AppShell({
               onReviewSession={navigation.openSessionReview}
               convertHdrClipsToSdr={preferences.convertHdrClipsToSdr}
               recording={preferences.recording}
+              windowVisible={windowVisible}
               reviewRecording={playerSession ?? undefined}
               highlightCount={playerSession
                 ? items.filter((candidate) => candidate.automated && candidate.sourceSessionPath === playerSession.filePath).length

@@ -14,6 +14,7 @@ internal static class WindowsWindow
     private const uint WmSysCommand = 0x0112;
     private const uint WmClose = 0x0010;
     private const int ScMinimize = 0xF020;
+    private const uint MonitorDefaultToNull = 0;
 
     internal static void HideWindow(PhotinoWindow window)
     {
@@ -47,6 +48,35 @@ internal static class WindowsWindow
     // IsWindowVisible stays true under a fullscreen app; the foreground window is the real signal.
     internal static bool IsForeground(PhotinoWindow window) => GetForegroundWindow() == window.WindowHandle;
 
+    internal static bool IsCoveredByFullscreenWindow(PhotinoWindow window)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero || foreground == window.WindowHandle || IsDesktopWindow(foreground))
+            return false;
+
+        var monitor = MonitorFromWindow(foreground, MonitorDefaultToNull);
+        if (monitor == IntPtr.Zero || monitor != MonitorFromWindow(window.WindowHandle, MonitorDefaultToNull))
+            return false;
+
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (!GetWindowRect(foreground, out var bounds) || !GetMonitorInfo(monitor, ref monitorInfo))
+            return false;
+
+        return bounds.Left <= monitorInfo.Monitor.Left && bounds.Top <= monitorInfo.Monitor.Top
+            && bounds.Right >= monitorInfo.Monitor.Right && bounds.Bottom >= monitorInfo.Monitor.Bottom;
+    }
+
+    private static bool IsDesktopWindow(IntPtr window)
+    {
+        if (window == GetShellWindow())
+            return true;
+
+        Span<char> name = stackalloc char[16];
+        var length = GetClassName(window, ref MemoryMarshal.GetReference(name), name.Length);
+        var className = name[..Math.Max(0, length)];
+        return className.SequenceEqual("Progman") || className.SequenceEqual("WorkerW");
+    }
+
     internal static void ShowContentWindows(PhotinoWindow window) => ShowContentWindows(window.WindowHandle);
 
     private static void ShowContentWindows(IntPtr windowHandle)
@@ -79,5 +109,40 @@ internal static class WindowsWindow
     [DllImport("user32.dll")]
     private static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetShellWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, ref char className, int maxCount);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
     private delegate bool EnumChildProc(IntPtr hWnd, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
+    }
 }

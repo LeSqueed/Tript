@@ -62,6 +62,7 @@ export interface PlayerViewProps {
   onRegionSelect?(region: TimelineRegion): void;
   convertHdrClipsToSdr?: boolean;
   recording?: boolean;
+  windowVisible?: boolean;
 }
 
 export function PlayerView({
@@ -83,6 +84,7 @@ export function PlayerView({
   onRegionSelect: externalOnRegionSelect,
   convertHdrClipsToSdr = false,
   recording: recordingProp,
+  windowVisible = true,
 }: PlayerViewProps) {
   const ipcSource = useIpcSessionSource(client, injectedSource === undefined);
   const source = injectedSource ?? ipcSource;
@@ -122,7 +124,7 @@ export function PlayerView({
 
   const declaredDuration = item?.endTime !== undefined && item.endTime > 0 ? item.endTime : undefined;
   const fallbackDuration = declaredDuration ?? DEFAULT_SESSION_SECONDS;
-  const playback = usePlayback(item?.filePath ?? '', fallbackDuration);
+  const playback = usePlayback(item?.filePath ?? '', fallbackDuration, windowVisible);
   const { duration, durationKnown, currentTime, seek, playing, videoRef } = playback;
   const [hasStartedPlayback, setHasStartedPlayback] = useState(false);
   const sdr = useSdrConversion(client);

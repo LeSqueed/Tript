@@ -387,7 +387,8 @@ internal sealed class ShellWindow : IDisposable
         {
             if (window.WindowHandle == IntPtr.Zero)
                 return;
-            _host.SetWindowVisible(WindowsWindow.IsVisible(window) && !WindowsWindow.IsMinimized(window));
+            _host.SetWindowVisible(WindowsWindow.IsVisible(window) && !WindowsWindow.IsMinimized(window)
+                && !WindowsWindow.IsCoveredByFullscreenWindow(window));
         }
         catch (Exception exception)
         {

@@ -90,13 +90,8 @@ internal sealed partial class AppHost : IDisposable
     private bool _stopFinalizationPending;
     private ProcessNameGameDetector? _detector;
     private FullscreenGameDetector? _fullscreenDetector;
-    private readonly GameDiscoveryService? _discovery;
-    private readonly IDiscoveryFileSystem _discoveryFileSystem = new PhysicalDiscoveryFileSystem();
-    private readonly object _inventoryGate = new();
-    private GameInventory _inventory = new([], []);
-    private readonly SemaphoreSlim _discoveryScanSemaphore = new(1, 1);
+    private readonly GameInventoryScanner _gameInventory;
     private readonly CancellationTokenSource _discoveryCancellation = new();
-    private Task _discoveryTask = Task.CompletedTask;
     private DetectionHost? _detectionHost;
     private RecordingMetadata? _pendingMetadata;
     private string? _activeOutputPath;
@@ -165,9 +160,9 @@ internal sealed partial class AppHost : IDisposable
         MigrateLegacyTrainingFolders(_gameCatalog, TrainingPaths.RootPath,
             TrainingPaths.InstalledModelsPath);
 #endif
-        _discovery = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
+        _gameInventory = new GameInventoryScanner(OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
             ? GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider())
-            : null;
+            : null);
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
 
         if (_resolverClient is null)
@@ -349,7 +344,7 @@ internal sealed partial class AppHost : IDisposable
 
         try
         {
-            _discoveryTask.GetAwaiter().GetResult();
+            _gameInventory.CurrentScan.GetAwaiter().GetResult();
         }
         catch (OperationCanceledException)
         {

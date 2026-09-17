@@ -195,9 +195,7 @@ internal sealed partial class AppHost
         if (candidates.Length == 0)
             return;
 
-        GameInventory inventory;
-        lock (_inventoryGate)
-            inventory = _inventory;
+        var inventory = _gameInventory.Inventory;
 
         var migrated = false;
         foreach (var game in candidates)
@@ -278,9 +276,7 @@ internal sealed partial class AppHost
 
     private void AttachDiscoveredProcessPaths(List<GameInfo> games)
     {
-        GameInventory inventory;
-        lock (_inventoryGate)
-            inventory = _inventory;
+        var inventory = _gameInventory.Inventory;
         if (inventory.Games.IsDefaultOrEmpty)
             return;
 

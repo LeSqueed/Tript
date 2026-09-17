@@ -54,10 +54,8 @@ internal sealed partial class AppHost
     {
         try
         {
-            await _discoveryTask.WaitAsync(_discoveryCancellation.Token).ConfigureAwait(false);
-            GameInventory inventory;
-            lock (_inventoryGate)
-                inventory = _inventory;
+            await _gameInventory.CurrentScan.WaitAsync(_discoveryCancellation.Token).ConfigureAwait(false);
+            var inventory = _gameInventory.Inventory;
             var resolution = CandidateResolverInput(candidate.Executable, normalized, inventory);
             if (!resolution.StoreBacked)
             {

@@ -49,6 +49,42 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
+    public void LowerPriority_RunsTheChildBelowNormal()
+    {
+        using var process = new System.Diagnostics.Process
+        {
+            StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = MediaTestFixture.Binaries.Ffmpeg,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            }
+        };
+        foreach (var argument in new[]
+                 {
+                     "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=1",
+                     "-t", "3600", "-f", "null", "-",
+                 })
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        Assert.True(process.Start());
+        try
+        {
+            ProcessPipes.LowerPriority(process);
+            process.Refresh();
+
+            Assert.Equal(System.Diagnostics.ProcessPriorityClass.BelowNormal, process.PriorityClass);
+        }
+        finally
+        {
+            ProcessPipes.KillQuietly(process);
+        }
+    }
+
+    [Fact]
     public async Task CreateClips_OverwritesAnExistingOutput_WithoutWaitingForAnAnswer()
     {
         var source = MediaTestFixture.CreateSdrSource("overwrite-source.mp4", durationSeconds: 4);

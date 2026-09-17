@@ -28,6 +28,19 @@ internal static class ProcessPipes
     internal static string TextOf(Task<string> read) =>
         read.IsCompletedSuccessfully ? read.Result : string.Empty;
 
+    internal static void LowerPriority(Process process)
+    {
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+                                             or System.ComponentModel.Win32Exception
+                                             or NotSupportedException)
+        {
+        }
+    }
+
     internal static void KillQuietly(Process process)
     {
         try

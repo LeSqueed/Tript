@@ -202,6 +202,7 @@ public sealed class MediaProbe
             throw new ClipSourceException($"Failed to start {fileName}: {ex.Message}", ex);
         }
 
+        ProcessPipes.LowerPriority(process);
         var stdout = ProcessPipes.BeginRead(process.StandardOutput);
         var stderr = ProcessPipes.BeginRead(process.StandardError);
 

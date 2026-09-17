@@ -41,6 +41,7 @@ public static class FfmpegRunner
             throw new ClipSourceException($"Failed to start ffmpeg at '{ffmpegPath}': {ex.Message}", ex);
         }
 
+        ProcessPipes.LowerPriority(process);
         try { process.StandardInput.Close(); } catch (IOException) {  }
 
         var stderr = new StringBuilder();
@@ -97,6 +98,7 @@ public static class FfmpegRunner
             return FfmpegOutcome.NotStarted($"Failed to start ffmpeg at '{ffmpegPath}': {exception.Message}");
         }
 
+        ProcessPipes.LowerPriority(process);
         try { process.StandardInput.Close(); } catch (IOException) {  }
 
         var stdout = ProcessPipes.BeginRead(process.StandardOutput);

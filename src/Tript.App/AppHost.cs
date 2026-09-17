@@ -51,6 +51,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly ContentServer _content;
     private readonly UiHost _ui;
     private readonly RecordingMetadataStore _metadata;
+    private readonly RecordingBookmarks _bookmarks;
     private readonly ClipTitleStore _clipTitles;
     private readonly ThumbnailStore _thumbnails;
     private readonly TrashStore _trash;
@@ -207,6 +208,7 @@ internal sealed partial class AppHost : IDisposable
 
         EffectiveRoot = RecordingRootPolicy.Resolve(options, settingsStore.Load());
 
+        _bookmarks = new RecordingBookmarks(_metadata, RelativeToRoot, PushError);
         _controller = new AppController(this);
         _ipc = new IpcServer(_controller, _token, options.ControlPort, options.UiPort);
         _metadata = new RecordingMetadataStore(ContentLayout.MetadataRoot(EffectiveRoot));
@@ -769,37 +771,14 @@ internal sealed partial class AppHost : IDisposable
 
     internal void PushSettings()
     {
-        var settings = _settingsStore.Load();
-        var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
-
-        if (settingsNode?["audio"] is JsonObject audioNode)
-            audioNode["devices"] = JsonSerializer.SerializeToNode(_audioLevels.Devices,
-                SettingsSerialization.Options);
-        var settingsElement = JsonSerializer.Deserialize<JsonElement>(
-            settingsNode?.ToJsonString() ?? "{}", SettingsSerialization.Options);
         var displays = EnumerateDisplays();
-        _ipc.Broadcast("settings", JsonSerializer.SerializeToElement(new
-        {
-            settings = settingsElement,
-
-            availableEncoders = _runtime is null ? null : ObsEncoderPolicy.EnumerateUsableEncoderIds(),
-
-            displayResolution = _primaryDisplay is { IsUsable: true } display
-                ? (object?)new { width = display.Width, height = display.Height }
-                : null,
-
-            availableDisplays = displays?.Select(monitor => new
-            {
-                id = monitor.Id,
-                name = monitor.Name,
-                width = monitor.Width,
-                height = monitor.Height,
-                primary = monitor.Primary,
-            }).ToList(),
-            displayFallbackWarning = BuildDisplayFallbackWarning(settings.Capture, displays),
-
-            appVersion = UpdateManager.CurrentInstalledVersion(),
-        }, Wire.Options));
+        _ipc.Broadcast("settings", SettingsMessage.Build(
+            _settingsStore.Load(),
+            _audioLevels.Devices,
+            displays,
+            _runtime is null ? null : ObsEncoderPolicy.EnumerateUsableEncoderIds(),
+            _primaryDisplay,
+            UpdateManager.CurrentInstalledVersion()));
     }
 
     private IReadOnlyList<ObsDisplay>? EnumerateDisplays()
@@ -817,24 +796,6 @@ internal sealed partial class AppHost : IDisposable
             Log.Warning(exception, "AppHost: {DisplayId} would not enumerate its monitors.", displayId);
             return null;
         }
-    }
-
-    private static object? BuildDisplayFallbackWarning(CaptureSettings capture, IReadOnlyList<ObsDisplay>? displays)
-    {
-        if (displays is null || string.IsNullOrEmpty(capture.Display))
-            return null;
-
-        var resolution = ObsCaptureSource.ResolveDisplay(displays, capture.Display);
-        if (!resolution.RequestedMissing)
-            return null;
-
-        return new
-        {
-            requestedId = capture.Display,
-            requestedLabel = capture.DisplayLabel,
-            usingId = resolution.Selected?.Id,
-            usingLabel = resolution.Selected?.Name,
-        };
     }
 
     internal void PushGameList()
@@ -856,7 +817,7 @@ internal sealed partial class AppHost : IDisposable
             return;
         }
 
-        var bookmark = CreateBookmark(parameters);
+        var bookmark = RecordingBookmarks.Create(parameters);
         var session = _sessionTracker.Active;
         if (session is not null && IsActiveRecordingPath(parameters.FilePath))
         {
@@ -866,32 +827,8 @@ internal sealed partial class AppHost : IDisposable
         }
 
         var target = ResolveContentFile(parameters.FilePath);
-        if (target is not null && TrySaveBookmark(target, bookmark))
+        if (target is not null && _bookmarks.TryAdd(target, bookmark))
             PushContent();
-    }
-
-    private bool TrySaveBookmark(string target, Bookmark bookmark)
-    {
-        var fileName = Path.GetFileName(target);
-        lock (_metadata.WriteGate)
-        {
-            var existing = _metadata.Read(fileName);
-            if (existing.MustNotBeOverwritten)
-            {
-                Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark is refused rather than replacing it.", fileName, existing.Failure);
-                PushError(
-                    "The bookmark could not be saved: this recording's metadata record could not be read, and overwriting it would lose its game and existing bookmarks.");
-                return false;
-            }
-
-            var metadata = existing.Record ?? new RecordingMetadata { VideoPath = RelativeToRoot(target) };
-            metadata.Bookmarks.Add(bookmark);
-            if (_metadata.Save(metadata))
-                return true;
-        }
-
-        PushError("The bookmark could not be saved, check the recording folder is writable.");
-        return false;
     }
 
     internal void DeleteBookmark(DeleteBookmarkParameters? parameters)
@@ -911,31 +848,8 @@ internal sealed partial class AppHost : IDisposable
         }
 
         var target = ResolveContentFile(parameters.FilePath);
-        if (target is not null && TryRemoveBookmark(Path.GetFileName(target), id))
+        if (target is not null && _bookmarks.TryRemove(Path.GetFileName(target), id))
             PushContent();
-    }
-
-    private bool TryRemoveBookmark(string fileName, Guid id)
-    {
-        lock (_metadata.WriteGate)
-        {
-            var existing = _metadata.Read(fileName);
-            if (existing.MustNotBeOverwritten)
-            {
-                Log.Warning("{FileName} has a metadata record that could not be read ({Failure}); the bookmark removal is refused rather than replacing it.", fileName, existing.Failure);
-                PushError("The bookmark could not be removed: this recording's metadata record could not be read.");
-                return false;
-            }
-
-            var metadata = existing.Record;
-            if (metadata is null || metadata.Bookmarks.RemoveAll(bookmark => bookmark.Id == id) == 0)
-                return false;
-            if (_metadata.Save(metadata))
-                return true;
-        }
-
-        PushError("The bookmark could not be removed, check the recording folder is writable.");
-        return false;
     }
 
     private bool IsActiveRecordingPath(string relativePath)
@@ -945,11 +859,4 @@ internal sealed partial class AppHost : IDisposable
 
         return string.Equals(relativePath, RelativeToRoot(_activeSessionPath), ContentPathComparison);
     }
-
-    private static Bookmark CreateBookmark(AddBookmarkParameters parameters) => new()
-    {
-        Id = Guid.TryParse(parameters.Id, out var id) ? id : Guid.NewGuid(),
-        Type = Enum.TryParse<BookmarkType>(parameters.Type, ignoreCase: true, out var type) ? type : BookmarkType.Manual,
-        Time = TimeSpan.FromSeconds(parameters.Time),
-    };
 }

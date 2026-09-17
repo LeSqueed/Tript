@@ -233,6 +233,19 @@ describe('App shell', () => {
     expect(screen.queryByTestId('library-groups')).toBeNull();
   });
 
+  it('opens the streamer page from the primary navigation and keeps it in the address', () => {
+    renderApp();
+    connect();
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: 'Streamer' }));
+
+    expect(within(nav).getByRole('button', { name: 'Streamer' }).getAttribute('aria-current')).toBe('page');
+    expect(window.location.hash).toBe('#streamer');
+    expect(screen.getByTestId('streamer-view')).toBeTruthy();
+    expect(screen.queryByTestId('library-groups')).toBeNull();
+  });
+
   it('can reopen settings after navigating back to the library', () => {
     renderApp();
     connect();

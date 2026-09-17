@@ -278,6 +278,8 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public bool HasGameCaptureSource => _gameCaptureSource is not null;
 
+    public ObsSource? GameCaptureSource => _gameCaptureSource;
+
     public bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
         Action clearWarning, CancellationToken cancellationToken) =>
         _hookProbe.WaitForHook(deadline, warningAfter, showWarning, clearWarning, cancellationToken);

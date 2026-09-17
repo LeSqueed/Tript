@@ -68,6 +68,7 @@ function makeSettings(): SettingsMessageContent['settings'] {
       quickClip: { modifiers: ['Control', 'Alt'], key: 'KeyC' },
       quickClipSeconds: 30,
     },
+    streaming: { shareEnabled: false, shareWhen: 'WhileObsRuns', senderName: 'Tript' },
   };
 }
 

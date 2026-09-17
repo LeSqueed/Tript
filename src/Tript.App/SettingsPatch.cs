@@ -40,6 +40,9 @@ internal static class SettingsPatch
                 case "hotkeys" when property.Value.ValueKind == JsonValueKind.Object:
                     ApplyToPage(settings.Hotkeys, property.Value);
                     break;
+                case "streaming" when property.Value.ValueKind == JsonValueKind.Object:
+                    ApplyToPage(settings.Streaming, property.Value);
+                    break;
             }
         }
     }

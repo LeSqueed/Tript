@@ -22,5 +22,8 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>Tript.Recorder.Tests</_Parameter1>
     </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.App.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>

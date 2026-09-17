@@ -82,6 +82,7 @@ internal sealed partial class AppHost
         IRecorderSession? hookWaitSession = null;
         CancellationTokenSource? waitCancellation = null;
         bool hookWaitCancelled = false;
+        bool hookFellBack = false;
         SettingsModel settings;
         ResolvedRecorderSettings resolved;
         string sessionPath;
@@ -135,6 +136,7 @@ internal sealed partial class AppHost
             {
                 Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
                     effectiveGameId);
+                SetHookConflictSuspected(false);
                 waitCancellation = new CancellationTokenSource();
                 _captureWaitCancellation = waitCancellation;
                 if (Volatile.Read(ref _recordingStopRequested) != 0)
@@ -155,11 +157,12 @@ internal sealed partial class AppHost
             var hookReady = hookWaitSession.WaitForGameCapture(
                 deadline,
                 warningAfter,
-                () => PushWarning("Still connecting game capture. Recording will start when the hook is ready."),
+                () => PushWarning(HookWaitWarning()),
                 () => PushWarning(null),
                 waitCancellation!.Token);
             hookWaitCancelled = waitCancellation.IsCancellationRequested;
-            if (!hookReady && !hookWaitCancelled && hasFallback)
+            hookFellBack = !hookReady && !hookWaitCancelled && hasFallback;
+            if (hookFellBack)
             {
                 Log.Information("AppHost: the {GameId} game-capture hook did not attach within {Timeout}s; " +
                                 "starting the recording on the display layer and keeping the hook retry",
@@ -180,6 +183,8 @@ internal sealed partial class AppHost
                     hookWaitSession.ClearSourceFromChannel();
                 _captureWaitCancellation = null;
                 PushWarning(null);
+                if (hookFellBack)
+                    ReportHookFallback();
 
                 if (hookWaitCancelled)
                     return StartRecordingResult.RecorderRefused;
@@ -540,6 +545,7 @@ internal sealed partial class AppHost
 
             Log.Information("AppHost: the capture policy changed to {Method}; rebuilding the recording scene.",
                 policy.Method);
+            _streamShare?.SetCapture(null);
             _recorder.Dispose();
             _recorder = null;
             _recorderSession.Dispose();
@@ -559,6 +565,7 @@ internal sealed partial class AppHost
         var session = new ObsRecorderSession(_runtime, _colourSource, gameCaptureTarget: null, policy);
         _recorderSession = session;
         _recorder = new RecorderStateMachine(session, settings);
+        _streamShare?.SetCapture(session.GameCaptureSource);
     }
 
     private void RetargetGameCapture(string gameId)

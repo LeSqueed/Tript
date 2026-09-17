@@ -52,6 +52,12 @@ public enum CloseBehavior
     HideToTray
 }
 
+public enum StreamShareWhen
+{
+    WhileObsRuns,
+    Always
+}
+
 public enum DisplayCaptureMethod
 {
     Auto,

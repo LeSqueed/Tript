@@ -110,6 +110,20 @@ public sealed class GameSettings
     public List<string> IgnoredApplications { get; set; } = [];
 }
 
+public sealed class StreamingSettings
+{
+    public const string DefaultSenderName = "Tript";
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
+
+    public bool ShareEnabled { get; set; }
+
+    public StreamShareWhen ShareWhen { get; set; } = StreamShareWhen.WhileObsRuns;
+
+    public string SenderName { get; set; } = DefaultSenderName;
+}
+
 public sealed class GeneralSettings
 {
     [JsonExtensionData]

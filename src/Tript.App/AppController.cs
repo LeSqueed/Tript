@@ -57,6 +57,7 @@ internal sealed class AppController
             ["DeleteBookmark"] = (parameters, _) => _host.DeleteBookmark(parameters.Deserialize<DeleteBookmarkParameters>()),
 
             ["ListSettings"] = (_, _) => _host.PushSettings(),
+            ["GetStreamerStatus"] = (_, _) => _host.PushStreamerStatus(),
             ["UpdateSettings"] = (parameters, _) =>
             {
                 var parsed = parameters.Deserialize<UpdateSettingsParameters>();

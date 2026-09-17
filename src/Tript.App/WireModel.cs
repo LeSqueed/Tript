@@ -14,6 +14,27 @@ internal static class Wire
     };
 }
 
+internal sealed class StreamerStatusInfo
+{
+    public string State { get; set; } = "off";
+
+    public bool ShareEnabled { get; set; }
+
+    public bool ObsRunning { get; set; }
+
+    public string? ObsVersion { get; set; }
+
+    public string SenderName { get; set; } = string.Empty;
+
+    public uint Width { get; set; }
+
+    public uint Height { get; set; }
+
+    public string? AdapterName { get; set; }
+
+    public bool HookConflictSuspected { get; set; }
+}
+
 internal sealed class AudioTrackInfo
 {
     public int Index { get; set; }

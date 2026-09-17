@@ -16,6 +16,7 @@ import './components/PlayerView.css';
 import './components/player/clipDialog.css';
 import './components/trash/trashList.css';
 import './components/SettingsView.css';
+import './components/StreamerView.css';
 import './components/TrainingView.css';
 
 createRoot(document.getElementById('root')!).render(

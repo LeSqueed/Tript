@@ -13,7 +13,15 @@ import type {
 import type { SettingsUpdateResultMessage } from '../ipc/protocol';
 import { readAvailableDisplays, readDisplayFallbackWarning } from './displayModel';
 
-export type SettingsPageName = 'recording' | 'buffer' | 'audio' | 'capture' | 'game' | 'general' | 'hotkeys';
+export type SettingsPageName =
+  | 'recording'
+  | 'buffer'
+  | 'audio'
+  | 'capture'
+  | 'game'
+  | 'general'
+  | 'hotkeys'
+  | 'streaming';
 
 const PAGE_KEY: Record<SettingsPageName, string> = {
   recording: 'recording',
@@ -23,6 +31,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
   game: 'game',
   general: 'general',
   hotkeys: 'hotkeys',
+  streaming: 'streaming',
 };
 
 const DEFAULT_SETTINGS: SettingsModel = {
@@ -66,6 +75,7 @@ const DEFAULT_SETTINGS: SettingsModel = {
     quickClip: { modifiers: ['Control'], key: 'F7' },
     quickClipSeconds: 30,
   },
+  streaming: { shareEnabled: false, shareWhen: 'WhileObsRuns', senderName: 'Tript' },
 };
 
 export interface SettingsController {
@@ -211,6 +221,7 @@ function mergeSettings(pushed: SettingsModel): SettingsModel {
     audio: { ...DEFAULT_SETTINGS.audio, ...pushed.audio },
     capture: { ...DEFAULT_SETTINGS.capture, ...pushed.capture },
     game: { ...DEFAULT_SETTINGS.game, ...pushed.game },
+    streaming: { ...DEFAULT_SETTINGS.streaming, ...pushed.streaming },
     general: {
       ...DEFAULT_SETTINGS.general,
       ...pushed.general,

@@ -36,6 +36,34 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void Streaming_DefaultsToOffWithTheTriptSender()
+    {
+        var streaming = _store.Load().Streaming;
+
+        Assert.False(streaming.ShareEnabled);
+        Assert.Equal(StreamShareWhen.WhileObsRuns, streaming.ShareWhen);
+        Assert.Equal("Tript", streaming.SenderName);
+    }
+
+    [Fact]
+    public void Streaming_RoundTrips()
+    {
+        var settings = _store.Load();
+        settings.Streaming.ShareEnabled = true;
+        settings.Streaming.ShareWhen = StreamShareWhen.Always;
+        settings.Streaming.SenderName = "Tript Game";
+        _store.Save();
+
+        var reloaded = new SettingsStore(_provider).Load().Streaming;
+
+        Assert.True(reloaded.ShareEnabled);
+        Assert.Equal(StreamShareWhen.Always, reloaded.ShareWhen);
+        Assert.Equal("Tript Game", reloaded.SenderName);
+        using var onDisk = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, "settings.json")));
+        Assert.Equal("Always", onDisk.RootElement.GetProperty("streaming").GetProperty("shareWhen").GetString());
+    }
+
+    [Fact]
     public void SaveThenLoad_RoundTripsTheModel()
     {
         var settings = _store.Load();

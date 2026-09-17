@@ -21,6 +21,7 @@ export type IconName =
   | 'folder'
   | 'close'
   | 'monitor'
+  | 'broadcast'
   | 'checkCircle'
   | 'infoCircle'
   | 'errorCircle'
@@ -93,6 +94,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect x="3" y="4.5" width="18" height="12.5" rx="2" />
       <path d="M9 20.5h6M12 17v3.5" />
+    </>
+  ),
+  broadcast: (
+    <>
+      <circle cx="12" cy="12" r="2" {...SOLID} />
+      <path d="M8.3 8.3a5.2 5.2 0 0 0 0 7.4M15.7 8.3a5.2 5.2 0 0 1 0 7.4" />
+      <path d="M5.4 5.4a9.3 9.3 0 0 0 0 13.2M18.6 5.4a9.3 9.3 0 0 1 0 13.2" />
     </>
   ),
   checkCircle: (

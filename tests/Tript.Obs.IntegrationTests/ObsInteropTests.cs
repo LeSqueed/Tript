@@ -195,7 +195,8 @@ public sealed class ObsInteropTests
     private static bool IsPlatformSpecific(string entryPoint) =>
         OperatingSystem.IsWindows()
             ? entryPoint.Contains("nix_platform", StringComparison.Ordinal)
-            : entryPoint.StartsWith("gs_duplicator_", StringComparison.Ordinal);
+            : entryPoint.StartsWith("gs_duplicator_", StringComparison.Ordinal)
+                || entryPoint == "gs_texture_get_shared_handle";
 
     private static IEnumerable<string> DeclaredEntryPoints() =>
         typeof(ObsNative)

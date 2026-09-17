@@ -225,6 +225,8 @@ internal sealed partial class AppHost : IDisposable
                 _ = ReconcileCustomGameIdentitiesAsync();
             }), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24));
         }
+
+        InitializeStreaming();
     }
 
     internal AppOptions Options => _options;
@@ -358,6 +360,7 @@ internal sealed partial class AppHost : IDisposable
             _updateManager.Dispose();
         }
         _modelCheckTimer?.Dispose();
+        DisposeStreaming();
         _detectionHost?.Dispose();
         _detector?.Dispose();
         _fullscreenDetector?.Dispose();
@@ -608,6 +611,8 @@ internal sealed partial class AppHost : IDisposable
                     return windowError;
                 if (!ValidateHotkeys(candidate, out var hotkeyError))
                     return hotkeyError;
+                if (ValidateStreamingSettings(candidate.Streaming) is { } streamingError)
+                    return streamingError;
 
                 string effectiveRoot;
                 try
@@ -666,6 +671,7 @@ internal sealed partial class AppHost : IDisposable
         SettingsChanged?.Invoke(settings);
         PushSettings();
         PushSettingsUpdateResult(requestId, true, null);
+        ApplyStreamingSettings(settings);
         return true;
     }
 

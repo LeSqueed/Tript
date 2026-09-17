@@ -14,7 +14,8 @@ public enum SettingsPage
     Capture,
     Game,
     General,
-    Hotkeys
+    Hotkeys,
+    Streaming
 }
 
 public sealed class Settings
@@ -41,4 +42,6 @@ public sealed class Settings
     public GeneralSettings General { get; set; } = new();
 
     public HotkeySettings Hotkeys { get; set; } = new();
+
+    public StreamingSettings Streaming { get; set; } = new();
 }

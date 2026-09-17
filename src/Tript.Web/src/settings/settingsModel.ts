@@ -78,6 +78,15 @@ export interface CaptureSettings {
   [key: string]: unknown;
 }
 
+export type StreamShareWhen = 'WhileObsRuns' | 'Always';
+
+export interface StreamingSettings {
+  shareEnabled: boolean;
+  shareWhen: StreamShareWhen;
+  senderName: string;
+  [key: string]: unknown;
+}
+
 export interface GameCaptureMethodOverride {
   method: DisplayCaptureMethod;
 }
@@ -174,6 +183,7 @@ export interface SettingsModel {
   game: GameSettings;
   general: GeneralSettings;
   hotkeys: HotkeySettings;
+  streaming: StreamingSettings;
   [key: string]: unknown;
 }
 

@@ -37,6 +37,12 @@ These are just ideas right now, nothing is set in stone. For things like permane
   whenever you want one yourself.
 - **Native notifications:** a toast and a sound cue when recording starts, stops, or something
   goes wrong.
+- **Streaming with OBS:** OBS and Tript record games the same way, and if both do it at once one of
+  them may only see a black screen. Turn on sharing in the Streamer tab and Tript sends the game
+  picture to OBS instead, with a delay of about 17 ms at 60 FPS. In OBS, install the
+  [Spout2 Plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin), add a *Spout2
+  Capture* source, pick `Tript`, and use it instead of Game Capture for games Tript records. Tript
+  still works without OBS, and sharing starts on its own when OBS opens.
 - **Don't see your game?** You can request support for a game right from Tript's settings. Note that this sends some information about your install and machine, such as an install ID and your IP. This information is used to prevent people spamming the server and is not intended to identify an individual user. 
 
 ## Supported games
@@ -58,6 +64,8 @@ Found one of these, or something else? Join the Discord and let me know.
 - **Wide screen event detection** currently the model is trained and regions are based on a 16:9 aspect ratio. Other aspect ratio's are untested. I'd love to receive feedback with a ideally a high quality recording.
 - **Non English game clients** to give the best experience, Tript tries to avoid creating events when you are dead and spectating the person who eliminated you or when you are spectating a teammate. To ensure we only show your best moments. This is done based on text on your screen. Leading to it creating bookmarks or highlights of moments that are not of interest to you.
 - **Nvidia and Intel GPUs** I only had access to an AMD GPU during testing. Nvidia or Intel will hopefully work out of the box. Report issues if you do encounter them.
+- **Sharing with OBS** works here with one GPU and one OBS install. Multi-GPU machines, other Spout
+  receivers and HDR games are untested, so report anything that looks off.
 - **Automated game detection outside of Steam** - Tript tries to automatically detect when you are playing a game and add it to the games library. The only tested launcher is currently Steam. If you find it is not properly detecting games, please report on this. Including your install location and what launcher you use to play the game.
 
 ## Getting started

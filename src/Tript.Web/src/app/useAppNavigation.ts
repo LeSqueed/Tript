@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { itemLabel, lacksMainVideo, sessionPlaylist } from '../components/library/libraryModel';
 import type { ContentItem } from '../ipc/protocol';
 
-export type Route = 'library' | 'sessions' | 'session' | 'settings' | 'player' | 'training';
+export type Route = 'library' | 'sessions' | 'session' | 'streamer' | 'settings' | 'player' | 'training';
 
 export type PlayerReturnRoute = 'library' | 'sessions' | 'session';
 
@@ -42,6 +42,7 @@ export interface AppNavigation {
   advanceAfterPlayerDelete: (item: ContentItem) => void;
   showLibrary: () => void;
   showSessions: () => void;
+  showStreamer: () => void;
   showSettings: () => void;
   showTraining: () => void;
   backFromPlayer: () => void;
@@ -251,6 +252,10 @@ export function useAppNavigation(
     replaceRouteHash('sessions');
     leaveFor('sessions');
   }, [leaveFor]);
+  const showStreamer = useCallback(() => {
+    replaceRouteHash('streamer');
+    leaveFor('streamer');
+  }, [leaveFor]);
   const showSettings = useCallback(() => {
     replaceRouteHash('settings');
     leaveFor('settings');
@@ -298,6 +303,7 @@ export function useAppNavigation(
     advanceAfterPlayerDelete,
     showLibrary,
     showSessions,
+    showStreamer,
     showSettings,
     showTraining,
     backFromPlayer,
@@ -313,10 +319,13 @@ function readStartupRoute(): Route {
   if (hash === 'sessions') {
     return 'sessions';
   }
+  if (hash === 'streamer') {
+    return 'streamer';
+  }
   return 'library';
 }
 
-function replaceRouteHash(route: 'library' | 'sessions' | 'settings'): void {
+function replaceRouteHash(route: 'library' | 'sessions' | 'streamer' | 'settings'): void {
   const hash = `#${route}`;
   if (window.location.hash === hash) {
     return;

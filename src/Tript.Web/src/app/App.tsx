@@ -17,6 +17,7 @@ import { SessionsView } from '../components/SessionsView';
 import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
+import { StreamerView } from '../components/StreamerView';
 import { useTrash } from '../components/trash/useTrash';
 import { sourceSession } from '../components/library/libraryModel';
 import { ConfirmDeleteDialog } from '../components/library/ConfirmDeleteDialog';
@@ -205,6 +206,15 @@ function AppShell({
           </button>
           <button
             type="button"
+            className={route === 'streamer' ? 'nav-item active' : 'nav-item'}
+            aria-current={route === 'streamer' ? 'page' : undefined}
+            onClick={navigation.showStreamer}
+          >
+            <Icon name="broadcast" className="nav-glyph" />
+            <span>Streamer</span>
+          </button>
+          <button
+            type="button"
             className={route === 'settings' ? 'nav-item active' : 'nav-item'}
             aria-current={route === 'settings' ? 'page' : undefined}
             onClick={showSettings}
@@ -308,6 +318,7 @@ function AppShell({
               />
             </div>
           )}
+          {route === 'streamer' && <StreamerView client={client} />}
           <div hidden={route !== 'settings'}>
             <SettingsView
               client={client}

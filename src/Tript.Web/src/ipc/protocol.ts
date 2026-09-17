@@ -223,6 +223,26 @@ export interface WarningMessage {
   message: string;
 }
 
+export type StreamerShareState =
+  | 'off'
+  | 'unsupported'
+  | 'waitingForObs'
+  | 'waitingForCapture'
+  | 'live'
+  | 'failed';
+
+export interface StreamerStatusMessage {
+  state: StreamerShareState;
+  shareEnabled: boolean;
+  obsRunning: boolean;
+  obsVersion?: string;
+  senderName: string;
+  width: number;
+  height: number;
+  adapterName?: string;
+  hookConflictSuspected: boolean;
+}
+
 export interface TrainingEventDefinition {
   id: number;
   name: string;
@@ -705,6 +725,7 @@ export type CommandName =
   | 'AddBookmark'
   | 'DeleteBookmark'
   | 'ListSettings'
+  | 'GetStreamerStatus'
   | 'UpdateSettings'
   | 'SetVideoLocation'
   | 'SelectGameExecutable'
@@ -754,6 +775,7 @@ export type MessageName =
   | 'gameList'
   | 'error'
   | 'warning'
+  | 'streamerStatus'
   | 'training'
   | 'trainingProgress'
   | 'trainingPublishResult'

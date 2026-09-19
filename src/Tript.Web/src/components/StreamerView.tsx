@@ -46,6 +46,11 @@ const STATE_TEXT: Record<StreamerShareState, { tone: Tone; title: string; detail
     title: 'Sharing with OBS',
     detail: 'Add a Spout2 Capture source in OBS to show this picture.',
   },
+  sharingOnly: {
+    tone: 'warning',
+    title: 'Sharing only, not recording',
+    detail: 'Your stream keeps the picture. Tript cannot record because the drive is out of space.',
+  },
   failed: {
     tone: 'error',
     title: 'Sharing stopped',
@@ -73,6 +78,8 @@ export function readStreamerStatus(content: unknown): StreamerStatusMessage | nu
     height: typeof value.height === 'number' ? value.height : 0,
     adapterName: typeof value.adapterName === 'string' ? value.adapterName : undefined,
     hookConflictSuspected: value.hookConflictSuspected === true,
+    recordingBlocked: value.recordingBlocked === true,
+    blockedReason: typeof value.blockedReason === 'string' ? value.blockedReason : undefined,
   };
 }
 
@@ -108,7 +115,7 @@ export function StreamerView({ client }: { client: IpcClient }) {
 
   return (
     <section className="streamer-view" data-testid="streamer-view">
-      {status?.hookConflictSuspected && state !== 'live' && (
+      {status?.hookConflictSuspected && state !== 'live' && state !== 'sharingOnly' && (
         <div className="streamer-alert" role="status" data-testid="streamer-conflict">
           OBS is open and may be recording the same game as Tript. This can make one of them show a
           black screen. Turn on sharing below and use the Tript source in OBS instead of Game Capture.
@@ -143,8 +150,11 @@ export function StreamerView({ client }: { client: IpcClient }) {
           <span>{text.title}</span>
         </div>
         <p className="muted small">
-          {state === 'live' && status ? `${status.width} x ${status.height}. ${text.detail}` : text.detail}
+          {(state === 'live' || state === 'sharingOnly') && status
+            ? `${status.width} x ${status.height}. ${text.detail}`
+            : text.detail}
         </p>
+        {status?.blockedReason && <p className="muted small">{status.blockedReason}</p>}
         <dl className="streamer-facts">
           <dt>OBS</dt>
           <dd>

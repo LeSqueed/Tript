@@ -13,11 +13,14 @@ import { CapturePage } from '../settings/pages/CapturePage';
 import { GamePage } from '../settings/pages/GamePage';
 import { GeneralPage } from '../settings/pages/GeneralPage';
 import { HotkeysPage } from '../settings/pages/HotkeysPage';
+import { StoragePage } from '../settings/pages/StoragePage';
+import { useStorage } from '../components/storage/useStorage';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'recording', label: 'Recording' },
   { id: 'buffer', label: 'Highlights' },
+  { id: 'storage', label: 'Storage' },
   { id: 'audio', label: 'Audio' },
   { id: 'capture', label: 'Capture' },
   { id: 'game', label: 'Games' },
@@ -38,12 +41,16 @@ export function SettingsView({
   builtInGameIds = [],
   focusGameId = null,
   onFocusGameHandled,
+  focusPage = null,
+  onFocusPageHandled,
   active = true,
 }: {
   client: IpcClient;
   builtInGameIds?: readonly string[];
   focusGameId?: string | null;
   onFocusGameHandled?: () => void;
+  focusPage?: SettingsPageName | null;
+  onFocusPageHandled?: () => void;
   active?: boolean;
 }) {
   const [page, setPage] = useState<SettingsPageName>('general');
@@ -51,6 +58,12 @@ export function SettingsView({
   useEffect(() => {
     if (focusGameId) setPage('game');
   }, [focusGameId]);
+
+  useEffect(() => {
+    if (!focusPage) return;
+    setPage(focusPage);
+    onFocusPageHandled?.();
+  }, [focusPage]);
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
@@ -58,6 +71,7 @@ export function SettingsView({
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
+  const storage = useStorage(client);
 
   useSendOnConnect(client, 'ListGames');
 
@@ -141,6 +155,20 @@ export function SettingsView({
             externalPushCount={controller.externalPushCount}
             availableEncoders={controller.availableEncoders}
             displayResolution={controller.displayResolution}
+          />
+          )}
+          {page === 'storage' && (
+          <StoragePage
+            settings={controller.settings.storage}
+            recording={controller.settings.recording}
+            update={controller.update}
+            page={page}
+            externalPushCount={controller.externalPushCount}
+            status={storage.status}
+            report={storage.report}
+            onReclaim={storage.reclaim}
+            onRefresh={storage.refresh}
+            onClearTrash={() => client.send('PurgeTrash')}
             onBrowse={() => client.send('SetVideoLocation')}
           />
           )}

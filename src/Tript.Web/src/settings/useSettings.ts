@@ -21,7 +21,8 @@ export type SettingsPageName =
   | 'game'
   | 'general'
   | 'hotkeys'
-  | 'streaming';
+  | 'streaming'
+  | 'storage';
 
 const PAGE_KEY: Record<SettingsPageName, string> = {
   recording: 'recording',
@@ -32,6 +33,7 @@ const PAGE_KEY: Record<SettingsPageName, string> = {
   general: 'general',
   hotkeys: 'hotkeys',
   streaming: 'streaming',
+  storage: 'storage',
 };
 
 const DEFAULT_SETTINGS: SettingsModel = {
@@ -76,6 +78,12 @@ const DEFAULT_SETTINGS: SettingsModel = {
     quickClipSeconds: 30,
   },
   streaming: { shareEnabled: false, shareWhen: 'WhileObsRuns', senderName: 'Tript' },
+  storage: {
+    minimumFreeBytes: 20 * 1024 * 1024 * 1024,
+    whenFull: 'PauseRecording',
+    policyConfirmed: false,
+    keepSharingWhenFull: true,
+  },
 };
 
 export interface SettingsController {
@@ -222,6 +230,7 @@ function mergeSettings(pushed: SettingsModel): SettingsModel {
     capture: { ...DEFAULT_SETTINGS.capture, ...pushed.capture },
     game: { ...DEFAULT_SETTINGS.game, ...pushed.game },
     streaming: { ...DEFAULT_SETTINGS.streaming, ...pushed.streaming },
+    storage: { ...DEFAULT_SETTINGS.storage, ...pushed.storage },
     general: {
       ...DEFAULT_SETTINGS.general,
       ...pushed.general,

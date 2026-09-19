@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { LibraryView } from './LibraryView';
-import type { ContentItem } from '../ipc/protocol';
+import type { ContentItem, StorageStatusMessage } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { TrashController } from './trash/useTrash';
 
@@ -849,5 +849,61 @@ describe('LibraryView sessions surface', () => {
     renderLibrary([placeholder, session]);
     fireEvent.click(screen.getByRole('radio', { name: 'Sessions' }));
     expect(cardTitles()).toEqual(['Ranked win']);
+  });
+});
+
+describe('the free space chip', () => {
+  const free: StorageStatusMessage = {
+    pressure: 'ok',
+    freeBytes: 128 * 1024 * 1024 * 1024,
+    totalBytes: 1024 * 1024 * 1024 * 1024,
+    minimumFreeBytes: 20 * 1024 * 1024 * 1024,
+    warnFreeBytes: 60 * 1024 * 1024 * 1024,
+    recordingBlocked: false,
+    policyConfirmed: true,
+    whenFull: 'PauseRecording',
+    keepSharingWhenFull: true,
+    volumeRoot: 'T:',
+    root: 'T:/Tript',
+    scratchFreeBytes: 0,
+    scratchLow: false,
+  };
+
+  function renderWithStorage(onOpenStorageSettings = vi.fn()) {
+    render(
+      <LibraryView
+        client={mockClient()}
+        items={[session]}
+        nowSeconds={NOW}
+        storageStatus={free}
+        onOpenStorageSettings={onOpenStorageSettings}
+      />,
+    );
+    return onOpenStorageSettings;
+  }
+
+  it('sits in the same row as the Select button', () => {
+    renderWithStorage();
+    const row = screen.getByTestId('library-selection');
+
+    expect(within(row).getByRole('button', { name: 'Select' })).toBeTruthy();
+    expect(within(row).getByTestId('storage-free-chip').textContent).toContain('128 GB free');
+  });
+
+  it('draws nothing above the toolbar any more', () => {
+    renderWithStorage();
+    expect(screen.queryByTestId('storage-bar')).toBeNull();
+  });
+
+  it('gets out of the way while picking items', () => {
+    renderWithStorage();
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.queryByTestId('storage-free-chip')).toBeNull();
+  });
+
+  it('stays away when the caller wires up no storage settings', () => {
+    render(<LibraryView client={mockClient()} items={[session]} nowSeconds={NOW} storageStatus={free} />);
+    expect(screen.queryByTestId('storage-free-chip')).toBeNull();
   });
 });

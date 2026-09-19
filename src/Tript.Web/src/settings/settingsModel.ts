@@ -87,6 +87,20 @@ export interface StreamingSettings {
   [key: string]: unknown;
 }
 
+export type StorageFullAction = 'PauseRecording' | 'ReclaimOldest';
+
+export const MINIMUM_FREE_BYTES_FLOOR = 1024 * 1024 * 1024;
+
+export const MINIMUM_FREE_BYTES_CEILING = 2048 * 1024 * 1024 * 1024;
+
+export interface StorageSettings {
+  minimumFreeBytes: number;
+  whenFull: StorageFullAction;
+  policyConfirmed: boolean;
+  keepSharingWhenFull: boolean;
+  [key: string]: unknown;
+}
+
 export interface GameCaptureMethodOverride {
   method: DisplayCaptureMethod;
 }
@@ -184,6 +198,7 @@ export interface SettingsModel {
   general: GeneralSettings;
   hotkeys: HotkeySettings;
   streaming: StreamingSettings;
+  storage: StorageSettings;
   [key: string]: unknown;
 }
 

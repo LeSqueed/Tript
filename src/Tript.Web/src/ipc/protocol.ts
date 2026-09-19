@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-import type { RecordingMode } from '../settings/settingsModel';
+import type { RecordingMode, StorageFullAction } from '../settings/settingsModel';
 
 export interface CommandEnvelope {
   method: CommandName;
@@ -229,6 +229,7 @@ export type StreamerShareState =
   | 'waitingForObs'
   | 'waitingForCapture'
   | 'live'
+  | 'sharingOnly'
   | 'failed';
 
 export interface StreamerStatusMessage {
@@ -241,6 +242,59 @@ export interface StreamerStatusMessage {
   height: number;
   adapterName?: string;
   hookConflictSuspected: boolean;
+  recordingBlocked?: boolean;
+  blockedReason?: string;
+}
+
+export type StoragePressure = 'unknown' | 'ok' | 'warning' | 'critical';
+
+export interface StorageStatusMessage {
+  pressure: StoragePressure;
+  freeBytes: number;
+  totalBytes: number;
+  minimumFreeBytes: number;
+  warnFreeBytes: number;
+  recordingBlocked: boolean;
+  policyConfirmed: boolean;
+  whenFull: StorageFullAction;
+  keepSharingWhenFull: boolean;
+  volumeRoot?: string;
+  root: string;
+  scratchRoot?: string;
+  scratchFreeBytes: number;
+  scratchLow: boolean;
+}
+
+export interface StorageGameUsage {
+  gameId?: string;
+  name?: string;
+  totalBytes: number;
+  sessionBytes: number;
+  highlightBytes: number;
+  clipBytes: number;
+}
+
+export interface StorageReportMessage {
+  root: string;
+  volumeRoot?: string;
+  volumeTotalBytes: number;
+  volumeFreeBytes: number;
+  libraryBytes: number;
+  sessionBytes: number;
+  highlightBytes: number;
+  clipBytes: number;
+  trashBytes: number;
+  sidecarBytes: number;
+  favoriteBytes: number;
+  sessionCount: number;
+  highlightCount: number;
+  clipCount: number;
+  trashCount: number;
+  games: StorageGameUsage[];
+}
+
+export interface ReclaimStorageParameters {
+  dryRun?: boolean;
 }
 
 export interface TrainingEventDefinition {
@@ -699,6 +753,7 @@ export type CommandParameters =
   | SuggestTrainingLabelsParameters
   | StartTrainingParameters
   | PublishTrainingModelParameters
+  | ReclaimStorageParameters
   | NewConnectionParameters;
 
 export type CommandName =
@@ -726,6 +781,9 @@ export type CommandName =
   | 'DeleteBookmark'
   | 'ListSettings'
   | 'GetStreamerStatus'
+  | 'GetStorageStatus'
+  | 'GetStorageReport'
+  | 'ReclaimStorage'
   | 'UpdateSettings'
   | 'SetVideoLocation'
   | 'SelectGameExecutable'
@@ -776,6 +834,8 @@ export type MessageName =
   | 'error'
   | 'warning'
   | 'streamerStatus'
+  | 'storageStatus'
+  | 'storageReport'
   | 'training'
   | 'trainingProgress'
   | 'trainingPublishResult'

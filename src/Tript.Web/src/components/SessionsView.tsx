@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type { ConnectionState } from '../ipc/websocketClient';
-import type { ContentItem } from '../ipc/protocol';
+import type { ContentItem, StorageStatusMessage } from '../ipc/protocol';
 import { Button, Toggle, type SelectOption } from './ui/controls';
 import { ContentCard } from './library/ContentCard';
 import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
@@ -20,6 +20,7 @@ import {
   lacksMainVideo,
   NO_GAME,
   recordingChildCounts,
+  sessionSizeTotals,
   sessionPreviewHighlights,
   SORT_OPTIONS,
   UNKNOWN_GAME_LABEL,
@@ -28,6 +29,7 @@ import {
 import { selectionKey } from './library/selectionModel';
 import { DEFAULT_RETENTION_HOURS } from './trash/trashModel';
 import { EmptyState, FilterMismatchEmptyState } from './ui/Ui';
+import { StorageFreeChip } from './storage/StorageFreeChip';
 
 const SESSIONS_QUERY: LibraryQuery = { ...DEFAULT_LIBRARY_QUERY, type: 'sessions' };
 
@@ -41,6 +43,8 @@ export interface SessionsViewProps {
   nowSeconds?: number;
   retentionHours?: number;
   deleteLinkedHighlightsByDefault?: boolean;
+  storageStatus?: StorageStatusMessage | null;
+  onOpenStorageSettings?: () => void;
 }
 
 export function SessionsView({
@@ -53,12 +57,15 @@ export function SessionsView({
   nowSeconds,
   retentionHours = DEFAULT_RETENTION_HOURS,
   deleteLinkedHighlightsByDefault = false,
+  storageStatus = null,
+  onOpenStorageSettings,
 }: SessionsViewProps) {
   const [query, setQuery] = useState<LibraryQuery>(SESSIONS_QUERY);
   const [pendingDelete, setPendingDelete] = useState<ContentItem | null>(null);
   const now = nowSeconds ?? Date.now() / 1000;
   const view = useMemo(() => deriveSessions(items, query, now), [items, query, now]);
   const recordingCounts = useMemo(() => recordingChildCounts(items), [items]);
+  const sessionTotals = useMemo(() => sessionSizeTotals(items), [items]);
 
   const updateQuery = useCallback((patch: Partial<LibraryQuery>) => {
     setQuery((previous) => ({ ...previous, ...patch, page: 1 }));
@@ -161,6 +168,9 @@ export function SessionsView({
                 : ''}
             </span>
           )}
+          {onOpenStorageSettings && (
+            <StorageFreeChip status={storageStatus} onOpenStorageSettings={onOpenStorageSettings} />
+          )}
         </div>
       )}
 
@@ -202,6 +212,7 @@ export function SessionsView({
                 item={item}
                 clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
                 highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                         sizeBytes={sessionTotals.get(item.filePath)}
                 previewHighlights={sessionPreviewHighlights(item, items)}
                 thumbnailLoadingActive={thumbnailLoadingActive}
                 onOpen={(item) => onOpen?.(item, view.resultItems)}

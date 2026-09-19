@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionsView } from './SessionsView';
-import type { ContentItem } from '../ipc/protocol';
+import type { ContentItem, StorageStatusMessage } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
 
 const NOW = 1787011200;
@@ -117,5 +117,44 @@ describe('SessionsView empty states', () => {
     renderSessions([session]);
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'no such title' } });
     expect(screen.getByTestId('sessions-empty-filtered')).toBeTruthy();
+  });
+});
+
+describe('the free space chip in sessions', () => {
+  const free: StorageStatusMessage = {
+    pressure: 'warning',
+    freeBytes: 40 * 1024 * 1024 * 1024,
+    totalBytes: 1024 * 1024 * 1024 * 1024,
+    minimumFreeBytes: 20 * 1024 * 1024 * 1024,
+    warnFreeBytes: 60 * 1024 * 1024 * 1024,
+    recordingBlocked: false,
+    policyConfirmed: true,
+    whenFull: 'PauseRecording',
+    keepSharingWhenFull: true,
+    volumeRoot: 'T:',
+    root: 'T:/Tript',
+    scratchFreeBytes: 0,
+    scratchLow: false,
+  };
+
+  it('sits in the range row and carries the pressure', () => {
+    render(
+      <SessionsView
+        client={mockClient()}
+        items={[session]}
+        nowSeconds={NOW}
+        storageStatus={free}
+        onOpenStorageSettings={vi.fn()}
+      />,
+    );
+
+    const chip = screen.getByTestId('storage-free-chip');
+    expect(chip.textContent).toContain('40 GB free');
+    expect(chip.getAttribute('data-pressure')).toBe('warning');
+  });
+
+  it('stays away when no storage settings are wired up', () => {
+    renderSessions([session]);
+    expect(screen.queryByTestId('storage-free-chip')).toBeNull();
   });
 });

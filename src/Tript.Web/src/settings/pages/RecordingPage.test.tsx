@@ -31,7 +31,6 @@ function renderPage(settings: RecordingSettings = SETTINGS, buffer: BufferSettin
       update={update}
       page="recording"
       externalPushCount={0}
-      onBrowse={vi.fn()}
     />,
   );
   return update;
@@ -54,7 +53,6 @@ describe('recording page layout', () => {
     expect(screen.getByLabelText(/^Frame rate/)).toBeTruthy();
     expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
     expect(screen.getByLabelText(/^HDR/)).toBeTruthy();
-    expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
     expect(screen.queryByLabelText(/^Bitrate/)).toBeNull();
   });
 
@@ -170,7 +168,7 @@ describe('maximum buffer size', () => {
     const view = (buffer: BufferSettings, externalPushCount: number) => (
       <RecordingPage settings={SETTINGS} buffer={buffer} update={update} page="recording"
         externalPushCount={externalPushCount} availableEncoders={undefined}
-        displayResolution={undefined} onBrowse={vi.fn()} />
+        displayResolution={undefined} />
     );
     const { rerender } = render(view(BUFFER, 0));
     const input = screen.getByLabelText(/^Maximum buffer size/) as HTMLInputElement;

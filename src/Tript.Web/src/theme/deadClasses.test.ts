@@ -7,7 +7,7 @@ import { moduleFiles, sourceFiles, stylesheetPaths, styledClassesIn } from './cs
 
 const SRC_ROOT = join(import.meta.dirname, '..');
 
-const COMPOSED = ['btn-', 'status-dot-'];
+const COMPOSED = ['btn-', 'status-dot-', 'storage-seg-'];
 
 describe('css classes', () => {
   it('are all worn by something', () => {

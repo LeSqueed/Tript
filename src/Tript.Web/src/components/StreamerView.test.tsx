@@ -141,6 +141,7 @@ describe('readStreamerStatus', () => {
   it('fills fields the backend left out', () => {
     expect(readStreamerStatus({ state: 'waitingForObs' })).toEqual({
       state: 'waitingForObs',
+      recordingBlocked: false,
       shareEnabled: false,
       obsRunning: false,
       obsVersion: undefined,

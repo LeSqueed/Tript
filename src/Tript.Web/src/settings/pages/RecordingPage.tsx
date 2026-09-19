@@ -9,7 +9,7 @@ import type {
   RecordingMode,
   RecordingSettings,
 } from '../settingsModel';
-import { Button, Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
+import { Field, SelectField, TextField, type SelectOption } from '../../components/ui/controls';
 import { ConfirmDialog } from '../../components/ui/confirmDialog';
 
 const RECORDING_MODES: { value: RecordingMode; label: string }[] = [
@@ -39,13 +39,6 @@ const FALLBACK_ENCODER = 'obs_x264';
 const BACKEND_DECIDES_ENCODER = 'x264';
 
 const MIB = 1024 * 1024;
-
-function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
-  const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
-  return windows
-    ? { placeholder: String.raw`D:\Recordings`, defaultLabel: String.raw`Videos\Tript` }
-    : { placeholder: '/home/you/Videos/Tript', defaultLabel: 'Videos/Tript' };
-}
 
 type EncoderFamily = 'x264' | 'vaapi' | 'nvenc' | 'amf' | 'qsv' | 'unknown';
 
@@ -192,7 +185,6 @@ export function RecordingPage({
   externalPushCount,
   availableEncoders,
   displayResolution,
-  onBrowse,
 }: {
   settings: RecordingSettings;
   buffer: BufferSettings;
@@ -201,9 +193,7 @@ export function RecordingPage({
   externalPushCount: number;
   availableEncoders?: string[];
   displayResolution?: DisplayResolution;
-  onBrowse: () => void;
 }) {
-  const directoryExample = nativeDirectoryExample();
   const [bitrate, setBitrate] = useState<string>(String(settings.bitrateKbps ?? ''));
   const [maxBitrate, setMaxBitrate] = useState<string>(String(settings.maxBitrateKbps ?? ''));
   const [bufferSizeMiB, setBufferSizeMiB] = useState<string>(
@@ -333,21 +323,6 @@ export function RecordingPage({
             { value: 'off', label: 'Always record in SDR' },
           ]}
         />
-      </Field>
-
-      <Field label="Output directory" hint={`Where recordings and highlights are saved. Leave empty for the default (${directoryExample.defaultLabel}).`}>
-        <span className="settings-row">
-          {}
-          <TextField
-            value={settings.outputDirectory ?? ''}
-            onChange={(value) => update(page, { outputDirectory: value === '' ? null : value })}
-            placeholder={`e.g. ${directoryExample.placeholder}`}
-            aria-label="Output directory"
-          />
-          <Button variant="ghost" onClick={onBrowse} title="Choose the recording folder with a native picker">
-            Browse
-          </Button>
-        </span>
       </Field>
 
       <details className="settings-advanced">

@@ -13,6 +13,8 @@ import { RecordingGroup, type GroupActions } from './library/RecordingGroup';
 import { ConfirmDeleteDialog, makeDeleteConfirmation, type DeleteConfirmation } from './library/ConfirmDeleteDialog';
 import { LibraryPagination } from './library/LibraryPagination';
 import { LibraryToolbar } from './library/LibraryToolbar';
+import { StorageFreeChip } from './storage/StorageFreeChip';
+import type { StorageStatusMessage } from '../ipc/protocol';
 import {
   addSelection,
   allSelected,
@@ -40,6 +42,7 @@ import {
   NO_GAME,
   pageCountFor,
   recordingChildCounts,
+  sessionSizeTotals,
   sessionPreviewHighlights,
   SORT_OPTIONS,
   UNKNOWN_GAME_LABEL,
@@ -71,6 +74,8 @@ export interface LibraryViewProps {
   trash?: TrashController;
   retentionHours?: number;
   deleteLinkedHighlightsByDefault?: boolean;
+  storageStatus?: StorageStatusMessage | null;
+  onOpenStorageSettings?: () => void;
 }
 export function LibraryView({
   client,
@@ -83,6 +88,8 @@ export function LibraryView({
   retentionHours = DEFAULT_RETENTION_HOURS,
   deleteLinkedHighlightsByDefault = false,
   trash,
+  storageStatus = null,
+  onOpenStorageSettings,
 }: LibraryViewProps) {
   const [query, setQuery] = useState<LibraryQuery>(DEFAULT_LIBRARY_QUERY);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -254,6 +261,7 @@ export function LibraryView({
 
   const allGroups = groupView && !groupView.filtered ? groupByRecording(groupView.resultItems) : [];
   const recordingCounts = useMemo(() => recordingChildCounts(items), [items]);
+  const sessionTotals = useMemo(() => sessionSizeTotals(items), [items]);
   const recentGroups = groupView && !groupView.filtered
     ? allGroups.filter((group) => group.recording !== null).slice(0, 3)
     : [];
@@ -276,9 +284,6 @@ export function LibraryView({
 
   return (
     <section className="library-view">
-      {}
-
-      {}
       {showingTrash && trash ? (
         <>
           <LibraryToolbar
@@ -351,6 +356,9 @@ export function LibraryView({
                   : ''}
               </span>
             )}
+            {onOpenStorageSettings && (
+              <StorageFreeChip status={storageStatus} onOpenStorageSettings={onOpenStorageSettings} />
+            )}
           </div>
         )
       )}
@@ -404,6 +412,7 @@ export function LibraryView({
                      actions={groupActions}
                      thumbnailLoadingActive={thumbnailLoadingActive}
                      priority={index === 0}
+                     sizeBytes={group.recording ? sessionTotals.get(group.recording.filePath) : undefined}
                    />
                  ))}
               </div>
@@ -422,6 +431,7 @@ export function LibraryView({
                          item={item}
                          clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
                          highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                         sizeBytes={sessionTotals.get(item.filePath)}
                          previewHighlights={sessionPreviewHighlights(item, items)}
                          thumbnailLoadingActive={thumbnailLoadingActive}
                          onOpen={(item) => onOpen?.(item, groupView.resultItems, 'library')}
@@ -445,6 +455,7 @@ export function LibraryView({
                   item={item}
                   clipsCount={recordingCounts.get(item.filePath)?.clips ?? 0}
                   highlightsCount={recordingCounts.get(item.filePath)?.highlights ?? 0}
+                         sizeBytes={sessionTotals.get(item.filePath)}
                   previewHighlights={sessionPreviewHighlights(item, items)}
                   thumbnailLoadingActive={thumbnailLoadingActive}
                   onOpen={(item) => onOpen?.(item, view.resultItems, 'library')}

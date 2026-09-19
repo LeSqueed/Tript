@@ -60,51 +60,12 @@ function renderPage(
   return update;
 }
 
-function trashRetention(): HTMLSelectElement {
-  return screen.getByLabelText('Empty the trash after') as HTMLSelectElement;
-}
-
 function deletionDefault(): HTMLInputElement {
   return screen.getByLabelText(/^Delete linked highlights by default/) as HTMLInputElement;
 }
 
 afterEach(cleanup);
 
-describe('trash retention', () => {
-  it('renders the stored value in the select', () => {
-    renderPage();
-    expect(trashRetention().value).toBe('24');
-  });
-
-  it('sends a recording page patch with the chosen retention', () => {
-    const update = renderPage();
-    fireEvent.change(trashRetention(), { target: { value: '168' } });
-
-    expect(update).toHaveBeenCalledWith('recording', { trashRetentionHours: 168 });
-  });
-
-  it('shows an unusual stored value via an appended current-value option', () => {
-    renderPage(GENERAL, { ...RECORDING, trashRetentionHours: 100 });
-
-    expect(trashRetention().value).toBe('100');
-    expect(screen.getByText('100 hours (current)')).toBeTruthy();
-  });
-
-  it('shows legacy negative and zero retention values as Never', () => {
-    const { rerender } = render(
-      <GeneralPage client={fakeClient()} settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: -5 }}
-        update={vi.fn()} page="general" />,
-    );
-    expect(trashRetention().value).toBe('0');
-    expect(screen.queryByText('-5 hours (current)')).toBeNull();
-
-    rerender(
-      <GeneralPage client={fakeClient()} settings={GENERAL} recording={{ ...RECORDING, trashRetentionHours: 0 }}
-        update={vi.fn()} page="general" />,
-    );
-    expect(trashRetention().selectedOptions[0].text).toBe('Never');
-  });
-});
 
 describe('notification show/sound toggles', () => {
   function fieldFor(label: string) {

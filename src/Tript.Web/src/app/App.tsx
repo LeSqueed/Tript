@@ -11,12 +11,15 @@ import { DisplayFallbackToasts } from '../components/toasts/DisplayFallbackToast
 import { GameCandidateToasts } from '../components/toasts/GameCandidateToasts';
 import { GameAddedToasts } from '../components/toasts/GameAddedToasts';
 import { UpdateToasts } from '../components/toasts/UpdateToasts';
+import { StorageToasts } from '../components/toasts/StorageToasts';
+import { useStorage } from '../components/storage/useStorage';
 import { useToast } from '../components/ui/toast/ToastProvider';
 import { LibraryView } from '../components/LibraryView';
 import { SessionsView } from '../components/SessionsView';
 import { SessionClipsView } from '../components/SessionClipsView';
 import { PlayerView } from '../components/PlayerView';
 import { SettingsView } from '../components/SettingsView';
+import type { SettingsPageName } from '../settings/useSettings';
 import { StreamerView } from '../components/StreamerView';
 import { useTrash } from '../components/trash/useTrash';
 import { sourceSession } from '../components/library/libraryModel';
@@ -124,6 +127,7 @@ function AppShell({
   });
   const { push, dismiss } = useToast();
   const [gameSettingsFocus, setGameSettingsFocus] = useState<string | null>(null);
+  const [settingsPageFocus, setSettingsPageFocus] = useState<SettingsPageName | null>(null);
 
   const toggleFavorite = useCallback((item: ContentItem) => {
     if (item.highlightsOnly === true) {
@@ -168,9 +172,15 @@ function AppShell({
   }, [push, dismiss, adoptPlayerItem, openInPlayer, routeRef]);
 
   const { clipJobCount, enqueueClip } = useClipJobs(client, connectionState, notifyClipCreated);
+  const storage = useStorage(client);
 
   const openGameSettings = useCallback((gameId: string) => {
     setGameSettingsFocus(gameId);
+    showSettings();
+  }, [showSettings]);
+
+  const openStorageSettings = useCallback(() => {
+    setSettingsPageFocus('storage');
     showSettings();
   }, [showSettings]);
   const playerSession = playerItem ? sourceSession(playerItem, items) : null;
@@ -251,6 +261,7 @@ function AppShell({
         <GameCandidateToasts client={client} />
         <GameAddedToasts client={client} onOpenGameSettings={openGameSettings} />
         <UpdateToasts client={client} />
+        <StorageToasts client={client} onOpenStorageSettings={openStorageSettings} />
         <div
           className={route === 'player' ? 'app-content app-content-player' : 'app-content'}
           ref={contentRef}
@@ -267,6 +278,8 @@ function AppShell({
                 retentionHours={trash.retentionHours}
                 deleteLinkedHighlightsByDefault={preferences.deleteLinkedHighlightsByDefault}
                 trash={trash}
+                storageStatus={storage.status}
+                onOpenStorageSettings={openStorageSettings}
               />
             </div>
           )}
@@ -315,6 +328,8 @@ function AppShell({
                 onOpen={navigation.openFromSessions}
                 retentionHours={trash.retentionHours}
                 deleteLinkedHighlightsByDefault={preferences.deleteLinkedHighlightsByDefault}
+                storageStatus={storage.status}
+                onOpenStorageSettings={openStorageSettings}
               />
             </div>
           )}
@@ -326,6 +341,8 @@ function AppShell({
               builtInGameIds={preferences.builtInGameIds}
               focusGameId={gameSettingsFocus}
               onFocusGameHandled={() => setGameSettingsFocus(null)}
+              focusPage={settingsPageFocus}
+              onFocusPageHandled={() => setSettingsPageFocus(null)}
             />
           </div>
           {route === 'training' && trainingFeatureEnabled && <TrainingView client={client} />}

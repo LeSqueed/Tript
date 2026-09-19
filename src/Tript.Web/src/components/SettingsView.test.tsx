@@ -69,6 +69,12 @@ function makeSettings(): SettingsMessageContent['settings'] {
       quickClipSeconds: 30,
     },
     streaming: { shareEnabled: false, shareWhen: 'WhileObsRuns', senderName: 'Tript' },
+    storage: {
+      minimumFreeBytes: 20 * 1024 * 1024 * 1024,
+      whenFull: 'PauseRecording',
+      policyConfirmed: false,
+      keepSharingWhenFull: true,
+    },
   };
 }
 
@@ -148,12 +154,13 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'Games' }).getAttribute('aria-selected')).toBe('true');
   });
 
-  it('renders the seven tabs and the recording page controls', () => {
+  it('renders the eight tabs and the recording page controls', () => {
     renderSettings('general');
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'General',
       'Recording',
       'Highlights',
+      'Storage',
       'Audio',
       'Capture',
       'Games',
@@ -175,7 +182,6 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Rate control/)).toBeTruthy();
     expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
     expect(screen.getByLabelText(/^HDR/)).toBeTruthy();
-    expect(screen.getByLabelText(/^Output directory/)).toBeTruthy();
   });
 
   it('renders General settings and sends page-scoped updates', () => {
@@ -705,9 +711,10 @@ describe('SettingsView', () => {
     expect(screen.getByLabelText(/^Quality/)).toBeTruthy();
   });
 
-  it('output directory edit sends a partial recording page', () => {
+  it('the recording folder lives on the storage page and sends a partial recording page', () => {
     const { ws } = renderSettings();
-    fireEvent.change(screen.getByLabelText(/^Output directory/), {
+    fireEvent.click(screen.getByRole('tab', { name: 'Storage' }));
+    fireEvent.change(screen.getByLabelText(/^Recording folder/), {
       target: { value: '/home/tester/Videos/Tript' },
     });
     const sent = sentUpdates(ws);
@@ -715,12 +722,13 @@ describe('SettingsView', () => {
     expect(sent[0]).toEqual({ recording: { outputDirectory: '/home/tester/Videos/Tript' } });
   });
 
-  it('clearing the output directory sends null (use the platform default)', () => {
+  it('clearing the recording folder sends null (use the platform default)', () => {
     const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Storage' }));
     const withDirectory = makeSettings();
     withDirectory.recording.outputDirectory = '/home/tester/Videos/Tript';
     pushSettings(ws, withDirectory);
-    fireEvent.change(screen.getByLabelText(/^Output directory/), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText(/^Recording folder/), { target: { value: '' } });
     const sent = sentUpdates(ws);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ recording: { outputDirectory: null } });
@@ -728,6 +736,7 @@ describe('SettingsView', () => {
 
   it('browse sends SetVideoLocation (no parameters) and a push fills the field', () => {
     const { ws } = renderSettings();
+    fireEvent.click(screen.getByRole('tab', { name: 'Storage' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
     const browseFrame = JSON.parse(ws.sent[ws.sent.length - 1]);
@@ -736,7 +745,7 @@ describe('SettingsView', () => {
     const picked = makeSettings();
     picked.recording.outputDirectory = '/home/tester/Videos/Picked';
     pushSettings(ws, picked, 'server:picked');
-    expect((screen.getByLabelText(/^Output directory/) as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText(/^Recording folder/) as HTMLInputElement).value).toBe(
       '/home/tester/Videos/Picked',
     );
   });

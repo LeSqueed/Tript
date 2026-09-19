@@ -23,13 +23,6 @@ const CLOSE_BEHAVIOR = [
   { value: 'HideToTray', label: 'Hide Tript to the tray' },
 ];
 
-const TRASH_RETENTION = [
-  { value: '24', label: '1 day' },
-  { value: '168', label: '7 days' },
-  { value: '720', label: '30 days' },
-  { value: '0', label: 'Never' },
-];
-
 export function GeneralPage({
   client,
   settings,
@@ -64,12 +57,6 @@ export function GeneralPage({
   function updateNotification(name: keyof GeneralSettings['notifications'], value: boolean) {
     update(page, { notifications: { [name]: value } });
   }
-
-  const storedTrashRetention = recording.trashRetentionHours ?? 24;
-  const trashRetentionValue = String(storedTrashRetention <= 0 ? 0 : storedTrashRetention);
-  const trashRetentionOptions = TRASH_RETENTION.some((option) => option.value === trashRetentionValue)
-    ? TRASH_RETENTION
-    : [...TRASH_RETENTION, { value: trashRetentionValue, label: `${trashRetentionValue} hours (current)` }];
 
   const isChecking = updateStatus?.stage === 'checking' || updateStatus?.stage === 'downloading';
   const updateStatusText = describeUpdateStatus(updateStatus);
@@ -138,17 +125,6 @@ export function GeneralPage({
             checked={recording.deleteLinkedHighlightsByDefault === true}
             onChange={(checked) => update('recording', { deleteLinkedHighlightsByDefault: checked })}
             aria-label="Delete linked highlights by default"
-          />
-        </Field>
-        <Field
-          label="Empty the trash after"
-          hint="Deleted items are removed from the trash permanently after this time. Never keeps them until you empty the trash by hand."
-        >
-          <SelectField
-            value={trashRetentionValue}
-            onChange={(value) => update('recording', { trashRetentionHours: Number(value) })}
-            options={trashRetentionOptions}
-            aria-label="Empty the trash after"
           />
         </Field>
       </section>

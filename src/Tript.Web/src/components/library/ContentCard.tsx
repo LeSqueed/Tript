@@ -3,9 +3,9 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import type { ContentItem } from '../../ipc/protocol';
 import {
+  formatBytes,
   formatDateChip,
   formatDurationChip,
-  formatSizeChip,
   itemGame,
   itemLabel,
   typeLabel,
@@ -30,6 +30,7 @@ export function ContentCard({
   clipsCount = 0,
   highlightsCount = 0,
   previewHighlights = [],
+  sizeBytes,
 }: {
   item: ContentItem;
   onOpen?: (item: ContentItem) => void;
@@ -44,12 +45,13 @@ export function ContentCard({
   clipsCount?: number;
   highlightsCount?: number;
   previewHighlights?: ContentItem[];
+  sizeBytes?: number;
   action?: ReactNode;
 }) {
   const label = itemLabel(item);
   const game = itemGame(item) ?? UNKNOWN_GAME_LABEL;
   const duration = formatDurationChip(item);
-  const size = formatSizeChip(item);
+  const size = formatBytes(sizeBytes ?? item.fileSizeBytes);
   const missingVideo = item.videoMissing === true;
   const highlightsOnly = item.highlightsOnly === true;
   const liveRecording = item.recording === true;

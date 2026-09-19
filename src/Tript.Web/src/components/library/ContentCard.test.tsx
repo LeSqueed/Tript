@@ -270,3 +270,29 @@ describe('ContentCard live recording', () => {
     expect(onOpen).toHaveBeenCalledWith(live);
   });
 });
+
+describe('the size chip', () => {
+  const sized: ContentItem = {
+    contentType: 'recording',
+    fileName: 'sized.mp4',
+    filePath: 'sessions/sized.mp4',
+    title: 'Sized session',
+    fileSizeBytes: 1024 * 1024 * 1024,
+  };
+
+  it('reports the file on its own when nothing else is given', () => {
+    render(<ContentCard item={sized} />);
+    expect(screen.getByText('1 GB')).toBeTruthy();
+  });
+
+  it('reports what the whole session costs when that is given', () => {
+    render(<ContentCard item={sized} sizeBytes={3 * 1024 * 1024 * 1024} />);
+    expect(screen.getByText('3 GB')).toBeTruthy();
+    expect(screen.queryByText('1 GB')).toBeNull();
+  });
+
+  it('shows no chip at all when the size is unknown', () => {
+    render(<ContentCard item={normal} />);
+    expect(screen.queryByText(/\d (B|KB|MB|GB)$/)).toBeNull();
+  });
+});

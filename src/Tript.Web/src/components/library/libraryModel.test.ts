@@ -14,8 +14,8 @@ import {
   filterItems,
   lacksMainVideo,
   formatDateChip,
+  formatBytes,
   formatDurationChip,
-  formatSizeChip,
   isFiltered,
   itemDate,
   itemDuration,
@@ -28,6 +28,7 @@ import {
   NO_GAME,
   pageCountFor,
   sessionPlaylist,
+  sessionSizeTotals,
   sortItems,
   sourceSession,
   typeLabel,
@@ -141,11 +142,11 @@ describe('chip formatting', () => {
   });
 
   it('formats a size in binary units, and omits the chip when the size is unknown', () => {
-    expect(formatSizeChip(clip)).toBe('33 KB');
-    expect(formatSizeChip(recentSession)).toBe('1.4 GB');
-    expect(formatSizeChip(item({ fileName: 'a.mp4', fileSizeBytes: 900 }))).toBe('900 B');
-    expect(formatSizeChip(bareSession)).toBeNull();
-    expect(formatSizeChip(item({ fileName: 'a.mp4', fileSizeBytes: 0 }))).toBeNull();
+    expect(formatBytes(clip.fileSizeBytes)).toBe('33 KB');
+    expect(formatBytes(recentSession.fileSizeBytes)).toBe('1.4 GB');
+    expect(formatBytes(900)).toBe('900 B');
+    expect(formatBytes(bareSession.fileSizeBytes)).toBeNull();
+    expect(formatBytes(0)).toBeNull();
   });
 });
 
@@ -598,5 +599,62 @@ describe('deriveSessions', () => {
   it('does not count the page itself as a filter', () => {
     expect(deriveSessions(ALL, query(), NOW).filtered).toBe(false);
     expect(deriveSessions(ALL, query({ game: 'Overwatch' }), NOW).filtered).toBe(true);
+  });
+});
+
+describe('the size a session costs', () => {
+  const session = item({ fileName: 'ow.mp4', filePath: 'sessions/ow.mp4', fileSizeBytes: 1000 });
+
+  function child(overrides: Partial<ContentItem> & { fileName: string }): ContentItem {
+    return item({ contentType: 'highlight', filePath: `highlights/${overrides.fileName}`, ...overrides });
+  }
+
+  it('adds the clips and highlights cut from it to the session itself', () => {
+    const totals = sessionSizeTotals([
+      session,
+      child({ fileName: 'ow-h1.mp4', sourceSessionPath: 'sessions/ow.mp4', fileSizeBytes: 30, automated: true }),
+      child({ fileName: 'ow-h2.mp4', sourceSessionPath: 'sessions/ow.mp4', fileSizeBytes: 70, automated: true }),
+      item({ contentType: 'clip', fileName: 'ow-c1.mp4', filePath: 'clips/ow-c1.mp4', sourceSessionPath: 'sessions/ow.mp4', fileSizeBytes: 400 }),
+    ]);
+
+    expect(totals.get('sessions/ow.mp4')).toBe(1500);
+  });
+
+  it('links a clip that carries no source path by its file name', () => {
+    const totals = sessionSizeTotals([
+      session,
+      child({ fileName: 'ow-highlight-1.mp4', fileSizeBytes: 250 }),
+    ]);
+
+    expect(totals.get('sessions/ow.mp4')).toBe(1250);
+  });
+
+  it('counts a session with no clips as just itself', () => {
+    expect(sessionSizeTotals([session]).get('sessions/ow.mp4')).toBe(1000);
+  });
+
+  it('reports a highlights-only session as the sum of its highlights', () => {
+    const shell = item({ fileName: 'gone.mp4', filePath: 'sessions/gone.mp4', highlightsOnly: true });
+    const totals = sessionSizeTotals([
+      shell,
+      child({ fileName: 'gone-h1.mp4', sourceSessionPath: 'sessions/gone.mp4', fileSizeBytes: 640, automated: true }),
+    ]);
+
+    expect(totals.get('sessions/gone.mp4')).toBe(640);
+  });
+
+  it('leaves an orphaned clip off every session', () => {
+    const totals = sessionSizeTotals([
+      session,
+      child({ fileName: 'other-h1.mp4', sourceSessionPath: 'sessions/missing.mp4', fileSizeBytes: 999, automated: true }),
+    ]);
+
+    expect(totals.get('sessions/ow.mp4')).toBe(1000);
+    expect(totals.has('sessions/missing.mp4')).toBe(false);
+  });
+
+  it('does not key clips, so a mixed grid falls back to their own size', () => {
+    const totals = sessionSizeTotals([session, clip]);
+    expect(totals.has(clip.filePath)).toBe(false);
   });
 });

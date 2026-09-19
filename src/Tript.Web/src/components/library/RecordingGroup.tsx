@@ -13,16 +13,27 @@ export interface GroupActions {
   onToggleSelected?: (item: ContentItem) => void;
 }
 
-function cardFor(
-  item: ContentItem,
-  actions: GroupActions,
-  variant: 'grid' | 'wide' = 'grid',
-  priority = false,
-  thumbnailLoadingActive = true,
-  clipsCount = 0,
-  highlightsCount = 0,
-  previewHighlights: ContentItem[] = [],
-) {
+interface CardOptions {
+  variant?: 'grid' | 'wide';
+  priority?: boolean;
+  thumbnailLoadingActive?: boolean;
+  clipsCount?: number;
+  highlightsCount?: number;
+  previewHighlights?: ContentItem[];
+  sizeBytes?: number;
+}
+
+function cardFor(item: ContentItem, actions: GroupActions, options: CardOptions = {}) {
+  const {
+    variant = 'grid',
+    priority = false,
+    thumbnailLoadingActive = true,
+    clipsCount = 0,
+    highlightsCount = 0,
+    previewHighlights = [],
+    sizeBytes,
+  } = options;
+
   return (
     <ContentCard
       item={item}
@@ -32,6 +43,7 @@ function cardFor(
       clipsCount={clipsCount}
       highlightsCount={highlightsCount}
       previewHighlights={previewHighlights}
+      sizeBytes={sizeBytes}
       onOpen={actions.onOpen}
       onDelete={actions.onDelete}
       onToggleFavorite={actions.onToggleFavorite}
@@ -48,15 +60,24 @@ export function RecordingGroup({
   actions,
   thumbnailLoadingActive = true,
   priority = false,
+  sizeBytes,
 }: {
   group: Group;
   variant: 'hero' | 'recent' | 'row';
   actions: GroupActions;
   thumbnailLoadingActive?: boolean;
   priority?: boolean;
+  sizeBytes?: number;
 }) {
   const recording = group.recording;
   const automaticClips = recording ? linkedAutomaticHighlights(recording, group.clips) : [];
+  const shared: CardOptions = {
+    thumbnailLoadingActive,
+    clipsCount: group.clips.length,
+    highlightsCount: automaticClips.length,
+    previewHighlights: automaticClips,
+    sizeBytes,
+  };
 
   if ((variant === 'hero' || variant === 'recent') && recording) {
     return (
@@ -65,16 +86,11 @@ export function RecordingGroup({
         data-testid={variant === 'recent' ? 'recording-group-recent' : 'library-hero'}
         aria-label={variant === 'recent' ? 'Recent recording' : 'Newest recording'}
       >
-        {cardFor(
-          recording,
-          actions,
-          variant === 'recent' ? 'grid' : 'wide',
+        {cardFor(recording, actions, {
+          ...shared,
+          variant: variant === 'recent' ? 'grid' : 'wide',
           priority,
-          thumbnailLoadingActive,
-          group.clips.length,
-          automaticClips.length,
-          automaticClips,
-        )}
+        })}
       </section>
     );
   }
@@ -86,9 +102,7 @@ export function RecordingGroup({
   return (
     <section className="recording-group" data-testid="recording-group">
       <div className="recording-group-body">
-        <div className="recording-group-head">
-          {cardFor(recording, actions, 'grid', false, thumbnailLoadingActive, group.clips.length, automaticClips.length, automaticClips)}
-        </div>
+        <div className="recording-group-head">{cardFor(recording, actions, shared)}</div>
       </div>
     </section>
   );

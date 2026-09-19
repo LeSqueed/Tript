@@ -197,6 +197,16 @@ export function recordingChildCounts(items: readonly ContentItem[]): Map<string,
   return counts;
 }
 
+export function sessionSizeTotals(items: readonly ContentItem[]): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const group of groupByRecording(items)) {
+    if (!group.recording) continue;
+    const children = group.clips.reduce((sum, clip) => sum + (clip.fileSizeBytes ?? 0), 0);
+    totals.set(group.recording.filePath, (group.recording.fileSizeBytes ?? 0) + children);
+  }
+  return totals;
+}
+
 export function sessionPreviewHighlights(
   item: ContentItem,
   items: readonly ContentItem[],
@@ -247,10 +257,6 @@ export function formatDateChip(item: ContentItem): string {
     month: 'short',
     day: 'numeric',
   });
-}
-
-export function formatSizeChip(item: ContentItem): string | null {
-  return formatContentSize(item.fileSizeBytes);
 }
 
 export function formatBytes(bytes: number | undefined): string | null {

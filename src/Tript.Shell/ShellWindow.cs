@@ -19,6 +19,11 @@ internal sealed class ShellWindow : IDisposable
     private readonly AppHost _host;
     private readonly SingleInstance _singleInstance;
     private readonly string _iconPath;
+    private readonly WindowPlacementStore _placementStore = new();
+    private readonly object _placementGate = new();
+    private WindowPlacement? _savedPlacement;
+    private WindowPlacement? _lastSeenPlacement;
+    private volatile bool _placementTracked;
     private WindowsTrayPresence? _tray;
     private WindowsHotkeys? _hotkeys;
     private Timer? _visibilityWatch;
@@ -114,6 +119,18 @@ internal sealed class ShellWindow : IDisposable
             ContextMenuEnabled = true,
             DevToolsEnabled = false,
         };
+
+        _savedPlacement = OperatingSystem.IsWindows()
+            ? WindowPlacement.Sanitize(_placementStore.Load())
+            : null;
+        if (_savedPlacement is { } placement)
+        {
+            window.UseOsDefaultSize = false;
+            window.UseOsDefaultLocation = false;
+            window.Size = new Size(placement.Width, placement.Height);
+            window.Location = new Point(placement.Left, placement.Top);
+            window.Maximized = placement.Maximized;
+        }
 
         if (File.Exists(_iconPath))
             window.IconFile = _iconPath;
@@ -212,6 +229,7 @@ internal sealed class ShellWindow : IDisposable
                 ShowMainWindow();
                 break;
             case TrayCommand.Hide:
+                SavePlacement(window);
                 WindowsWindow.HideWindow(window);
                 break;
             case TrayCommand.StartRecording:
@@ -282,6 +300,7 @@ internal sealed class ShellWindow : IDisposable
 
     private bool OnClosing(PhotinoWindow window)
     {
+        SavePlacement(window);
         var decision = Program.DecideWindowClose(
             exitRequested: Volatile.Read(ref _exitRequested) != 0,
             hideToTray: _tray is not null
@@ -315,6 +334,7 @@ internal sealed class ShellWindow : IDisposable
     private void OnCreated(PhotinoWindow window)
     {
         AssignPickers(window);
+        TrackPlacement(window);
         _tray?.SetRecordingState(_host.IsRecording, _host.CurrentGameId);
         if (_activationPending)
         {
@@ -374,6 +394,8 @@ internal sealed class ShellWindow : IDisposable
             return;
         }
 
+        SavePlacement(window);
+
         if (_host.SettingsStore.Load().General.MinimizeBehavior == MinimizeBehavior.Tray
             && TrayReachable())
         {
@@ -393,6 +415,69 @@ internal sealed class ShellWindow : IDisposable
         catch (Exception exception)
         {
             Log.Debug(exception, "Tript.Shell: could not read the window visibility");
+        }
+
+        SaveSettledPlacement(window);
+    }
+
+    private void TrackPlacement(PhotinoWindow window)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        if (_savedPlacement is { } saved)
+            WindowsWindow.ApplyPlacement(window, saved);
+        _placementTracked = true;
+    }
+
+    private void SaveSettledPlacement(PhotinoWindow window)
+    {
+        if (!_placementTracked || Volatile.Read(ref _exitRequested) != 0)
+            return;
+
+        try
+        {
+            WindowPlacement? current = null;
+            window.Invoke(() => current = WindowsWindow.TryGetPlacement(window));
+            if (current is null)
+                return;
+
+            var settled = current == _lastSeenPlacement;
+            _lastSeenPlacement = current;
+            if (settled)
+                SavePlacementIfChanged(current);
+        }
+        catch (Exception exception)
+        {
+            Log.Debug(exception, "Tript.Shell: could not read the window placement");
+        }
+    }
+
+    private void SavePlacement(PhotinoWindow window)
+    {
+        if (!_placementTracked)
+            return;
+
+        try
+        {
+            if (WindowsWindow.TryGetPlacement(window) is { } current)
+                SavePlacementIfChanged(current);
+        }
+        catch (Exception exception)
+        {
+            Log.Debug(exception, "Tript.Shell: could not read the window placement");
+        }
+    }
+
+    private void SavePlacementIfChanged(WindowPlacement current)
+    {
+        lock (_placementGate)
+        {
+            if (current == _savedPlacement)
+                return;
+
+            _placementStore.Save(current);
+            _savedPlacement = current;
         }
     }
 

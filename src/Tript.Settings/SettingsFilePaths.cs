@@ -11,7 +11,11 @@ public static class SettingsFilePaths
 
     public const string SettingsFileName = "settings.json";
 
+    public const string WindowStateFileName = "window.json";
+
     public static string SettingsPath => Path.Combine(ConfigDirectory, SettingsFileName);
+
+    public static string WindowStatePath => Path.Combine(ConfigDirectory, WindowStateFileName);
 
     public static string ConfigDirectory => _configDirectory.Value;
 

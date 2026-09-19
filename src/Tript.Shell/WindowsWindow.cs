@@ -15,17 +15,20 @@ internal static class WindowsWindow
     private const uint WmClose = 0x0010;
     private const int ScMinimize = 0xF020;
     private const uint MonitorDefaultToNull = 0;
+    private const uint ShowMaximized = 3;
+    private const uint RestoreToMaximized = 0x0002;
 
     internal static void HideWindow(PhotinoWindow window)
     {
         ShowWindow(window.WindowHandle, Hide);
     }
 
+    // SW_RESTORE un-arranges as well as un-minimizes, so an unconditional restore drops a maximized
+    // or snapped window back to its pre-arrange rect every time the tray activates it.
     internal static void ShowWindow(PhotinoWindow window)
     {
         var handle = window.WindowHandle;
-        ShowWindow(handle, Show);
-        ShowWindow(handle, Restore);
+        ShowWindow(handle, IsIconic(handle) ? Restore : Show);
         ShowContentWindows(handle);
         SetForegroundWindow(handle);
     }
@@ -39,6 +42,41 @@ internal static class WindowsWindow
     {
         if (!PostMessage(window.WindowHandle, WmClose, IntPtr.Zero, IntPtr.Zero))
             throw new ApplicationException("Windows could not close the shell window.");
+    }
+
+    internal static WindowPlacement? TryGetPlacement(PhotinoWindow window)
+    {
+        var handle = window.WindowHandle;
+        var placement = new NativeWindowPlacement { Length = Marshal.SizeOf<NativeWindowPlacement>() };
+        if (handle == IntPtr.Zero || !GetWindowPlacement(handle, ref placement))
+            return null;
+
+        var bounds = placement.NormalPosition;
+        var maximized = IsZoomed(handle)
+            || (IsIconic(handle) && (placement.Flags & RestoreToMaximized) != 0);
+        return new WindowPlacement(bounds.Left, bounds.Top,
+            bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, maximized);
+    }
+
+    internal static void ApplyPlacement(PhotinoWindow window, WindowPlacement saved)
+    {
+        var handle = window.WindowHandle;
+        var placement = new NativeWindowPlacement { Length = Marshal.SizeOf<NativeWindowPlacement>() };
+        if (handle == IntPtr.Zero || !GetWindowPlacement(handle, ref placement))
+            return;
+
+        placement.NormalPosition = new NativeRect
+        {
+            Left = saved.Left,
+            Top = saved.Top,
+            Right = saved.Left + saved.Width,
+            Bottom = saved.Top + saved.Height,
+        };
+        placement.Flags = 0;
+        placement.ShowCommand = !IsWindowVisible(handle) ? (uint)Hide
+            : saved.Maximized ? ShowMaximized
+            : placement.ShowCommand;
+        SetWindowPlacement(handle, ref placement);
     }
 
     internal static bool IsVisible(PhotinoWindow window) => IsWindowVisible(window.WindowHandle);
@@ -120,6 +158,17 @@ internal static class WindowsWindow
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowPlacement(IntPtr hWnd, ref NativeWindowPlacement placement);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPlacement(IntPtr hWnd, ref NativeWindowPlacement placement);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -135,6 +184,24 @@ internal static class WindowsWindow
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeWindowPlacement
+    {
+        public int Length;
+        public uint Flags;
+        public uint ShowCommand;
+        public NativePoint MinPosition;
+        public NativePoint MaxPosition;
+        public NativeRect NormalPosition;
     }
 
     [StructLayout(LayoutKind.Sequential)]

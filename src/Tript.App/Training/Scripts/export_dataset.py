@@ -15,6 +15,8 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageOps
 
+PRESERVED_ACROSS_EXPORT = ("ocr", "ocr_model.onnx", "ocr_dict.txt")
+
 @dataclass(frozen=True)
 class Region:
     x: float
@@ -130,7 +132,19 @@ def main() -> int:
                 backup.replace(destination)
             raise
         if backup.exists():
-            shutil.rmtree(backup)
+            try:
+                for name in PRESERVED_ACROSS_EXPORT:
+                    carried = backup / name
+                    if carried.exists():
+                        carried.replace(destination / name)
+            except OSError as error:
+                print(
+                    f"WARNING could not carry OCR artifacts across the export; "
+                    f"they remain in {backup.name} ({error})",
+                    flush=True,
+                )
+            else:
+                shutil.rmtree(backup)
 
         coverage = ", ".join(
             f"{item['name']}={item['trainingSamples']}/{item['validationSamples']}"

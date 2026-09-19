@@ -33,6 +33,96 @@ internal sealed class StreamerStatusInfo
     public string? AdapterName { get; set; }
 
     public bool HookConflictSuspected { get; set; }
+
+    public bool RecordingBlocked { get; set; }
+
+    public string? BlockedReason { get; set; }
+}
+
+internal sealed class StorageStatusInfo
+{
+    public string Pressure { get; set; } = "unknown";
+
+    public long FreeBytes { get; set; }
+
+    public long TotalBytes { get; set; }
+
+    public long MinimumFreeBytes { get; set; }
+
+    public long WarnFreeBytes { get; set; }
+
+    public bool RecordingBlocked { get; set; }
+
+    public bool PolicyConfirmed { get; set; }
+
+    public string WhenFull { get; set; } = "PauseRecording";
+
+    public bool KeepSharingWhenFull { get; set; }
+
+    public string? VolumeRoot { get; set; }
+
+    public string Root { get; set; } = string.Empty;
+
+    public string? ScratchRoot { get; set; }
+
+    public long ScratchFreeBytes { get; set; }
+
+    public bool ScratchLow { get; set; }
+}
+
+internal sealed class StorageGameUsage
+{
+    public string? GameId { get; set; }
+
+    public string? Name { get; set; }
+
+    public long TotalBytes { get; set; }
+
+    public long SessionBytes { get; set; }
+
+    public long HighlightBytes { get; set; }
+
+    public long ClipBytes { get; set; }
+}
+
+internal sealed class StorageReport
+{
+    public string Root { get; set; } = string.Empty;
+
+    public string? VolumeRoot { get; set; }
+
+    public long VolumeTotalBytes { get; set; }
+
+    public long VolumeFreeBytes { get; set; }
+
+    public long LibraryBytes { get; set; }
+
+    public long SessionBytes { get; set; }
+
+    public long HighlightBytes { get; set; }
+
+    public long ClipBytes { get; set; }
+
+    public long TrashBytes { get; set; }
+
+    public long SidecarBytes { get; set; }
+
+    public long FavoriteBytes { get; set; }
+
+    public int SessionCount { get; set; }
+
+    public int HighlightCount { get; set; }
+
+    public int ClipCount { get; set; }
+
+    public int TrashCount { get; set; }
+
+    public List<StorageGameUsage> Games { get; set; } = [];
+}
+
+internal sealed class ReclaimStorageParameters
+{
+    public bool DryRun { get; set; }
 }
 
 internal sealed class AudioTrackInfo

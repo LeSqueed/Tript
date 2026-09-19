@@ -52,6 +52,7 @@ internal sealed partial class AppHost
         _streamShare.Configure(streaming.ShareEnabled, streaming.ShareWhen, senderName);
         _obsWatcher.SetWatching(_streamShare.WantsObsPresence);
         _streamShare.SetObsRunning(_obsWatcher.Current.Running);
+        SetCaptureHold(CaptureHoldWanted());
         SyncStreamShareCapture();
     }
 
@@ -144,9 +145,12 @@ internal sealed partial class AppHost
         var status = _streamShare?.Status ?? StreamShareStatus.Initial;
         var presence = CurrentObsPresence();
         var settings = _settingsStore.Load().Streaming;
+        var blockedReason = StorageBlockedReason();
         return new StreamerStatusInfo
         {
-            State = WireState(status.State),
+            State = blockedReason is not null && status.State == StreamShareState.Live
+                ? "sharingOnly"
+                : WireState(status.State),
             ShareEnabled = settings.ShareEnabled,
             ObsRunning = presence.Running,
             ObsVersion = presence.Version,
@@ -155,6 +159,8 @@ internal sealed partial class AppHost
             Height = status.Height,
             AdapterName = GraphicsAdapterName(),
             HookConflictSuspected = Volatile.Read(ref _hookConflictSuspected) != 0,
+            RecordingBlocked = blockedReason is not null,
+            BlockedReason = blockedReason,
         };
     }
 

@@ -123,11 +123,11 @@ internal sealed class WindowsTrayPresence : IDisposable
         return _added;
     }
 
-    internal void SetRecordingState(bool recording, string? gameId)
+    internal void SetRecordingState(bool recording, string? gameId, bool sharingOnly = false)
     {
         _tooltip = recording
             ? string.IsNullOrWhiteSpace(gameId) ? "Tript - Recording" : $"Tript - Recording: {gameId}"
-            : "Tript";
+            : sharingOnly ? "Tript - Sharing only, out of space" : "Tript";
         if (EnsureIconPresent())
             ModifyIcon();
     }

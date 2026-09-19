@@ -227,6 +227,7 @@ internal sealed partial class AppHost : IDisposable
         }
 
         InitializeStreaming();
+        InitializeStorage();
     }
 
     internal AppOptions Options => _options;
@@ -286,6 +287,8 @@ internal sealed partial class AppHost : IDisposable
             PurgeExpiredTrash();
             _trashPurgeTimer = new Timer(_ => _maintenance.Run("trash purge", PurgeExpiredTrash), null,
                 TrashPurgeInterval, TrashPurgeInterval);
+
+            StartStorageWatch();
 
             if (_updateManager is not null)
             {
@@ -360,6 +363,7 @@ internal sealed partial class AppHost : IDisposable
             _updateManager.Dispose();
         }
         _modelCheckTimer?.Dispose();
+        DisposeStorage();
         DisposeStreaming();
         _detectionHost?.Dispose();
         _detector?.Dispose();
@@ -613,6 +617,8 @@ internal sealed partial class AppHost : IDisposable
                     return hotkeyError;
                 if (ValidateStreamingSettings(candidate.Streaming) is { } streamingError)
                     return streamingError;
+                if (ValidateStorageSettings(candidate.Storage) is { } storageError)
+                    return storageError;
 
                 string effectiveRoot;
                 try
@@ -672,6 +678,7 @@ internal sealed partial class AppHost : IDisposable
         PushSettings();
         PushSettingsUpdateResult(requestId, true, null);
         ApplyStreamingSettings(settings);
+        ApplyStorageSettings(settings);
         return true;
     }
 

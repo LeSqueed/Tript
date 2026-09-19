@@ -207,13 +207,25 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         return JsonDocument.Parse(Encoding.UTF8.GetString(ms.ToArray()));
     }
 
-    internal async Task<(string Method, JsonElement Content)> ReceiveAsyncParsed(TimeSpan? timeout = null)
+    internal Task<(string Method, JsonElement Content)> ReceiveAsyncParsed(TimeSpan? timeout = null) =>
+        ReceiveNextParsed(timeout, skipStorageReports: true);
+
+    internal Task<(string Method, JsonElement Content)> ReceiveAnyParsed(TimeSpan? timeout = null) =>
+        ReceiveNextParsed(timeout, skipStorageReports: false);
+
+    private async Task<(string Method, JsonElement Content)> ReceiveNextParsed(TimeSpan? timeout,
+        bool skipStorageReports)
     {
-        using var doc = await ReceiveAsync(timeout);
-        var root = doc.RootElement;
-        var method = root.GetProperty("method").GetString()!;
-        var content = root.GetProperty("content").Clone();
-        return (method, content);
+        while (true)
+        {
+            using var doc = await ReceiveAsync(timeout);
+            var root = doc.RootElement;
+            var method = root.GetProperty("method").GetString()!;
+            if (skipStorageReports && method == "storageReport")
+                continue;
+
+            return (method, root.GetProperty("content").Clone());
+        }
     }
 
     internal async Task ShutdownAsync()

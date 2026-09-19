@@ -48,8 +48,7 @@ internal sealed partial class AppHost
                     return;
 
                 var sourceSessionPath = RelativeToRoot(sourcePath);
-                var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
-                Directory.CreateDirectory(replayDirectory);
+                var replayDirectory = ReplayScratchDirectory();
                 var saveElapsed = _liveHighlights.ElapsedSeconds;
                 var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var accepted = recorder.SaveReplayBuffer(replayDirectory,
@@ -197,8 +196,7 @@ internal sealed partial class AppHost
             return;
 
         var sourceSessionPath = RelativeToRoot(sourcePath);
-        var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
-        Directory.CreateDirectory(replayDirectory);
+        var replayDirectory = ReplayScratchDirectory();
         var saveElapsed = _liveHighlights.ElapsedSeconds;
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = recorder.SaveReplayBuffer(replayDirectory,

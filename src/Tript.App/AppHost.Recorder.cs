@@ -34,6 +34,7 @@ internal sealed partial class AppHost
         NoDetectedGame,
         UnsupportedMode,
         RecorderRefused,
+        InsufficientStorage,
     }
 
     internal void StartRecordingOrReport(string? gameId, string? displayId = null, bool applyDisplay = false)
@@ -50,6 +51,9 @@ internal sealed partial class AppHost
             StartRecordingResult.ShuttingDown => "Recording did not start because Tript is shutting down.",
             StartRecordingResult.UnsupportedMode =>
                 "Recording did not start because the selected recording mode is not supported.",
+            StartRecordingResult.InsufficientStorage =>
+                $"Recording did not start because {EffectiveRoot} is out of space. "
+                + "Free up space or lower the reserved free space in Settings, Storage.",
             _ => "Recording did not start because the recorder refused to start.",
         });
     }
@@ -116,6 +120,11 @@ internal sealed partial class AppHost
 
             if (!resolved.Mode.IsAlphaSupported())
                 return StartRecordingResult.UnsupportedMode;
+
+            if (!HasRoomToStartRecording(resolved.Mode))
+                return StartRecordingResult.InsufficientStorage;
+
+            SetCaptureHoldLocked(false);
 
             sessionPath = BuildSessionPath(effectiveGameId, resolved.Mode.RecordsSession());
             resolved.OutputPath = resolved.Mode.RecordsSession()
@@ -378,6 +387,8 @@ internal sealed partial class AppHost
         _currentGameId = null;
         Volatile.Write(ref _recordingProcessOwner, null);
 
+        SetCaptureHoldLocked(CaptureHoldWanted());
+
         PushState(recording: false, null);
         if (stoppedMode is RecordingMode.ReplayBufferOnly)
             RequestNotification(NotificationKind.RecordingStopped, "Buffering stopped", "The replay buffer has stopped.");
@@ -584,6 +595,42 @@ internal sealed partial class AppHost
         return ExecutableNames.Normalize(entry is null ? gameId : LibraryGames.ExecutableOf(entry));
     }
 
+    private bool _captureHeldForSharing;
+
+    private void SetCaptureHold(bool held)
+    {
+        lock (_recorderGate)
+            SetCaptureHoldLocked(held);
+    }
+
+    private void SetCaptureHoldLocked(bool held)
+    {
+        if (held && (_disposed || _shuttingDown || _recorderSession is null))
+            held = false;
+
+        if (_captureHeldForSharing == held)
+            return;
+
+        _captureHeldForSharing = held;
+
+        try
+        {
+            if (held)
+                _recorderSession!.PlaceSourceOnChannel();
+            else if (_recorderSession is not null && _recorder?.Snapshot.State == RecorderState.Idle)
+                _recorderSession.ClearSourceFromChannel();
+        }
+        catch (Exception exception) when (exception is ObsException or ObjectDisposedException
+                                             or EntryPointNotFoundException)
+        {
+            _captureHeldForSharing = false;
+            Log.Warning(exception, "AppHost: the capture could not be held open for sharing.");
+            return;
+        }
+
+        SyncStreamShareCapture();
+    }
+
     private string BuildSessionPath(string? gameId, bool createDirectory = true)
     {
         var directory = string.IsNullOrWhiteSpace(gameId)
@@ -596,11 +643,25 @@ internal sealed partial class AppHost
         return Path.Combine(directory, name);
     }
 
-    private static string BuildReplayBufferPath()
+    private string BuildReplayBufferPath() =>
+        Path.Combine(ReplayScratchDirectory(), "replay-buffer.mp4");
+
+    internal string ReplayScratchDirectory()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
-        Directory.CreateDirectory(directory);
-        return Path.Combine(directory, "replay-buffer.mp4");
+        var directory = Path.Combine(ContentLayout.ScratchRoot(EffectiveRoot), "replay");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(exception, "AppHost: {Directory} could not be created; replays fall back to the temp folder.",
+                directory);
+            var fallback = Path.Combine(Path.GetTempPath(), "Tript", "replay");
+            Directory.CreateDirectory(fallback);
+            return fallback;
+        }
     }
 
     private string ClipDirectoryForSource(string sourcePath) =>

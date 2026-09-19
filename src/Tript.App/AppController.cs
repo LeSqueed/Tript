@@ -58,6 +58,9 @@ internal sealed class AppController
 
             ["ListSettings"] = (_, _) => _host.PushSettings(),
             ["GetStreamerStatus"] = (_, _) => _host.PushStreamerStatus(),
+            ["GetStorageStatus"] = (_, _) => _host.PushStorageStatus(),
+            ["ReclaimStorage"] = (parameters, _) => _host.ReclaimStorage(
+                parameters.Deserialize<ReclaimStorageParameters>()),
             ["UpdateSettings"] = (parameters, _) =>
             {
                 var parsed = parameters.Deserialize<UpdateSettingsParameters>();
@@ -97,6 +100,7 @@ internal sealed class AppController
                 await _host.RequestGameAddAsync(parameters.Deserialize<RequestGameAddParameters>(), client),
 
             ["ListContent"] = (_, _) => Task.Run(_host.PushContent),
+            ["GetStorageReport"] = (_, _) => Task.Run(_host.PushStorageReport),
 #if TRIPT_TRAINING
             ["ListTraining"] = async (parameters, _) =>
                 await _host.PushTraining(parameters.Deserialize<TrainingGameParameters>()?.GameId),

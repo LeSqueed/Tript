@@ -429,6 +429,21 @@ public sealed class TrashTests : IDisposable
     }
 
     [Fact]
+    public void ListContent_AndTheContentServer_BothIgnoreTheReplayScratch()
+    {
+        var replay = Path.Combine(_contentRoot, ContentLayout.Scratch, "replay", "tript-replay-1.mp4");
+        Directory.CreateDirectory(Path.GetDirectoryName(replay)!);
+        File.WriteAllText(replay, "replay");
+
+        Assert.Empty(_host.ListContent());
+
+        Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, ".scratch/replay/tript-replay-1.mp4"));
+        Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, ".scratch"));
+        Assert.Null(ContentServer.ResolveWithinRoot(_contentRoot, ".scratch/replay/tript-replay-1.mp4",
+            allowTrash: true));
+    }
+
+    [Fact]
     public void ACorruptEntryRecord_StillListsAndStillRestores()
     {
         WriteSession("session-1.mp4", "Overwatch", "The clutch");

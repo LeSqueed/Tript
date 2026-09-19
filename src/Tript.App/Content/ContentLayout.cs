@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using Tript.Core;
+
 namespace Tript.App.Content;
 
 internal static class ContentLayout
@@ -9,6 +11,8 @@ internal static class ContentLayout
     internal const string Clips = "clips";
     internal const string Highlights = "highlights";
     internal const string Metadata = "metadata";
+
+    internal const string Scratch = ".scratch";
     internal const string Thumbnails = "thumbnails";
 
     internal static string MetadataRoot(string root) => Path.Combine(root, Metadata);
@@ -16,6 +20,12 @@ internal static class ContentLayout
     internal static string ThumbnailRoot(string root) => Path.Combine(root, Metadata, Thumbnails);
 
     internal static string TrashRoot(string root) => Path.Combine(root, TrashStore.DirectoryName);
+
+    internal static string ScratchRoot(string root) => Path.Combine(root, Scratch);
+
+    internal static bool IsReservedSegment(string segment) =>
+        segment.Equals(TrashStore.DirectoryName, FilePaths.Comparison)
+        || segment.Equals(Scratch, FilePaths.Comparison);
 
     internal static string ToWirePath(string root, string absolutePath) =>
         Path.GetRelativePath(root, absolutePath).Replace(Path.DirectorySeparatorChar, '/');
@@ -52,6 +62,7 @@ internal static class ContentLayout
 
         var segment = wirePath.Split(['/', '\\'], 2)[0];
         return segment is Sessions or Clips or Highlights or Metadata or TrashStore.DirectoryName
+            or Scratch
             ? null
             : segment;
     }

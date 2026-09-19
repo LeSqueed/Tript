@@ -371,6 +371,7 @@ internal sealed partial class AppHost
         }
 
         _maintenance.SetRecording(suspended);
+        SetStorageWatchInterval(suspended);
     }
 
     private IClipEngine BuildClipEngine()

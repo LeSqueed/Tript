@@ -172,7 +172,7 @@ internal sealed class ContentCatalogue
             ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 !entry.IsDirectory && FileSystemName.MatchesWin32Expression(VideoPattern, entry.FileName, ignoreCase),
             ShouldRecursePredicate = (ref FileSystemEntry entry) =>
-                !(entry.FileName.SequenceEqual(TrashStore.DirectoryName)
+                !(ContentLayout.IsReservedSegment(new string(entry.FileName))
                     && Path.TrimEndingDirectorySeparator(entry.Directory).SequenceEqual(rootPath)),
         };
     }

@@ -258,7 +258,7 @@ internal sealed class ShellWindow : IDisposable
 
         try
         {
-            window.Invoke(() => tray.SetRecordingState(recording, gameId));
+            window.Invoke(() => tray.SetRecordingState(recording, gameId, _host.RecordingBlockedByStorage));
         }
         catch (Exception exception)
         {

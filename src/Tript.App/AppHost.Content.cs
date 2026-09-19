@@ -77,11 +77,15 @@ internal sealed partial class AppHost
 
     internal void PushContent() => _contentPush.Run();
 
-    private void BroadcastContent() =>
+    private void BroadcastContent()
+    {
+        var items = ListContent();
         _ipc.Broadcast("content", JsonSerializer.SerializeToElement(new
         {
-            content = ListContent(),
+            content = items,
         }, Wire.Options));
+        BroadcastStorageReport(items);
+    }
 
     private void ReportContentFailure(Exception exception)
     {

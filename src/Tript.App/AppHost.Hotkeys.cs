@@ -76,8 +76,7 @@ internal sealed partial class AppHost
         };
 
         var sourceSessionPath = RelativeToRoot(sourcePath);
-        var replayDirectory = Path.Combine(Path.GetTempPath(), "Tript", "replay");
-        Directory.CreateDirectory(replayDirectory);
+        var replayDirectory = ReplayScratchDirectory();
         var accepted = recorder.SaveReplayBuffer(replayDirectory,
             "tript-replay-%CCYY-%MM-%DD-%hh-%mm-%ss",
             replayPath =>

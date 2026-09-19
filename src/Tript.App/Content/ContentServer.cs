@@ -138,7 +138,7 @@ internal sealed class ContentServer : LocalHttpListener
             var candidate = Path.GetFullPath(Path.Combine(root, requestPath));
             if (!FilePaths.IsAtOrUnder(candidate, root))
                 return null;
-            return allowTrash || !IsInTrash(candidate, root) ? candidate : null;
+            return IsReserved(candidate, root, allowTrash) ? null : candidate;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException
                                              or PathTooLongException)
@@ -147,12 +147,16 @@ internal sealed class ContentServer : LocalHttpListener
         }
     }
 
-    private static bool IsInTrash(string candidate, string root)
+    private static bool IsReserved(string candidate, string root, bool allowTrash)
     {
         var relative = Path.GetRelativePath(root, candidate);
         var separator = relative.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
         var first = separator >= 0 ? relative[..separator] : relative;
-        return first.Equals(TrashStore.DirectoryName, FilePaths.Comparison);
+
+        if (first.Equals(ContentLayout.Scratch, FilePaths.Comparison))
+            return true;
+
+        return !allowTrash && first.Equals(TrashStore.DirectoryName, FilePaths.Comparison);
     }
 
     private async Task ServeContentAsync(HttpListenerContext context, string requestPath,

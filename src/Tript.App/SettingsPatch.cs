@@ -43,6 +43,9 @@ internal static class SettingsPatch
                 case "streaming" when property.Value.ValueKind == JsonValueKind.Object:
                     ApplyToPage(settings.Streaming, property.Value);
                     break;
+                case "storage" when property.Value.ValueKind == JsonValueKind.Object:
+                    ApplyToPage(settings.Storage, property.Value);
+                    break;
             }
         }
     }

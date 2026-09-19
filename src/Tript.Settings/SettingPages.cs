@@ -124,6 +124,26 @@ public sealed class StreamingSettings
     public string SenderName { get; set; } = DefaultSenderName;
 }
 
+public sealed class StorageSettings
+{
+    public const long DefaultMinimumFreeBytes = 20L * 1024 * 1024 * 1024;
+
+    public const long LowestMinimumFreeBytes = 1L * 1024 * 1024 * 1024;
+
+    public const long HighestMinimumFreeBytes = 2048L * 1024 * 1024 * 1024;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> UnknownProperties { get; set; } = new();
+
+    public long MinimumFreeBytes { get; set; } = DefaultMinimumFreeBytes;
+
+    public StorageFullAction WhenFull { get; set; } = StorageFullAction.PauseRecording;
+
+    public bool PolicyConfirmed { get; set; }
+
+    public bool KeepSharingWhenFull { get; set; } = true;
+}
+
 public sealed class GeneralSettings
 {
     [JsonExtensionData]

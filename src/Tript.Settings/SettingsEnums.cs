@@ -58,6 +58,12 @@ public enum StreamShareWhen
     Always
 }
 
+public enum StorageFullAction
+{
+    PauseRecording,
+    ReclaimOldest
+}
+
 public enum DisplayCaptureMethod
 {
     Auto,

@@ -36,14 +36,15 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void TheEightPages_Exist()
+    public void TheNinePages_Exist()
     {
-        Assert.Equal(8, Enum.GetValues<SettingsPage>().Length);
+        Assert.Equal(9, Enum.GetValues<SettingsPage>().Length);
         Assert.Equal(
             new[]
             {
                 SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture,
                 SettingsPage.Game, SettingsPage.General, SettingsPage.Hotkeys, SettingsPage.Streaming,
+                SettingsPage.Storage,
             },
             Enum.GetValues<SettingsPage>());
     }

@@ -98,6 +98,7 @@ public sealed class SettingsStore
         SettingsPage.General => settings.General,
         SettingsPage.Hotkeys => settings.Hotkeys,
         SettingsPage.Streaming => settings.Streaming,
+        SettingsPage.Storage => settings.Storage,
         _ => throw new ArgumentOutOfRangeException(nameof(page), page, null),
     };
 }

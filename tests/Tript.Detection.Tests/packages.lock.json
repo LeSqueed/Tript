@@ -127,12 +127,22 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )"
+          "Tript.Core": "[0.1.0-alpha.8, )",
+          "Tript.Obs": "[0.1.0-alpha.8, )"
         }
       },
       "tript.obs": {
         "type": "Project"
+      }
+    },
+    "net10.0/win-x64": {
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.28.0",
+        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
+        }
       }
     },
     "net10.0-windows10.0.19041": {
@@ -261,12 +271,22 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )"
+          "Tript.Core": "[0.1.0-alpha.8, )",
+          "Tript.Obs": "[0.1.0-alpha.8, )"
         }
       },
       "tript.obs": {
         "type": "Project"
+      }
+    },
+    "net10.0-windows10.0.19041/win-x64": {
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.28.0",
+        "contentHash": "xpguSCrXBe5E1l1088S7UqnI36EHaTL6CJMHEhwfGBoSwyPH5Q/IkbkBBk/GwXWzsVyEXpQm42ZimSAQs0/zKA==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
+        }
       }
     }
   }

@@ -213,9 +213,9 @@ publish-shell-win: restore-windows
 	mkdir -p $(WIN_APP_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(WIN_APP_DIR)/dist/
 
-# The per-project lock files carry the ordinary framework graph in source control. Windows publishing
-# needs the additional RID graph for Photino.Native and OBS assets, so materialize it deliberately before
-# the locked publish rather than letting an ordinary test restore rewrite it implicitly.
+# Directory.Build.props declares RuntimeIdentifiers=win-x64, so the committed lock files already carry
+# the win-x64 graph and any restore reproduces it. These two stay as an explicit pre-publish step: a
+# locked publish must fail loudly if the graph is somehow missing rather than quietly restoring it.
 restore-windows:
 	dotnet restore src/Tript.App/Tript.App.csproj -p:RuntimeIdentifier=win-x64 -p:RestoreForceEvaluate=true --nologo
 	dotnet restore src/Tript.Shell/Tript.Shell.csproj -p:RuntimeIdentifier=win-x64 -p:RestoreForceEvaluate=true --nologo
@@ -286,7 +286,9 @@ cut-release:
 	echo "Bumping $$current -> $$next"; \
 	sed -i "s#<Version>$$current</Version>#<Version>$$next</Version>#" Directory.Build.props; \
 	sed -i "s#\"version\": \"$$current\"#\"version\": \"$$next\"#" $(WEB_SRC)/package.json; \
+	dotnet restore Tript.slnx -p:RestoreForceEvaluate=true --nologo; \
 	git add Directory.Build.props $(WEB_SRC)/package.json; \
+	git add -- '*packages.lock.json'; \
 	git commit -m "chore: bump version to $$next"; \
 	git tag "v$$next"; \
 	git push origin main; \

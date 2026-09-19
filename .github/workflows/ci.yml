@@ -47,3 +47,9 @@ jobs:
 
       - name: Test
         run: make test CONFIG=Release
+
+      # Restore writes packages.lock.json, so a build or test that rewrites it means the
+      # committed lock files no longer describe the build. That used to pass silently and
+      # only surfaced later as NU1004 on a locked Windows publish.
+      - name: Lock files are unchanged by the build
+        run: git diff --exit-code -- '*packages.lock.json'

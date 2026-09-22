@@ -34,6 +34,25 @@ static int fail(const wchar_t *message)
     return 1;
 }
 
+// old-App is the rollback target for the version in App, and UpdateManager deletes it once that
+// version has outlived the rollback window. A restart before that left it in place, and because
+// MoveFileW cannot rename onto an existing directory the swap was skipped without a word. Renaming
+// it aside keeps this launcher free of a recursive delete: UpdateManager.SweepLeftovers removes any
+// folder in .tript-update that is neither old-App nor the staged folder the marker names.
+static void DiscardStalePreviousInstall(const wchar_t *stagingDirectory, const wchar_t *oldAppBackupPath)
+{
+    wchar_t discardPath[PATH_CAPACITY];
+
+    if (GetFileAttributesW(oldAppBackupPath) == INVALID_FILE_ATTRIBUTES)
+        return;
+
+    if (swprintf_s(discardPath, ARRAYSIZE(discardPath), L"%ls\\discard-%llu", stagingDirectory,
+            (unsigned long long)GetTickCount64()) < 0)
+        return;
+
+    MoveFileW(oldAppBackupPath, discardPath);
+}
+
 static BOOL MoveAppAside(const wchar_t *appDirectory, const wchar_t *oldAppBackupPath)
 {
     for (;;)
@@ -259,6 +278,12 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
     DWORD stagedAttributes = GetFileAttributesW(stagedShellPath);
     if (stagedAttributes == INVALID_FILE_ATTRIBUTES || (stagedAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
         return TRUE; // The staged package looks incomplete - leave the current App\ alone.
+
+    wchar_t stagingDirectory[PATH_CAPACITY];
+    if (swprintf_s(stagingDirectory, ARRAYSIZE(stagingDirectory), L"%ls\\.tript-update", launcherDirectory) < 0)
+        return TRUE;
+
+    DiscardStalePreviousInstall(stagingDirectory, oldAppBackupPath);
 
     // Plain MoveFileW, not MoveFileExW(..., MOVEFILE_REPLACE_EXISTING): that flag is documented to
     // fail whenever either path names a directory, which both of these always are. A same-volume

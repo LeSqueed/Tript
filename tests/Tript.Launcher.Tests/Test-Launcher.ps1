@@ -118,6 +118,18 @@ Assert-That (Test-Path (Join-Path $dir ".tript-update\staged-020\Tript.Shell.exe
 Assert-That (Test-Path (Join-Path $dir ".tript-update\ready.marker")) "the marker is kept for the next start"
 Assert-That (-not (Test-Path (Join-Path $dir ".tript-update\old-App"))) "nothing was moved aside"
 
+Write-Output "A leftover old-App from an earlier update does not block the next one"
+$dir = New-Install "stale-old-app"
+Add-Shell (Join-Path $dir "App") "shell-ok" "previous"
+Add-Shell (Join-Path $dir ".tript-update\old-App") "shell-ok" "ancient"
+Add-Shell (Join-Path $dir ".tript-update\staged-020") "shell-ok" "new"
+[IO.File]::WriteAllText((Join-Path $dir ".tript-update\ready.marker"), "1`n0.2.0`nstaged-020`n")
+$code = Invoke-Launcher $dir
+Assert-That ($code -eq 0) "the launcher exits cleanly"
+Assert-That ((Identity (Join-Path $dir "App")) -eq "new") "the update is applied despite the leftover"
+Assert-That ((Identity (Join-Path $dir ".tript-update\old-App")) -eq "previous") "the version it replaced becomes the rollback target"
+Assert-That (((Get-ChildItem (Join-Path $dir ".tript-update") -Directory -Filter "discard-*") | Measure-Object).Count -eq 1) "the stale install is set aside for the app to sweep"
+
 Write-Output "A swap interrupted between its two renames is recovered"
 $dir = New-Install "interrupted"
 Add-Shell (Join-Path $dir ".tript-update\old-App") "shell-ok" "previous"

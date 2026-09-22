@@ -15,6 +15,12 @@ this file; their notes are on the [GitHub releases page](https://github.com/LeSq
 - The log now records each step of an update: found, downloaded and verified, installing, and the
   previous version removed.
 
+### Reliability
+
+- **A clip, thumbnail or duration check no longer fails when Tript is busy.** Output from ffmpeg and
+  ffprobe is now read on its own thread, so a file could be reported as unreadable while the machine
+  was under load even though nothing was wrong with it.
+
 ### For developers
 
 - Training looks for its Python environment in the install root (`.venv` beside `App`) first, so an

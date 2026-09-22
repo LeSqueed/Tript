@@ -22,10 +22,44 @@
 // run for longer than this, so the version to go back to is still there.
 #define TRIPT_UPDATE_PROBATION_MS 60000
 
+// A folder window open in App (Explorer), or the old shell's WebView2 helpers still exiting, makes
+// moving App aside fail with access denied. Giving up at once used to restart the old version with
+// no word to the user, so a brief lock is waited out and a lasting one is put to the user.
+#define TRIPT_SWAP_RETRY_MS 5000
+#define TRIPT_SWAP_RETRY_STEP_MS 250
+
 static int fail(const wchar_t *message)
 {
     MessageBoxW(NULL, message, L"Tript", MB_OK | MB_ICONERROR);
     return 1;
+}
+
+static BOOL MoveAppAside(const wchar_t *appDirectory, const wchar_t *oldAppBackupPath)
+{
+    for (;;)
+    {
+        ULONGLONG deadline = GetTickCount64() + TRIPT_SWAP_RETRY_MS;
+        for (;;)
+        {
+            if (MoveFileW(appDirectory, oldAppBackupPath))
+                return TRUE;
+
+            DWORD error = GetLastError();
+            if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION)
+                return FALSE;
+            if (GetTickCount64() >= deadline)
+                break;
+            Sleep(TRIPT_SWAP_RETRY_STEP_MS);
+        }
+
+        int choice = MessageBoxW(NULL,
+            L"Tript could not install the update because a file in its folder is in use.\n\n"
+            L"Close any Explorer window or program that is using the Tript folder, then choose Retry. "
+            L"Choose Cancel to start the current version.",
+            L"Tript", MB_RETRYCANCEL | MB_ICONWARNING);
+        if (choice != IDRETRY)
+            return FALSE;
+    }
 }
 
 // ASCII-only widen: the marker's own format guarantees every byte is a digit, ASCII letter, '.'
@@ -230,9 +264,9 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
     // fail whenever either path names a directory, which both of these always are. A same-volume
     // directory rename only succeeds when the destination doesn't already exist yet, which is the
     // case here as long as UpdateManager.SweepLeftovers() cleared old-App on the previous startup.
-    if (!MoveFileW(appDirectory, oldAppBackupPath))
-        return TRUE; // Could not move the current App\ aside (e.g. a file still in use, or a
-                      // leftover old-App from an interrupted swap). The marker is untouched, so
+    if (!MoveAppAside(appDirectory, oldAppBackupPath))
+        return TRUE; // Could not move the current App\ aside (a lock the user chose not to clear,
+                      // or old-App still present from a previous swap). The marker is untouched, so
                       // this is retried on the next full launch.
 
     if (!MoveFileW(stagedDirectory, appDirectory))

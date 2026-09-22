@@ -93,6 +93,31 @@ Assert-That ((Identity (Join-Path $dir "App")) -eq "new") "the new build is in A
 Assert-That (Test-Path (Join-Path $dir ".tript-update\old-App\Tript.Shell.exe")) "old-App is kept to roll back to"
 Assert-That (-not (Test-Path (Join-Path $dir ".tript-update\rolled-back"))) "nothing is rolled back"
 
+Write-Output "A briefly locked App folder is waited out instead of skipping the update"
+$dir = New-Install "brief-lock"
+Add-Shell (Join-Path $dir "App") "shell-ok" "previous"
+Add-Shell (Join-Path $dir ".tript-update\staged-020") "shell-ok" "new"
+[IO.File]::WriteAllText((Join-Path $dir ".tript-update\ready.marker"), "1`n0.2.0`nstaged-020`n")
+$lock = [IO.File]::Open((Join-Path $dir "App\identity.txt"), 'Open', 'Read', 'None')
+$process = Start-Process -FilePath (Join-Path $dir "Tript.exe") -PassThru -WindowStyle Hidden
+Start-Sleep -Milliseconds 1500
+$lock.Dispose()
+if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+Assert-That ((Identity (Join-Path $dir "App")) -eq "new") "the update is applied once the lock is released"
+Assert-That (Test-Path (Join-Path $dir ".tript-update\old-App\Tript.Shell.exe")) "old-App is kept to roll back to"
+
+Write-Output "A lasting lock asks the user and leaves the install and the staged update untouched"
+$dir = New-Install "lasting-lock"
+Add-Shell (Join-Path $dir "App") "shell-ok" "previous"
+Add-Shell (Join-Path $dir ".tript-update\staged-020") "shell-ok" "new"
+[IO.File]::WriteAllText((Join-Path $dir ".tript-update\ready.marker"), "1`n0.2.0`nstaged-020`n")
+$lock = [IO.File]::Open((Join-Path $dir "App\identity.txt"), 'Open', 'Read', 'None')
+try { Invoke-Launcher $dir | Out-Null } finally { $lock.Dispose() }
+Assert-That ((Identity (Join-Path $dir "App")) -eq "previous") "App is not swapped while locked"
+Assert-That (Test-Path (Join-Path $dir ".tript-update\staged-020\Tript.Shell.exe")) "the staged update is kept"
+Assert-That (Test-Path (Join-Path $dir ".tript-update\ready.marker")) "the marker is kept for the next start"
+Assert-That (-not (Test-Path (Join-Path $dir ".tript-update\old-App"))) "nothing was moved aside"
+
 Write-Output "A swap interrupted between its two renames is recovered"
 $dir = New-Install "interrupted"
 Add-Shell (Join-Path $dir ".tript-update\old-App") "shell-ok" "previous"

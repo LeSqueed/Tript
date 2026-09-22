@@ -99,7 +99,7 @@
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )"
         }
       }
     },

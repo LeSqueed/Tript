@@ -127,29 +127,29 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.9, )",
-          "Tript.Obs": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )",
+          "Tript.Obs": "[0.1.0-alpha.10, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )",
-          "Tript.Detection": "[0.1.0-alpha.9, )",
-          "Tript.Obs": "[0.1.0-alpha.9, )",
-          "Tript.Settings": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )",
+          "Tript.Detection": "[0.1.0-alpha.10, )",
+          "Tript.Obs": "[0.1.0-alpha.10, )",
+          "Tript.Settings": "[0.1.0-alpha.10, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )"
         }
       },
       "tript.testsupport": {
@@ -295,29 +295,29 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.9, )",
-          "Tript.Obs": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )",
+          "Tript.Obs": "[0.1.0-alpha.10, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )",
-          "Tript.Detection": "[0.1.0-alpha.9, )",
-          "Tript.Obs": "[0.1.0-alpha.9, )",
-          "Tript.Settings": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )",
+          "Tript.Detection": "[0.1.0-alpha.10, )",
+          "Tript.Obs": "[0.1.0-alpha.10, )",
+          "Tript.Settings": "[0.1.0-alpha.10, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.9, )"
+          "Tript.Core": "[0.1.0-alpha.10, )"
         }
       },
       "tript.testsupport": {

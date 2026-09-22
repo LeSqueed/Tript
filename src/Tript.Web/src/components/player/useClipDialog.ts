@@ -63,7 +63,15 @@ export interface ClipDialogController {
   applyImportProgress(content: ImportProgressContent): void;
 }
 
-export function useClipDialog(clipDuration: number): ClipDialogController {
+export interface ClipModePreference {
+  mode: ClipMode;
+  onChange(mode: ClipMode): void;
+}
+
+export function useClipDialog(
+  clipDuration: number,
+  modePreference?: ClipModePreference,
+): ClipDialogController {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<ContentItem | null>(null);
   const [regions, setRegions] = useState<TimelineRegion[]>([]);
@@ -81,6 +89,8 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
   const proposalIdRef = useRef<string | null>(null);
   const clipDurationRef = useRef<number>(clipDuration);
   clipDurationRef.current = clipDuration;
+  const modePreferenceRef = useRef(modePreference);
+  modePreferenceRef.current = modePreference;
 
   const duration = clipDuration;
   const markDuration = (): number => clipDurationRef.current;
@@ -116,7 +126,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
           setSelectedRegionId(null);
         }
       }
-      setMode('combine');
+      setMode(modePreferenceRef.current?.mode ?? 'combine');
       setTitle(sessionItem.title ?? sessionItem.fileName ?? 'Clip');
       setProgress({});
       setAudio((current) => ({ ...current, volumes: {}, muted: [] }));
@@ -181,6 +191,14 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
     setRegions([]);
     setSelectedRegionId(null);
     proposalIdRef.current = null;
+  }, []);
+
+  const handleSetMode = useCallback((next: ClipMode) => {
+    setMode(next);
+    const preference = modePreferenceRef.current;
+    if (preference && preference.mode !== next) {
+      preference.onChange(next);
+    }
   }, []);
 
   const handleSelectRegion = useCallback((id: string | null) => {
@@ -351,7 +369,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       updateRegion: handleUpdateRegion,
       removeRegion: handleRemoveRegion,
       clearRegions: handleClearRegions,
-      setMode,
+      setMode: handleSetMode,
       setTitle,
       selectRegion: handleSelectRegion,
       setAudioTracks: handleSetAudioTracks,
@@ -379,6 +397,7 @@ export function useClipDialog(clipDuration: number): ClipDialogController {
       handleUpdateRegion,
       handleRemoveRegion,
       handleClearRegions,
+      handleSetMode,
       handleSelectRegion,
       handleSetAudioTracks,
       handleSetAudioVolume,

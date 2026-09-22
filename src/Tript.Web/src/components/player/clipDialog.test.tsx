@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../ipc/protocol';
 import { ClipDialog } from './clipDialog';
 import { MIN_REGION_SECONDS } from './clipModel';
+import type { ClipMode } from './clipModel';
 import { useClipDialog, type ClipDialogController } from './useClipDialog';
 
 const session: ContentItem = {
@@ -503,5 +504,49 @@ describe('clip dialog — the clippable duration', () => {
     expect(payload.segments).toEqual([{ startTime: 5, endTime: 8 }]);
     expect(payload.startTime).toBe(5);
     expect(payload.endTime).toBe(8);
+  });
+});
+
+describe('clip dialog - remembered output mode', () => {
+  function preferenceProbe(initial: ClipMode) {
+    const changes: ClipMode[] = [];
+    const ref: { dialog: ClipDialogController | null } = { dialog: null };
+    function Probe() {
+      const [mode, setMode] = useState<ClipMode>(initial);
+      const dialog = useClipDialog(MEASURED_SECONDS, {
+        mode,
+        onChange: (next) => {
+          changes.push(next);
+          setMode(next);
+        },
+      });
+      ref.dialog = dialog;
+      return null;
+    }
+    render(<Probe />);
+    return { dialog: () => ref.dialog as ClipDialogController, changes };
+  }
+
+  it('opens in the stored mode', () => {
+    const { dialog } = preferenceProbe('separate');
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().mode).toBe('separate');
+  });
+
+  it('stores a new selection and reopens with it', () => {
+    const { dialog, changes } = preferenceProbe('combine');
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().setMode('separate'));
+    expect(changes).toEqual(['separate']);
+    act(() => dialog().closeDialog());
+    act(() => dialog().openDialog(session, 42));
+    expect(dialog().mode).toBe('separate');
+  });
+
+  it('does not store a selection that matches the stored mode', () => {
+    const { dialog, changes } = preferenceProbe('combine');
+    act(() => dialog().openDialog(session, 42));
+    act(() => dialog().setMode('combine'));
+    expect(changes).toEqual([]);
   });
 });

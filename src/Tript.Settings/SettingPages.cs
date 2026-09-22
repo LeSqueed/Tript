@@ -161,6 +161,8 @@ public sealed class GeneralSettings
 
     public bool CheckForUpdatesAutomatically { get; set; } = true;
 
+    public ClipOutputMode ClipOutputMode { get; set; } = ClipOutputMode.Combine;
+
     public NotificationSettings Notifications { get; set; } = new();
 }
 

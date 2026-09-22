@@ -21,6 +21,8 @@ import { PlayerSidePanel, availableTabs, type PlayerPanelTab } from './player/Pl
 import { PlaybackSurface } from './player/PlaybackSurface';
 import { filterBookmarks } from './player/bookmarks';
 import { useClipDialog } from './player/useClipDialog';
+import type { ClipMode } from './player/clipModel';
+import { useSettings } from '../settings/useSettings';
 import { ClipDialog } from './player/clipDialog';
 import {
   clampTime,
@@ -142,7 +144,17 @@ export function PlayerView({
   const canMark = clipDuration >= MIN_REGION_SECONDS;
   const { viewWindow, setAdjustedViewWindow } = useTimelineWindow(item?.filePath, currentTime, duration);
 
-  const dialog = useClipDialog(clipDuration);
+  const { settings, update: updateSettings } = useSettings(client);
+  const preferredClipMode: ClipMode = settings.general.clipOutputMode === 'Separate' ? 'separate' : 'combine';
+  const clipModePreference = useMemo(
+    () => ({
+      mode: preferredClipMode,
+      onChange: (mode: ClipMode) =>
+        updateSettings('general', { clipOutputMode: mode === 'separate' ? 'Separate' : 'Combine' }),
+    }),
+    [preferredClipMode, updateSettings],
+  );
+  const dialog = useClipDialog(clipDuration, clipModePreference);
   useEffect(() => {
     dialog.attachSession(item ?? null);
   }, [item, dialog.attachSession]);

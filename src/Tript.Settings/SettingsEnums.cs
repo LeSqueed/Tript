@@ -52,6 +52,12 @@ public enum CloseBehavior
     HideToTray
 }
 
+public enum ClipOutputMode
+{
+    Combine,
+    Separate
+}
+
 public enum StreamShareWhen
 {
     WhileObsRuns,

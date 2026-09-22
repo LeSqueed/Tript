@@ -149,6 +149,7 @@ export interface GameSettings {
 export type StartupVisibility = 'Window' | 'Minimized' | 'Tray';
 export type MinimizeBehavior = 'Taskbar' | 'Tray';
 export type CloseBehavior = 'Exit' | 'HideToTray';
+export type ClipOutputMode = 'Combine' | 'Separate';
 
 export interface NotificationSettings {
   enabled: boolean;
@@ -168,6 +169,7 @@ export interface GeneralSettings {
   closeBehavior: CloseBehavior;
   convertHdrClipsToSdr?: boolean;
   checkForUpdatesAutomatically?: boolean;
+  clipOutputMode?: ClipOutputMode;
   notifications: NotificationSettings;
   [key: string]: unknown;
 }

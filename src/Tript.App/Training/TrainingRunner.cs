@@ -403,17 +403,25 @@ internal sealed class TrainingRunner
         }
     }
 
-    internal static PythonCommand FindPython()
+    internal static PythonCommand FindPython() => FindPython(AppContext.BaseDirectory);
+
+    internal static PythonCommand FindPython(string appBaseDirectory)
     {
         var configured = Environment.GetEnvironmentVariable("TRIPT_PYTHON");
         if (!string.IsNullOrWhiteSpace(configured))
             return new PythonCommand(configured, []);
 
-        var virtualEnvironment = OperatingSystem.IsWindows()
-            ? Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe")
-            : Path.Combine(AppContext.BaseDirectory, ".venv", "bin", "python");
-        if (File.Exists(virtualEnvironment))
-            return new PythonCommand(virtualEnvironment, []);
+        // The install root first, beside .venv-paddle: an update replaces App wholesale, so an
+        // environment kept inside it was moved into old-App and deleted with the previous version.
+        var installRoot = Path.GetFullPath(Path.Combine(appBaseDirectory, ".."));
+        foreach (var root in new[] { installRoot, appBaseDirectory })
+        {
+            var virtualEnvironment = OperatingSystem.IsWindows()
+                ? Path.Combine(root, ".venv", "Scripts", "python.exe")
+                : Path.Combine(root, ".venv", "bin", "python");
+            if (File.Exists(virtualEnvironment))
+                return new PythonCommand(virtualEnvironment, []);
+        }
 
         return new PythonCommand("python", []);
     }

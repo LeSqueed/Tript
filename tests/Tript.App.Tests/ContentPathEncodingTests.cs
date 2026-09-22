@@ -4,6 +4,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Tript.App.Content;
 using Xunit;
 
 namespace Tript.App.Tests;
@@ -53,7 +54,7 @@ public sealed class ContentPathEncodingTests
         var cached = Path.Combine(_contentRoot, "metadata", "thumbnails", "my clip.mp4.jpg");
         Directory.CreateDirectory(Path.GetDirectoryName(cached)!);
         await File.WriteAllTextAsync(cached, "JPEGBYTES");
-        await File.WriteAllTextAsync($"{cached}.version", "2");
+        await File.WriteAllTextAsync($"{cached}.version", ThumbnailStore.CacheVersion);
         File.SetLastWriteTimeUtc(cached, DateTime.UtcNow.AddMinutes(5));
 
         var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);

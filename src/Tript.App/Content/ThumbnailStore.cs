@@ -9,7 +9,7 @@ namespace Tript.App.Content;
 
 internal sealed class ThumbnailStore : IDisposable
 {
-    private const string CacheVersion = "3";
+    internal const string CacheVersion = "3";
     private const int MaxPendingExtractions = 32;
     private static readonly TimeSpan WorkerShutdownWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FailedExtractionCooldown = TimeSpan.FromMinutes(5);

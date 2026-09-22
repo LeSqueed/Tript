@@ -3,6 +3,24 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.0.0 (2026-09-22)
+
+First stable release. It carries everything from the 0.1.0 alpha series, with one further fix.
+
+### Updates
+
+- **An update is no longer skipped when the previous version's backup is still on disk.** Restarting
+  within two minutes of an update left that copy in place, which silently blocked the next update,
+  and each restart began the wait again. The backup is now moved aside and cleaned up in the
+  background.
+
+### Known limits
+
+- Tript is not code signed and has no installer, so Windows SmartScreen warns the first time you run
+  it. Choose "More info", then "Run anyway".
+- Clips use your graphics card where one works. NVENC and Quick Sync have been tested less widely
+  than AMD; if neither works, clips are made on the CPU, which is slower but produces the same file.
+
 ## 0.1.0-alpha.11 (2026-09-22)
 
 ### Updates

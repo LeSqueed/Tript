@@ -46,16 +46,16 @@ public sealed class SharingViolationTests : IDisposable
         var destination = Path.Combine(_root, "moved.mp4");
 
         var reader = OpenWithoutDeleteSharing(source);
-        var release = Task.Run(async () =>
+        var attempts = 0;
+
+        SharingViolationRetry.Run(() =>
         {
-            await Task.Delay(150);
-            await reader.DisposeAsync();
-        });
+            if (++attempts == 2)
+                reader.Dispose();
+            File.Move(source, destination);
+        }, [TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)]);
 
-        SharingViolationRetry.Run(() => File.Move(source, destination),
-            [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(400)]);
-        release.Wait();
-
+        Assert.Equal(2, attempts);
         Assert.True(File.Exists(destination));
         Assert.False(File.Exists(source));
     }

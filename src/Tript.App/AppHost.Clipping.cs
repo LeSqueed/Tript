@@ -377,8 +377,21 @@ internal sealed partial class AppHost
     private IClipEngine BuildClipEngine()
     {
         var (ffmpeg, ffprobe) = _libraryTools.Value
-            ?? throw new FfmpegNotFoundException("ffmpeg was not found. Install ffmpeg and ensure it is on PATH.");
-        return new ClipEngine(ffmpeg, new MediaProbe(ffprobe));
+            ?? throw new FfmpegNotFoundException(FfmpegLocator.NotFoundMessage("ffmpeg"));
+        var encoders = new VideoEncoderSelector(ffmpeg);
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                _ = encoders.Current;
+                _ = encoders.GpuToneMapping;
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception, "AppHost: the clip encoder probe failed");
+            }
+        });
+        return new ClipEngine(ffmpeg, new MediaProbe(ffprobe), encoders);
     }
 
     private sealed class AutomaticClipJob

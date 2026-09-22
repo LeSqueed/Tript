@@ -68,7 +68,9 @@ internal sealed partial class AppHost : IDisposable
     {
         try
         {
-            return new FfmpegLocator().Locate();
+            var tools = new FfmpegLocator().Locate();
+            Log.Information("AppHost: using ffmpeg at {Ffmpeg}", tools.Ffmpeg);
+            return tools;
         }
         catch (FfmpegNotFoundException exception)
         {

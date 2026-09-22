@@ -14,6 +14,12 @@ internal static class ColorChain
         + "format=yuv420p,"
         + "eq=contrast=1.05:saturation=1.05:gamma=0.99";
 
+    public const string GpuToneMapChain =
+        "libplacebo=tonemapping=hable:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+        + ":format=yuv420p:contrast=1.05:saturation=1.05";
+
+    public static readonly IReadOnlyList<string> GpuToneMapDevice = ["-init_hw_device", "vulkan"];
+
     public const string ForceYuv420p = "format=yuv420p";
 
     public const string TagBt709 = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709";

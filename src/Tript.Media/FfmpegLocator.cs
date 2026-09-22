@@ -24,15 +24,20 @@ public sealed class FfmpegLocator
             Path.GetFileNameWithoutExtension(c.Name).Equals("ffprobe", StringComparison.OrdinalIgnoreCase));
 
         if (ffmpeg is null)
-            throw new FfmpegNotFoundException("ffmpeg was not found. Install ffmpeg and ensure it is on PATH.");
+            throw new FfmpegNotFoundException(NotFoundMessage("ffmpeg"));
         if (ffprobe is null)
-            throw new FfmpegNotFoundException("ffprobe was not found. Install ffmpeg and ensure it is on PATH.");
+            throw new FfmpegNotFoundException(NotFoundMessage("ffprobe"));
 
         VerifyRuns(ffmpeg.Path, "ffmpeg");
         VerifyRuns(ffprobe.Path, "ffprobe");
 
         return (ffmpeg.Path, ffprobe.Path);
     }
+
+    public static string NotFoundMessage(string tool) =>
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? $"{tool} was not found. Tript bundles it in {VendorDirectory}, so this install is incomplete; reinstall Tript."
+            : $"{tool} was not found. Install ffmpeg and ensure it is on PATH.";
 
     private sealed record Candidate(string Name, string Path);
 

@@ -10,11 +10,13 @@ public sealed class ClipEngine : IClipEngine
 {
     private readonly string _ffmpegPath;
     private readonly MediaProbe _probe;
+    private readonly VideoEncoderSelector _encoders;
 
-    public ClipEngine(string ffmpegPath, MediaProbe probe)
+    public ClipEngine(string ffmpegPath, MediaProbe probe, VideoEncoderSelector? encoders = null)
     {
         _ffmpegPath = ffmpegPath;
         _probe = probe;
+        _encoders = encoders ?? VideoEncoderSelector.SoftwareOnly();
     }
 
     public IReadOnlyList<string> CreateClips(ClipRequest request) =>
@@ -149,12 +151,22 @@ public sealed class ClipEngine : IClipEngine
 
         var colorPlan = ResolveColorPlan(sourceInfo, regions, request.EncoderFamily, request.ForceSdr);
         var audioTrackCount = sourceInfo.AudioStreamCount;
-        var regionCount = regions.Count;
 
-        var args = new List<string>();
+        Encode(request, outputPath, "combine", colorPlan, plan =>
+            BuildCombinedArgs(request, regions, audioTrackCount, colorPlan, plan, outputPath));
+        return [outputPath];
+    }
+
+    private static List<string> BuildCombinedArgs(ClipRequest request, IReadOnlyList<ClipRegion> regions,
+        int audioTrackCount, ColorPlan colorPlan, EncodePlan plan, string outputPath)
+    {
+        var encoder = plan.Encoder;
+        var regionCount = regions.Count;
+        var args = plan.GlobalArgs();
 
         for (var i = 0; i < regionCount; i++)
         {
+            args.AddRange(encoder.InputArgs);
             args.Add("-ss");
             args.Add(FormatSeconds(regions[i].Start.TotalSeconds));
             args.Add("-t");
@@ -163,7 +175,7 @@ public sealed class ClipEngine : IClipEngine
             args.Add(request.SourcePath);
         }
 
-        var filter = BuildCombineFilter(request, regionCount, audioTrackCount, colorPlan);
+        var filter = BuildCombineFilter(request, regionCount, audioTrackCount, colorPlan, plan);
         args.Add("-filter_complex");
         args.Add(filter);
 
@@ -175,14 +187,66 @@ public sealed class ClipEngine : IClipEngine
             args.Add($"[aout{t}]");
         }
 
-        AppendVideoEncodeArgs(args, colorPlan);
+        AppendVideoEncodeArgs(args, colorPlan, encoder);
         AppendAudioEncodeArgs(args);
 
         args.Add(outputPath);
+        return args;
+    }
 
-        FfmpegRunner.Run(_ffmpegPath, args, request, "combine");
+    private void Encode(ClipRequest request, string outputPath, string stage, ColorPlan colorPlan,
+        Func<EncodePlan, List<string>> buildArgs)
+    {
+        var plan = colorPlan.PreservingHdr
+            ? EncodePlan.Cpu
+            : new EncodePlan(_encoders.Current, colorPlan.ToneMapping && _encoders.GpuToneMapping);
+        try
+        {
+            FfmpegRunner.Run(_ffmpegPath, buildArgs(plan), request, stage);
+            EnsureOutputWritten(outputPath);
+            return;
+        }
+        catch (ClipEncodeException exception) when (plan.UsesGpu)
+        {
+            Diagnostics.Report(DiagnosticLevel.Warning,
+                $"Clips: {plan.Describe()} failed during {stage}, retrying on the CPU: "
+                + FfmpegRunner.Tail(exception.Message));
+            TryDelete(outputPath);
+        }
+
+        FfmpegRunner.Run(_ffmpegPath, buildArgs(EncodePlan.Cpu), request, $"{stage} (CPU retry)");
         EnsureOutputWritten(outputPath);
-        return [outputPath];
+        _encoders.Demote(plan.Encoder);
+        if (plan.GpuToneMap)
+            _encoders.DemoteToneMapping();
+    }
+
+    private readonly record struct EncodePlan(VideoEncoder Encoder, bool GpuToneMap)
+    {
+        internal static EncodePlan Cpu => new(VideoEncoder.Software, false);
+
+        internal bool UsesGpu => Encoder.IsHardware || GpuToneMap;
+
+        internal List<string> GlobalArgs()
+        {
+            var args = new List<string>(Encoder.GlobalArgs);
+            if (GpuToneMap)
+                args.AddRange(ColorChain.GpuToneMapDevice);
+            return args;
+        }
+
+        internal string Describe() => GpuToneMap ? $"{Encoder.Name} with GPU tone mapping" : Encoder.Name;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static AudioTrackAdjustment AdjustmentFor(ClipRequest request, int sourceTrackIndex) =>
@@ -191,7 +255,7 @@ public sealed class ClipEngine : IClipEngine
             new AudioTrackAdjustment(sourceTrackIndex));
 
     private static string BuildCombineFilter(ClipRequest request, int regionCount,
-        int audioTrackCount, ColorPlan colorPlan)
+        int audioTrackCount, ColorPlan colorPlan, EncodePlan plan)
     {
         var parts = new List<string>();
         var concatInputs = new List<string>();
@@ -230,7 +294,7 @@ public sealed class ClipEngine : IClipEngine
             concatOutputs += $"[c{t}]";
         parts.Add($"{inputs}{concatArgs}{concatOutputs}");
 
-        parts.Add($"[vcat]{BuildVideoChain(colorPlan)}[vout]");
+        parts.Add($"[vcat]{BuildVideoChain(colorPlan, plan.GpuToneMap)}{plan.Encoder.FilterSuffix}[vout]");
 
         for (var t = 0; t < audioTrackCount; t++)
             parts.Add($"[c{t}]anull[aout{t}]");
@@ -253,46 +317,55 @@ public sealed class ClipEngine : IClipEngine
             var region = regions[i];
             var outputPath = Path.Combine(outputDirectory, BuildFileName(request.SourcePath, region, i));
 
-            var args = new List<string>
-            {
-                "-ss",
-                FormatSeconds(region.Start.TotalSeconds),
-                "-t",
-                FormatSeconds(region.Duration.TotalSeconds),
-                "-i",
-                request.SourcePath,
-            };
-
-            var filter = BuildSeparateFilter(request, audioTrackCount, colorPlan);
-            args.Add("-filter_complex");
-            args.Add(filter);
-
-            args.Add("-map");
-            args.Add("[vout]");
-            for (var t = 0; t < audioTrackCount; t++)
-            {
-                args.Add("-map");
-                args.Add($"[aout{t}]");
-            }
-
-            AppendVideoEncodeArgs(args, colorPlan);
-            AppendAudioEncodeArgs(args);
-
-            args.Add(outputPath);
-
-            FfmpegRunner.Run(_ffmpegPath, args, request, $"separate region {i + 1}/{regions.Count}");
-            EnsureOutputWritten(outputPath);
+            Encode(request, outputPath, $"separate region {i + 1}/{regions.Count}", colorPlan, plan =>
+                BuildSeparateArgs(request, region, audioTrackCount, colorPlan, plan, outputPath));
             results.Add(outputPath);
         }
 
         return results;
     }
 
-    private static string BuildSeparateFilter(ClipRequest request, int audioTrackCount, ColorPlan colorPlan)
+    private static List<string> BuildSeparateArgs(ClipRequest request, ClipRegion region,
+        int audioTrackCount, ColorPlan colorPlan, EncodePlan plan, string outputPath)
+    {
+        var encoder = plan.Encoder;
+        var args = plan.GlobalArgs();
+        args.AddRange(encoder.InputArgs);
+        args.AddRange(
+        [
+            "-ss",
+            FormatSeconds(region.Start.TotalSeconds),
+            "-t",
+            FormatSeconds(region.Duration.TotalSeconds),
+            "-i",
+            request.SourcePath,
+        ]);
+
+        var filter = BuildSeparateFilter(request, audioTrackCount, colorPlan, plan);
+        args.Add("-filter_complex");
+        args.Add(filter);
+
+        args.Add("-map");
+        args.Add("[vout]");
+        for (var t = 0; t < audioTrackCount; t++)
+        {
+            args.Add("-map");
+            args.Add($"[aout{t}]");
+        }
+
+        AppendVideoEncodeArgs(args, colorPlan, encoder);
+        AppendAudioEncodeArgs(args);
+
+        args.Add(outputPath);
+        return args;
+    }
+
+    private static string BuildSeparateFilter(ClipRequest request, int audioTrackCount, ColorPlan colorPlan,
+        EncodePlan plan)
     {
         var parts = new List<string>();
 
-        parts.Add($"[0:v]{BuildVideoChain(colorPlan)}[vout]");
+        parts.Add($"[0:v]{BuildVideoChain(colorPlan, plan.GpuToneMap)}{plan.Encoder.FilterSuffix}[vout]");
 
         for (var t = 0; t < audioTrackCount; t++)
         {
@@ -312,10 +385,10 @@ public sealed class ClipEngine : IClipEngine
         return string.Join(",", parts);
     }
 
-    private static string BuildVideoChain(ColorPlan colorPlan)
+    private static string BuildVideoChain(ColorPlan colorPlan, bool gpuToneMap)
     {
         if (colorPlan.ToneMapping)
-            return ColorChain.ToneMapChain;
+            return gpuToneMap ? ColorChain.GpuToneMapChain : ColorChain.ToneMapChain;
 
         if (colorPlan.PreservingHdr)
         {
@@ -328,7 +401,7 @@ public sealed class ClipEngine : IClipEngine
         return $"null,{ColorChain.TagBt709}";
     }
 
-    private static void AppendVideoEncodeArgs(List<string> args, ColorPlan colorPlan)
+    private static void AppendVideoEncodeArgs(List<string> args, ColorPlan colorPlan, VideoEncoder encoder)
     {
         if (colorPlan.PreservingHdr)
         {
@@ -342,7 +415,8 @@ public sealed class ClipEngine : IClipEngine
         }
 
         args.Add("-c:v");
-        args.Add("libx264");
+        args.Add(encoder.Name);
+        args.AddRange(encoder.OutputArgs);
     }
 
     private static void AppendAudioEncodeArgs(List<string> args)

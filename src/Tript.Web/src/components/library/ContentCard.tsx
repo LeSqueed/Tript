@@ -123,7 +123,7 @@ export function ContentCard({
             <span className="content-card-title" title={label}>
               {label}
             </span>
-            <span className="content-card-chips">
+            <span className={duration !== null ? 'content-card-chips content-card-chips--timed' : 'content-card-chips'}>
               <span className="pill content-card-type">{typeLabel(item)}</span>
               {liveRecording && <span className="pill content-card-recording-chip">{highlightsOnly ? 'Buffering' : 'Recording'}</span>}
               {highlightsOnly && !liveRecording && <span className="pill content-card-missing-chip">Highlights-only session</span>}
@@ -167,8 +167,7 @@ export function ContentCard({
         />
       )}
 
-      {}
-      {onDelete && !liveRecording && (
+      {onDelete && !liveRecording && !selectable && (
         <button
           type="button"
           className="content-card-delete"

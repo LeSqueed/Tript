@@ -169,31 +169,45 @@ describe('ContentCard missing-video placeholder', () => {
     expect(screen.getByRole('button', { name: 'Open Missing session' })).toBeTruthy();
   });
 
-  it('omits favourite but retains open, delete, and select behavior', () => {
+  it('omits favourite but retains open and delete behavior', () => {
     const onOpen = vi.fn();
     const onDelete = vi.fn();
     const onToggleFavorite = vi.fn();
-    const onToggleSelected = vi.fn();
     render(
       <ContentCard
         item={missing}
         onOpen={onOpen}
         onDelete={onDelete}
         onToggleFavorite={onToggleFavorite}
-        selectable
-        onToggleSelected={onToggleSelected}
       />,
     );
 
     expect(screen.queryByRole('button', { name: /favorites/i })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open Missing session' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete Missing session' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Missing session' }));
 
     expect(onOpen).toHaveBeenCalledWith(missing);
     expect(onDelete).toHaveBeenCalledWith(missing);
-    expect(onToggleSelected).toHaveBeenCalledWith(missing);
     expect(onToggleFavorite).not.toHaveBeenCalled();
+  });
+
+  it('offers only the select checkbox in selection mode, so a click cannot land on delete', () => {
+    const onDelete = vi.fn();
+    const onToggleSelected = vi.fn();
+    render(
+      <ContentCard
+        item={missing}
+        onDelete={onDelete}
+        selectable
+        onToggleSelected={onToggleSelected}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Delete Missing session' })).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Missing session' }));
+
+    expect(onToggleSelected).toHaveBeenCalledWith(missing);
+    expect(onDelete).not.toHaveBeenCalled();
   });
 });
 

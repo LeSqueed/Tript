@@ -404,6 +404,10 @@
   opacity: 0.92;
 }
 
+.content-card-chips--timed {
+  padding-right: 56px;
+}
+
 .content-card-type {
   border-color: var(--color-neutral);
 }

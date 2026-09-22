@@ -123,6 +123,8 @@ internal sealed class UpdateManager : IDisposable
             var shaAsset = release.Assets.First(asset =>
                 string.Equals(asset.Name, assetNames.Value.Sha256AssetName, StringComparison.Ordinal));
 
+            Log.Information("UpdateManager: {Version} is available ({SizeMb:0.0} MB), downloading",
+                versionText, zipAsset.Size / 1048576.0);
             await DownloadVerifyAndStageAsync(versionText, release.HtmlUrl, zipAsset, shaAsset, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -177,7 +179,11 @@ internal sealed class UpdateManager : IDisposable
         if (_disposed)
             return;
 
-        DeleteDirectoryIfExists(UpdateStagingPaths.OldAppBackupPath(_installRoot));
+        var previous = UpdateStagingPaths.OldAppBackupPath(_installRoot);
+        if (Directory.Exists(previous))
+            Log.Information("UpdateManager: {Version} ran past the rollback window; removing the previous install",
+                _currentVersion);
+        DeleteDirectoryIfExists(previous);
         DeleteStagingRootIfEmpty();
     }
 
@@ -185,7 +191,11 @@ internal sealed class UpdateManager : IDisposable
     internal bool TryApply()
     {
         var marker = UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot));
-        return marker is not null && StagedShellExists(marker);
+        if (marker is null || !StagedShellExists(marker))
+            return false;
+
+        Log.Information("UpdateManager: restarting to install {Version}", marker.Version);
+        return true;
     }
 
     private bool StagedShellExists(UpdateMarker marker) => File.Exists(Path.Combine(
@@ -206,6 +216,10 @@ internal sealed class UpdateManager : IDisposable
             DeleteFileIfExists(markerPath);
             marker = null;
         }
+
+        if (Directory.Exists(UpdateStagingPaths.OldAppBackupPath(_installRoot)))
+            Log.Information("UpdateManager: running {Version}; the previous install is kept until the rollback "
+                + "window has passed", _currentVersion);
 
         // old-App is deliberately kept here. It is the only way back if this version turns out not
         // to start, and deleting it on the first startup is what used to make a bad release
@@ -296,6 +310,8 @@ internal sealed class UpdateManager : IDisposable
                 throw;
             }
 
+            Log.Information("UpdateManager: {Version} downloaded and verified; it installs on the next restart",
+                version);
             SetStatus(UpdateStage.Ready, version: version, releaseUrl: releaseUrl);
         }
         finally

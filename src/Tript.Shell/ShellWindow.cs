@@ -43,6 +43,11 @@ internal sealed class ShellWindow : IDisposable
     private StartupVisibility _startupVisibility;
     private volatile bool _startupVisibilityApplied;
     private volatile bool _disposed;
+    // Photino dereferences the native window inside Invoke, so a call made before OnCreated or after
+    // the window closed is an access violation no catch can stop. The startup update check raising
+    // its "update ready" notification did exactly that and killed the process.
+    private volatile bool _nativeReady;
+    private volatile bool _hotkeysStale;
     private int _visibilityTicking;
 
     internal ShellWindow(string url, AppHost host, SingleInstance singleInstance)
@@ -72,7 +77,10 @@ internal sealed class ShellWindow : IDisposable
             : null;
         _hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(_host.SettingsStore.Load()));
         _host.SettingsChanged += settings =>
-            _window?.Invoke(() => _hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(settings)));
+        {
+            if (!TryInvoke(() => _hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(settings))))
+                _hotkeysStale = true;
+        };
 
         var window = CreateWindow();
         _window = window;
@@ -82,7 +90,7 @@ internal sealed class ShellWindow : IDisposable
         _host.StatusChanged += UpdateTrayState;
         _host.RestartForUpdateRequested += RestartForUpdate;
         _host.NotificationRequested += (kind, title, body) =>
-            ShellNotifications.Show(_window, _host, kind, title, body);
+            ShellNotifications.Show(_window, TryInvoke, _host, kind, title, body);
 
         window.RegisterWindowClosingHandler((_, _) => OnClosing(window));
         AssignPickers(window);
@@ -116,6 +124,7 @@ internal sealed class ShellWindow : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        _nativeReady = false;
         if (OperatingSystem.IsWindows())
             SystemEvents.SessionEnding -= OnSessionEnding;
 
@@ -220,7 +229,8 @@ internal sealed class ShellWindow : IDisposable
         {
             if (!_startupVisibilityApplied)
                 _startupVisibility = StartupVisibility.Window;
-            window.Invoke(() => WindowsWindow.ShowWindow(window));
+            if (!TryInvoke(() => WindowsWindow.ShowWindow(window)))
+                _activationPending = true;
         }
         catch (ApplicationException)
         {
@@ -281,6 +291,8 @@ internal sealed class ShellWindow : IDisposable
                 ShowMainWindow();
                 break;
             case TrayCommand.Hide:
+                if (!_nativeReady)
+                    break;
                 SavePlacement(window);
                 WindowsWindow.HideWindow(window);
                 break;
@@ -300,7 +312,7 @@ internal sealed class ShellWindow : IDisposable
     {
         try
         {
-            window.Invoke(() =>
+            var invoked = TryInvoke(() =>
             {
                 WindowsWindow.ShowWindow(window);
                 if (_webReady)
@@ -312,6 +324,11 @@ internal sealed class ShellWindow : IDisposable
                     _pendingNavigation = Program.NavigateSettingsMessage;
                 }
             });
+            if (!invoked)
+            {
+                _pendingNavigation = Program.NavigateSettingsMessage;
+                _activationPending = true;
+            }
         }
         catch (ApplicationException)
         {
@@ -328,7 +345,7 @@ internal sealed class ShellWindow : IDisposable
 
         try
         {
-            window.Invoke(() => tray.SetStatus(status));
+            TryInvoke(() => tray.SetStatus(status));
         }
         catch (Exception exception)
         {
@@ -372,6 +389,7 @@ internal sealed class ShellWindow : IDisposable
                 RequestExit();
                 return true;
             default:
+                _nativeReady = false;
                 return false;
         }
     }
@@ -385,6 +403,12 @@ internal sealed class ShellWindow : IDisposable
 
     private void OnCreated(PhotinoWindow window)
     {
+        _nativeReady = true;
+        if (_hotkeysStale)
+        {
+            _hotkeysStale = false;
+            _hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(_host.SettingsStore.Load()));
+        }
         AssignPickers(window);
         TrackPlacement(window);
         _tray?.SetStatus(_host.CurrentTrayStatus());
@@ -394,6 +418,16 @@ internal sealed class ShellWindow : IDisposable
             _startupVisibility = StartupVisibility.Window;
             WindowsWindow.ShowWindow(window);
         }
+    }
+
+    private bool TryInvoke(Action action)
+    {
+        var window = _window;
+        if (window is null || !_nativeReady || _disposed)
+            return false;
+
+        window.Invoke(action);
+        return true;
     }
 
     private void ApplyStartupVisibility(PhotinoWindow window)

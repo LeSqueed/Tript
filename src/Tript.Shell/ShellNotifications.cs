@@ -10,7 +10,8 @@ namespace Tript.Shell;
 
 internal static class ShellNotifications
 {
-    internal static void Show(PhotinoWindow? window, AppHost host, NotificationKind kind, string title, string body)
+    internal static void Show(PhotinoWindow? window, Func<Action, bool> invoke, AppHost host, NotificationKind kind,
+        string title, string body)
     {
         if (!OperatingSystem.IsWindows() || window is null)
             return;
@@ -26,7 +27,7 @@ internal static class ShellNotifications
 
         try
         {
-            window.Invoke(() =>
+            var shown = invoke(() =>
             {
                 if (WindowsWindow.IsForeground(window))
                     return;
@@ -40,6 +41,8 @@ internal static class ShellNotifications
                     window.SendNotification(title, body);
 #endif
             });
+            if (!shown)
+                Log.Debug("Tript.Shell: dropped the {Kind} notification because the window is not ready", kind);
         }
         catch (Exception exception)
         {

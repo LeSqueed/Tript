@@ -81,6 +81,11 @@ Found one of these, or something else? Join the Discord and let me know.
 
 Tript is licensed under the GNU General Public License v2.0 or later (GPL-2.0-or-later).
 
+The Windows download also includes, as separate programs under their own licenses: the OBS Studio
+runtime (GPL-2.0-or-later) and an FFmpeg build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)
+(GPL-3.0, license in `App/vendor/ffmpeg/LICENSE.txt`). The exact FFmpeg release is pinned in the
+`Makefile` (`FFMPEG_TAG`, `FFMPEG_BUILD`); its source is the FFmpeg commit named in the build.
+
 ---
 
 ## Building from source

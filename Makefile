@@ -10,6 +10,7 @@
 #   publish-shell-win  publish the Windows desktop shell (Tript.Shell, Photino window) into App/
 #   launcher-windows   build the native Windows Tript.exe launcher (requires mingw-w64)
 #   obs-fetch  download the pinned OBS Studio Windows portable zip into third_party/
+#   ffmpeg-fetch  download the pinned, checksum-verified ffmpeg Windows build into third_party/
 #   test       run the .NET test suite + the frontend Vitest suite
 #   run        run the assembled binary — prefers the desktop shell, falls back to the headless host
 #   cut-release  bump the version, commit, tag, and push — triggers .github/workflows/release.yml
@@ -24,6 +25,7 @@
 #   FAKE_RECORDER=true|false      pass --fake-recorder to `run` (default true for dev)
 #   TRAINING=true|false           include the model-training feature set (default false)
 #   OBS_URL=<url>                 override the OBS zip download URL
+#   FFMPEG_TAG / FFMPEG_BUILD / FFMPEG_SHA256   pinned BtbN ffmpeg build bundled on Windows
 #   WIN_LAUNCHER_CC=<compiler>    mingw-w64 C compiler (default x86_64-w64-mingw32-gcc)
 #   WIN_LAUNCHER_WINDRES=<tool>   mingw-w64 resource compiler (default x86_64-w64-mingw32-windres)
 #   VERSION=<x.y.z-suffix>        cut-release: version to bump to (default: auto-increment)
@@ -47,6 +49,11 @@ DIST_DIR ?= dist
 FAKE_RECORDER ?= true
 TRAINING ?= false
 OBS_URL ?= https://github.com/obsproject/obs-studio/releases/download/$(OBS_VERSION)/OBS-Studio-$(OBS_VERSION)-Windows-x64.zip
+# A month-end autobuild: BtbN prunes the daily ones but keeps these, so the pin keeps resolving.
+FFMPEG_TAG ?= autobuild-2026-08-31-13-27
+FFMPEG_BUILD ?= ffmpeg-n9.0.1-11-ge47273f4d9-win64-gpl-shared-9.0
+FFMPEG_SHA256 ?= 00d78694632f17a1de325c639d0acf04a6b3ab8f20ce0a2e5bedd2d5e21e3adb
+FFMPEG_URL ?= https://github.com/BtbN/FFmpeg-Builds/releases/download/$(FFMPEG_TAG)/$(FFMPEG_BUILD).zip
 
 # ---- derived paths ----
 WEB_SRC := src/Tript.Web
@@ -58,10 +65,12 @@ SHELL_BIN := $(PUBLISH_DIR)/Tript.Shell
 OBS_ARCHIVE := third_party/obs-studio-$(OBS_VERSION).zip
 OBS_DIR := third_party/obs-studio-$(OBS_VERSION)
 OBS_EXTRACTED := third_party/obs-studio-$(OBS_VERSION)-x64
+FFMPEG_ARCHIVE := third_party/$(FFMPEG_BUILD).zip
+FFMPEG_EXTRACTED := third_party/$(FFMPEG_BUILD)
 WIN_LAUNCHER_CC ?= x86_64-w64-mingw32-gcc
 WIN_LAUNCHER_WINDRES ?= x86_64-w64-mingw32-windres
 
-.PHONY: all dev release linux windows obs-fetch restore-windows test test-dotnet test-web test-integration test-all
+.PHONY: all dev release linux windows obs-fetch ffmpeg-fetch restore-windows test test-dotnet test-web test-integration test-all
 .PHONY: run clean shell publish-shell cut-release
 .PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows launcher-windows
 
@@ -110,7 +119,7 @@ OBS_MODULES := obs-x264 obs-ffmpeg obs-outputs obs-nvenc obs-qsv11 win-capture i
 OBS_BIN_CORE := obs.dll libobs-d3d11.dll libobs-winrt.dll libobs-opengl.dll \
 	libx264-164.dll datachannel.dll libcurl.dll librist.dll srt.dll w32-pthreads.dll zlib.dll
 
-assemble-windows: obs-fetch
+assemble-windows: obs-fetch ffmpeg-fetch
 	# Copy the built frontend as ./dist (the app host serves it from next to the binary).
 	mkdir -p $(WIN_APP_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(WIN_APP_DIR)/dist/
@@ -179,6 +188,13 @@ assemble-windows: obs-fetch
 		cp "$$probe" $(WIN_APP_DIR)/; \
 	done
 
+	# ffmpeg for clips, SDR conversion and thumbnails, found by FfmpegLocator in vendor/ffmpeg. Its av*.dll
+	# stay in that folder so they never shadow the different av*.dll libobs loads from bin/64bit.
+	mkdir -p $(WIN_APP_DIR)/vendor/ffmpeg
+	cp $(FFMPEG_EXTRACTED)/bin/ffmpeg.exe $(FFMPEG_EXTRACTED)/bin/ffprobe.exe $(WIN_APP_DIR)/vendor/ffmpeg/
+	cp $(FFMPEG_EXTRACTED)/bin/*.dll $(WIN_APP_DIR)/vendor/ffmpeg/
+	cp $(FFMPEG_EXTRACTED)/LICENSE.txt $(WIN_APP_DIR)/vendor/ffmpeg/
+
 launcher-windows:
 	mkdir -p $(WIN_PUBLISH_DIR)/.launcher
 	$(WIN_LAUNCHER_WINDRES) -I src/Tript.Web/public -O coff \
@@ -238,6 +254,20 @@ $(OBS_EXTRACTED): $(OBS_ARCHIVE)
 	mkdir -p $(OBS_EXTRACTED)
 	cd $(OBS_EXTRACTED) && unzip -q ../$(notdir $(OBS_ARCHIVE))
 	touch $(OBS_EXTRACTED)
+
+# ---- ffmpeg download ----
+ffmpeg-fetch: $(FFMPEG_ARCHIVE) $(FFMPEG_EXTRACTED)
+
+$(FFMPEG_ARCHIVE):
+	mkdir -p third_party
+	curl -L --fail -o $(FFMPEG_ARCHIVE).part $(FFMPEG_URL)
+	echo "$(FFMPEG_SHA256)  $(FFMPEG_ARCHIVE).part" | sha256sum -c -
+	mv $(FFMPEG_ARCHIVE).part $(FFMPEG_ARCHIVE)
+
+$(FFMPEG_EXTRACTED): $(FFMPEG_ARCHIVE)
+	rm -rf $(FFMPEG_EXTRACTED)
+	cd third_party && unzip -q $(notdir $(FFMPEG_ARCHIVE))
+	touch $(FFMPEG_EXTRACTED)
 
 # ---- aliases ----
 dev: publish-linux

@@ -28,8 +28,20 @@ jobs:
           cache: npm
           cache-dependency-path: src/Tript.Web/package-lock.json
 
-      - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
+      # The pinned build the Windows bundle ships, read from the Makefile so the two cannot drift.
+      - name: Install the bundled ffmpeg
+        shell: pwsh
+        run: |
+          $make = Get-Content Makefile -Raw
+          $pin = { param($name) [regex]::Match($make, "(?m)^$name \?= (\S+)").Groups[1].Value }
+          $tag = & $pin 'FFMPEG_TAG'
+          $build = & $pin 'FFMPEG_BUILD'
+          $sha = & $pin 'FFMPEG_SHA256'
+          $zip = Join-Path $env:RUNNER_TEMP "$build.zip"
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$build.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $sha.ToUpperInvariant()) { throw "ffmpeg checksum mismatch" }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP "$build\bin" >> $env:GITHUB_PATH
 
       - name: Build the frontend
         working-directory: src/Tript.Web

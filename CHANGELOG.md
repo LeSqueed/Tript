@@ -3,6 +3,23 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 0.1.0-alpha.11 (2026-09-22)
+
+### Updates
+
+- **Tript no longer closes when it starts with an update waiting.** The "update ready" notice could
+  arrive before the window existed, which crashed Tript right after a restart.
+- **An update is no longer skipped when the Tript folder is in use.** Tript waits a few seconds for
+  the previous version to finish closing. If a window such as File Explorer still has the folder
+  open, it asks you to close it and retry, instead of quietly starting the old version again.
+- The log now records each step of an update: found, downloaded and verified, installing, and the
+  previous version removed.
+
+### For developers
+
+- Training looks for its Python environment in the install root (`.venv` beside `App`) first, so an
+  update no longer deletes it. A `.venv` inside `App` is still used when the root has none.
+
 ## 0.1.0-alpha.10 (2026-09-22)
 
 ### Recording you can rely on

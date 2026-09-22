@@ -164,13 +164,13 @@
         "type": "Project",
         "dependencies": {
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Detection": "[1.0.0, )",
-          "Tript.GameDiscovery": "[1.0.0, )",
-          "Tript.Media": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )",
-          "Tript.Recorder": "[1.0.0, )",
-          "Tript.Settings": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Detection": "[1.0.1, )",
+          "Tript.GameDiscovery": "[1.0.1, )",
+          "Tript.Media": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )",
+          "Tript.Recorder": "[1.0.1, )",
+          "Tript.Settings": "[1.0.1, )"
         }
       },
       "tript.core": {
@@ -181,41 +181,41 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )"
         }
       },
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Detection": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )",
-          "Tript.Settings": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Detection": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )",
+          "Tript.Settings": "[1.0.1, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.shell": {
@@ -224,7 +224,7 @@
           "Microsoft.Win32.SystemEvents": "[10.0.12, )",
           "Photino.NET": "[4.0.16, )",
           "System.Drawing.Common": "[10.0.12, )",
-          "Tript.App": "[1.0.0, )"
+          "Tript.App": "[1.0.1, )"
         }
       },
       "tript.testsupport": {
@@ -425,13 +425,13 @@
         "type": "Project",
         "dependencies": {
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Detection": "[1.0.0, )",
-          "Tript.GameDiscovery": "[1.0.0, )",
-          "Tript.Media": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )",
-          "Tript.Recorder": "[1.0.0, )",
-          "Tript.Settings": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Detection": "[1.0.1, )",
+          "Tript.GameDiscovery": "[1.0.1, )",
+          "Tript.Media": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )",
+          "Tript.Recorder": "[1.0.1, )",
+          "Tript.Settings": "[1.0.1, )"
         }
       },
       "tript.core": {
@@ -442,41 +442,41 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )"
         }
       },
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Detection": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )",
-          "Tript.Settings": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Detection": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )",
+          "Tript.Settings": "[1.0.1, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.shell": {
@@ -486,7 +486,7 @@
           "Microsoft.Win32.SystemEvents": "[10.0.12, )",
           "Photino.NET": "[4.0.16, )",
           "System.Drawing.Common": "[10.0.12, )",
-          "Tript.App": "[1.0.0, )"
+          "Tript.App": "[1.0.1, )"
         }
       },
       "tript.testsupport": {

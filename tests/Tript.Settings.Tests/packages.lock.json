@@ -99,7 +99,7 @@
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.testsupport": {
@@ -208,7 +208,7 @@
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.testsupport": {

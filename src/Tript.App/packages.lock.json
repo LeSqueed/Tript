@@ -37,41 +37,41 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )"
         }
       },
       "tript.gamediscovery": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )",
-          "Tript.Detection": "[1.0.0, )",
-          "Tript.Obs": "[1.0.0, )",
-          "Tript.Settings": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )",
+          "Tript.Detection": "[1.0.1, )",
+          "Tript.Obs": "[1.0.1, )",
+          "Tript.Settings": "[1.0.1, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.0, )"
+          "Tript.Core": "[1.0.1, )"
         }
       }
     },

@@ -14,6 +14,11 @@ First stable release. It carries everything from the 0.1.0 alpha series, with on
   and each restart began the wait again. The backup is now moved aside and cleaned up in the
   background.
 
+### Reliability
+
+- **Installing a detection model no longer fails when a virus scanner is still reading it.** The
+  freshly downloaded file could be held open for a moment, which made the install give up.
+
 ### Known limits
 
 - Tript is not code signed and has no installer, so Windows SmartScreen warns the first time you run

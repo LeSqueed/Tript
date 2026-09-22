@@ -32,6 +32,30 @@ internal static class GameModelInstaller
         }
     }
 
+    // A directory move fails outright while any file inside it is open, and a model was downloaded
+    // moments earlier: on Windows the scanner still has model.onnx open, which made an install fail
+    // for no reason the user could act on. Tript is unsigned, so it is scanned more eagerly.
+    private static readonly TimeSpan MoveRetryWindow = TimeSpan.FromSeconds(3);
+
+    private static void MoveDirectoryWithRetry(string source, string destination)
+    {
+        var deadline = Environment.TickCount64 + (long)MoveRetryWindow.TotalMilliseconds;
+        while (true)
+        {
+            try
+            {
+                Directory.Move(source, destination);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (Environment.TickCount64 >= deadline)
+                    throw;
+                Thread.Sleep(100);
+            }
+        }
+    }
+
     internal static void InstallValidatedDirectory(string gameId, string stagedPath, string modelsRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stagedPath);
@@ -43,21 +67,29 @@ internal static class GameModelInstaller
         var hadPrevious = Directory.Exists(target);
 
         if (hadPrevious)
-            Directory.Move(target, backup);
+            MoveDirectoryWithRetry(target, backup);
 
         try
         {
-            Directory.Move(stagedPath, target);
+            MoveDirectoryWithRetry(stagedPath, target);
         }
         catch
         {
             if (hadPrevious && Directory.Exists(backup) && !Directory.Exists(target))
-                Directory.Move(backup, target);
+                MoveDirectoryWithRetry(backup, target);
             throw;
         }
 
-        if (Directory.Exists(backup))
-            Directory.Delete(backup, recursive: true);
+        // The model is installed by this point. A scanner still holding a file in the old copy must
+        // not turn a finished install into a failure; CleanupInterruptedInstalls removes it later.
+        try
+        {
+            if (Directory.Exists(backup))
+                Directory.Delete(backup, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     internal static void CleanupInterruptedInstalls(string modelsRoot)

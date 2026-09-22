@@ -6,7 +6,7 @@ import type { ContentItem, RecordingState } from '../ipc/protocol';
 import type { IpcClient } from '../ipc/websocketClient';
 import { Button } from './ui/controls';
 import { ContentCard } from './library/ContentCard';
-import { itemLabel } from './library/libraryModel';
+import { itemLabel, orderedHighlights } from './library/libraryModel';
 
 export function SessionClipsView({
   recording,
@@ -23,7 +23,11 @@ export function SessionClipsView({
   client: IpcClient;
   onBack(): void;
   backLabel: string;
-  onOpen(item: ContentItem, navigation: ContentItem[]): void;
+  onOpen(
+    item: ContentItem,
+    navigation: ContentItem[],
+    rebuild?: (items: readonly ContentItem[]) => ContentItem[],
+  ): void;
   onToggleFavorite(item: ContentItem): void;
   onDelete(item: ContentItem): void;
 }) {
@@ -74,7 +78,7 @@ export function SessionClipsView({
             <ContentCard
               key={clip.filePath}
               item={clip}
-              onOpen={(selected) => onOpen(selected, ordered)}
+              onOpen={(selected) => onOpen(selected, ordered, (next) => orderedHighlights(recording.filePath, next))}
               onToggleFavorite={onToggleFavorite}
               onDelete={onDelete}
             />

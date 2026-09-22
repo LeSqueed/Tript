@@ -565,6 +565,78 @@ describe('App shell', () => {
     });
   });
 
+  it('adds a clip made while the session is open to the player playlist', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    expect(screen.queryByRole('button', { name: 'Play Second highlight' })).toBeNull();
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+
+    expect(screen.getByRole('button', { name: 'Play Second highlight' })).toBeTruthy();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Session 1');
+  });
+
+  it('adds a new highlight to a playlist opened from the highlights view', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+
+    expect(screen.getByRole('button', { name: 'Play Second highlight' })).toBeTruthy();
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('First highlight');
+  });
+
+  it('keeps a trashed highlight out of the live playlist before and after the backend confirms', () => {
+    renderApp();
+    connect();
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, HIGHLIGHT_1, SESSION_1] },
+      }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Session 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review highlights (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open First highlight' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'content',
+        content: { content: [HIGHLIGHT_2, SESSION_1] },
+      }));
+    });
+
+    expect(document.querySelector('video')?.getAttribute('aria-label')).toContain('Second highlight');
+    expect(screen.queryByRole('button', { name: /First highlight/ })).toBeNull();
+  });
+
   it('offers a restore on the highlight delete toast that puts the item back and opens it', () => {
     renderApp();
     connect();

@@ -212,7 +212,10 @@ describe('LibraryView grid', () => {
     const onOpen = vi.fn();
     renderLibrary([session, clip], onOpen);
     fireEvent.click(screen.getByRole('button', { name: 'Open Nice shot' }));
-    expect(onOpen).toHaveBeenCalledWith(clip, [session, clip], 'library');
+    expect(onOpen).toHaveBeenCalledWith(clip, [session, clip], 'library', expect.any(Function));
+    const rebuild = onOpen.mock.calls[0][3] as (items: ContentItem[]) => ContentItem[];
+    const added = { ...clip, fileName: 'added.mp4', filePath: 'clips/added.mp4', title: 'Added later' };
+    expect(rebuild([session, clip, added]).map((item) => item.filePath)).toContain('clips/added.mp4');
   });
 });
 
@@ -810,7 +813,7 @@ describe('LibraryView recent sessions and groups', () => {
     const onOpen = vi.fn();
     renderLibrary([newest], onOpen);
     fireEvent.click(within(screen.getByTestId('library-recent')).getByRole('button', { name: 'Open Recording 2' }));
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'ow-2.mp4' }), expect.anything(), 'session');
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'ow-2.mp4' }), expect.anything(), 'session', expect.any(Function));
   });
 
   it('withdraws the recent shelf once the user is filtering', () => {

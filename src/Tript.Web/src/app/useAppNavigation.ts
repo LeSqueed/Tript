@@ -8,6 +8,8 @@ export type Route = 'library' | 'sessions' | 'session' | 'streamer' | 'settings'
 
 export type PlayerReturnRoute = 'library' | 'sessions' | 'session';
 
+export type PlaylistSource = (items: readonly ContentItem[]) => ContentItem[];
+
 export interface SessionReview {
   recording: ContentItem;
   clips: ContentItem[];
@@ -17,6 +19,7 @@ interface SessionPlayerOrigin {
   recording: ContentItem;
   item: ContentItem;
   navigation: ContentItem[];
+  source: PlaylistSource | null;
   returnRoute: PlayerReturnRoute;
 }
 
@@ -34,10 +37,11 @@ export interface AppNavigation {
     resultItems: ContentItem[],
     origin?: 'library' | 'session',
     returnRoute?: 'library' | 'sessions',
+    rebuild?: PlaylistSource,
   ) => void;
-  openFromSessions: (item: ContentItem, resultItems: ContentItem[]) => void;
+  openFromSessions: (item: ContentItem, resultItems: ContentItem[], rebuild?: PlaylistSource) => void;
   openSessionReview: (recording: ContentItem, returnRoute?: 'library' | 'player') => void;
-  openSessionClip: (item: ContentItem, navigation: ContentItem[]) => void;
+  openSessionClip: (item: ContentItem, navigation: ContentItem[], rebuild?: PlaylistSource) => void;
   adoptPlayerItem: (item: ContentItem) => void;
   advanceAfterPlayerDelete: (item: ContentItem) => void;
   showLibrary: () => void;
@@ -59,6 +63,7 @@ export function useAppNavigation(
   const [playerItem, setPlayerItem] = useState<ContentItem | null>(null);
   const [playerTitle, setPlayerTitle] = useState('');
   const [playerNavigation, setPlayerNavigation] = useState<ContentItem[]>([]);
+  const playerSource = useRef<PlaylistSource | null>(null);
   const [playerReturnRoute, setPlayerReturnRoute] = useState<PlayerReturnRoute>('library');
   const [sessionReview, setSessionReview] = useState<SessionReview | null>(null);
   const [sessionPlayerOrigin, setSessionPlayerOrigin] = useState<SessionPlayerOrigin | null>(null);
@@ -70,6 +75,7 @@ export function useAppNavigation(
     setPlayerItem(null);
     setPlayerTitle('');
     setPlayerNavigation([]);
+    playerSource.current = null;
   }, []);
 
   const showInPlayer = useCallback((item: ContentItem) => {
@@ -103,7 +109,13 @@ export function useAppNavigation(
     setSessionReview({ recording, clips });
     setSessionReturnRoute(returnRoute);
     setSessionPlayerOrigin(returnRoute === 'player'
-      ? { recording, item: playerItem ?? recording, navigation: playerNavigation, returnRoute: playerReturnRoute }
+      ? {
+        recording,
+        item: playerItem ?? recording,
+        navigation: playerNavigation,
+        source: playerSource.current,
+        returnRoute: playerReturnRoute,
+      }
       : null);
     setRoute('session');
   }, [items, playerItem, playerNavigation, playerReturnRoute]);
@@ -114,11 +126,13 @@ export function useAppNavigation(
       resultItems: ContentItem[],
       origin: 'library' | 'session' = 'library',
       returnRoute: 'library' | 'sessions' = 'library',
+      rebuild?: PlaylistSource,
     ) => {
       savedScrollTop.current = contentRef.current?.scrollTop ?? 0;
       const isSession = item.contentType === 'recording' || item.contentType === 'buffer';
       const recording = isSession && (origin === 'session' || lacksMainVideo(item)) ? item : null;
       const navigation = recording ? sessionPlaylist(recording, items) : resultItems;
+      const source = recording ? sessionPlaylistSource(recording.filePath) : rebuild ?? null;
       const requested = navigation.find((candidate) => candidate.filePath === item.filePath) ?? navigation[0];
       if (!requested) {
         if (recording) openSessionReview(recording, 'library');
@@ -126,14 +140,15 @@ export function useAppNavigation(
       }
       showInPlayer(requested);
       setPlayerNavigation(navigation);
+      playerSource.current = source;
       setPlayerReturnRoute(returnRoute);
       setRoute('player');
     },
     [items, openSessionReview, contentRef, showInPlayer],
   );
 
-  const openFromSessions = useCallback((item: ContentItem, resultItems: ContentItem[]) => {
-    openInPlayer(item, resultItems, 'session', 'sessions');
+  const openFromSessions = useCallback((item: ContentItem, resultItems: ContentItem[], rebuild?: PlaylistSource) => {
+    openInPlayer(item, resultItems, 'session', 'sessions', rebuild);
   }, [openInPlayer]);
 
   const closePlayer = useCallback(() => {
@@ -141,9 +156,10 @@ export function useAppNavigation(
     setRoute((current) => (current === 'player' ? playerReturnRoute : current));
   }, [playerReturnRoute, clearPlayer]);
 
-  const openSessionClip = useCallback((item: ContentItem, navigation: ContentItem[]) => {
+  const openSessionClip = useCallback((item: ContentItem, navigation: ContentItem[], rebuild?: PlaylistSource) => {
     showInPlayer(item);
     setPlayerNavigation(navigation);
+    playerSource.current = rebuild ?? null;
     setPlayerReturnRoute('session');
     setRoute('player');
   }, [showInPlayer]);
@@ -152,6 +168,10 @@ export function useAppNavigation(
     const remaining = playerNavigation.filter((candidate) => candidate.filePath !== item.filePath);
     const deletedIndex = playerNavigation.findIndex((candidate) => candidate.filePath === item.filePath);
     const replacement = remaining[deletedIndex] ?? remaining[deletedIndex - 1];
+    const source = playerSource.current;
+    if (source) {
+      playerSource.current = (next) => source(next).filter((candidate) => candidate.filePath !== item.filePath);
+    }
     setPlayerNavigation(remaining);
     if (replacement) {
       showInPlayer(replacement);
@@ -191,10 +211,13 @@ export function useAppNavigation(
       return;
     }
     showInPlayer(currentItem);
+    const source = playerSource.current;
     setPlayerNavigation((previous) =>
-      previous
-        .map((candidate) => byPath.get(candidate.filePath))
-        .filter((entry): entry is ContentItem => entry !== undefined),
+      source
+        ? source(items)
+        : previous
+          .map((candidate) => byPath.get(candidate.filePath))
+          .filter((entry): entry is ContentItem => entry !== undefined),
     );
   }, [items, playerItem, closePlayer, showInPlayer]);
 
@@ -276,7 +299,8 @@ export function useAppNavigation(
   const backFromSession = useCallback(() => {
     if (sessionReturnRoute === 'player' && sessionPlayerOrigin) {
       showInPlayer(sessionPlayerOrigin.item);
-      setPlayerNavigation(sessionPlayerOrigin.navigation);
+      setPlayerNavigation(sessionPlayerOrigin.source?.(items) ?? sessionPlayerOrigin.navigation);
+      playerSource.current = sessionPlayerOrigin.source;
       setPlayerReturnRoute(sessionPlayerOrigin.returnRoute);
       setSessionReview(null);
       setSessionPlayerOrigin(null);
@@ -284,7 +308,7 @@ export function useAppNavigation(
       return;
     }
     showLibrary();
-  }, [sessionPlayerOrigin, sessionReturnRoute, showLibrary, showInPlayer]);
+  }, [items, sessionPlayerOrigin, sessionReturnRoute, showLibrary, showInPlayer]);
 
   return {
     route,
@@ -331,4 +355,11 @@ function replaceRouteHash(route: 'library' | 'sessions' | 'streamer' | 'settings
     return;
   }
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+}
+
+function sessionPlaylistSource(recordingPath: string): PlaylistSource {
+  return (items) => {
+    const recording = items.find((candidate) => candidate.filePath === recordingPath);
+    return recording ? sessionPlaylist(recording, items) : [];
+  };
 }

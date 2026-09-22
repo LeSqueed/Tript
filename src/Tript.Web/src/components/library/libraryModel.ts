@@ -181,6 +181,13 @@ export function sessionPlaylist(recording: ContentItem, candidates: readonly Con
   return playableMain ? [recording, ...children] : children;
 }
 
+export function orderedHighlights(recordingPath: string, items: readonly ContentItem[]): ContentItem[] {
+  return items
+    .filter((item) => item.automated && item.sourceSessionPath === recordingPath)
+    .sort((left, right) =>
+      (left.clipStartTime ?? Number.POSITIVE_INFINITY) - (right.clipStartTime ?? Number.POSITIVE_INFINITY));
+}
+
 export function lacksMainVideo(item: ContentItem): boolean {
   return !isClipContent(item) && (item.videoMissing === true || item.highlightsOnly === true);
 }

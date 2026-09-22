@@ -69,7 +69,12 @@ export interface LibraryViewProps {
   thumbnailLoadingActive?: boolean;
   connectionState?: ConnectionState;
   contentLoaded?: boolean;
-  onOpen?: (item: ContentItem, resultItems: ContentItem[], origin: 'library' | 'session') => void;
+  onOpen?: (
+    item: ContentItem,
+    resultItems: ContentItem[],
+    origin: 'library' | 'session',
+    rebuild?: (items: readonly ContentItem[]) => ContentItem[],
+  ) => void;
   nowSeconds?: number;
   trash?: TrashController;
   retentionHours?: number;
@@ -103,6 +108,14 @@ export function LibraryView({
   const groupView = useMemo(
     () => (grouped ? deriveGroupedLibrary(items, query, now) : null),
     [grouped, items, query, now],
+  );
+  const rebuildFlat = useCallback(
+    (next: readonly ContentItem[]) => deriveLibrary([...next], query, now).resultItems,
+    [query, now],
+  );
+  const rebuildGrouped = useCallback(
+    (next: readonly ContentItem[]) => deriveGroupedLibrary([...next], query, now).resultItems,
+    [query, now],
   );
   const page = groupView?.page ?? view.page;
   const pageCount = groupView?.pageCount ?? view.pageCount;
@@ -234,14 +247,14 @@ export function LibraryView({
 
   const groupActions: GroupActions = useMemo(
     () => ({
-      onOpen: (item: ContentItem) => onOpen?.(item, groupView?.resultItems ?? [], 'session'),
+      onOpen: (item: ContentItem) => onOpen?.(item, groupView?.resultItems ?? [], 'session', rebuildGrouped),
       onDelete: requestDelete,
       onToggleFavorite: toggleFavorite,
       selectable: selectionMode,
       isSelected: (item: ContentItem) => selection.includes(selectionKey(item)),
       onToggleSelected: toggleItem,
     }),
-    [onOpen, groupView, requestDelete, toggleFavorite, selectionMode, selection, toggleItem],
+    [onOpen, groupView, rebuildGrouped, requestDelete, toggleFavorite, selectionMode, selection, toggleItem],
   );
 
   const gameOptions: SelectOption[] = useMemo(() => {
@@ -434,7 +447,7 @@ export function LibraryView({
                          sizeBytes={sessionTotals.get(item.filePath)}
                          previewHighlights={sessionPreviewHighlights(item, items)}
                          thumbnailLoadingActive={thumbnailLoadingActive}
-                         onOpen={(item) => onOpen?.(item, groupView.resultItems, 'library')}
+                         onOpen={(item) => onOpen?.(item, groupView.resultItems, 'library', rebuildGrouped)}
                        onDelete={requestDelete}
                        onToggleFavorite={toggleFavorite}
                        selectable={selectionMode}
@@ -458,7 +471,7 @@ export function LibraryView({
                          sizeBytes={sessionTotals.get(item.filePath)}
                   previewHighlights={sessionPreviewHighlights(item, items)}
                   thumbnailLoadingActive={thumbnailLoadingActive}
-                  onOpen={(item) => onOpen?.(item, view.resultItems, 'library')}
+                  onOpen={(item) => onOpen?.(item, view.resultItems, 'library', rebuildFlat)}
                 onDelete={requestDelete}
                 onToggleFavorite={toggleFavorite}
                 selectable={selectionMode}

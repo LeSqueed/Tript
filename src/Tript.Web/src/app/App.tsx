@@ -274,7 +274,7 @@ function AppShell({
                 thumbnailLoadingActive={route === 'library'}
                 connectionState={connectionState}
                 contentLoaded={loaded}
-                onOpen={openInPlayer}
+                onOpen={(item, results, origin, rebuild) => openInPlayer(item, results, origin, 'library', rebuild)}
                 retentionHours={trash.retentionHours}
                 deleteLinkedHighlightsByDefault={preferences.deleteLinkedHighlightsByDefault}
                 trash={trash}

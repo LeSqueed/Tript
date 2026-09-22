@@ -64,7 +64,7 @@ internal static class Program
                         ObsLogLevel.Error => LogEventLevel.Error,
                         ObsLogLevel.Warning => LogEventLevel.Warning,
                         ObsLogLevel.Info => LogEventLevel.Information,
-                        _ => LogEventLevel.Verbose,
+                        _ => LogEventLevel.Debug,
                     };
                     Log.Write(serilogLevel, "libobs: {Message}", message.TrimEnd());
                 });
@@ -79,7 +79,7 @@ internal static class Program
 
     internal static AppHost BuildApp(AppOptions options)
     {
-        AppLog.Configure(options.LogDirectory);
+        AppLog.Configure(options.LogDirectory, options.VerboseLog);
 
         DeclareDpiAwareness();
 

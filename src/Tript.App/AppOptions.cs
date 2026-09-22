@@ -34,6 +34,8 @@ internal sealed class AppOptions
     // write into, and prune, the real user's logs.
     public string? LogDirectory { get; init; }
 
+    public bool VerboseLog { get; init; }
+
     public static AppOptions? Parse(string[] args) => Parse(args, Console.Error);
 
     internal static AppOptions? Parse(string[] args, TextWriter errors)
@@ -46,6 +48,7 @@ internal sealed class AppOptions
         var startedByWindows = false;
         string? gameListJson = null;
         string? logDirectory = null;
+        var verboseLog = false;
         var uiPort = LocalPorts.Ui;
         var contentPort = LocalPorts.Content;
         var controlPort = LocalPorts.ControlSocket;
@@ -78,6 +81,9 @@ internal sealed class AppOptions
                 case "--log-dir" when index + 1 < args.Length:
                     logDirectory = args[++index];
                     break;
+                case "--verbose-log":
+                    verboseLog = true;
+                    break;
                 case "--ui-port" when index + 1 < args.Length:
                     if (!TryParsePort(args[index], args[++index], out uiPort, errors))
                         return null;
@@ -95,7 +101,7 @@ internal sealed class AppOptions
                     Console.WriteLine(
                         "Usage: Tript.App [--content-root <dir>] [--settings-path <file>] " +
                         "[--web-root <dir>] [--fake-recorder] [--disable-updater] [--startup] " +
-                        "[--game-list <json>] [--log-dir <dir>] [--ui-port <port>] [--content-port <port>] "
+                        "[--game-list <json>] [--log-dir <dir>] [--verbose-log] [--ui-port <port>] [--content-port <port>] "
                         + "[--control-port <port>]");
                     return null;
                 default:
@@ -114,6 +120,7 @@ internal sealed class AppOptions
             StartedByWindows = startedByWindows,
             GameListJson = gameListJson,
             LogDirectory = logDirectory,
+            VerboseLog = verboseLog,
             UiPort = uiPort,
             ContentPort = contentPort,
             ControlPort = controlPort,

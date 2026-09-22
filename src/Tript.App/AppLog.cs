@@ -28,7 +28,20 @@ internal static class AppLog
 
     internal static string? CurrentFile { get; private set; }
 
-    internal static void Configure(string? logDirectory = null, LogEventLevel minimum = LogEventLevel.Information)
+    // Release builds write Information and above to the file: every UI command logs a Debug line, so
+    // Debug by default filled users' logs with noise. Debug builds, or --verbose-log on a release,
+    // write Debug too, including libobs's own debug output (module loading, for one).
+    internal static LogEventLevel DefaultFileLevel(bool verbose)
+    {
+#if DEBUG
+        return LogEventLevel.Debug;
+#else
+        return verbose ? LogEventLevel.Debug : LogEventLevel.Information;
+#endif
+    }
+
+    internal static void Configure(string? logDirectory = null, bool verbose = false,
+        LogEventLevel minimum = LogEventLevel.Information)
     {
         Volatile.Write(ref _logDirectoryOverride, string.IsNullOrWhiteSpace(logDirectory) ? null : logDirectory);
 
@@ -42,9 +55,10 @@ internal static class AppLog
         var floor = minimum;
         if (TryCreateFileSink() is { } fileSink)
         {
-            configuration = configuration.WriteTo.Sink(fileSink, restrictedToMinimumLevel: LogEventLevel.Debug);
-            if (LogEventLevel.Debug < floor)
-                floor = LogEventLevel.Debug;
+            var fileLevel = DefaultFileLevel(verbose);
+            configuration = configuration.WriteTo.Sink(fileSink, restrictedToMinimumLevel: fileLevel);
+            if (fileLevel < floor)
+                floor = fileLevel;
         }
 
         Log.Logger = configuration.MinimumLevel.Is(floor).CreateLogger();

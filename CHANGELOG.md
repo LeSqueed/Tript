@@ -27,6 +27,19 @@ this file; their notes are on the [GitHub releases page](https://github.com/LeSq
 - **Turning off "Check for updates automatically" now actually stops automatic updates.** Before,
   the setting was only read at startup and the daily check ignored it.
 
+### Clips are made on your graphics card
+
+- **Creating clips and converting HDR to SDR now run on the GPU.** Tript encodes with NVIDIA NVENC,
+  AMD AMF or Intel Quick Sync, whichever works on your machine, decodes on the GPU, and tone maps HDR
+  recordings on the GPU through Vulkan. A 20 second 1440p HDR clip went from about 6 minutes of CPU
+  time to under 20 seconds, and finishes three times sooner. The CPU is only used when no GPU path
+  works, and a clip that fails on the GPU is retried on the CPU instead of failing.
+- **ffmpeg now ships with Tript on Windows**, so clips, thumbnails and SDR conversion work without
+  installing anything else.
+- **The clip dialog remembers "One merged clip" or "Separate clips"** instead of resetting every time.
+- **The player's playlist updates as clips and highlights are added**, instead of only after you
+  reopen the player.
+
 ### The tray icon shows what Tript is doing
 
 - A red dot while recording a session, a purple ring while only the replay buffer runs, and an amber
@@ -71,6 +84,8 @@ this file; their notes are on the [GitHub releases page](https://github.com/LeSq
 - Log files roll over at 20 MB and are pruned during long sessions, not only at startup.
 - Detection no longer writes several lines a second to the log for the whole recording.
 - Log files never contain the resolver API key.
+- Release builds log at the normal level and no longer write debug detail. Start Tript with
+  `--verbose-log` to include it when investigating a problem.
 
 ### For developers
 

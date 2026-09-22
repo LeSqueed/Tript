@@ -90,7 +90,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ZIP="Tript-${VERSION}-win-x64.zip"
-          (cd dist && zip -r "../$ZIP" Release-win)
+          (cd dist && mv Release-win Tript && zip -r "../$ZIP" Tript)
           sha256sum "$ZIP" > "$ZIP.sha256"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 

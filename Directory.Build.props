@@ -25,6 +25,6 @@
          or not -r win-x64 was passed, so an ordinary build or test can no longer strip the graph
          back out and leave the next publish failing NU1004. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <Version>0.1.0-alpha.11</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 </Project>

@@ -142,36 +142,36 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.11, )",
-          "Tript.Obs": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )",
+          "Tript.Obs": "[1.0.0, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )",
-          "Tript.Detection": "[0.1.0-alpha.11, )",
-          "Tript.Obs": "[0.1.0-alpha.11, )",
-          "Tript.Settings": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )",
+          "Tript.Detection": "[1.0.0, )",
+          "Tript.Obs": "[1.0.0, )",
+          "Tript.Settings": "[1.0.0, )"
         }
       },
       "tript.recorderharness": {
         "type": "Project",
         "dependencies": {
-          "Tript.Obs": "[0.1.0-alpha.11, )",
-          "Tript.Recorder": "[0.1.0-alpha.11, )"
+          "Tript.Obs": "[1.0.0, )",
+          "Tript.Recorder": "[1.0.0, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       }
     },
@@ -326,36 +326,36 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[0.1.0-alpha.11, )",
-          "Tript.Obs": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )",
+          "Tript.Obs": "[1.0.0, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       },
       "tript.recorder": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )",
-          "Tript.Detection": "[0.1.0-alpha.11, )",
-          "Tript.Obs": "[0.1.0-alpha.11, )",
-          "Tript.Settings": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )",
+          "Tript.Detection": "[1.0.0, )",
+          "Tript.Obs": "[1.0.0, )",
+          "Tript.Settings": "[1.0.0, )"
         }
       },
       "tript.recorderharness": {
         "type": "Project",
         "dependencies": {
-          "Tript.Obs": "[0.1.0-alpha.11, )",
-          "Tript.Recorder": "[0.1.0-alpha.11, )"
+          "Tript.Obs": "[1.0.0, )",
+          "Tript.Recorder": "[1.0.0, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       }
     },

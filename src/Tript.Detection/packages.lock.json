@@ -36,7 +36,7 @@
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       }
     },
@@ -86,7 +86,7 @@
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[0.1.0-alpha.11, )"
+          "Tript.Core": "[1.0.0, )"
         }
       }
     },

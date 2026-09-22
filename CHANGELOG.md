@@ -3,7 +3,7 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
-## Unreleased
+## 0.1.0-alpha.10 (2026-09-22)
 
 ### Recording you can rely on
 

@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Tript.Detection;
+using Tript.Core;
 
 namespace Tript.App.Training;
 
@@ -443,6 +444,11 @@ internal sealed class TrainingRunner
 
         if (!process.Start())
             throw new InvalidOperationException($"Could not start Python: {python.FileName}");
+
+        // Training runs for hours holding GPU memory. AppHost.Dispose cancels it on a graceful exit,
+        // but a crash or a forced exit skips that, and the trainer and its whole CUDA process tree
+        // kept running with Tript gone. Children of a job-assigned process join the job too.
+        ChildProcessJob.Track(process);
 
         lock (_gate)
             _process = process;

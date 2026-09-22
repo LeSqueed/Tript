@@ -4,6 +4,7 @@
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
+using Serilog;
 using Tript.Core;
 
 namespace Tript.Shell;
@@ -205,11 +206,24 @@ internal sealed class SingleInstance : IDisposable
             {
                 break;
             }
-            catch (IOException) when (!_cancellation.IsCancellationRequested)
+            catch (ObjectDisposedException)
             {
+                // Dispose raced this iteration. Letting it escape would crash the process on
+                // shutdown, from a background thread.
+                break;
+            }
+            catch (IOException exception) when (!_cancellation.IsCancellationRequested)
+            {
+                // If creating the pipe itself keeps failing (another process holding the name, say)
+                // this loop would otherwise spin a core at 100% and silently stop accepting launches.
+                if (Interlocked.Exchange(ref _pipeFailureReported, 1) == 0)
+                    Log.Warning(exception, "Tript.Shell: the single-instance pipe failed; a second launch may not bring Tript forward");
+                Thread.Sleep(250);
             }
         }
     }
+
+    private int _pipeFailureReported;
 
     private void Dispatch(string? message)
     {
@@ -239,7 +253,7 @@ internal sealed class SingleInstance : IDisposable
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.Shell: the {message} request failed: {exception.Message}");
+            Log.Warning(exception, "Tript.Shell: the {Message} request failed", message);
         }
     }
 
@@ -249,8 +263,14 @@ internal sealed class SingleInstance : IDisposable
             return;
         _disposed = true;
         _cancellation.Cancel();
-        _serverThread.Join(TimeSpan.FromSeconds(2));
-        _cancellation.Dispose();
+
+        // Disposing the CTS while ServerLoop may still read its Token turns a slow shutdown into an
+        // ObjectDisposedException on a background thread. If the thread has not stopped, leave the
+        // CTS for the GC: it is finalizable and the process is exiting.
+        if (_serverThread.Join(TimeSpan.FromSeconds(2)))
+            _cancellation.Dispose();
+        else
+            Log.Warning("Tript.Shell: the single-instance listener did not stop within 2s");
         _mutex.ReleaseMutex();
         _mutex.Dispose();
     }

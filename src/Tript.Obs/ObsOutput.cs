@@ -4,6 +4,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -49,6 +50,14 @@ public sealed class ObsOutput : IDisposable
         return new ObsOutput(pointer);
     }
 
+    // Draining in-flight callbacks before releasing the output is what keeps libobs from calling into
+    // a freed handle. The drain used to be unbounded, and with no SynchronizationContext the stop
+    // handlers run synchronously inside the callback, so a handler that blocked, for example on a
+    // lock the disposing thread already held, hung shutdown forever. On timeout the handle is leaked
+    // on purpose: releasing it while a callback may still be running is a native use-after-free,
+    // which is far worse than one output left behind at exit.
+    private static readonly TimeSpan CallbackDrainTimeout = TimeSpan.FromSeconds(10);
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeRequested, 1) != 0)
@@ -58,18 +67,28 @@ public sealed class ObsOutput : IDisposable
         var savedEvent = StopListeningForSaved();
         if (stopEvent?.IsCurrentCallback == true)
         {
+            var savedDrained = savedEvent?.WaitForCallbacks(CallbackDrainTimeout) ?? true;
             ThreadPool.QueueUserWorkItem(_ =>
-            {
-                stopEvent.WaitForCallbacks(Timeout.InfiniteTimeSpan);
-                _handle.Dispose();
-            });
-            savedEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
+                ReleaseIfDrained(stopEvent.WaitForCallbacks(CallbackDrainTimeout) && savedDrained));
             return;
         }
 
-        stopEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
-        savedEvent?.WaitForCallbacks(Timeout.InfiniteTimeSpan);
-        _handle.Dispose();
+        var stopDrained = stopEvent?.WaitForCallbacks(CallbackDrainTimeout) ?? true;
+        var savedDrainedNow = savedEvent?.WaitForCallbacks(CallbackDrainTimeout) ?? true;
+        ReleaseIfDrained(stopDrained && savedDrainedNow);
+    }
+
+    private void ReleaseIfDrained(bool drained)
+    {
+        if (drained)
+        {
+            _handle.Dispose();
+            return;
+        }
+
+        Diagnostics.Report(DiagnosticLevel.Error,
+            $"An OBS output callback did not finish within {CallbackDrainTimeout.TotalSeconds:0}s; "
+            + "the output handle is being leaked rather than released while a callback may still use it");
     }
 
     public static bool IsTypeRegistered(string id)
@@ -374,8 +393,12 @@ public sealed class ObsOutput : IDisposable
             if (GCHandle.FromIntPtr(parameter).Target is ObsOutputStopSubscription stopEvent)
                 stopEvent.OnNativeStop(calldata);
         }
-        catch
+        catch (Exception exception)
         {
+            // Cannot propagate into libobs, but a failure here means the recording may never be
+            // marked as stopped, which is the one thing that has to be traceable.
+            Diagnostics.Report(DiagnosticLevel.Error,
+                "libobs output stop callback failed; the recording may not finalize", exception);
         }
     }
 
@@ -387,8 +410,10 @@ public sealed class ObsOutput : IDisposable
             if (GCHandle.FromIntPtr(parameter).Target is ObsOutputSignalSubscription signal)
                 signal.OnNativeSignal();
         }
-        catch
+        catch (Exception exception)
         {
+            Diagnostics.Report(DiagnosticLevel.Error,
+                "libobs output saved callback failed; a replay or clip may not be reported as written", exception);
         }
     }
 }

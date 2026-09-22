@@ -127,6 +127,11 @@ public sealed class ObsRuntime : IDisposable
 
         lock (Gate)
         {
+            // Before the generation bump, so these still release their handles for real rather than
+            // having the release skipped as belonging to a dead runtime.
+            ObsFrameSubscription.DisposeAllLive();
+            ObsSourceShare.DisposeAllLive();
+            ObsVolumeMeter.DisposeAllLive();
             DisposeLiveScenes();
 
             Interlocked.Increment(ref _generation);

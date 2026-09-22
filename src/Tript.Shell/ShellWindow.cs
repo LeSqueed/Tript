@@ -2,6 +2,8 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Drawing;
+using System.Runtime.Versioning;
+using Microsoft.Win32;
 using Photino.NET;
 using Serilog;
 using Tript.App;
@@ -28,14 +30,20 @@ internal sealed class ShellWindow : IDisposable
     private WindowsHotkeys? _hotkeys;
     private Timer? _visibilityWatch;
     private PhotinoWindow? _window;
-    private bool _activationPending;
+    // These are written on the single-instance pipe thread, an AppHost background thread or a pool
+    // thread and read on the UI thread, with no lock between them. Without volatile a stale read is
+    // allowed; for _restartForUpdatePending that means exiting instead of restarting into a staged
+    // update, silently.
+    private volatile bool _activationPending;
     private bool _startupMinimizePending;
     private int _exitRequested;
-    private bool _restartForUpdatePending;
-    private bool _webReady;
-    private string? _pendingNavigation;
+    private volatile bool _restartForUpdatePending;
+    private volatile bool _webReady;
+    private volatile string? _pendingNavigation;
     private StartupVisibility _startupVisibility;
-    private bool _startupVisibilityApplied;
+    private volatile bool _startupVisibilityApplied;
+    private volatile bool _disposed;
+    private int _visibilityTicking;
 
     internal ShellWindow(string url, AppHost host, SingleInstance singleInstance)
     {
@@ -56,6 +64,9 @@ internal sealed class ShellWindow : IDisposable
                 HandleTrayCommand)
             : null;
 
+        if (OperatingSystem.IsWindows())
+            SystemEvents.SessionEnding += OnSessionEnding;
+
         _hotkeys = OperatingSystem.IsWindows()
             ? new WindowsHotkeys(HandleHotkey, _host.PushError)
             : null;
@@ -68,7 +79,7 @@ internal sealed class ShellWindow : IDisposable
 
         _singleInstance.ActivationRequested += ShowMainWindow;
         _singleInstance.ExitRequested += RequestExit;
-        _host.StateChanged += UpdateTrayState;
+        _host.StatusChanged += UpdateTrayState;
         _host.RestartForUpdateRequested += RestartForUpdate;
         _host.NotificationRequested += (kind, title, body) =>
             ShellNotifications.Show(_window, _host, kind, title, body);
@@ -85,7 +96,7 @@ internal sealed class ShellWindow : IDisposable
                 "Tript.Shell: the tray icon could not be registered; Tript will minimize to the taskbar instead of hiding");
         }
 
-        _visibilityWatch = new Timer(_ => ReportVisibility(window), null,
+        _visibilityWatch = new Timer(_ => OnVisibilityTick(window), null,
             VisibilityPollInterval, VisibilityPollInterval);
 
         window.Load(Program.BuildLibraryUrl(_url));
@@ -104,9 +115,41 @@ internal sealed class ShellWindow : IDisposable
 
     public void Dispose()
     {
-        _visibilityWatch?.Dispose();
+        _disposed = true;
+        if (OperatingSystem.IsWindows())
+            SystemEvents.SessionEnding -= OnSessionEnding;
+
+        // A plain Dispose returns while a tick may still be running against the window being torn
+        // down. The wait is bounded because a tick can be parked in window.Invoke, which needs this
+        // very thread, so waiting forever here would deadlock the exit.
+        if (_visibilityWatch is { } watch)
+        {
+            using var settled = new ManualResetEvent(false);
+            if (watch.Dispose(settled))
+                settled.WaitOne(TimeSpan.FromSeconds(2));
+        }
         _hotkeys?.Dispose();
         _tray?.Dispose();
+    }
+
+    // Windows restart, shutdown and log off kill the process without any of the deliberate exit paths
+    // running, so an in-progress recording loses its metadata and its mp4 is never finalized. This is
+    // the only warning we get. Stop synchronously: the handler runs on the SystemEvents pump, not the
+    // Photino message loop, and returning here is what tells Windows we are ready to go.
+    [SupportedOSPlatform("windows")]
+    private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+    {
+        try
+        {
+            if (_host.IsRecording)
+                _host.StopRecordingOrReport();
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Tript.Shell: the recording could not be stopped for {Reason}", e.Reason);
+        }
+
+        RequestExit();
     }
 
     private PhotinoWindow CreateWindow()
@@ -153,13 +196,13 @@ internal sealed class ShellWindow : IDisposable
         switch (action)
         {
             case HotkeyAction.ToggleRecording:
-                ThreadPool.QueueUserWorkItem(_ => _host.ToggleRecording());
+                RunInBackground(_host.ToggleRecording, "toggle recording");
                 break;
             case HotkeyAction.ManualBookmark:
-                ThreadPool.QueueUserWorkItem(_ => _host.AddLiveBookmark());
+                RunInBackground(_host.AddLiveBookmark, "add a bookmark");
                 break;
             case HotkeyAction.QuickClip:
-                ThreadPool.QueueUserWorkItem(_ => _host.CreateQuickClipFromBuffer());
+                RunInBackground(_host.CreateQuickClipFromBuffer, "save a quick clip");
                 break;
         }
     }
@@ -201,8 +244,17 @@ internal sealed class ShellWindow : IDisposable
         // Off the message pump, which CloseWindow needs: stopping here flushes the session metadata.
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            if (_host.IsRecording)
-                _host.StopRecordingOrReport();
+            // A throw here used to skip the close below and crash the pool thread, so the exit never
+            // completed. A failed stop is logged and the window still closes.
+            try
+            {
+                if (_host.IsRecording)
+                    _host.StopRecordingOrReport();
+            }
+            catch (Exception exception)
+            {
+                Log.Error(exception, "Tript.Shell: the recording could not be stopped before exit");
+            }
 
             Program.CloseShellOrRequestShutdown(
                 () => WindowsWindow.CloseWindow(window),
@@ -233,13 +285,13 @@ internal sealed class ShellWindow : IDisposable
                 WindowsWindow.HideWindow(window);
                 break;
             case TrayCommand.StartRecording:
-                ThreadPool.QueueUserWorkItem(_ => _host.StartRecordingOrReport(null));
+                RunInBackground(() => _host.StartRecordingOrReport(null), "start recording");
                 break;
             case TrayCommand.StopRecording:
-                ThreadPool.QueueUserWorkItem(_ => _host.StopRecordingOrReport());
+                RunInBackground(_host.StopRecordingOrReport, "stop recording");
                 break;
             case TrayCommand.OpenSettings:
-                ThreadPool.QueueUserWorkItem(_ => OpenSettings(window));
+                RunInBackground(() => OpenSettings(window), "open settings");
                 break;
         }
     }
@@ -267,7 +319,7 @@ internal sealed class ShellWindow : IDisposable
         }
     }
 
-    private void UpdateTrayState(bool recording, string? gameId)
+    private void UpdateTrayState(TrayStatus status)
     {
         var tray = _tray;
         var window = _window;
@@ -276,7 +328,7 @@ internal sealed class ShellWindow : IDisposable
 
         try
         {
-            window.Invoke(() => tray.SetRecordingState(recording, gameId, _host.RecordingBlockedByStorage));
+            window.Invoke(() => tray.SetStatus(status));
         }
         catch (Exception exception)
         {
@@ -335,7 +387,7 @@ internal sealed class ShellWindow : IDisposable
     {
         AssignPickers(window);
         TrackPlacement(window);
-        _tray?.SetRecordingState(_host.IsRecording, _host.CurrentGameId);
+        _tray?.SetStatus(_host.CurrentTrayStatus());
         if (_activationPending)
         {
             _activationPending = false;
@@ -361,8 +413,46 @@ internal sealed class ShellWindow : IDisposable
         }
     }
 
+    internal const string ClientErrorPrefix = "tript:client-error:";
+    private const int MaxClientErrorLength = 8 * 1024;
+    private const int MaxClientErrorReports = 200;
+    private int _clientErrorReports;
+
+    // The UI's error boundary and global handlers report here over the native bridge, which still
+    // works when the control socket is the thing that broke. Bounded again on this side: the page
+    // already truncates, but a UI stuck in a render loop must not be able to fill the disk.
+    private void LogClientError(string payload)
+    {
+        if (Interlocked.Increment(ref _clientErrorReports) > MaxClientErrorReports)
+            return;
+
+        if (payload.Length > MaxClientErrorLength)
+            payload = payload[..MaxClientErrorLength];
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : null;
+            var text = root.TryGetProperty("message", out var m) ? m.GetString() : null;
+            var stack = root.TryGetProperty("stack", out var s) ? s.GetString() : null;
+            Log.Error("UI {Kind} error: {Message}{Stack}", kind ?? "unknown", text ?? "(no message)",
+                string.IsNullOrEmpty(stack) ? string.Empty : Environment.NewLine + stack);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            Log.Error("UI error (unparseable report): {Payload}", payload);
+        }
+    }
+
     private void OnWebMessage(PhotinoWindow window, string message)
     {
+        if (message.StartsWith(ClientErrorPrefix, StringComparison.Ordinal))
+        {
+            LogClientError(message[ClientErrorPrefix.Length..]);
+            return;
+        }
+
         if (!string.Equals(message, ReadyMessage, StringComparison.Ordinal))
             return;
 
@@ -400,6 +490,47 @@ internal sealed class ShellWindow : IDisposable
             && TrayReachable())
         {
             WindowsWindow.HideWindow(window);
+        }
+    }
+
+    // An exception escaping a pool thread terminates the process, so a failed hotkey or tray action
+    // used to take a running recording down with it.
+    private static void RunInBackground(Action action, string what)
+    {
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception exception)
+            {
+                Log.Error(exception, "Tript.Shell: could not {What}", what);
+            }
+        });
+    }
+
+    // ReportVisibility blocks in window.Invoke, which needs the UI thread. While a native folder
+    // picker holds that thread (up to five minutes) the one-second timer used to queue a new blocked
+    // callback every tick, around three hundred of them, starving the pool that hotkeys, the tray and
+    // the clip pipeline all run on. Skipping a tick while one is still running bounds that to one.
+    private void OnVisibilityTick(PhotinoWindow window)
+    {
+        if (_disposed || Interlocked.Exchange(ref _visibilityTicking, 1) != 0)
+            return;
+
+        try
+        {
+            if (!_disposed)
+                ReportVisibility(window);
+        }
+        catch (Exception exception)
+        {
+            Log.Debug(exception, "Tript.Shell: a window visibility check failed");
+        }
+        finally
+        {
+            Volatile.Write(ref _visibilityTicking, 0);
         }
     }
 

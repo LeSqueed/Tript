@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Runtime.InteropServices;
+using Serilog;
 using Tript.App;
 
 namespace Tript.Shell;
@@ -28,6 +30,19 @@ internal static class Program
         if (options is null)
             return 2;
 
+        AppLog.InstallCrashHandlers();
+        try
+        {
+            return Run(options);
+        }
+        finally
+        {
+            AppLog.Shutdown();
+        }
+    }
+
+    private static int Run(AppOptions options)
+    {
         using var singleInstance = SingleInstance.TryAcquire();
         if (singleInstance is null)
             return 0;
@@ -39,7 +54,8 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.Shell: {exception}");
+            Log.Fatal(exception, "Tript.Shell: the app host could not be built");
+            ReportStartupFailure("Tript could not start.", exception.Message);
             return 1;
         }
 
@@ -62,15 +78,17 @@ internal static class Program
             {
                 if (!WaitForUi(host.UiUrl, TimeSpan.FromSeconds(15)))
                 {
-                    Console.Error.WriteLine(
-                        "Tript.Shell: the app host did not come up in time (no reply from " + host.UiUrl +
-                        "); giving up.");
+                    // host.UiUrl carries the session token, which must never reach a log file.
+                    Log.Fatal("Tript.Shell: the app host did not come up in time (no reply on port {Port}); giving up",
+                        LocalPorts.Ui);
+                    ReportStartupFailure("Tript could not start because its interface did not come up in time.", null);
                     return 1;
                 }
 
                 if (!WebviewAudioSink.IsPresent())
                 {
                     Console.Error.WriteLine(WebviewAudioSink.MissingSinkMessage);
+                    Log.Fatal("Tript.Shell: {Message}", WebviewAudioSink.MissingSinkMessage);
                     return 1;
                 }
 
@@ -79,7 +97,8 @@ internal static class Program
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine($"Tript.Shell: {exception}");
+                Log.Fatal(exception, "Tript.Shell: the window failed");
+                ReportStartupFailure("Tript stopped unexpectedly.", exception.Message);
                 return 1;
             }
             finally
@@ -87,7 +106,10 @@ internal static class Program
                 host.Ipc.RequestShutdown();
                 if (!hostThread.Join(TimeSpan.FromSeconds(5)))
                 {
-                    Console.Error.WriteLine("Tript.Shell: the app host did not stop; terminating the process.");
+                    // Environment.Exit skips every finally and Dispose below, including the one that
+                    // would flush the log, so flush first or the reason for the kill is lost too.
+                    Log.Fatal("Tript.Shell: the app host did not stop; terminating the process");
+                    AppLog.Shutdown();
                     Environment.Exit(1);
                 }
             }
@@ -110,7 +132,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.Shell: could not update Windows startup registration: {exception.Message}");
+            Log.Warning(exception, "Tript.Shell: could not update Windows startup registration");
         }
     }
 
@@ -122,9 +144,42 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.Shell: the app host failed: {exception}");
+            Log.Fatal(exception, "Tript.Shell: the app host failed");
         }
     }
+
+    // Tript.Shell is a WinExe, so there is no console and nothing the user can see when startup
+    // fails: double-clicking Tript just does nothing. This is the only feedback on that path.
+    private static void ReportStartupFailure(string summary, string? detail)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const int maxDetail = 400;
+        if (detail is { Length: > maxDetail })
+            detail = detail[..maxDetail] + "...";
+
+        var logLocation = AppLog.CurrentFile ?? AppLog.LogDirectory;
+        var paragraphs = string.IsNullOrWhiteSpace(detail)
+            ? new[] { summary, "Details were written to:" + Environment.NewLine + logLocation }
+            : new[] { summary, detail, "Details were written to:" + Environment.NewLine + logLocation };
+        var text = string.Join(Environment.NewLine + Environment.NewLine, paragraphs);
+
+        try
+        {
+            MessageBoxW(IntPtr.Zero, text, "Tript", MbOk | MbIconError | MbSetForeground);
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+        {
+        }
+    }
+
+    private const uint MbOk = 0x00000000;
+    private const uint MbIconError = 0x00000010;
+    private const uint MbSetForeground = 0x00010000;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr window, string text, string caption, uint type);
 
     private static bool WaitForUi(string url, TimeSpan timeout)
     {

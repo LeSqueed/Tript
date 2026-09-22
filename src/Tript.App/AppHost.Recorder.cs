@@ -138,6 +138,7 @@ internal sealed partial class AppHost
 
             Volatile.Write(ref _recordingProcessOwner, processOwner);
             SetBackgroundWorkSuspendedForRecording(true);
+            StartMetadataCheckpoints();
 
             if (processOwner is not null &&
                 _recorderSession is { } session &&
@@ -308,7 +309,7 @@ internal sealed partial class AppHost
         {
             _stopFinalizationPending = true;
             var recorder = _recorder;
-            ThreadPool.QueueUserWorkItem(_ => CompletePendingStop(recorder));
+            RunGuarded(() => CompletePendingStop(recorder), "finalizing a slow recording stop");
             Log.Warning("AppHost: recording output did not finish stopping within {Timeout}; leaving the recording in Stopping state until its callback arrives",
                 _recorderStopTimeout);
             return false;
@@ -318,22 +319,32 @@ internal sealed partial class AppHost
         return true;
     }
 
+    // Deliberately not gated on _disposed: shutdown is exactly when finalizing matters most, because
+    // this is the only path that writes the session's .metadata.json and its bookmarks. Dispose waits
+    // for _stopFinalizationPending to clear before it drops _recorder, so the identity check below is
+    // what keeps this from finalizing against a session that has already been replaced.
     private void CompletePendingStop(RecorderStateMachine recorder)
     {
+        var deadline = DateTime.UtcNow + _pendingStopFinalizeTimeout;
         while (true)
         {
             lock (_recorderGate)
             {
-                if (_disposed || !ReferenceEquals(_recorder, recorder))
-                {
-                    _stopFinalizationPending = false;
+                if (!_stopFinalizationPending || !ReferenceEquals(_recorder, recorder))
                     return;
-                }
 
                 if (recorder.Snapshot.State == RecorderState.Idle)
                 {
                     _stopFinalizationPending = false;
                     FinalizeStoppedRecordingLocked();
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    _stopFinalizationPending = false;
+                    Log.Error("AppHost: the recording output never reached Idle within {Timeout}; the session metadata and its bookmarks were not written",
+                        _pendingStopFinalizeTimeout);
                     return;
                 }
             }
@@ -342,8 +353,31 @@ internal sealed partial class AppHost
         }
     }
 
+    // Lets Dispose block until the queued CompletePendingStop has finished, so the recorder is not
+    // torn out from under it. Returns false when the budget ran out and the metadata was lost.
+    private bool WaitForPendingStopFinalization(TimeSpan budget)
+    {
+        var deadline = DateTime.UtcNow + budget;
+        while (true)
+        {
+            RecorderStateMachine? recorder;
+            lock (_recorderGate)
+            {
+                if (!_stopFinalizationPending)
+                    return true;
+                recorder = _recorder;
+            }
+
+            if (recorder is null || DateTime.UtcNow >= deadline)
+                return false;
+
+            recorder.WaitForIdle(TimeSpan.FromMilliseconds(100));
+        }
+    }
+
     private void FinalizeStoppedRecordingLocked()
     {
+        StopMetadataCheckpoints();
         _recorder!.DrainCompletedOutput();
         StopDetection();
         SetBackgroundWorkSuspendedForRecording(false);
@@ -515,7 +549,59 @@ internal sealed partial class AppHost
         catch (Exception exception) { Log.Warning(exception, "AppHost: deferred OBS runtime disposal failed"); }
     }
 
-    private void WriteMetadataRecord(RecordingMetadata metadata)
+    private static readonly TimeSpan MetadataCheckpointInterval = TimeSpan.FromSeconds(15);
+
+    private Timer? _metadataCheckpointTimer;
+
+    private int _metadataCheckpointRunning;
+
+    private void StartMetadataCheckpoints() =>
+        _metadataCheckpointTimer ??= new Timer(_ => CheckpointMetadata(), null,
+            MetadataCheckpointInterval, MetadataCheckpointInterval);
+
+    private void StopMetadataCheckpoints()
+    {
+        _metadataCheckpointTimer?.Dispose();
+        _metadataCheckpointTimer = null;
+    }
+
+    // Bookmarks live only in _sessionTracker until the recording stops, so a crash or a power loss
+    // takes the whole session's worth with it even now that the video itself survives. Writing the
+    // record periodically bounds that loss to the checkpoint interval. Safe mid-recording because
+    // WriteMetadataRecord never probes the file that is still being written.
+    private void CheckpointMetadata()
+    {
+        if (_disposed || Interlocked.Exchange(ref _metadataCheckpointRunning, 1) != 0)
+            return;
+
+        try
+        {
+            lock (_recorderGate)
+            {
+                if (_disposed || _recorder is null || _recorder.Snapshot.State != RecorderState.Recording)
+                    return;
+
+                if (_pendingMetadata is null || _activeRecordingMode?.RecordsSession() != true)
+                    return;
+
+                if (_sessionTracker.Active is not { } session)
+                    return;
+
+                _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
+                WriteMetadataRecord(_pendingMetadata, broadcast: false);
+            }
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "AppHost: a metadata checkpoint failed; bookmarks stay in memory until the recording stops");
+        }
+        finally
+        {
+            Volatile.Write(ref _metadataCheckpointRunning, 0);
+        }
+    }
+
+    private void WriteMetadataRecord(RecordingMetadata metadata, bool broadcast = true)
     {
         if (_activeOutputPath is null || !File.Exists(_activeOutputPath))
             return;
@@ -533,7 +619,9 @@ internal sealed partial class AppHost
 
             _metadata.Save(metadata);
         }
-        PushContent();
+
+        if (broadcast)
+            PushContent();
     }
 
     private void EnsureRecorderBuilt(ResolvedRecorderSettings settings)

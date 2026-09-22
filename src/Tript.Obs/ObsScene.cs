@@ -4,6 +4,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -108,8 +109,19 @@ public sealed class ObsScene : IDisposable
         }
 
         var items = new List<ObsSceneItem>(pointers.Count);
-        foreach (var pointer in pointers)
-            items.Add(ObsSceneItem.FromBorrowedPointer(pointer));
+        var wrapped = 0;
+        try
+        {
+            for (; wrapped < pointers.Count; wrapped++)
+                items.Add(ObsSceneItem.FromReferencedPointer(pointers[wrapped]));
+        }
+        catch
+        {
+            // Collect took a reference on every pointer, so any not yet handed to an item would leak.
+            for (var i = wrapped; i < pointers.Count; i++)
+                ObsNative.obs_sceneitem_release(pointers[i]);
+            throw;
+        }
 
         return items;
     }
@@ -139,11 +151,20 @@ public sealed class ObsScene : IDisposable
     {
         try
         {
+            // The reference is taken here, inside the callback, because libobs only holds the scene
+            // lock for the duration of obs_scene_enum_items. Taking it after the enumeration returned
+            // left a window where another thread could remove the item and free it first, and the
+            // later addref landed on freed memory. Add first so a failed Add cannot leak the ref.
             if (GCHandle.FromIntPtr(parameter).Target is List<nint> pointers)
+            {
                 pointers.Add(item);
+                ObsNative.obs_sceneitem_addref(item);
+            }
         }
-        catch
+        catch (Exception exception)
         {
+            Diagnostics.Report(DiagnosticLevel.Warning,
+                "Collecting a scene item failed; the scene's item list will be incomplete", exception);
         }
 
         return 1;

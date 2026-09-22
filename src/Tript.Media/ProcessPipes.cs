@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Diagnostics;
+using Tript.Core;
 
 namespace Tript.Media;
 
@@ -28,6 +29,14 @@ internal static class ProcessPipes
     internal static string TextOf(Task<string> read) =>
         read.IsCompletedSuccessfully ? read.Result : string.Empty;
 
+    // Called right after Start for every ffmpeg and ffprobe child. The job ties the child to Tript's
+    // lifetime, so a crash or forced exit no longer leaves ffmpeg running and holding its output.
+    internal static void Adopt(Process process)
+    {
+        ChildProcessJob.Track(process);
+        LowerPriority(process);
+    }
+
     internal static void LowerPriority(Process process)
     {
         try
@@ -52,6 +61,10 @@ internal static class ProcessPipes
                                              or System.ComponentModel.Win32Exception
                                              or NotSupportedException)
         {
+            // InvalidOperationException is the normal "already exited" case. Anything else means
+            // an ffmpeg that may still be running, holding its output file, with nothing tracking it.
+            if (exception is not InvalidOperationException)
+                Diagnostics.Report(DiagnosticLevel.Warning, "Could not kill an ffmpeg process; it may still be running", exception);
         }
     }
 }

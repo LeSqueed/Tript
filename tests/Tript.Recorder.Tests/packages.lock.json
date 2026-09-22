@@ -132,7 +132,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       },
       "tript.recorder": {
         "type": "Project",
@@ -297,7 +300,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       },
       "tript.recorder": {
         "type": "Project",

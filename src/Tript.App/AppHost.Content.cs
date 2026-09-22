@@ -55,6 +55,43 @@ internal sealed partial class AppHost
         }
     }
 
+    // Takes no path from the client on purpose: the host decides what to open, so this command cannot
+    // be turned into "open any folder on the machine" the way a path parameter could.
+    internal void OpenLogFolder()
+    {
+        var directory = AppLog.LogDirectory;
+        var current = AppLog.CurrentFile;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = current is not null && File.Exists(current)
+                        ? $"/select,\"{current.Replace("\"", string.Empty)}\""
+                        : $"\"{directory.Replace("\"", string.Empty)}\"",
+                    UseShellExecute = true,
+                });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start("open", $"\"{directory.Replace("\"", string.Empty)}\"");
+            }
+            else
+            {
+                Process.Start("xdg-open", directory);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception
+            or IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(exception, "AppHost: could not open the log folder {Directory}", directory);
+            PushError($"The log folder could not be opened. It is at {directory}");
+        }
+    }
+
     internal void OpenInBrowser(OpenInBrowserParameters? parameters)
     {
         var url = parameters?.Url;

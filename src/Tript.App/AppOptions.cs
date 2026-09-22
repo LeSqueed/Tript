@@ -30,6 +30,10 @@ internal sealed class AppOptions
 
     public string? GameListJson { get; init; }
 
+    // Null means the per-user log folder. The test driver sets this so its child app hosts do not
+    // write into, and prune, the real user's logs.
+    public string? LogDirectory { get; init; }
+
     public static AppOptions? Parse(string[] args) => Parse(args, Console.Error);
 
     internal static AppOptions? Parse(string[] args, TextWriter errors)
@@ -41,6 +45,7 @@ internal sealed class AppOptions
         var disableUpdater = false;
         var startedByWindows = false;
         string? gameListJson = null;
+        string? logDirectory = null;
         var uiPort = LocalPorts.Ui;
         var contentPort = LocalPorts.Content;
         var controlPort = LocalPorts.ControlSocket;
@@ -70,6 +75,9 @@ internal sealed class AppOptions
                 case "--game-list" when index + 1 < args.Length:
                     gameListJson = args[++index];
                     break;
+                case "--log-dir" when index + 1 < args.Length:
+                    logDirectory = args[++index];
+                    break;
                 case "--ui-port" when index + 1 < args.Length:
                     if (!TryParsePort(args[index], args[++index], out uiPort, errors))
                         return null;
@@ -87,7 +95,8 @@ internal sealed class AppOptions
                     Console.WriteLine(
                         "Usage: Tript.App [--content-root <dir>] [--settings-path <file>] " +
                         "[--web-root <dir>] [--fake-recorder] [--disable-updater] [--startup] " +
-                        "[--game-list <json>] [--ui-port <port>] [--content-port <port>] [--control-port <port>]");
+                        "[--game-list <json>] [--log-dir <dir>] [--ui-port <port>] [--content-port <port>] "
+                        + "[--control-port <port>]");
                     return null;
                 default:
                     errors.WriteLine($"Tript.App: unknown argument '{args[index]}'.");
@@ -104,6 +113,7 @@ internal sealed class AppOptions
             DisableUpdater = disableUpdater,
             StartedByWindows = startedByWindows,
             GameListJson = gameListJson,
+            LogDirectory = logDirectory,
             UiPort = uiPort,
             ContentPort = contentPort,
             ControlPort = controlPort,

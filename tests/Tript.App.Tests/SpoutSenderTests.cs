@@ -33,6 +33,41 @@ public sealed class SpoutSenderTests
         Assert.False(SpoutNaming.IsValidSenderName(new string('a', SpoutNaming.NameLength)));
     }
 
+    // The sender list is shared with every Spout application on the machine. On a lock timeout the
+    // sender used to carry on and rewrite the list anyway, which could drop another application's
+    // registration. It must now leave the list alone and register on a later Publish instead.
+    // The lock is held from another thread because a Mutex is reentrant for its owner.
+    [SkippableFact]
+    public void WhileAnotherApplicationHoldsTheListLock_PublishLeavesTheSharedListAlone_AndRetries()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new SkipException("Spout shared memory is Windows-only.");
+
+        var name = _prefix + "Sender";
+        using var held = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        var holder = new Thread(() =>
+        {
+            using var mutex = new Mutex(false, _objects.SenderList + "_mutex");
+            mutex.WaitOne();
+            held.Set();
+            release.Wait();
+            mutex.ReleaseMutex();
+        });
+        holder.Start();
+        held.Wait();
+
+        using var sender = new SpoutSender(name, _objects);
+        sender.Publish(0x1234, 1920, 1080);
+        Assert.Empty(SpoutSender.ReadSenderList(_objects));
+
+        release.Set();
+        holder.Join();
+
+        sender.Publish(0x1234, 1920, 1080);
+        Assert.Equal([name], SpoutSender.ReadSenderList(_objects));
+    }
+
     [SkippableFact]
     public void Publishing_RegistersTheSenderAndItsTexture()
     {

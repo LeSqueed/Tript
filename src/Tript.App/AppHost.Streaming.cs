@@ -170,6 +170,7 @@ internal sealed partial class AppHost
             return;
 
         _ipc.Broadcast("streamerStatus", JsonSerializer.SerializeToElement(BuildStreamerStatus(), Wire.Options));
+        PushTrayStatus();
     }
 
     internal static string WireState(StreamShareState state) => state switch

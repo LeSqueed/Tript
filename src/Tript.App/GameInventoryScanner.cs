@@ -90,6 +90,24 @@ internal sealed class GameInventoryScanner
         return null;
     }
 
+    // Every store source records why it skipped a library or an entry (an unreadable Steam
+    // libraryfolders.vdf, a missing Epic manifest directory, a registry key it could not open), and
+    // nothing ever read them, so "my game isn't detected" left no trace at all.
+    private static void ReportDiagnostics(GameInventory inventory)
+    {
+        foreach (var diagnostic in inventory.Diagnostics)
+        {
+            var level = diagnostic.Severity switch
+            {
+                DiagnosticSeverity.Error => Serilog.Events.LogEventLevel.Warning,
+                DiagnosticSeverity.Warning => Serilog.Events.LogEventLevel.Information,
+                _ => Serilog.Events.LogEventLevel.Debug,
+            };
+            Log.Write(level, "GameDiscovery: {Store} {Code}: {Message} ({Location})",
+                diagnostic.Store, diagnostic.Code, diagnostic.Message, diagnostic.Location ?? "no location");
+        }
+    }
+
     private async Task ScanAsync(GameDiscoveryService discovery, CancellationToken cancellationToken,
         Action onDiscovered)
     {
@@ -109,6 +127,7 @@ internal sealed class GameInventoryScanner
                 var inventory = await discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 Inventory = inventory;
+                ReportDiagnostics(inventory);
             }
             catch (OperationCanceledException)
             {

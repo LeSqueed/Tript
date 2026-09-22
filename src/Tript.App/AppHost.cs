@@ -82,6 +82,8 @@ internal sealed partial class AppHost : IDisposable
 
     private readonly object _recorderGate = new();
     private readonly TimeSpan _recorderStopTimeout;
+
+    private readonly TimeSpan _pendingStopFinalizeTimeout;
     private bool _shuttingDown;
 
     private RecorderStateMachine? _recorder;
@@ -123,6 +125,7 @@ internal sealed partial class AppHost : IDisposable
 
     private readonly UpdateManager? _updateManager;
     private Timer? _updateCheckTimer;
+    private Timer? _previousInstallTimer;
     private string? _lastNotifiedUpdateStage;
 
     private bool _disposed;
@@ -132,7 +135,8 @@ internal sealed partial class AppHost : IDisposable
         TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false,
         ResolverClient? resolverClient = null,
         AudioDeviceInventory? audioDeviceInventory = null,
-        GameIdAliasStore? gameIdAliases = null)
+        GameIdAliasStore? gameIdAliases = null,
+        TimeSpan? pendingStopFinalizeTimeout = null)
     {
         _contentPush = new CoalescingRunner(BroadcastContent, ReportContentFailure);
         _clipQueue = new SerialWorkQueue<ClipRequest>(ProcessClip, ReportClipFailure);
@@ -159,10 +163,24 @@ internal sealed partial class AppHost : IDisposable
             ? GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider())
             : null);
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
+        _pendingStopFinalizeTimeout = pendingStopFinalizeTimeout ?? _recorderStopTimeout;
 
         if (_resolverClient is null)
         {
             var resolverConfig = ResolverConfig.FromFile();
+            if (resolverConfig is null)
+            {
+                Log.Information("AppHost: no resolver.json beside the executable; game search and model delivery are off");
+            }
+            else if (resolverConfig.BaseUri.IsLoopback)
+            {
+                // The checked-in config/resolver.json points here, and only release.yml replaces it.
+                // A locally built or hand-copied bundle therefore asks localhost for its models and,
+                // with nothing listening, auto-detection finds no model and silently does nothing.
+                Log.Warning("AppHost: resolver.json points at {Resolver}; models and game search only work "
+                    + "while a resolver runs on this machine", resolverConfig.BaseUri);
+            }
+
             if (resolverConfig is not null)
             {
                 _resolverClient = new ResolverClient(resolverConfig,
@@ -236,7 +254,7 @@ internal sealed partial class AppHost : IDisposable
 
     internal event Action<SettingsModel>? SettingsChanged;
 
-    internal event Action<bool, string?>? StateChanged;
+    internal event Action<TrayStatus>? StatusChanged;
 
     internal event Action<NotificationKind, string, string>? NotificationRequested;
 
@@ -292,8 +310,14 @@ internal sealed partial class AppHost : IDisposable
 
             if (_updateManager is not null)
             {
-                if (_settingsStore.Load().General.CheckForUpdatesAutomatically)
-                    _ = CheckForUpdatesAutomaticAsync();
+                _ = CheckForUpdatesAutomaticAsync();
+
+                // One-shot: once this version has outlived the launcher's rollback window, the
+                // previous install it would have rolled back to is no longer needed.
+                _previousInstallTimer = new Timer(
+                    _ => _maintenance.Run("previous install cleanup", _updateManager.DiscardPreviousInstall), null,
+                    UpdateManager.PreviousInstallProbation, Timeout.InfiniteTimeSpan);
+
                 _updateCheckTimer = new Timer(
                     _ => _maintenance.Run("update check", () => { _ = CheckForUpdatesAutomaticAsync(); }), null,
                     UpdateCheckInterval, UpdateCheckInterval);
@@ -355,8 +379,10 @@ internal sealed partial class AppHost : IDisposable
             Log.Warning(exception, "AppHost: launcher game discovery did not settle cleanly during shutdown.");
         }
 
+        StopMetadataCheckpoints();
         _trashPurgeTimer?.Dispose();
         _updateCheckTimer?.Dispose();
+        _previousInstallTimer?.Dispose();
         if (_updateManager is not null)
         {
             _updateManager.StatusChanged -= OnUpdateStatusChanged;
@@ -379,7 +405,14 @@ internal sealed partial class AppHost : IDisposable
 
         try
         {
-            StopRecording();
+            // StopRecording returns false and hands the finalization to CompletePendingStop when the
+            // output is slow to stop. Wait for that to land before dropping _recorder below, or the
+            // session's .metadata.json and every bookmark in it are lost.
+            if (!StopRecording() && !WaitForPendingStopFinalization(_pendingStopFinalizeTimeout))
+            {
+                Log.Error("AppHost: shutdown did not finish stopping the recording in time; "
+                    + "the session metadata may be incomplete");
+            }
         }
         catch (Exception exception)
         {
@@ -403,8 +436,28 @@ internal sealed partial class AppHost : IDisposable
 
         if (recorder?.Snapshot.State == RecorderState.Stopping)
         {
-            ThreadPool.QueueUserWorkItem(_ => DisposeRecorderResources(
-                recorder, recorderSession, colourSource, runtime));
+            // Deferred because disposing a still-stopping output can block on libobs, but the process
+            // is about to exit and nothing awaits thread-pool work at exit. Wait briefly so the flush
+            // usually lands, and give up rather than hanging the quit if libobs is wedged.
+            var deferred = new ManualResetEventSlim(false);
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    DisposeRecorderResources(recorder, recorderSession, colourSource, runtime);
+                }
+                finally
+                {
+                    deferred.Set();
+                }
+            });
+
+            // Only dispose once the worker is known to be done with it: a timed-out wait leaves it
+            // about to call Set(), and that would throw ObjectDisposedException on a pool thread.
+            if (deferred.Wait(_pendingStopFinalizeTimeout))
+                deferred.Dispose();
+            else
+                Log.Warning("AppHost: the recorder was still shutting down when the process exited");
         }
         else
         {
@@ -742,8 +795,56 @@ internal sealed partial class AppHost : IDisposable
                 },
             },
         }, Wire.Options));
-        StateChanged?.Invoke(recording, representedGameId);
+        PushTrayStatus();
     }
+
+    // An exception escaping a pool thread terminates the process. The crash handler logs it on the
+    // way down, but the recording still dies with the process, so background work is caught here.
+    // Auto-start is the case that mattered: an encoder that refused to open killed Tript at the
+    // moment the game started.
+    private static void RunGuarded(Action work, string what) =>
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                work();
+            }
+            catch (Exception exception)
+            {
+                Log.Error(exception, "AppHost: {What} failed", what);
+            }
+        });
+
+    internal TrayStatus CurrentTrayStatus()
+    {
+        if (_disposed)
+            return TrayStatus.Idle;
+
+        var recording = IsRecording;
+        var gameId = CurrentGameId ?? (!recording ? CurrentDetectedGameId() : null);
+        var storage = _storageMonitor.Status;
+        return TrayStatus.From(
+            recording,
+            _activeRecordingMode,
+            GameDisplayName(gameId),
+            _recordingBlockedByStorage,
+            storage.Pressure,
+            StorageAlertReason(storage),
+            _streamShare?.Status.State ?? StreamShareState.Off,
+            _settingsStore.Load().Streaming.ShareEnabled);
+    }
+
+    private void PushTrayStatus()
+    {
+        var status = CurrentTrayStatus();
+        if (status == _lastTrayStatus)
+            return;
+
+        _lastTrayStatus = status;
+        StatusChanged?.Invoke(status);
+    }
+
+    private TrayStatus? _lastTrayStatus;
 
     internal void WatchAudioLevels() => _audioLevels.Watch();
 

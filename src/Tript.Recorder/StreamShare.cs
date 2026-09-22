@@ -121,7 +121,18 @@ public sealed class StreamShare<TCapture> : IDisposable where TCapture : class
         Raise(changed);
     }
 
-    private void OnActiveChanged() => ThreadPool.QueueUserWorkItem(_ => Refresh());
+    // Runs on a pool thread, where an escaping exception would terminate the process.
+    private void OnActiveChanged() => ThreadPool.QueueUserWorkItem(_ =>
+    {
+        try
+        {
+            Refresh();
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "StreamShare: refreshing the shared capture failed");
+        }
+    });
 
     private void Refresh()
     {

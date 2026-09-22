@@ -17,6 +17,11 @@
 // somehow kept exiting with the restart-for-update code.
 #define TRIPT_MAX_UPDATE_RESTARTS 3
 
+// A version swapped in by this run that exits with a failure within this long is treated as a
+// broken update and rolled back. Mirrored by UpdateManager, which keeps old-App until the app has
+// run for longer than this, so the version to go back to is still there.
+#define TRIPT_UPDATE_PROBATION_MS 60000
+
 static int fail(const wchar_t *message)
 {
     MessageBoxW(NULL, message, L"Tript", MB_OK | MB_ICONERROR);
@@ -80,6 +85,80 @@ static BOOL ExtractLine(const char *buffer, int lineIndex, char *line, size_t li
     }
 }
 
+// A swap that was interrupted between the two MoveFileW calls in TryApplyStagedUpdate - a power loss
+// or a hard kill in that millisecond window - leaves App\ missing while the previous install sits
+// intact in .tript-update\old-App. Without this the next launch fails with "Tript is incomplete" and
+// the user has to reinstall, so the recovery runs before the marker is even read: the marker may be
+// absent or malformed and the install still needs putting back.
+static void RestoreInterruptedSwap(const wchar_t *appDirectory, const wchar_t *oldAppBackupPath)
+{
+    wchar_t backupShellPath[PATH_CAPACITY];
+
+    if (GetFileAttributesW(appDirectory) != INVALID_FILE_ATTRIBUTES)
+        return; // App\ is present, so no swap was left half-applied.
+
+    if (swprintf_s(backupShellPath, ARRAYSIZE(backupShellPath), L"%ls\\Tript.Shell.exe",
+            oldAppBackupPath) < 0)
+        return;
+
+    DWORD attributes = GetFileAttributesW(backupShellPath);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        return; // No usable backup to restore - leave the caller to report the missing install.
+
+    // Best effort: if this fails the caller still reports the missing install, which is where we
+    // already were. A success puts old-App back as App\ and leaves any staged update to retry.
+    MoveFileW(oldAppBackupPath, appDirectory);
+}
+
+// A new version that dies within the probation window is almost certainly broken, and the updater
+// that could fix it lives inside the version that will not start. This puts the previous install
+// back and records the failed version in .tript-update\rolled-back, which UpdateManager reads so
+// the old version does not download and apply the same release again the next day.
+static BOOL RollBackFailedUpdate(const wchar_t *launcherDirectory, const char *failedVersion)
+{
+    wchar_t appDirectory[PATH_CAPACITY];
+    wchar_t oldAppBackupPath[PATH_CAPACITY];
+    wchar_t oldShellPath[PATH_CAPACITY];
+    wchar_t failedAppPath[PATH_CAPACITY];
+    wchar_t recordPath[PATH_CAPACITY];
+
+    if (swprintf_s(appDirectory, ARRAYSIZE(appDirectory), L"%ls\\App", launcherDirectory) < 0 ||
+        swprintf_s(oldAppBackupPath, ARRAYSIZE(oldAppBackupPath), L"%ls\\.tript-update\\old-App",
+            launcherDirectory) < 0 ||
+        swprintf_s(oldShellPath, ARRAYSIZE(oldShellPath), L"%ls\\Tript.Shell.exe", oldAppBackupPath) < 0 ||
+        swprintf_s(failedAppPath, ARRAYSIZE(failedAppPath), L"%ls\\.tript-update\\failed-App",
+            launcherDirectory) < 0 ||
+        swprintf_s(recordPath, ARRAYSIZE(recordPath), L"%ls\\.tript-update\\rolled-back",
+            launcherDirectory) < 0)
+        return FALSE;
+
+    DWORD attributes = GetFileAttributesW(oldShellPath);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        return FALSE; // Nothing to go back to.
+
+    // failed-App left by an earlier rollback makes this fail. UpdateManager sweeps it on the next
+    // start, so the most this costs is one launch without a rollback.
+    if (!MoveFileW(appDirectory, failedAppPath))
+        return FALSE;
+
+    if (!MoveFileW(oldAppBackupPath, appDirectory))
+    {
+        // Better the failing version than no install at all.
+        MoveFileW(failedAppPath, appDirectory);
+        return FALSE;
+    }
+
+    HANDLE record = CreateFileW(recordPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (record != INVALID_HANDLE_VALUE)
+    {
+        DWORD written = 0;
+        WriteFile(record, failedVersion, (DWORD)strlen(failedVersion), &written, NULL);
+        CloseHandle(record);
+    }
+
+    return TRUE;
+}
+
 // Looks for a staged update under <launcherDirectory>\.tript-update\ready.marker (written by
 // Tript.App.Updater.UpdateManager - see src/Tript.App/Updater/UpdateMarker.cs, which this must
 // stay in step with) and, if one is validly staged, swaps it into place before App\Tript.Shell.exe
@@ -91,8 +170,12 @@ static BOOL ExtractLine(const char *buffer, int lineIndex, char *line, size_t li
 // appDirectory/shellPath are always rebuilt fresh by the caller afterwards). Returns FALSE only
 // for the one truly unrecoverable case - a swap left App\ missing and rolling back failed too - in
 // which case *fatalExitCode is set and wWinMain must return it immediately.
-static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExitCode)
+static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExitCode,
+    BOOL *swapped, char *swappedVersion, size_t versionCapacity)
 {
+    *swapped = FALSE;
+    swappedVersion[0] = '\0';
+
     wchar_t markerPath[PATH_CAPACITY];
     wchar_t appDirectory[PATH_CAPACITY];
     wchar_t oldAppBackupPath[PATH_CAPACITY];
@@ -101,6 +184,7 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
     wchar_t stagedFolderNameWide[MARKER_TOKEN_CAPACITY];
     char markerContent[MARKER_CAPACITY];
     char formatVersion[16];
+    char targetVersion[MARKER_TOKEN_CAPACITY];
     char stagedFolderName[MARKER_TOKEN_CAPACITY];
 
     if (swprintf_s(markerPath, ARRAYSIZE(markerPath), L"%ls\\.tript-update\\ready.marker",
@@ -109,6 +193,8 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
         swprintf_s(oldAppBackupPath, ARRAYSIZE(oldAppBackupPath), L"%ls\\.tript-update\\old-App",
             launcherDirectory) < 0)
         return TRUE; // Path too long to even ask - behave as if no update were staged.
+
+    RestoreInterruptedSwap(appDirectory, oldAppBackupPath);
 
     HANDLE markerFile = CreateFileW(markerPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL, NULL);
@@ -149,12 +235,23 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
                       // leftover old-App from an interrupted swap). The marker is untouched, so
                       // this is retried on the next full launch.
 
-    if (!MoveFileW(stagedDirectory, appDirectory) && !MoveFileW(oldAppBackupPath, appDirectory))
+    if (!MoveFileW(stagedDirectory, appDirectory))
     {
-        *fatalExitCode = fail(L"Tript's update could not be completed and the previous "
-            L"installation could not be restored. Reinstall Tript from a fresh download.");
-        return FALSE;
+        if (!MoveFileW(oldAppBackupPath, appDirectory))
+        {
+            *fatalExitCode = fail(L"Tript's update could not be completed and the previous "
+                L"installation could not be restored. Reinstall Tript from a fresh download.");
+            return FALSE;
+        }
+
+        return TRUE; // The previous install is back in place; no swap happened.
     }
+
+    // The version is only recorded for a rollback, so a marker whose version line is missing or
+    // unsafe still swaps; it just cannot be named if it later has to be rolled back.
+    *swapped = TRUE;
+    if (ExtractLine(markerContent, 1, targetVersion, ARRAYSIZE(targetVersion)) && IsSafeMarkerToken(targetVersion))
+        strcpy_s(swappedVersion, versionCapacity, targetVersion);
 
     return TRUE;
 }
@@ -180,10 +277,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR arguments, int
         return fail(L"Tript could not determine its installation directory.");
     *separator = L'\0';
 
+    BOOL rolledBack = FALSE;
     for (;;)
     {
         int fatalExitCode = 0;
-        if (!TryApplyStagedUpdate(launcherPath, &fatalExitCode))
+        BOOL swapped = FALSE;
+        char swappedVersion[MARKER_TOKEN_CAPACITY];
+        if (!TryApplyStagedUpdate(launcherPath, &fatalExitCode, &swapped, swappedVersion, ARRAYSIZE(swappedVersion)))
             return fatalExitCode;
 
         if (swprintf_s(appDirectory, ARRAYSIZE(appDirectory), L"%ls\\App", launcherPath) < 0 ||
@@ -203,6 +303,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR arguments, int
         STARTUPINFOW startup = { 0 };
         PROCESS_INFORMATION process = { 0 };
         startup.cb = sizeof(startup);
+        ULONGLONG started = GetTickCount64();
         if (!CreateProcessW(shellPath, commandLine, NULL, NULL, FALSE, 0, NULL, appDirectory, &startup, &process))
             return fail(L"Tript could not start App\\Tript.Shell.exe.");
 
@@ -216,6 +317,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR arguments, int
 
         if (waitResult != WAIT_OBJECT_0)
             return fail(L"Tript could not wait for the application to close.");
+
+        // Only once per run, so a version that also fails after the rollback cannot loop.
+        if (swapped && !rolledBack && exitCode != 0 && exitCode != TRIPT_EXIT_CODE_RESTART_FOR_UPDATE
+            && GetTickCount64() - started < TRIPT_UPDATE_PROBATION_MS
+            && RollBackFailedUpdate(launcherPath, swappedVersion))
+        {
+            rolledBack = TRUE;
+            MessageBoxW(NULL, L"The Tript update could not start, so Tript went back to the version you had before.",
+                L"Tript", MB_OK | MB_ICONWARNING);
+            continue;
+        }
 
         if (exitCode != TRIPT_EXIT_CODE_RESTART_FOR_UPDATE)
             return (int)exitCode;

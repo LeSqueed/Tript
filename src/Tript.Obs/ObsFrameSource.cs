@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -74,6 +75,14 @@ internal sealed class ObsFrameSource : IFrameSource
 internal sealed class ObsFrameSubscription : IFrameSubscription
 {
     private static readonly ConcurrentDictionary<nint, ObsFrameSubscription> Live = new();
+
+    // ObsRuntime.Dispose calls this before obs_shutdown. An instance left registered past shutdown
+    // would, on its owner's later Dispose, call back into a libobs that no longer exists.
+    internal static void DisposeAllLive()
+    {
+        foreach (var live in Live.Values.ToArray())
+            live.Dispose();
+    }
     private static long _nextId;
 
     private readonly ObsRuntime _runtime;
@@ -166,10 +175,14 @@ internal sealed class ObsFrameSubscription : IFrameSubscription
                 subscription.ExitCallback();
             }
         }
-        catch
+        catch (Exception exception)
         {
+            Diagnostics.ReportFirst(ref _frameCallbackFailed, DiagnosticLevel.Error,
+                "libobs raw video callback failed; detection frames are not being delivered", exception);
         }
     }
+
+    private static int _frameCallbackFailed;
 
     private bool TryEnterCallback()
     {

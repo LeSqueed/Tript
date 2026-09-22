@@ -101,6 +101,11 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         startInfo.ArgumentList.Add(contentRoot);
         startInfo.ArgumentList.Add("--settings-path");
         startInfo.ArgumentList.Add(settingsPath);
+
+        // Without this every child app host wrote into the real user's log folder, and with its
+        // ten-file retention each test run deleted one of that user's real logs.
+        startInfo.ArgumentList.Add("--log-dir");
+        startInfo.ArgumentList.Add(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, "logs"));
         if (fake)
             startInfo.ArgumentList.Add("--fake-recorder");
         startInfo.ArgumentList.Add("--disable-updater");

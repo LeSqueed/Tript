@@ -45,7 +45,12 @@ internal sealed class ObsOutputStopSubscription
                 return;
 
             _disconnectRequested = false;
-            _pinned = GCHandle.Alloc(this);
+
+            // A Disconnect that raced an in-flight callback leaves the pin allocated until that
+            // callback exits. Allocating a fresh one over it leaked the old handle permanently and
+            // then freed the new one on the next exit. The pin is always for this object, so reuse it.
+            if (!_pinned.IsAllocated)
+                _pinned = GCHandle.Alloc(this);
             unsafe
             {
                 ObsNative.signal_handler_connect(

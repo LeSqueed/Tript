@@ -2,6 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { reportClientError } from '../../app/errorReporting';
+
+// NotAllowedError (autoplay policy) and AbortError (a pause or a new source interrupting play) are
+// routine. Anything else, NotSupportedError above all, is a clip that will not play, which used to
+// fail with no trace, and is the first thing to look for when an HDR or codec change breaks playback.
+function reportPlaybackFailure(error: unknown): void {
+  if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) return;
+  reportClientError('playback', error);
+}
 
 export interface PlaybackState {
   currentTime: number;
@@ -39,8 +48,7 @@ export function usePlayback(itemKey: string, fallbackDuration: number, visible =
       video.currentTime = 0;
       video.pause();
       if (shouldPlay) {
-        void video.play().catch(() => {
-        });
+        void video.play().catch(reportPlaybackFailure);
       }
     }
   }, [itemKey]);
@@ -82,8 +90,7 @@ export function usePlayback(itemKey: string, fallbackDuration: number, visible =
       return;
     }
     if (video.paused) {
-      void video.play().catch(() => {
-      });
+      void video.play().catch(reportPlaybackFailure);
     } else {
       video.pause();
     }

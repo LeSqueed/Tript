@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using Tript.Core;
+
 namespace Tript.Media;
 
 public interface IThumbnailExtractor
@@ -91,6 +93,15 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
         if (outcome.Succeeded && HasContent(destinationPath)
             && (!rejectBlack || !outcome.StandardError.Contains("blackframe", StringComparison.OrdinalIgnoreCase)))
             return true;
+
+        // A black frame is expected and the caller retries at another offset, so only a genuine
+        // ffmpeg failure is worth reporting. That is the only record of why a thumbnail is blank.
+        if (!outcome.Succeeded)
+        {
+            Diagnostics.Report(DiagnosticLevel.Warning,
+                $"ffmpeg could not extract a thumbnail from '{Path.GetFileName(sourcePath)}' at {offset.TotalSeconds:0.#}s "
+                + $"(exit {outcome.ExitCode}): {FfmpegRunner.Tail(outcome.StandardError)}");
+        }
 
         TryDelete(destinationPath);
         return false;

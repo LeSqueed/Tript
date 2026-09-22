@@ -3,6 +3,7 @@
 
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -53,7 +54,9 @@ internal sealed class ObsOutputSignalSubscription
             if (_connected)
                 return;
 
-            _pinned = GCHandle.Alloc(this);
+            // A Disconnect that timed out leaves the pin allocated for the callback still running.
+            if (!_pinned.IsAllocated)
+                _pinned = GCHandle.Alloc(this);
             unsafe
             {
                 ObsNative.signal_handler_connect(ObsNative.obs_output_get_signal_handler(_output.Pointer), _signal,
@@ -76,12 +79,30 @@ internal sealed class ObsOutputSignalSubscription
                     &ObsOutput.OnSaved, GCHandle.ToIntPtr(_pinned));
             }
             _connected = false;
+
+            // Unbounded, this self-deadlocked whenever Disconnect ran on a thread that was itself
+            // inside a handler, or that pumped the SynchronizationContext a posted handler needed.
+            // On timeout the pin stays allocated: freeing it under a live callback hands libobs a
+            // dangling GCHandle.
+            var deadline = Environment.TickCount64 + (long)DisconnectTimeout.TotalMilliseconds;
             while (_callbacksInFlight != 0)
-                Monitor.Wait(_gate);
+            {
+                var remaining = (int)Math.Max(0, deadline - Environment.TickCount64);
+                if (remaining == 0 || !Monitor.Wait(_gate, remaining))
+                {
+                    Diagnostics.Report(DiagnosticLevel.Error,
+                        $"OBS '{_signal}' handlers were still running after {DisconnectTimeout.TotalSeconds:0}s; "
+                        + "leaving the callback pinned rather than freeing it under them");
+                    return;
+                }
+            }
+
             if (_pinned.IsAllocated)
                 _pinned.Free();
         }
     }
+
+    private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(10);
 
     internal void OnNativeSignal()
     {

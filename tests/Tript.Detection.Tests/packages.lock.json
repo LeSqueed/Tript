@@ -132,7 +132,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       }
     },
     "net10.0/win-x64": {
@@ -276,7 +279,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       }
     },
     "net10.0-windows10.0.19041/win-x64": {

@@ -793,6 +793,7 @@ export type CommandName =
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
   | 'OpenFileLocation'
+  | 'OpenLogFolder'
   | 'OpenInBrowser'
   | 'ListTraining'
   | 'ImportTrainingAssets'

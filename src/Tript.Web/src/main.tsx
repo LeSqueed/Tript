@@ -3,6 +3,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
+import { ErrorBoundary } from './app/ErrorBoundary';
+import { installGlobalErrorHandlers } from './app/errorReporting';
 import { installPhotinoBridge, type PhotinoExternal } from './app/nativeBridge';
 import './theme/theme.css';
 import './theme/utilities.css';
@@ -20,9 +22,13 @@ import './components/StreamerView.css';
 import './components/storage/storage.css';
 import './components/TrainingView.css';
 
+installGlobalErrorHandlers();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 

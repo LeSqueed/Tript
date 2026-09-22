@@ -10,6 +10,9 @@ internal static class UpdateStagingPaths
     private const string MarkerFileName = "ready.marker";
     private const string OldAppFolderName = "old-App";
 
+    // Written by launcher.c's RollBackFailedUpdate: the version that failed to start and was undone.
+    private const string RolledBackFileName = "rolled-back";
+
     internal static string InstallRootFromAppBaseDirectory(string appBaseDirectory)
     {
         var trimmed = Path.TrimEndingDirectorySeparator(Path.GetFullPath(appBaseDirectory));
@@ -23,6 +26,9 @@ internal static class UpdateStagingPaths
 
     internal static string OldAppBackupPath(string installRoot) =>
         Path.Combine(StagingRoot(installRoot), OldAppFolderName);
+
+    internal static string RolledBackPath(string installRoot) =>
+        Path.Combine(StagingRoot(installRoot), RolledBackFileName);
 
     internal static string DownloadPath(string installRoot, string token) =>
         Path.Combine(StagingRoot(installRoot), $"download-{token}.zip.part");

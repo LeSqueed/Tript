@@ -3,4 +3,9 @@
     <RootNamespace>Tript.Core</RootNamespace>
     <AssemblyName>Tript.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Tript.App.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

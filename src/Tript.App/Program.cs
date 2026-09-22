@@ -5,6 +5,8 @@ using System.Runtime.InteropServices;
 #if TRIPT_TRAINING
 using Tript.App.Training;
 #endif
+using Serilog;
+using Serilog.Events;
 using Tript.Detection;
 using Tript.App;
 using Tript.App.Models;
@@ -15,12 +17,16 @@ namespace Tript.App;
 
 internal static class Program
 {
+    private static readonly Lock ObsLogGate = new();
+    private static IDisposable? _obsLogScope;
+
     private static int Main(string[] args)
     {
         var options = AppOptions.Parse(args);
         if (options is null)
             return 2;
 
+        AppLog.InstallCrashHandlers();
         try
         {
             using var app = BuildApp(options);
@@ -29,14 +35,51 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App: {exception}");
+            Log.Fatal(exception, "Tript.App: the app host failed to start or run");
             return 1;
+        }
+        finally
+        {
+            AppLog.Shutdown();
+        }
+    }
+
+    // libobs formats every diagnostic that matters for a recorder, including D3D11 device loss,
+    // encoder open failures, NVENC session limits and capture hook errors, and hands it to one
+    // process-wide handler. Without this they are formatted and dropped. Installed before
+    // obs_startup so module loading and graphics init are captured too.
+    private static void InstallObsLogBridge()
+    {
+        lock (ObsLogGate)
+        {
+            if (_obsLogScope is not null)
+                return;
+
+            try
+            {
+                _obsLogScope = ObsLog.Install(static (level, message) =>
+                {
+                    var serilogLevel = level switch
+                    {
+                        ObsLogLevel.Error => LogEventLevel.Error,
+                        ObsLogLevel.Warning => LogEventLevel.Warning,
+                        ObsLogLevel.Info => LogEventLevel.Information,
+                        _ => LogEventLevel.Verbose,
+                    };
+                    Log.Write(serilogLevel, "libobs: {Message}", message.TrimEnd());
+                });
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or DllNotFoundException
+                or EntryPointNotFoundException)
+            {
+                Log.Warning(exception, "Tript.App: the libobs log bridge could not be installed");
+            }
         }
     }
 
     internal static AppHost BuildApp(AppOptions options)
     {
-        AppLog.Configure();
+        AppLog.Configure(options.LogDirectory);
 
         DeclareDpiAwareness();
 
@@ -132,6 +175,8 @@ internal static class Program
         if (locations.RuntimeDirectory is not null)
             ObsRuntime.SetRuntimeDirectory(locations.RuntimeDirectory);
 
+        InstallObsLogBridge();
+
         _ = MuxerHelper.EnsureNextToApp(locations.ModuleBinaryDir);
 
         ObsStartupOptions startup;
@@ -159,7 +204,7 @@ internal static class Program
         var runtime = ObsRuntime.Start(startup);
 
         if (OperatingSystem.IsWindows())
-            Console.Error.WriteLine($"Tript.App: libobs startup on {Thread.CurrentThread.GetApartmentState()} thread");
+            Log.Debug("Tript.App: libobs startup on {Apartment} thread", Thread.CurrentThread.GetApartmentState());
 
         if (OperatingSystem.IsWindows() && locations.RuntimeDirectory is not null)
             SetDllDirectoryW(locations.RuntimeDirectory);
@@ -196,8 +241,11 @@ internal static class Program
         if (OperatingSystem.IsWindows())
         {
             var types = runtime.EnumerateInputTypes();
-            Console.Error.WriteLine($"Tript.App: registered input types: {string.Join(", ", types)}");
+            Log.Information("Tript.App: registered input types: {Types}", string.Join(", ", types));
         }
+
+        Log.Information("Tript.App: registered output types: {Types}",
+            string.Join(", ", ObsOutput.EnumerateTypeIds()));
 
         if (!report.AllLoaded)
             throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
@@ -218,7 +266,7 @@ internal static class Program
                     && m.ModuleName.IndexOf(".dll", StringComparison.OrdinalIgnoreCase) >= 0)
                 .Select(m => $"{m.ModuleName} @0x{m.BaseAddress:X}")
                 .ToArray();
-            Console.Error.WriteLine($"Tript.App: loaded obs modules: {string.Join(", ", loaded)}");
+            Log.Error("Tript.App: graphics init failed; loaded obs modules: {Modules}", string.Join(", ", loaded));
 
             var obs = System.Diagnostics.Process.GetCurrentProcess().Modules
                 .Cast<System.Diagnostics.ProcessModule>()
@@ -227,7 +275,7 @@ internal static class Program
                 ?.BaseAddress ?? nint.Zero;
             if (obs == nint.Zero)
             {
-                Console.Error.WriteLine("Tript.App: graphics diagnostic failed: obs module not found");
+                Log.Error("Tript.App: graphics diagnostic failed: obs module not found");
                 return;
             }
             unsafe
@@ -242,13 +290,17 @@ internal static class Program
                     NativeLibrary.GetExport(obs, "gs_effect_create_from_file");
                 var bfree = (delegate* unmanaged[Cdecl]<nint, void>)
                     NativeLibrary.GetExport(obs, "bfree");
+                var gsDestroy = (delegate* unmanaged[Cdecl]<nint, void>)
+                    NativeLibrary.GetExport(obs, "gs_destroy");
+                var effectDestroy = (delegate* unmanaged[Cdecl]<nint, void>)
+                    NativeLibrary.GetExport(obs, "gs_effect_destroy");
 
                 nint graphics = 0;
                 var module = "libobs-d3d11\0";
                 var modulePtr = Marshal.StringToCoTaskMemAnsi(module);
                 var code = gsCreate(&graphics, (byte*)modulePtr, 0);
                 Marshal.FreeCoTaskMem(modulePtr);
-                Console.Error.WriteLine($"Tript.App: gs_create -> {code}, graphics=0x{graphics:X}");
+                Log.Error("Tript.App: gs_create -> {Code}, graphics=0x{Graphics:X}", code, graphics);
 
                 if (graphics != 0)
                 {
@@ -265,24 +317,31 @@ internal static class Program
                         var found = findDataFile((byte*)namePtr);
                         Marshal.FreeCoTaskMem(namePtr);
                         var foundPath = found != 0 ? Marshal.PtrToStringAnsi(found) ?? "(null)" : "(none)";
-                        Console.Error.WriteLine($"Tript.App: {effectName} found at: {foundPath} exists={found != 0 && File.Exists(foundPath)}");
+                        Log.Error("Tript.App: {Effect} found at: {Path} exists={Exists}", effectName, foundPath,
+                            found != 0 && File.Exists(foundPath));
 
                         nint error = 0;
                         var pathPtr = Marshal.StringToCoTaskMemAnsi(foundPath + "\0");
                         var effect = effectCreate((byte*)pathPtr, &error);
                         Marshal.FreeCoTaskMem(pathPtr);
                         var errorText = error != 0 ? Marshal.PtrToStringAnsi(error) ?? "(null)" : "(none)";
-                        Console.Error.WriteLine($"Tript.App:   {effectName} -> 0x{effect:X}, error: {errorText}");
+                        Log.Error("Tript.App:   {Effect} -> 0x{Handle:X}, error: {Error}", effectName, effect, errorText);
                         if (error != 0)
                             bfree2(error);
+                        if (effect != 0)
+                            effectDestroy(effect);
                     }
                     gsLeave();
+
+                    // This is a second D3D11 device created only to explain the failure. Without
+                    // gs_destroy it stays alive for the rest of the process.
+                    gsDestroy(graphics);
                 }
             }
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Tript.App: graphics diagnostic failed: {exception.Message}");
+            Log.Error(exception, "Tript.App: graphics diagnostic failed");
         }
     }
 
@@ -326,8 +385,11 @@ internal static class Program
     internal static IReadOnlyList<string> SafeModules(bool isWindows) =>
         isWindows
 
-            ? new[] { "obs-x264", "obs-ffmpeg", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
-            : new[] { "obs-x264", "obs-ffmpeg", "linux-capture", "image-source", "linux-pulseaudio" };
+            // obs-outputs is here for mp4_output, OBS's Hybrid MP4 writer, which is what keeps a
+            // recording playable after a crash. It also carries the RTMP/FLV outputs, which Tript
+            // never creates. Keep in step with OBS_MODULES in the Makefile.
+            ? new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
+            : new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "linux-capture", "image-source", "linux-pulseaudio" };
 
     [DllImport("libX11.so.6", CharSet = CharSet.Ansi)]
     private static extern nint XOpenDisplay(string? name);

@@ -11,29 +11,73 @@ public sealed class MediaProbe
 {
     private readonly string _ffprobePath;
 
-    private readonly Dictionary<string, MediaInfo> _cache = new(StringComparer.Ordinal);
+    // Keyed on path alone, a file rewritten in place kept its first answer forever. The replay scratch
+    // file is reused for every live highlight, so its stale duration made clip regions get computed
+    // against the wrong length. The stamp makes a changed file miss the cache.
+    private readonly record struct FileStamp(long Length, DateTime LastWriteUtc);
+
+    private readonly Dictionary<string, (FileStamp Stamp, MediaInfo Info)> _cache = new(StringComparer.Ordinal);
+
+    // Previously unbounded: one entry per file probed for the life of the process. Evicting a single
+    // entry at a time rather than clearing keeps a large library from re-probing everything per scan.
+    internal const int MaxCachedEntries = 4096;
 
     public MediaProbe(string ffprobePath)
     {
         _ffprobePath = ffprobePath;
     }
 
+    internal int CachedCount
+    {
+        get
+        {
+            lock (_cache)
+                return _cache.Count;
+        }
+    }
+
     public MediaInfo Probe(string path)
     {
         var absolute = Path.GetFullPath(path);
+        var stamp = StampOf(absolute);
         lock (_cache)
         {
-            if (_cache.TryGetValue(absolute, out var cached))
-                return cached;
+            if (stamp is { } current && _cache.TryGetValue(absolute, out var cached) && cached.Stamp == current)
+                return cached.Info;
         }
 
         var info = ProbeUncached(absolute);
-        lock (_cache)
+        if (stamp is { } probed)
         {
-            _cache[absolute] = info;
+            lock (_cache)
+            {
+                if (_cache.Count >= MaxCachedEntries && !_cache.ContainsKey(absolute))
+                {
+                    foreach (var oldest in _cache.Keys)
+                    {
+                        _cache.Remove(oldest);
+                        break;
+                    }
+                }
+
+                _cache[absolute] = (probed, info);
+            }
         }
 
         return info;
+    }
+
+    private static FileStamp? StampOf(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists ? new FileStamp(file.Length, file.LastWriteTimeUtc) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private MediaInfo ProbeUncached(string path)
@@ -202,7 +246,7 @@ public sealed class MediaProbe
             throw new ClipSourceException($"Failed to start {fileName}: {ex.Message}", ex);
         }
 
-        ProcessPipes.LowerPriority(process);
+        ProcessPipes.Adopt(process);
         var stdout = ProcessPipes.BeginRead(process.StandardOutput);
         var stderr = ProcessPipes.BeginRead(process.StandardError);
 

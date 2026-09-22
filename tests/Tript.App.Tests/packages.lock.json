@@ -74,6 +74,11 @@
           "Newtonsoft.Json": "13.0.1"
         }
       },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "10.0.12",
+        "contentHash": "kdj5cqOwgZCMltEhQ4+WVUoFkMHG08EJfy1MDyS9H+FBg66vTTFyX8YcNl8IQh5wRQv79P+iduQgDGY8ucBR+w=="
+      },
       "Newtonsoft.Json": {
         "type": "Transitive",
         "resolved": "13.0.1",
@@ -96,6 +101,14 @@
         "type": "Transitive",
         "resolved": "4.4.0",
         "contentHash": "ZC6Le3rr4TVJJjS4KsQAesxeF1EhW9qcZmmG7eP5Y2G3+gTGkJEUXkq4+tZNPtyp05I0wWOxnIjwtxFweJsObw=="
+      },
+      "System.Drawing.Common": {
+        "type": "Transitive",
+        "resolved": "10.0.12",
+        "contentHash": "FBUxiucg2gsnyItbpGgyXI5u8FYLcqdLKS1XJkHHTj3RK1c6kpsJr/Y9i4edUNF7LqCYFrHqpHEvpt8/lNBe9w==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "10.0.12"
+        }
       },
       "System.Numerics.Tensors": {
         "type": "Transitive",
@@ -185,7 +198,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       },
       "tript.recorder": {
         "type": "Project",
@@ -205,7 +221,9 @@
       "tript.shell": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.Win32.SystemEvents": "[10.0.12, )",
           "Photino.NET": "[4.0.16, )",
+          "System.Drawing.Common": "[10.0.12, )",
           "Tript.App": "[0.1.0-alpha.9, )"
         }
       },
@@ -224,6 +242,11 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime.Managed": "1.28.0"
         }
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "10.0.12",
+        "contentHash": "kdj5cqOwgZCMltEhQ4+WVUoFkMHG08EJfy1MDyS9H+FBg66vTTFyX8YcNl8IQh5wRQv79P+iduQgDGY8ucBR+w=="
       },
       "Photino.Native": {
         "type": "Transitive",
@@ -436,7 +459,10 @@
         }
       },
       "tript.obs": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Tript.Core": "[0.1.0-alpha.9, )"
+        }
       },
       "tript.recorder": {
         "type": "Project",
@@ -457,6 +483,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Toolkit.Uwp.Notifications": "[7.1.3, )",
+          "Microsoft.Win32.SystemEvents": "[10.0.12, )",
           "Photino.NET": "[4.0.16, )",
           "System.Drawing.Common": "[10.0.12, )",
           "Tript.App": "[0.1.0-alpha.9, )"

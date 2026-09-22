@@ -102,7 +102,7 @@ publish-windows: restore-windows
 # hardware is actually present.
 
 # The allowlist, mirrored here (single source of truth is Program.cs; keep them in step).
-OBS_MODULES := obs-x264 obs-ffmpeg obs-nvenc obs-qsv11 win-capture image-source win-wasapi
+OBS_MODULES := obs-x264 obs-ffmpeg obs-outputs obs-nvenc obs-qsv11 win-capture image-source win-wasapi
 
 # bin/64bit's libobs + graphics module + the media dlls obs-ffmpeg.dll imports. Qt, the OBS
 # frontend (obs64.exe, obs-frontend-api.dll, obs-scripting.dll, lua51.dll) and every PDB are
@@ -130,8 +130,10 @@ assemble-windows: obs-fetch
 	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/av*.dll) $(WIN_APP_DIR)/bin/64bit/
 	cp $(wildcard $(OBS_EXTRACTED)/bin/64bit/sw*.dll) $(WIN_APP_DIR)/bin/64bit/
 
-	# The allowlisted module binaries only — browser/CEF, Qt plugins, filters, outputs, vst,
-	# decklink/aja and the like never load and are not shipped.
+	# The allowlisted module binaries only: browser/CEF, Qt plugins, filters, vst, decklink/aja and
+	# the like never load and are not shipped. obs-outputs is the exception among the output
+	# plugins: it registers mp4_output, the Hybrid MP4 writer that keeps a recording playable after a
+	# crash. Its RTMP/FLV outputs come along but Tript never creates them.
 	mkdir -p $(WIN_APP_DIR)/obs-plugins/64bit
 	for module in $(OBS_MODULES); do \
 		cp $(OBS_EXTRACTED)/obs-plugins/64bit/$$module.dll $(WIN_APP_DIR)/obs-plugins/64bit/; done

@@ -1,0 +1,72 @@
+# The checks that need a real Windows machine. Called by ci.yml on every push and by release.yml
+# before anything is published, because a tag push does not run ci.yml and a release must not go
+# out on a build that was only ever cross-compiled.
+#
+# It also runs the unit suites on Windows, which is the only place the Windows-only tests (tray
+# icon, child-process job, Spout, PROPVARIANT layout) do anything: on Linux they skip. The OBS
+# integration suite stays out, for the reasons given in ci.yml.
+name: Windows checks
+
+on:
+  workflow_call:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Tript.Web/package-lock.json
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Build the frontend
+        working-directory: src/Tript.Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build
+        run: dotnet build Tript.slnx -c Release --nologo
+
+      # Serial on purpose: Tript.App.Tests drives a real libobs context, and parallel test hosts trip
+      # an intermittent libobs JSON-parse crash.
+      - name: Test
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($project in 'App','Detection','Media','Recorder','Settings','GameDiscovery') {
+            dotnet test "tests/Tript.$project.Tests" -c Release -f net10.0 --nologo -m:1
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+      # The launcher is the one component that can leave an install unable to start: it swaps
+      # updates into place and rolls a broken one back. These drive the compiled launcher itself.
+      - name: Launcher update paths
+        shell: pwsh
+        run: ./tests/Tript.Launcher.Tests/Test-Launcher.ps1
+
+      # Publishes the app host the way the shipped bundle is published (self-contained, win-x64) and
+      # starts it. The shell itself needs a desktop, which a runner does not have.
+      - name: Published app host reaches READY
+        shell: pwsh
+        run: |
+          dotnet publish src/Tript.App/Tript.App.csproj -f net10.0 -c Release `
+            -r win-x64 --self-contained true -p:RestoreLockedMode=true -o publish-smoke --nologo
+          ./tests/Tript.Smoke/Test-AppHostReady.ps1 -AppHost publish-smoke/Tript.App.exe `
+            -WebRoot src/Tript.Web/dist
+
+      - name: Lock files are unchanged by the build
+        run: git diff --exit-code -- '*packages.lock.json'

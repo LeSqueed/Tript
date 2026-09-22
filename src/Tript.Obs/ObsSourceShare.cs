@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -15,6 +16,14 @@ internal sealed unsafe class ObsSourceShare : IDisposable
     private const float OrthoDepth = 100f;
 
     private static readonly ConcurrentDictionary<nint, ObsSourceShare> Live = new();
+
+    // ObsRuntime.Dispose calls this before obs_shutdown. An instance left registered past shutdown
+    // would, on its owner's later Dispose, call back into a libobs that no longer exists.
+    internal static void DisposeAllLive()
+    {
+        foreach (var live in Live.Values.ToArray())
+            live.Dispose();
+    }
     private static long _nextId;
 
     private readonly ObsSource _source;
@@ -122,10 +131,14 @@ internal sealed unsafe class ObsSourceShare : IDisposable
                 share.ExitCallback();
             }
         }
-        catch
+        catch (Exception exception)
         {
+            Diagnostics.ReportFirst(ref _renderCallbackFailed, DiagnosticLevel.Error,
+                "libobs render callback for the shared capture failed; OBS sharing is not updating", exception);
         }
     }
+
+    private static int _renderCallbackFailed;
 
     private void Render()
     {

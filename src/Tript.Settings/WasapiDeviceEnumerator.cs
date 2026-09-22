@@ -41,8 +41,11 @@ public static class WasapiDeviceEnumerator
             return true;
         }
 
+        // S_FALSE means the thread was already initialised, which is the common case on a reused pool
+        // thread and still owns a reference. Balancing only S_OK leaks one apartment reference per call.
+        // RPC_E_CHANGED_MODE must not be balanced: that call took no reference.
         var initResult = CoInitializeEx(IntPtr.Zero, CoInitializeFlagsMultithreaded);
-        var initializedHere = initResult == 0;
+        var initializedHere = initResult is HResultOk or HResultFalse;
 
         var comObjects = new List<object>();
         try
@@ -222,6 +225,10 @@ public static class WasapiDeviceEnumerator
         public uint pid;
     }
 
+    // Native PROPVARIANT is an 8-byte header plus a two-pointer union: 24 bytes on x64, 16 on x86.
+    // Declaring only one pointer makes the struct too small, so GetValue writes and PropVariantClear
+    // zeroes past the end of the managed local and corrupts the adjacent stack. Both pointers must
+    // stay declared even though only the first is read.
     [StructLayout(LayoutKind.Sequential)]
     private struct PropVariant
     {
@@ -230,12 +237,16 @@ public static class WasapiDeviceEnumerator
         public ushort wReserved2;
         public ushort wReserved3;
         public nint value;
+        public nint valueHigh;
     }
 
     [DllImport("ole32.dll", PreserveSig = true)]
     private static extern int PropVariantClear(ref PropVariant value);
 
     private const uint CoInitializeFlagsMultithreaded = 0x0;
+
+    private const int HResultOk = 0;
+    private const int HResultFalse = 1;
 
     [DllImport("ole32.dll", ExactSpelling = true)]
     private static extern int CoInitializeEx(nint reserved, uint dwCoInit);

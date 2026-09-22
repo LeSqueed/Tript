@@ -519,7 +519,7 @@ public class VisualEventDetector : IDisposable
 
                 if (!_frameQueue.Reader.TryRead(out var frameData))
                 {
-                    Log.Debug("DetectionLoop: no frame available");
+                    Log.Verbose("DetectionLoop: no frame available");
                     continue;
                 }
 
@@ -529,7 +529,7 @@ public class VisualEventDetector : IDisposable
                     frameData = newer;
                 }
 
-                Log.Debug("DetectionLoop: processing frame {W}x{H}", frameData.Width, frameData.Height);
+                Log.Verbose("DetectionLoop: processing frame {W}x{H}", frameData.Width, frameData.Height);
 
                 try
                 {
@@ -538,7 +538,7 @@ public class VisualEventDetector : IDisposable
 
                     if (DetectionFramePreprocessor.IsNearBlack(frameData.Buffer, fW, fH))
                     {
-                        Log.Debug("DetectionLoop: skipping near-black frame");
+                        Log.Verbose("DetectionLoop: skipping near-black frame");
 
                         DetectionsAvailable?.Invoke(new DetectionBatch { FrameTimestamp = frameData.Timestamp });
                         continue;
@@ -548,7 +548,7 @@ public class VisualEventDetector : IDisposable
                         ? []
                         : DetectObjects(session, frameData);
 
-                    Log.Debug("DetectionLoop: {Count} results across {Groups} groups", allResults.Count, _regionGroups.Count);
+                    Log.Verbose("DetectionLoop: {Count} results across {Groups} groups", allResults.Count, _regionGroups.Count);
                     if (allResults.Count == 0 && DateTime.UtcNow - _lastEmptyInferenceLog >= TimeSpan.FromSeconds(5))
                     {
                         _lastEmptyInferenceLog = DateTime.UtcNow;
@@ -698,6 +698,16 @@ public class VisualEventDetector : IDisposable
         }
 
         Stop();
+
+        // Only the frame callback and the detection thread touch this event. Stop has removed the
+        // subscription, so once the thread has joined nothing can Set or Wait on it. A quarantined
+        // thread is still inside Wait, so the event is left for the GC in that case.
+        bool quarantined;
+        lock (_lifecycleGate)
+            quarantined = _quarantined;
+        if (!quarantined)
+            _frameArrived.Dispose();
+
         GC.SuppressFinalize(this);
     }
 }

@@ -5,6 +5,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32;
+using Tript.Core;
 
 namespace Tript.Obs.Spout;
 
@@ -54,6 +55,7 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
     private SharedBlock? _active;
     private Mutex? _accessMutex;
     private bool _registered;
+    private int _listLockTimeoutReported;
     private bool _disposed;
 
     internal SpoutSender(string name, SpoutObjectNames? objects = null)
@@ -76,8 +78,11 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
             _info ??= SharedBlock.Open(Name, SharedInfoSize);
             _accessMutex ??= new Mutex(false, Name + AccessMutexSuffix);
 
-            using (_info.Lock(ListLockTimeout))
-                WriteInfo(_info.Accessor, sharedHandle, width, height);
+            using (var infoLock = _info.Lock(ListLockTimeout))
+            {
+                if (infoLock.Acquired)
+                    WriteInfo(_info.Accessor, sharedHandle, width, height);
+            }
 
             if (_registered)
                 return;
@@ -85,8 +90,18 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
             _list ??= SharedBlock.Open(_objects.SenderList, MaxSenders() * NameLength);
             _active ??= SharedBlock.Open(_objects.ActiveSender, NameLength);
 
-            using (_list.Lock(ListLockTimeout))
+            using (var listLock = _list.Lock(ListLockTimeout))
             {
+                // The sender list is shared by every Spout application on the machine. Writing it
+                // without the lock could clobber another sender's registration, so on a timeout this
+                // leaves _registered false and the next Publish tries again.
+                if (!listLock.Acquired)
+                {
+                    Diagnostics.ReportFirst(ref _listLockTimeoutReported, DiagnosticLevel.Warning,
+                        "The Spout sender list was locked by another application; registration will be retried");
+                    return;
+                }
+
                 var names = ReadNames(_list.Accessor, SlotCount(_list));
                 names.Add(Name);
                 WriteNames(_list.Accessor, SlotCount(_list), names);
@@ -177,14 +192,23 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
     {
         if (_registered && _list is not null && _active is not null)
         {
-            using (_list.Lock(ListLockTimeout))
+            using (var listLock = _list.Lock(ListLockTimeout))
             {
-                var names = ReadNames(_list.Accessor, SlotCount(_list));
-                names.Remove(Name);
-                WriteNames(_list.Accessor, SlotCount(_list), names);
+                if (listLock.Acquired)
+                {
+                    var names = ReadNames(_list.Accessor, SlotCount(_list));
+                    names.Remove(Name);
+                    WriteNames(_list.Accessor, SlotCount(_list), names);
 
-                if (ReadString(_active.Accessor, 0, NameLength) == Name)
-                    WriteString(_active.Accessor, 0, NameLength, names.Min ?? string.Empty);
+                    if (ReadString(_active.Accessor, 0, NameLength) == Name)
+                        WriteString(_active.Accessor, 0, NameLength, names.Min ?? string.Empty);
+                }
+                else
+                {
+                    // A stale name in the list is far less harmful than corrupting another sender's.
+                    Diagnostics.Report(DiagnosticLevel.Warning,
+                        "The Spout sender list stayed locked; Tript's entry may linger until the next start");
+                }
             }
         }
 
@@ -192,8 +216,11 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
 
         if (_info is not null)
         {
-            using (_info.Lock(ListLockTimeout))
-                _info.Accessor.WriteArray(0, new byte[SharedInfoSize], 0, SharedInfoSize);
+            using (var infoLock = _info.Lock(ListLockTimeout))
+            {
+                if (infoLock.Acquired)
+                    _info.Accessor.WriteArray(0, new byte[SharedInfoSize], 0, SharedInfoSize);
+            }
             _info.Dispose();
             _info = null;
         }
@@ -286,8 +313,19 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
         private SharedBlock(MemoryMappedFile map, string name)
         {
             _map = map;
-            Accessor = map.CreateViewAccessor(0, 0);
-            _mutex = new Mutex(false, name + MutexSuffix);
+            try
+            {
+                Accessor = map.CreateViewAccessor(0, 0);
+                _mutex = new Mutex(false, name + MutexSuffix);
+            }
+            catch
+            {
+                // The factory methods have no try of their own, so a throw here leaked a named
+                // section handle per failure.
+                Accessor?.Dispose();
+                map.Dispose();
+                throw;
+            }
         }
 
         internal MemoryMappedViewAccessor Accessor { get; }
@@ -307,7 +345,11 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
             }
         }
 
-        internal IDisposable Lock(TimeSpan timeout)
+        // AbandonedMutexException means the wait succeeded and this thread now owns the mutex; the
+        // previous owner simply died holding it. It is reported as acquired because it is: treating
+        // it as a failure would skip the release and hold the mutex forever. A timeout is the only
+        // real failure, and callers must check Acquired before writing shared memory.
+        internal LockScope Lock(TimeSpan timeout)
         {
             bool acquired;
             try
@@ -319,7 +361,7 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
                 acquired = true;
             }
 
-            return new Release(acquired ? _mutex : null);
+            return new LockScope(acquired ? _mutex : null);
         }
 
         public void Dispose()
@@ -329,8 +371,10 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
             _mutex.Dispose();
         }
 
-        private sealed class Release(Mutex? mutex) : IDisposable
+        internal sealed class LockScope(Mutex? mutex) : IDisposable
         {
+            internal bool Acquired => mutex is not null;
+
             public void Dispose() => mutex?.ReleaseMutex();
         }
     }

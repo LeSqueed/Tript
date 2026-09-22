@@ -208,6 +208,18 @@ export function GeneralPage({
           </div>
         </div>
       </section>
+
+      <section className="settings-section" aria-labelledby="general-diagnostics-heading">
+        <h3 className="subheading" id="general-diagnostics-heading">Diagnostics</h3>
+        <p className="muted small">
+          Logs record what Tript was doing when something went wrong. If you report a problem, include the
+          most recent log file. Logs contain folder paths, file names and game names from this PC, so look
+          through one before sharing it.
+        </p>
+        <div className="field">
+          <Button onClick={() => client.send('OpenLogFolder')}>Open log folder</Button>
+        </div>
+      </section>
     </div>
   );
 }

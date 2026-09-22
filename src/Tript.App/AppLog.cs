@@ -5,6 +5,7 @@ using System.Threading;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
+using Tript.Core;
 using Tript.Settings;
 
 namespace Tript.App;
@@ -13,8 +14,28 @@ internal static class AppLog
 {
     private const int RetainedFiles = 10;
 
-    internal static void Configure(LogEventLevel minimum = LogEventLevel.Information)
+    // Tript runs for days in the background, and pruning only ran at startup, so a single session
+    // could grow one file without bound. Rolling at a fixed size keeps disk use capped at roughly
+    // RetainedFiles * MaxFileBytes.
+    private const long MaxFileBytes = 20L * 1024 * 1024;
+
+    private static int _crashHandlersInstalled;
+
+    private static string? _logDirectoryOverride;
+
+    internal static string LogDirectory =>
+        Volatile.Read(ref _logDirectoryOverride) ?? Path.Combine(SettingsFilePaths.ConfigDirectory, "logs");
+
+    internal static string? CurrentFile { get; private set; }
+
+    internal static void Configure(string? logDirectory = null, LogEventLevel minimum = LogEventLevel.Information)
     {
+        Volatile.Write(ref _logDirectoryOverride, string.IsNullOrWhiteSpace(logDirectory) ? null : logDirectory);
+
+        // Replacing Log.Logger does not dispose the previous one, so a second Configure would leak
+        // its file handle. CloseAndFlush disposes it and is harmless the first time.
+        Log.CloseAndFlush();
+
         var configuration = new LoggerConfiguration()
             .WriteTo.Sink(new StandardErrorSink(), restrictedToMinimumLevel: minimum);
 
@@ -27,18 +48,49 @@ internal static class AppLog
         }
 
         Log.Logger = configuration.MinimumLevel.Is(floor).CreateLogger();
+
+        Diagnostics.SetSink(static (level, message, exception) => Log.Write(level switch
+        {
+            DiagnosticLevel.Error => LogEventLevel.Error,
+            DiagnosticLevel.Warning => LogEventLevel.Warning,
+            DiagnosticLevel.Information => LogEventLevel.Information,
+            _ => LogEventLevel.Debug,
+        }, exception, "{Message}", message));
+    }
+
+    internal static void Shutdown() => Log.CloseAndFlush();
+
+    // Nothing else in the process catches an exception that escapes a thread, so without these a
+    // crash leaves a log that simply stops. Safe to call before Configure: Log is a silent logger
+    // until then, and Configure swaps in the real one underneath these handlers.
+    internal static void InstallCrashHandlers()
+    {
+        if (Interlocked.Exchange(ref _crashHandlersInstalled, 1) != 0)
+            return;
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            Log.Fatal(args.ExceptionObject as Exception,
+                "Unhandled exception; the process is terminating: {Terminating}", args.IsTerminating);
+            if (args.IsTerminating)
+                Log.CloseAndFlush();
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            Log.Error(args.Exception, "A background task failed and nothing observed the exception");
+            args.SetObserved();
+        };
     }
 
     private static FileSink? TryCreateFileSink()
     {
         try
         {
-            var directory = Path.Combine(SettingsFilePaths.ConfigDirectory, "logs");
+            var directory = LogDirectory;
             Directory.CreateDirectory(directory);
-            PruneOldLogs(directory);
-            var path = Path.Combine(
-                directory, $"tript-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.log");
-            return new FileSink(path);
+            PruneOldLogs(directory, keep: RetainedFiles - 1);
+            return new FileSink(directory, $"tript-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}");
         }
         catch (Exception exception)
             when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -48,14 +100,14 @@ internal static class AppLog
         }
     }
 
-    private static void PruneOldLogs(string directory)
+    private static void PruneOldLogs(string directory, int keep)
     {
         try
         {
             var stale = new DirectoryInfo(directory)
                 .EnumerateFiles("tript-*.log")
                 .OrderByDescending(file => file.LastWriteTimeUtc)
-                .Skip(RetainedFiles - 1);
+                .Skip(keep);
             foreach (var file in stale)
             {
                 try { file.Delete(); }
@@ -94,16 +146,35 @@ internal static class AppLog
 
     private sealed class FileSink : ILogEventSink, IDisposable
     {
-        private readonly StreamWriter _writer;
-        private readonly Lock _gate = new();
+        // Flushing every line made each debug message a synchronous disk write, including the
+        // detection loop's once-per-tick lines. Anything at Information or above still flushes at
+        // once, so the lines that explain a crash reach disk before it; debug lines flush at most
+        // once a second, and Shutdown flushes whatever is left.
+        private const long DebugFlushIntervalMilliseconds = 1000;
 
-        internal FileSink(string path)
+        private readonly string _directory;
+        private readonly string _stem;
+        private readonly Lock _gate = new();
+        private StreamWriter _writer;
+        private long _written;
+        private int _part;
+        private long _lastFlush;
+
+        internal FileSink(string directory, string stem)
         {
-            _writer = new StreamWriter(
-                new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
-            {
-                AutoFlush = true,
-            };
+            _directory = directory;
+            _stem = stem;
+            _writer = Open(PathFor(0));
+        }
+
+        private string PathFor(int part) =>
+            Path.Combine(_directory, part == 0 ? $"{_stem}.log" : $"{_stem}-{part}.log");
+
+        private static StreamWriter Open(string path)
+        {
+            var writer = new StreamWriter(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read));
+            CurrentFile = path;
+            return writer;
         }
 
         public void Emit(LogEvent logEvent)
@@ -115,14 +186,39 @@ internal static class AppLog
             {
                 try
                 {
+                    if (_written >= MaxFileBytes)
+                        Roll();
+
                     _writer.WriteLine(line);
+                    _written += line.Length + Environment.NewLine.Length;
                     if (logEvent.Exception is { } exception)
-                        _writer.WriteLine(exception);
+                    {
+                        var text = exception.ToString();
+                        _writer.WriteLine(text);
+                        _written += text.Length + Environment.NewLine.Length;
+                    }
+
+                    var now = Environment.TickCount64;
+                    if (logEvent.Level >= LogEventLevel.Information
+                        || now - _lastFlush >= DebugFlushIntervalMilliseconds)
+                    {
+                        _writer.Flush();
+                        _lastFlush = now;
+                    }
                 }
                 catch (Exception exception) when (exception is IOException or ObjectDisposedException)
                 {
                 }
             }
+        }
+
+        private void Roll()
+        {
+            _writer.Dispose();
+            _part++;
+            _written = 0;
+            _writer = Open(PathFor(_part));
+            PruneOldLogs(_directory, keep: RetainedFiles);
         }
 
         public void Dispose()

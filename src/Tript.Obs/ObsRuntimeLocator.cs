@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -156,6 +157,9 @@ public static class ObsRuntimeLocator
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
+            // Returning null surfaces later only as "No OBS runtime was found", so the real reason,
+            // usually pkg-config missing or failing, has to be recorded here.
+            Diagnostics.Report(DiagnosticLevel.Warning, "Probing for the OBS runtime failed", exception);
             return null;
         }
     }

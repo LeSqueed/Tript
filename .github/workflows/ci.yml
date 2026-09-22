@@ -53,3 +53,8 @@ jobs:
       # only surfaced later as NU1004 on a locked Windows publish.
       - name: Lock files are unchanged by the build
         run: git diff --exit-code -- '*packages.lock.json'
+
+  # Tript ships a Windows bundle that the job above only ever cross-compiles, so nothing started it
+  # on Windows before a release went out. Shared with release.yml, which must not ship without it.
+  windows:
+    uses: ./.github/workflows/windows-checks.yml

@@ -24,6 +24,15 @@ public sealed class ObsSceneItem : IDisposable
     internal static ObsSceneItem? FromBorrowedPointerOrNull(nint pointer) =>
         pointer == nint.Zero ? null : FromBorrowedPointer(pointer);
 
+    // For a pointer whose reference the caller already took, so it must not be taken twice.
+    internal static ObsSceneItem FromReferencedPointer(nint pointer)
+    {
+        if (pointer == nint.Zero)
+            throw new ObsException("libobs returned a null scene item where one was expected.");
+
+        return new ObsSceneItem(pointer);
+    }
+
     internal nint Pointer
     {
         get

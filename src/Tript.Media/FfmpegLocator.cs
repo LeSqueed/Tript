@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Tript.Core;
 
 namespace Tript.Media;
 
@@ -95,6 +96,7 @@ public sealed class FfmpegLocator
 
             if (!process.Start())
                 throw new FfmpegNotFoundException($"{what} at '{binary}' could not be started.");
+            ChildProcessJob.Track(process);
 
             if (!process.WaitForExit(5000))
             {

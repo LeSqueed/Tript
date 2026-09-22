@@ -58,7 +58,7 @@ internal sealed partial class AppHost
         if (!ShouldAutoRecord(gameId))
             return;
 
-        ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(gameId, owner));
+        RunGuarded(() => StartDetectedGameRecording(gameId, owner), "starting the recording for a detected game");
     }
 
     internal bool ShouldAutoRecord(string gameId) =>
@@ -127,7 +127,8 @@ internal sealed partial class AppHost
             if (_detectedGames.LatestGameId() is { } nextGameId
                 && _detectedGames.LatestOwner(nextGameId) is { } nextOwner)
             {
-                ThreadPool.QueueUserWorkItem(_ => StartDetectedGameRecording(nextGameId, nextOwner));
+                RunGuarded(() => StartDetectedGameRecording(nextGameId, nextOwner),
+                    "starting the recording for the next detected game");
             }
         }
     }

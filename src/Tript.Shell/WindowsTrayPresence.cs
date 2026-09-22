@@ -3,6 +3,8 @@
 
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using Tript.App;
 
 namespace Tript.Shell;
 
@@ -27,9 +29,6 @@ internal sealed class WindowsTrayPresence : IDisposable
     private const uint NimDelete = 0x00000002;
     private const uint NimSetVersion = 0x00000004;
     private const uint NotifyIconVersion4 = 4;
-    private const uint ImageIcon = 1;
-    private const uint LoadFromFile = 0x00000010;
-    private const uint LoadDefaultSize = 0x00000040;
     private const uint WmApp = 0x8000;
     private const uint WmTray = WmApp + 1;
     private const uint WmCommand = 0x0111;
@@ -37,6 +36,7 @@ internal sealed class WindowsTrayPresence : IDisposable
     private const uint WmLButtonUp = 0x0202;
     private const uint WmLButtonDoubleClick = 0x0203;
     private const uint WmRButtonUp = 0x0205;
+    private const uint WmSettingChange = 0x001A;
     private const uint WmUser = 0x0400;
     private const uint NinSelect = WmUser;
     private const uint NinKeySelect = WmUser + 1;
@@ -59,11 +59,14 @@ internal sealed class WindowsTrayPresence : IDisposable
     private readonly WndProcDelegate _wndProc;
     private readonly uint _taskbarCreated;
     private readonly uint _trayCallbackMessage = WmTray;
+    private readonly Dictionary<(TrayActivity, TrayAlert), IntPtr> _icons = new();
     private IntPtr _messageWindow;
     private IntPtr _icon;
+    private int _iconSize = 16;
     private bool _added;
     private bool _useGuid = true;
     private bool _disposed;
+    private TrayStatus _status = TrayStatus.Idle;
     private string _tooltip = "Tript";
 
     internal WindowsTrayPresence(string iconPath, Func<bool> isWindowVisible, Func<bool> isRecording,
@@ -85,7 +88,8 @@ internal sealed class WindowsTrayPresence : IDisposable
         try
         {
             _messageWindow = CreateMessageWindow();
-            _icon = LoadImage(IntPtr.Zero, _iconPath, ImageIcon, 32, 32, LoadFromFile | LoadDefaultSize);
+            _iconSize = TrayIconFactory.TrayIconSize();
+            _icon = IconFor(_status);
             if (_icon == IntPtr.Zero)
                 throw new InvalidOperationException($"Could not load the tray icon '{_iconPath}'.");
 
@@ -123,13 +127,62 @@ internal sealed class WindowsTrayPresence : IDisposable
         return _added;
     }
 
-    internal void SetRecordingState(bool recording, string? gameId, bool sharingOnly = false)
+    internal void SetStatus(TrayStatus status)
     {
-        _tooltip = recording
-            ? string.IsNullOrWhiteSpace(gameId) ? "Tript - Recording" : $"Tript - Recording: {gameId}"
-            : sharingOnly ? "Tript - Sharing only, out of space" : "Tript";
-        if (EnsureIconPresent())
+        if (_disposed || !OperatingSystem.IsWindows())
+            return;
+
+        _status = status;
+        _tooltip = status.Tooltip();
+        _icon = IconFor(status);
+        // NIF_ICON with a null handle blanks the tray entry, so never modify without a drawn icon.
+        if (_icon != IntPtr.Zero && EnsureIconPresent())
             ModifyIcon();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private IntPtr IconFor(TrayStatus status)
+    {
+        var key = (status.Activity, status.Alert);
+        if (_icons.TryGetValue(key, out var cached))
+            return cached;
+
+        IntPtr icon;
+        try
+        {
+            icon = TrayIconFactory.Create(_iconPath, _iconSize, status.Activity, status.Alert);
+        }
+        catch (Exception exception) when (exception is ArgumentException or SystemException)
+        {
+            Console.Error.WriteLine($"Tript.Shell: the tray icon could not be drawn: {exception.Message}");
+            return _icon;
+        }
+
+        _icons[key] = icon;
+        return icon;
+    }
+
+    // A DPI or taskbar-size change alters SM_CXSMICON, so cached icons become the wrong size.
+    [SupportedOSPlatform("windows")]
+    private void RebuildIcons()
+    {
+        var size = TrayIconFactory.TrayIconSize();
+        if (size == _iconSize)
+            return;
+
+        _iconSize = size;
+        DestroyIcons();
+        _icon = IconFor(_status);
+        if (_icon != IntPtr.Zero && EnsureIconPresent())
+            ModifyIcon();
+    }
+
+    private void DestroyIcons()
+    {
+        foreach (var icon in _icons.Values)
+            DestroyIcon(icon);
+        _icons.Clear();
+        _icon = IntPtr.Zero;
     }
 
     private IntPtr CreateMessageWindow()
@@ -184,7 +237,8 @@ internal sealed class WindowsTrayPresence : IDisposable
 
     private void ModifyIcon()
     {
-        var data = BuildNotifyIconData(_useGuid ? NifTip | NifGuid : NifTip);
+        var flags = NifTip | NifIcon;
+        var data = BuildNotifyIconData(_useGuid ? flags | NifGuid : flags);
         ShellNotifyIcon(NimModify, ref data);
     }
 
@@ -210,6 +264,13 @@ internal sealed class WindowsTrayPresence : IDisposable
                 EnsureIconPresent();
             }
             return IntPtr.Zero;
+        }
+
+        if (message == WmSettingChange)
+        {
+            if (!_disposed && OperatingSystem.IsWindows())
+                RebuildIcons();
+            return DefWindowProc(window, message, wParam, lParam);
         }
 
         if (message == _trayCallbackMessage)
@@ -247,6 +308,12 @@ internal sealed class WindowsTrayPresence : IDisposable
         if (menu == IntPtr.Zero)
             return;
 
+        if (_status.Alert != TrayAlert.None && !string.IsNullOrWhiteSpace(_status.AlertReason))
+        {
+            AppendMenu(menu, MfGrayed, 0, _status.AlertReason);
+            AppendMenu(menu, MfSeparator, 0, null);
+        }
+
         var visible = _isWindowVisible();
         AppendMenu(menu, MfString, 1, visible ? "Hide Tript" : "Show Tript");
         AppendMenu(menu, MfSeparator, 0, null);
@@ -276,12 +343,7 @@ internal sealed class WindowsTrayPresence : IDisposable
         _disposed = true;
 
         DeleteIcon();
-
-        if (_icon != IntPtr.Zero)
-        {
-            DestroyIcon(_icon);
-            _icon = IntPtr.Zero;
-        }
+        DestroyIcons();
 
         if (_messageWindow != IntPtr.Zero)
         {
@@ -365,10 +427,6 @@ internal sealed class WindowsTrayPresence : IDisposable
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "Shell_NotifyIconW")]
     private static extern bool ShellNotifyIcon(uint message, ref NotifyIconData data);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr LoadImage(IntPtr instance, string name, uint imageType, int width,
-        int height, uint loadFlags);
 
     [DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr icon);

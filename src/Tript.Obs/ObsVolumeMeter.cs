@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Tript.Obs.Interop;
+using Tript.Core;
 
 namespace Tript.Obs;
 
@@ -15,6 +16,14 @@ internal sealed class ObsVolumeMeter : IDisposable
     private const float MeterDbFloor = -60f;
     private const float MeterDbCeiling = 0f;
     private static readonly ConcurrentDictionary<nint, ObsVolumeMeter> Live = new();
+
+    // ObsRuntime.Dispose calls this before obs_shutdown. An instance left registered past shutdown
+    // would, on its owner's later Dispose, call back into a libobs that no longer exists.
+    internal static void DisposeAllLive()
+    {
+        foreach (var live in Live.Values.ToArray())
+            live.Dispose();
+    }
     private static long _nextId;
 
     private readonly ObsSource _source;
@@ -110,10 +119,14 @@ internal sealed class ObsVolumeMeter : IDisposable
                 meter.ExitCallback();
             }
         }
-        catch
+        catch (Exception exception)
         {
+            Diagnostics.ReportFirst(ref _meterCallbackFailed, DiagnosticLevel.Warning,
+                "libobs volume meter callback failed; audio level meters are not updating", exception);
         }
     }
+
+    private static int _meterCallbackFailed;
 
     internal static float ToMeterPosition(float decibels)
     {

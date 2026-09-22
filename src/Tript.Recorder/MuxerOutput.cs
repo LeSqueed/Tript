@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using Serilog;
 using Tript.Obs;
 
 namespace Tript.Recorder;
@@ -99,10 +100,19 @@ internal sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
 
     public bool WaitForReplaySave(TimeSpan timeout) => _replaySaveCompleted.Wait(timeout);
 
+    // A quick clip whose save never signalled (the disk filled, or the muxer errored) left
+    // _replaySaveCompleted reset forever, so an unbounded wait here hung every later shutdown.
+    private static readonly TimeSpan ReplaySaveDisposeWait = TimeSpan.FromSeconds(30);
+
+    private int _disposed;
+
     public void Dispose()
     {
-        if (_isReplayBuffer)
-            _replaySaveCompleted.Wait(Timeout.InfiniteTimeSpan);
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        if (_isReplayBuffer && !_replaySaveCompleted.Wait(ReplaySaveDisposeWait))
+            Log.Warning("Recorder: a replay save was still pending when its output was disposed; the clip may be incomplete");
         if (_isReplayBuffer)
             _output.Saved -= OnReplaySaved;
         _output.Dispose();

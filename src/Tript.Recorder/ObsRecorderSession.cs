@@ -11,7 +11,16 @@ namespace Tript.Recorder;
 public sealed class ObsRecorderSession : IRecorderSession
 {
     private const string FfmpegMuxerId = "ffmpeg_muxer";
+    private const string Mp4OutputId = "mp4_output";
     private const string ReplayBufferId = "replay_buffer";
+
+    // ffmpeg_muxer only writes the moov atom when the output stops, so a crash, a power loss or any
+    // forced exit leaves an unplayable recording. mp4_output is OBS's Hybrid MP4 writer, which keeps
+    // recovery data as it goes and still finalizes to an ordinary seekable MP4. It ships in
+    // obs-outputs and only exists from OBS 31, while the supported floor is 30.1 and Linux builds use
+    // whatever OBS the system has, so this falls back rather than refusing to record.
+    private static string SessionOutputId() =>
+        ObsOutput.IsTypeRegistered(Mp4OutputId) ? Mp4OutputId : FfmpegMuxerId;
 
     private const string FfmpegAacId = "ffmpeg_aac";
     private const uint VideoChannel = 0;
@@ -88,11 +97,21 @@ public sealed class ObsRecorderSession : IRecorderSession
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        var sessionOutputId = SessionOutputId();
+        if (settings.Mode.RecordsSession())
+        {
+            if (sessionOutputId == Mp4OutputId)
+                Log.Information("Recorder: writing the session with {Output} (crash-safe Hybrid MP4)", sessionOutputId);
+            else
+                Log.Warning("Recorder: {Mp4} is not registered, falling back to {Output}; a crash or forced exit "
+                    + "will leave this recording unplayable", Mp4OutputId, sessionOutputId);
+        }
+
         var outputIds = settings.Mode switch
         {
             RecordingMode.ReplayBufferOnly => new[] { ReplayBufferId },
-            _ when settings.Mode.UsesReplayBuffer() => [FfmpegMuxerId, ReplayBufferId],
-            _ => [FfmpegMuxerId]
+            _ when settings.Mode.UsesReplayBuffer() => [sessionOutputId, ReplayBufferId],
+            _ => [sessionOutputId]
         };
 
         foreach (var outputId in outputIds)
@@ -127,7 +146,7 @@ public sealed class ObsRecorderSession : IRecorderSession
                     ownsVideoEncoder: true);
             }
 
-            session = CreateMuxerOutput(settings, FfmpegMuxerId, "recorder output", audio, videoEncoder,
+            session = CreateMuxerOutput(settings, sessionOutputId, "recorder output", audio, videoEncoder,
                 ownsVideoEncoder: true);
             if (!settings.Mode.UsesReplayBuffer())
                 return session;
@@ -185,7 +204,7 @@ public sealed class ObsRecorderSession : IRecorderSession
         nint audio, ObsEncoder videoEncoder, bool ownsVideoEncoder, bool includeCaptureSources = true)
     {
         using var outputSettings = new ObsSettings();
-        if (outputId == FfmpegMuxerId)
+        if (outputId != ReplayBufferId)
         {
             outputSettings.SetString("path", settings.OutputPath);
         }

@@ -84,6 +84,7 @@ internal sealed class AppController
             ["OpenFileLocation"] = (parameters, _) => _host.OpenFileLocation(
                 parameters.Deserialize<OpenFileLocationParameters>()),
             ["OpenInBrowser"] = (parameters, _) => _host.OpenInBrowser(parameters.Deserialize<OpenInBrowserParameters>()),
+            ["OpenLogFolder"] = (_, _) => _host.OpenLogFolder(),
 #if TRIPT_TRAINING
             ["CancelTraining"] = (_, _) => _host.CancelTraining(),
 #endif

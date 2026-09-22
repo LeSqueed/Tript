@@ -10,10 +10,15 @@ internal sealed partial class AppHost
     internal Task CheckForUpdatesManualAsync() =>
         _updateManager is null ? Task.CompletedTask : _updateManager.CheckAsync(manual: true, CancellationToken.None);
 
+    // The setting used to be read only once, at startup, while the 24 hour timer was armed
+    // unconditionally and never looked at it, so turning automatic updates off still downloaded an
+    // update the next day. Every automatic check now asks, so the toggle takes effect immediately.
     internal Task CheckForUpdatesAutomaticAsync() =>
-        _updateManager is null
+        _updateManager is null || !AutomaticUpdateChecksEnabled
             ? Task.CompletedTask
             : _updateManager.CheckAsync(manual: false, CancellationToken.None);
+
+    internal bool AutomaticUpdateChecksEnabled => _settingsStore.Load().General.CheckForUpdatesAutomatically;
 
     internal void ApplyUpdate()
     {

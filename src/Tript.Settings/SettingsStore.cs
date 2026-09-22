@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Text.Json;
+using Tript.Core;
+
 namespace Tript.Settings;
 
 public sealed class SettingsStore
@@ -32,10 +35,45 @@ public sealed class SettingsStore
                 return _settings;
 
             var json = _provider.ReadJson();
-            _settings = json is null
-                ? new Settings()
-                : SettingsSerialization.Deserialize(json) ?? new Settings();
+            _settings = json is null ? new Settings() : DeserializeOrRecover(json);
             return _settings;
+        }
+    }
+
+    // Where the unreadable settings file was moved, when Load had to fall back to defaults.
+    public string? RecoveredFrom { get; private set; }
+
+    // A settings.json that fails to parse used to throw straight out of Load, which runs during
+    // startup, so Tript refused to start at all. Falling back to defaults keeps it usable, and moving
+    // the bad file aside first means the next Save cannot overwrite the user's only copy.
+    private Settings DeserializeOrRecover(string json)
+    {
+        try
+        {
+            return SettingsSerialization.Deserialize(json) ?? new Settings();
+        }
+        catch (JsonException exception)
+        {
+            RecoveredFrom = PreserveUnreadableFile();
+            Diagnostics.Report(DiagnosticLevel.Error,
+                $"{Path.GetFileName(FilePath)} could not be read and settings were reset to defaults; "
+                + $"the original was kept at {RecoveredFrom ?? "its original path (it could not be moved)"}",
+                exception);
+            return new Settings();
+        }
+    }
+
+    private string? PreserveUnreadableFile()
+    {
+        try
+        {
+            var backup = $"{FilePath}.unreadable-{DateTime.Now:yyyyMMdd-HHmmss}";
+            File.Move(FilePath, backup);
+            return backup;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

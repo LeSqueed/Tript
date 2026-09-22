@@ -53,8 +53,19 @@ internal sealed partial class AppHost
         catch (Exception exception) when (exception is HttpRequestException or InvalidDataException
             or JsonException or TaskCanceledException)
         {
+            LogResolverFailure("search", exception);
             PushGameSearchResult(client, requestId, [], "The game search service could not be reached.");
         }
+    }
+
+    // The UI deliberately shows one friendly line for every resolver failure, but DNS, TLS, a 401 from
+    // a rotated key and a 500 from the service need very different fixes, so the log has to tell them
+    // apart. HttpRequestException carries no request headers, so this cannot leak the API key.
+    private static void LogResolverFailure(string operation, Exception exception)
+    {
+        var status = exception is HttpRequestException { StatusCode: { } code } ? ((int)code).ToString() : "none";
+        Log.Warning(exception, "Resolver: {Operation} failed ({Kind}, HTTP status {Status})",
+            operation, exception.GetType().Name, status);
     }
 
     private static void PushGameSearchResult(ClientHandle client, string requestId,
@@ -87,6 +98,7 @@ internal sealed partial class AppHost
         catch (Exception exception) when (exception is HttpRequestException or InvalidDataException
             or JsonException or TaskCanceledException)
         {
+            LogResolverFailure("resolve", exception);
             PushResolvedGameSearch(client, requestId, null, "The selected game could not be resolved.");
         }
     }

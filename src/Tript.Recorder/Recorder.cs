@@ -4,11 +4,24 @@
 using Tript.Core;
 using Tript.Obs;
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.Recorder;
 
 public sealed class Recorder : IDisposable
 {
+    // libobs reports a finished save or stop through a callback. If that callback never fires, for
+    // example because the disk filled mid-save, an unbounded wait here hung shutdown until the shell
+    // killed the process, which skips obs_shutdown. Both bounds are far above a healthy save or stop.
+    private static readonly TimeSpan ReplaySaveWait = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan OutputStopWait = TimeSpan.FromSeconds(30);
+
+    private static void WaitBounded(Func<bool> wait, string what)
+    {
+        if (!wait())
+            Log.Warning("Recorder: gave up waiting for {What}; libobs never signalled completion", what);
+    }
+
     private readonly IRecorderSession _session;
     private readonly object _gate = new();
     private readonly ManualResetEventSlim _idle = new(initialState: true);
@@ -164,7 +177,7 @@ public sealed class Recorder : IDisposable
             {
                 if (!cleanupOutput.WaitForStop(TimeSpan.Zero))
                     cleanupOutput.Stop();
-                cleanupOutput.WaitForStop(Timeout.InfiniteTimeSpan);
+                WaitBounded(() => cleanupOutput.WaitForStop(OutputStopWait), "the failed output to stop");
             }
 
             cleanupOutput.Dispose();
@@ -212,11 +225,12 @@ public sealed class Recorder : IDisposable
         try
         {
             if (output is IReplayBufferOutput replay)
-                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
+                WaitBounded(() => replay.WaitForReplaySave(ReplaySaveWait), "the replay save to finish before stopping");
             output.Stop();
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException exception)
         {
+            Log.Warning(exception, "Recorder: the output was already disposed when it was asked to stop");
         }
 
         return true;
@@ -251,12 +265,13 @@ public sealed class Recorder : IDisposable
             try
             {
                 if (stopping is IReplayBufferOutput replay)
-                    replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
+                    WaitBounded(() => replay.WaitForReplaySave(ReplaySaveWait), "the replay save to finish during dispose");
                 stopping.Stop();
-                stopping.WaitForStop(Timeout.InfiniteTimeSpan);
+                WaitBounded(() => stopping.WaitForStop(OutputStopWait), "the output to stop during dispose");
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException exception)
             {
+                Log.Warning(exception, "Recorder: the output was already disposed while the recorder was disposing");
             }
         }
 
@@ -297,8 +312,8 @@ public sealed class Recorder : IDisposable
         if (toDispose is not null)
         {
             if (toDispose is IReplayBufferOutput replay)
-                replay.WaitForReplaySave(Timeout.InfiniteTimeSpan);
-            toDispose.WaitForStop(Timeout.InfiniteTimeSpan);
+                WaitBounded(() => replay.WaitForReplaySave(ReplaySaveWait), "the replay save to finish");
+            WaitBounded(() => toDispose.WaitForStop(OutputStopWait), "the output to stop");
             toDispose.Dispose();
         }
     }

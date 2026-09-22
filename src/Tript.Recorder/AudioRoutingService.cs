@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using Tript.Settings;
+using Serilog;
 
 namespace Tript.Recorder;
 
@@ -53,8 +54,11 @@ public sealed class AudioRoutingService
                 {
                     _sink.DeactivateSource(activeSources[i]);
                 }
-                catch
+                catch (Exception cleanup)
                 {
+                    // Swallowed so it cannot mask the wiring failure rethrown below, but a source
+                    // left active keeps capturing audio after the recording is gone.
+                    Log.Warning(cleanup, "AudioRouting: could not deactivate an audio source while unwinding");
                 }
             }
 
@@ -66,8 +70,9 @@ public sealed class AudioRoutingService
                     {
                         disposable.Dispose();
                     }
-                    catch
+                    catch (Exception cleanup)
                     {
+                        Log.Warning(cleanup, "AudioRouting: could not release an audio encoder while unwinding");
                     }
                 }
             }
@@ -80,8 +85,9 @@ public sealed class AudioRoutingService
                     {
                         disposable.Dispose();
                     }
-                    catch
+                    catch (Exception cleanup)
                     {
+                        Log.Warning(cleanup, "AudioRouting: could not release an audio source while unwinding");
                     }
                 }
             }

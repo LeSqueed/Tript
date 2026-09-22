@@ -243,8 +243,13 @@ internal sealed class GameModelManager : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+
+        // Cancel, but do not dispose. In-flight downloads still hold this token, and the Lazy that
+        // starts a download reads _shutdown.Token when it first runs, which can be after Dispose (a
+        // detected game can ask for its model while shutdown is underway). Either one on a disposed
+        // source throws ObjectDisposedException out of a background task. The source is finalizable
+        // and this only runs at shutdown.
         _shutdown.Cancel();
-        _shutdown.Dispose();
         if (_ownsHttp)
             _http.Dispose();
     }

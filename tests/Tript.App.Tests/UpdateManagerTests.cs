@@ -203,6 +203,97 @@ public sealed class UpdateManagerTests : IDisposable
         Assert.True(manager.TryApply());
     }
 
+    // Deleting old-App on the new version's first startup is what used to make a bad release
+    // unrecoverable: the launcher rolls back to it if the new version fails within a minute.
+    [Fact]
+    public void SweepLeftovers_KeepsThePreviousInstallForTheLauncherToRollBackTo()
+    {
+        var oldApp = UpdateStagingPaths.OldAppBackupPath(_installRoot);
+        Directory.CreateDirectory(oldApp);
+        File.WriteAllText(Path.Combine(oldApp, "Tript.Shell.exe"), "previous");
+
+        using var manager = CreateManager(new RouteHandler(new Dictionary<string, byte[]>()));
+        manager.SweepLeftovers();
+
+        Assert.True(File.Exists(Path.Combine(oldApp, "Tript.Shell.exe")));
+    }
+
+    [Fact]
+    public void DiscardPreviousInstall_RemovesItOnceProbationHasPassed()
+    {
+        var oldApp = UpdateStagingPaths.OldAppBackupPath(_installRoot);
+        Directory.CreateDirectory(oldApp);
+        File.WriteAllText(Path.Combine(oldApp, "Tript.Shell.exe"), "previous");
+
+        using var manager = CreateManager(new RouteHandler(new Dictionary<string, byte[]>()));
+        manager.DiscardPreviousInstall();
+
+        Assert.False(Directory.Exists(oldApp));
+    }
+
+    // Longer than the launcher's 60 second window, or the launcher could roll back to nothing.
+    [Fact]
+    public void ThePreviousInstallOutlivesTheLaunchersRollbackWindow() =>
+        Assert.True(UpdateManager.PreviousInstallProbation > TimeSpan.FromSeconds(60));
+
+    // After a rollback the marker names the build that failed, and its staged folder is gone.
+    [Fact]
+    public void SweepLeftovers_DropsAMarkerForTheVersionThatWasRolledBack()
+    {
+        UpdateMarker.WriteAtomic(UpdateStagingPaths.MarkerPath(_installRoot),
+            new UpdateMarker(UpdateMarker.CurrentFormatVersion, "0.1.0-alpha.3", "staged-gone"));
+        File.WriteAllText(UpdateStagingPaths.RolledBackPath(_installRoot), "0.1.0-alpha.3");
+
+        using var manager = CreateManager(new RouteHandler(new Dictionary<string, byte[]>()),
+            currentVersion: "0.1.0-alpha.1");
+        manager.SweepLeftovers();
+
+        Assert.Null(UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot)));
+    }
+
+    // Without the record, the old version downloaded and applied the same broken release the next
+    // day, failed, rolled back, and repeated.
+    [Fact]
+    public async Task AnAutomaticCheck_DoesNotReapplyAVersionThatWasRolledBack()
+    {
+        var zipBytes = BuildAppZip("Release-win");
+        Directory.CreateDirectory(UpdateStagingPaths.StagingRoot(_installRoot));
+        File.WriteAllText(UpdateStagingPaths.RolledBackPath(_installRoot), "0.1.0-alpha.3");
+        using var manager = CreateManager(new RouteHandler(ReleaseRoutes(zipBytes, ValidHashOf(zipBytes))));
+
+        await manager.CheckAsync(manual: false, CancellationToken.None);
+
+        Assert.Equal("available", manager.Snapshot().Stage);
+        Assert.Null(UpdateMarker.TryRead(UpdateStagingPaths.MarkerPath(_installRoot)));
+    }
+
+    [Fact]
+    public async Task AManualCheck_RetriesARolledBackVersionOnPurpose()
+    {
+        var zipBytes = BuildAppZip("Release-win");
+        Directory.CreateDirectory(UpdateStagingPaths.StagingRoot(_installRoot));
+        File.WriteAllText(UpdateStagingPaths.RolledBackPath(_installRoot), "0.1.0-alpha.3");
+        using var manager = CreateManager(new RouteHandler(ReleaseRoutes(zipBytes, ValidHashOf(zipBytes))));
+
+        await manager.CheckAsync(manual: true, CancellationToken.None);
+
+        Assert.Equal("ready", manager.Snapshot().Stage);
+    }
+
+    [Fact]
+    public async Task ANewerReleaseClearsAnOldRollbackRecord()
+    {
+        var zipBytes = BuildAppZip("Release-win");
+        Directory.CreateDirectory(UpdateStagingPaths.StagingRoot(_installRoot));
+        File.WriteAllText(UpdateStagingPaths.RolledBackPath(_installRoot), "0.1.0-alpha.2");
+        using var manager = CreateManager(new RouteHandler(ReleaseRoutes(zipBytes, ValidHashOf(zipBytes))));
+
+        await manager.CheckAsync(manual: false, CancellationToken.None);
+
+        Assert.Equal("ready", manager.Snapshot().Stage);
+        Assert.False(File.Exists(UpdateStagingPaths.RolledBackPath(_installRoot)));
+    }
+
     private void AssertNoStagedLeftovers() =>
         Assert.False(Directory.Exists(UpdateStagingPaths.StagingRoot(_installRoot)));
 

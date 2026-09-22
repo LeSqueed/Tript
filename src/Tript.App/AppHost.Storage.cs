@@ -35,14 +35,39 @@ internal sealed partial class AppHost
     private void InitializeStorage()
     {
         _storageReportPush = new CoalescingRunner(BroadcastStorageReport, ReportStorageFailure);
-        _storageMonitor.StatusChanged += _ => PushStorageStatus();
+        _storageMonitor.StatusChanged += _ =>
+        {
+            PushStorageStatus();
+            PushTrayStatus();
+        };
         _storageMonitor.Configure(_settingsStore.Load().Storage);
         SampleStorage();
     }
 
     private void StartStorageWatch()
     {
-        _storageTimer = new Timer(_ => SampleStorage(), null, StorageIdleInterval, StorageIdleInterval);
+        _storageTimer = new Timer(_ => OnStorageTimer(), null, StorageIdleInterval, StorageIdleInterval);
+    }
+
+    // Samples run every 15s while recording, and ApplyStoragePolicy can stop a recording. A slow or
+    // network volume that outlasted the interval put two threads into that policy at once. Direct
+    // callers (a settings change, startup) wait for the gate so a new configuration is never
+    // dropped; the timer just skips a tick when a sample is already running.
+    private readonly Lock _storageSampleGate = new();
+
+    private void OnStorageTimer()
+    {
+        if (!_storageSampleGate.TryEnter())
+            return;
+
+        try
+        {
+            SampleStorage();
+        }
+        finally
+        {
+            _storageSampleGate.Exit();
+        }
     }
 
     private void DisposeStorage() => _storageTimer?.Dispose();
@@ -86,16 +111,22 @@ internal sealed partial class AppHost
         if (_disposed)
             return;
 
-        try
+        lock (_storageSampleGate)
         {
-            _storageMonitor.SetReplayReserve(ReplayReserveBytes());
-            _storageMonitor.Sample(MeasureContentVolume(), MeasureScratchVolume());
-            FinalizeRecordingStoppedOutsideTript();
-            ApplyStoragePolicy();
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "AppHost: the free space check failed.");
+            if (_disposed)
+                return;
+
+            try
+            {
+                _storageMonitor.SetReplayReserve(ReplayReserveBytes());
+                _storageMonitor.Sample(MeasureContentVolume(), MeasureScratchVolume());
+                FinalizeRecordingStoppedOutsideTript();
+                ApplyStoragePolicy();
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(exception, "AppHost: the free space check failed.");
+            }
         }
     }
 
@@ -191,6 +222,20 @@ internal sealed partial class AppHost
         return status.ScratchLow && status.Pressure != StoragePressure.Critical
             ? $"Only {FormatBytes(status.ScratchFreeBytes)} free on {status.ScratchRoot}, where replays are saved."
             : $"Only {FormatBytes(status.FreeBytes)} free on {status.VolumeRoot ?? EffectiveRoot}.";
+    }
+
+    internal string? StorageAlertReason(StorageStatus status)
+    {
+        if (StorageBlockedReason() is { } blocked)
+            return blocked;
+
+        var root = status.VolumeRoot ?? EffectiveRoot;
+        return status.Pressure switch
+        {
+            StoragePressure.Critical => $"Only {FormatBytes(status.FreeBytes)} free on {root}.",
+            StoragePressure.Warning => $"Space is running low on {root}.",
+            _ => null,
+        };
     }
 
     private bool HasRoomToStartRecording(RecordingMode mode)

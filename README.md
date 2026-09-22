@@ -4,6 +4,8 @@
 
 **Tript watches your screen while you play, and records moments you might want to share.**
 
+![Tript's player: an Overwatch session with every kill and death marked on the timeline, and the highlights Tript cut from it lined up on the right](.github/assets/hero.jpg)
+
 ## What it does
 
 Tript sits quietly in the background and watches for a supported game. The moment it recognizes

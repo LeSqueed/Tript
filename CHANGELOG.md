@@ -3,6 +3,24 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.0.1 (2026-09-22)
+
+### Library
+
+- **Ticking a card in selection mode no longer opens the delete dialog.** The card's delete button
+  sat on top of its checkbox, so a click meant to select an item asked to delete it instead. In
+  selection mode, cards now show only the checkbox; delete the selection with the button at the top.
+- **Thumbnails of HDR recordings are no longer washed out.** They are now converted to normal
+  colours the way SDR clips are. Existing thumbnails are rebuilt the next time they are shown.
+- A card's length no longer covers its size and other details.
+
+### Player
+
+- **"Create as" now starts on the option you chose last time.** It used to show "One merged clip"
+  until you opened Adjust details, so a quick Create clips could make one merged clip when you had
+  asked for separate ones.
+- The start and end boxes in the Create clip dialog are wide enough for times past 99 seconds.
+
 ## 1.0.0 (2026-09-22)
 
 First stable release. It carries everything from the 0.1.0 alpha series, with one further fix.

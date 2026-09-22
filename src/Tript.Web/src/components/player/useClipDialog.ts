@@ -76,7 +76,8 @@ export function useClipDialog(
   const [session, setSession] = useState<ContentItem | null>(null);
   const [regions, setRegions] = useState<TimelineRegion[]>([]);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
-  const [mode, setMode] = useState<ClipMode>('combine');
+  const [chosenMode, setChosenMode] = useState<ClipMode | null>(null);
+  const mode = chosenMode ?? modePreference?.mode ?? 'combine';
   const [title, setTitle] = useState('');
   const [audio, setAudio] = useState<{
     tracks: { id: string; device: string; muted: boolean; volume: number }[];
@@ -126,7 +127,6 @@ export function useClipDialog(
           setSelectedRegionId(null);
         }
       }
-      setMode(modePreferenceRef.current?.mode ?? 'combine');
       setTitle(sessionItem.title ?? sessionItem.fileName ?? 'Clip');
       setProgress({});
       setAudio((current) => ({ ...current, volumes: {}, muted: [] }));
@@ -194,7 +194,7 @@ export function useClipDialog(
   }, []);
 
   const handleSetMode = useCallback((next: ClipMode) => {
-    setMode(next);
+    setChosenMode(next);
     const preference = modePreferenceRef.current;
     if (preference && preference.mode !== next) {
       preference.onChange(next);

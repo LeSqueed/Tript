@@ -510,9 +510,13 @@ describe('clip dialog — the clippable duration', () => {
 describe('clip dialog - remembered output mode', () => {
   function preferenceProbe(initial: ClipMode) {
     const changes: ClipMode[] = [];
-    const ref: { dialog: ClipDialogController | null } = { dialog: null };
+    const ref: { dialog: ClipDialogController | null; store: (mode: ClipMode) => void } = {
+      dialog: null,
+      store: () => {},
+    };
     function Probe() {
       const [mode, setMode] = useState<ClipMode>(initial);
+      ref.store = setMode;
       const dialog = useClipDialog(MEASURED_SECONDS, {
         mode,
         onChange: (next) => {
@@ -524,8 +528,32 @@ describe('clip dialog - remembered output mode', () => {
       return null;
     }
     render(<Probe />);
-    return { dialog: () => ref.dialog as ClipDialogController, changes };
+    return { dialog: () => ref.dialog as ClipDialogController, changes, store: (mode: ClipMode) => ref.store(mode) };
   }
+
+  it('shows the stored mode before the dialog is ever opened', () => {
+    const { dialog } = preferenceProbe('separate');
+    expect(dialog().mode).toBe('separate');
+  });
+
+  it('follows a stored mode that arrives after the player mounted', () => {
+    const { dialog, store } = preferenceProbe('combine');
+    act(() => store('separate'));
+    expect(dialog().mode).toBe('separate');
+  });
+
+  it('keeps a fresh selection while the store has not caught up yet', () => {
+    const changes: ClipMode[] = [];
+    const ref: { dialog: ClipDialogController | null } = { dialog: null };
+    function Probe() {
+      ref.dialog = useClipDialog(MEASURED_SECONDS, { mode: 'combine', onChange: (next) => changes.push(next) });
+      return null;
+    }
+    render(<Probe />);
+    act(() => ref.dialog!.setMode('separate'));
+    expect(ref.dialog!.mode).toBe('separate');
+    expect(changes).toEqual(['separate']);
+  });
 
   it('opens in the stored mode', () => {
     const { dialog } = preferenceProbe('separate');

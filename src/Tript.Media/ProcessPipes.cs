@@ -10,9 +10,13 @@ internal static class ProcessPipes
 {
     private static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(2);
 
+    // A dedicated thread, not ReadToEndAsync: a process's redirected pipes are synchronous handles, so
+    // the async read blocks a pool thread. With the pool busy it could start after the process had
+    // exited and DrainGrace had run out, and a successful ffprobe then came back as empty output.
     internal static Task<string> BeginRead(StreamReader reader)
     {
-        var read = reader.ReadToEndAsync();
+        var read = Task.Factory.StartNew(reader.ReadToEnd, CancellationToken.None,
+            TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         _ = read.ContinueWith(static task => _ = task.Exception,
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);

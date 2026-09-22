@@ -87,6 +87,48 @@ public sealed class ThumbnailExtractionTests
     }
 
     [Fact]
+    public void TryExtract_ToneMapsAnHdrSource_SoTheThumbnailIsNotWashedOut()
+    {
+        var source = MediaTestFixture.CreateHdrSource("thumbnail-hdr-args.mkv");
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-hdr-args.jpg");
+        var log = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-hdr-args.log");
+        var extractor = new FfmpegThumbnailExtractor(
+            MediaTestFixture.CreateCountingStubFfmpeg("ffmpeg-hdr-args", log, writesFrameAt: destination),
+            MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+
+        Assert.Contains("tonemap=", Assert.Single(File.ReadAllLines(log)));
+    }
+
+    [Fact]
+    public void TryExtract_LeavesAnSdrSourceUntouched()
+    {
+        var source = MediaTestFixture.CreateSdrSource("thumbnail-sdr-args.mp4", durationSeconds: 5, audioTracks: 0);
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-sdr-args.jpg");
+        var log = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-sdr-args.log");
+        var extractor = new FfmpegThumbnailExtractor(
+            MediaTestFixture.CreateCountingStubFfmpeg("ffmpeg-sdr-args", log, writesFrameAt: destination),
+            MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+
+        Assert.DoesNotContain("tonemap", Assert.Single(File.ReadAllLines(log)));
+    }
+
+    [Fact]
+    public void TryExtract_WritesAJpegFrameFromAnHdrSource()
+    {
+        var source = MediaTestFixture.CreateHdrSource("thumbnail-hdr.mkv");
+        var destination = Path.Combine(MediaTestFixture.ScratchRoot, "thumbnail-hdr.jpg");
+        var extractor = new FfmpegThumbnailExtractor(MediaTestFixture.Binaries.Ffmpeg, MediaTestFixture.Binaries.Ffprobe);
+
+        Assert.True(extractor.TryExtract(source, destination));
+
+        Assert.Equal("mjpeg", MediaTestFixture.ProbeValue(MediaTestFixture.Binaries.Ffprobe, destination, "v:0", "codec_name"));
+    }
+
+    [Fact]
     public void TryExtract_FallsBackToFrameZeroOnce_WhenTheChosenSeekProducesNoFrame()
     {
         var source = MediaTestFixture.CreateSdrSource("thumbnail-two-runs.mp4", durationSeconds: 5, audioTracks: 0);

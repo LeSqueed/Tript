@@ -38,26 +38,39 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
         if (!File.Exists(sourcePath))
             return false;
 
-        return TryExtractAt(sourcePath, destinationPath, ChosenOffset(sourcePath), rejectBlack: true)
-            || TryExtractAt(sourcePath, destinationPath, TimeSpan.Zero, rejectBlack: false);
+        var info = TryProbe(sourcePath);
+        var filter = VideoFilter(info?.IsHdr == true);
+        return TryExtractAt(sourcePath, destinationPath, ChosenOffset(info), filter, rejectBlack: true)
+            || TryExtractAt(sourcePath, destinationPath, TimeSpan.Zero, filter, rejectBlack: false);
     }
 
-    private TimeSpan ChosenOffset(string sourcePath)
+    private MediaInfo? TryProbe(string sourcePath)
     {
         try
         {
-            var duration = _probe.Value?.Probe(sourcePath).DurationSeconds;
-            if (duration is > 0 and var seconds && double.IsFinite(seconds))
-                return TimeSpan.FromSeconds(Math.Max(SeekOffset.TotalSeconds, seconds * SeekFraction));
+            return _probe.Value?.Probe(sourcePath);
         }
         catch (Exception)
         {
+            return null;
         }
+    }
+
+    private static TimeSpan ChosenOffset(MediaInfo? info)
+    {
+        if (info?.DurationSeconds is > 0 and var seconds && double.IsFinite(seconds))
+            return TimeSpan.FromSeconds(Math.Max(SeekOffset.TotalSeconds, seconds * SeekFraction));
 
         return SeekOffset;
     }
 
-    private bool TryExtractAt(string sourcePath, string destinationPath, TimeSpan offset, bool rejectBlack)
+    private static string VideoFilter(bool hdr)
+    {
+        var filter = $"blackframe=amount=98:threshold=32,scale={Width}:-2";
+        return hdr ? $"{filter},{ColorChain.ToneMapChain}" : filter;
+    }
+
+    private bool TryExtractAt(string sourcePath, string destinationPath, TimeSpan offset, string filter, bool rejectBlack)
     {
         var arguments = new List<string>
         {
@@ -80,7 +93,7 @@ public sealed class FfmpegThumbnailExtractor : IThumbnailExtractor
             "-frames:v", "1",
             "-an", "-sn", "-dn",
 
-            "-vf", $"blackframe=amount=98:threshold=32,scale={Width}:-2",
+            "-vf", filter,
 
             "-f", "image2", "-update", "1",
             "-c:v", "mjpeg",

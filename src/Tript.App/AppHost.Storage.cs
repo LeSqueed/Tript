@@ -22,7 +22,7 @@ internal sealed partial class AppHost
 
     private readonly StorageMonitor _storageMonitor = new();
 
-    private IStorageProbe _storageProbe = new DriveInfoStorageProbe();
+    private readonly IStorageProbe _storageProbe;
 
     private Timer? _storageTimer;
 

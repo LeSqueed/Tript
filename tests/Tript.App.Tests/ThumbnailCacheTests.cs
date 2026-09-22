@@ -194,7 +194,7 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 
     [Fact]
-    public void HoldForRemoval_WaitsForARunningExtractionToLetGoOfTheVideo()
+    public async Task HoldForRemoval_WaitsForARunningExtractionToLetGoOfTheVideo()
     {
         var video = WriteVideo("in-use.mp4");
         var extractor = new BlockingExtractor();
@@ -204,11 +204,10 @@ public sealed class ThumbnailCacheTests : IDisposable
         Assert.True(extractor.Entered.Wait(TimeSpan.FromSeconds(2)), "the background worker did not start");
 
         var holdTask = Task.Run(() => store.HoldForRemoval(Path.GetFileName(video), TimeSpan.FromSeconds(10)));
-        Assert.False(holdTask.Wait(TimeSpan.FromMilliseconds(300)), "the hold must not return while ffmpeg still has the file");
+        Assert.NotSame(holdTask, await Task.WhenAny(holdTask, Task.Delay(TimeSpan.FromMilliseconds(300))));
 
         extractor.Release.Set();
-        Assert.True(holdTask.Wait(TimeSpan.FromSeconds(5)), "the hold must return once the extraction finished");
-        holdTask.Result.Dispose();
+        (await holdTask.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
     }
 
     [Fact]

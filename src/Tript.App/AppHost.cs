@@ -136,8 +136,10 @@ internal sealed partial class AppHost : IDisposable
         ResolverClient? resolverClient = null,
         AudioDeviceInventory? audioDeviceInventory = null,
         GameIdAliasStore? gameIdAliases = null,
-        TimeSpan? pendingStopFinalizeTimeout = null)
+        TimeSpan? pendingStopFinalizeTimeout = null,
+        IStorageProbe? storageProbe = null)
     {
+        _storageProbe = storageProbe ?? new DriveInfoStorageProbe();
         _contentPush = new CoalescingRunner(BroadcastContent, ReportContentFailure);
         _clipQueue = new SerialWorkQueue<ClipRequest>(ProcessClip, ReportClipFailure);
         _options = options;

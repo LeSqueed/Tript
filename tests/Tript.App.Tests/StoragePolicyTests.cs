@@ -32,10 +32,7 @@ public sealed class StoragePolicyTests : IDisposable
             WebRoot = _root,
             FakeRecorder = true,
         }, settings, runtime: null, new RecordingSessionTracker(),
-            recorderStopTimeout: TimeSpan.FromMilliseconds(20));
-
-        typeof(AppHost).GetField("_storageProbe", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(_host, _probe);
+            recorderStopTimeout: TimeSpan.FromMilliseconds(20), storageProbe: _probe);
     }
 
     public void Dispose()

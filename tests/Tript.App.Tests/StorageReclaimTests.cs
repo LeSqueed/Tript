@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
-using System.Reflection;
 using Tript.App.Content;
 using Tript.Settings;
 using Xunit;
@@ -32,10 +31,7 @@ public sealed class StorageReclaimTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, _settings, runtime: null, new RecordingSessionTracker());
-
-        typeof(AppHost).GetField("_storageProbe", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(_host, _probe);
+        }, _settings, runtime: null, new RecordingSessionTracker(), storageProbe: _probe);
     }
 
     public void Dispose()

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
 import { mirrorLibrary } from './mirror-library.ts';
 import { seedDemo } from './seed-demo.ts';
@@ -81,6 +81,57 @@ function startHost(contentRoot: string, settings: string): Promise<Host> {
   });
 }
 
+const PREWARM_SKIPPED = new Set(['.trash', '.scratch', 'metadata']);
+const PREWARM_WORKERS = 4;
+const PREWARM_LIMIT_MS = 30 * 60_000;
+
+function videosUnder(root: string, dir = root): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (PREWARM_SKIPPED.has(entry.name)) return [];
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return videosUnder(root, path);
+    return entry.name.toLowerCase().endsWith('.mp4') ? [relative(root, path).split(sep).join('/')] : [];
+  });
+}
+
+async function prewarmThumbnails(root: string, host: Host): Promise<void> {
+  const key = host.url.match(/[?#&]k=([^&#]+)/)?.[1];
+  if (!key) throw new Error('READY url carries no launch key');
+  const queue = videosUnder(root);
+  const total = queue.length;
+  const deadline = Date.now() + PREWARM_LIMIT_MS;
+  let done = 0;
+  const missing: string[] = [];
+  console.log(`generating ${total} thumbnails...`);
+
+  const worker = async () => {
+    for (let path = queue.shift(); path !== undefined; path = queue.shift()) {
+      const encoded = path.split('/').map(encodeURIComponent).join('/');
+      const url = `http://localhost:${PORTS.content}/api/thumbnail/${encoded}?k=${key}`;
+      let ready = false;
+      while (!ready && Date.now() < deadline) {
+        const response = await fetch(url).catch(() => null);
+        ready = response?.status === 200;
+        await response?.arrayBuffer().catch(() => undefined);
+        if (!ready) await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (!ready) missing.push(path);
+      done += 1;
+      if (done % 50 === 0 || done === total) console.log(`  thumbnails ${done}/${total}`);
+    }
+  };
+  await Promise.all(Array.from({ length: PREWARM_WORKERS }, worker));
+  if (missing.length > 0) console.warn(`  ${missing.length} thumbnails never generated: ${missing.slice(0, 5).join(', ')}`);
+}
+
+async function dismissToasts(page: Page): Promise<void> {
+  const dismissers = page.locator('.toast-dismiss').filter({ visible: true });
+  while (await dismissers.count()) {
+    await dismissers.first().click().catch(() => undefined);
+    await page.waitForTimeout(250);
+  }
+}
+
 async function openApp(browser: Browser, host: Host): Promise<Page> {
   const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
   await page.route('http://localhost:8893/**', (route) =>
@@ -109,9 +160,39 @@ function wanted(name: string): boolean {
   return only.length === 0 || only.some((prefix) => name.startsWith(prefix));
 }
 
+const THUMBNAIL_WAIT_MS = 240_000;
+
+async function pendingThumbnails(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const inView = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0
+        && box.top < window.innerHeight && box.left < window.innerWidth;
+    };
+    const placeholders = Array.from(document.querySelectorAll('.content-card-placeholder')).filter(inView).length;
+    const images = Array.from(document.querySelectorAll<HTMLImageElement>('img[src*="/api/thumbnail/"]'))
+      .filter(inView)
+      .filter((image) => !image.complete || image.naturalWidth === 0).length;
+    return placeholders + images;
+  });
+}
+
+async function settleThumbnails(page: Page, name: string): Promise<void> {
+  const deadline = Date.now() + THUMBNAIL_WAIT_MS;
+  let pending = await pendingThumbnails(page);
+  while (pending > 0 && Date.now() < deadline) {
+    await page.waitForTimeout(500);
+    pending = await pendingThumbnails(page);
+  }
+  if (pending > 0) console.warn(`  ${name}: ${pending} thumbnails still missing after ${THUMBNAIL_WAIT_MS / 1000}s`);
+  await page.waitForTimeout(300);
+}
+
 async function shoot(page: Page, name: string, target?: Locator, pad = 12): Promise<void> {
   if (!wanted(name)) return;
+  if (!name.includes('toast') && !target) await dismissToasts(page);
   await page.waitForTimeout(400);
+  await settleThumbnails(page, name);
   const path = join(OUT, `${name}.png`);
   if (target) {
     const box = await target.boundingBox();
@@ -400,6 +481,7 @@ async function main(): Promise<void> {
     }
     const host = await startHost(root, settings);
     try {
+      await prewarmThumbnails(root, host);
       const page = await openApp(browser, host);
       await library(page);
       await player(page);

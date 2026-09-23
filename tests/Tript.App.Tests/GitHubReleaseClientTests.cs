@@ -14,53 +14,93 @@ public sealed class GitHubReleaseClientTests
     private static readonly Uri ReleasesUri = new("https://api.test/repos/LeSqueed/Tript/releases");
 
     [Fact]
-    public async Task GetLatestPublishedReleaseAsync_UsesTheListEndpointNotLatest()
+    public async Task GetLatestStableReleaseAsync_UsesTheListEndpointNotLatest()
     {
         var handler = new RouteHandler(ReleasesUri.ToString(), Releases(
             new
             {
-                tag_name = "v0.1.0-alpha.3", draft = false, prerelease = true,
-                html_url = "https://github.com/LeSqueed/Tript/releases/tag/v0.1.0-alpha.3",
+                tag_name = "v1.0.1", draft = false, prerelease = false,
+                html_url = "https://github.com/LeSqueed/Tript/releases/tag/v1.0.1",
                 assets = Array.Empty<object>(),
             }));
         var client = new GitHubReleaseClient(new HttpClient(handler), ReleasesUri);
 
-        var release = await client.GetLatestPublishedReleaseAsync(CancellationToken.None);
+        var release = await client.GetLatestStableReleaseAsync(CancellationToken.None);
 
         Assert.NotNull(release);
-        Assert.Equal("v0.1.0-alpha.3", release!.TagName);
+        Assert.Equal("v1.0.1", release!.TagName);
         Assert.Single(handler.Requests);
         Assert.DoesNotContain("/latest", handler.Requests[0]);
     }
 
     [Fact]
-    public async Task GetLatestPublishedReleaseAsync_SkipsDraftsAndReturnsTheFirstNonDraft()
+    public async Task GetLatestStableReleaseAsync_SkipsDraftsAndReturnsTheFirstPublishedOne()
     {
         var handler = new RouteHandler(ReleasesUri.ToString(), Releases(
             new
             {
-                tag_name = "v0.2.0-alpha.1", draft = true, prerelease = true, html_url = "https://x",
+                tag_name = "v1.1.0", draft = true, prerelease = false, html_url = "https://x",
                 assets = Array.Empty<object>(),
             },
             new
             {
-                tag_name = "v0.1.0-alpha.3", draft = false, prerelease = true, html_url = "https://x",
+                tag_name = "v1.0.1", draft = false, prerelease = false, html_url = "https://x",
                 assets = Array.Empty<object>(),
             }));
         var client = new GitHubReleaseClient(new HttpClient(handler), ReleasesUri);
 
-        var release = await client.GetLatestPublishedReleaseAsync(CancellationToken.None);
+        var release = await client.GetLatestStableReleaseAsync(CancellationToken.None);
 
-        Assert.Equal("v0.1.0-alpha.3", release!.TagName);
+        Assert.Equal("v1.0.1", release!.TagName);
     }
 
     [Fact]
-    public async Task GetLatestPublishedReleaseAsync_ReturnsNullOnNetworkFailure()
+    public async Task GetLatestStableReleaseAsync_SkipsPrereleasesNewerThanTheLatestStableOne()
+    {
+        var handler = new RouteHandler(ReleasesUri.ToString(), Releases(
+            new
+            {
+                tag_name = "v1.1.0-beta.2", draft = false, prerelease = true, html_url = "https://x",
+                assets = Array.Empty<object>(),
+            },
+            new
+            {
+                tag_name = "v1.1.0-beta.1", draft = false, prerelease = true, html_url = "https://x",
+                assets = Array.Empty<object>(),
+            },
+            new
+            {
+                tag_name = "v1.0.1", draft = false, prerelease = false, html_url = "https://x",
+                assets = Array.Empty<object>(),
+            }));
+        var client = new GitHubReleaseClient(new HttpClient(handler), ReleasesUri);
+
+        var release = await client.GetLatestStableReleaseAsync(CancellationToken.None);
+
+        Assert.Equal("v1.0.1", release!.TagName);
+    }
+
+    [Fact]
+    public async Task GetLatestStableReleaseAsync_ReturnsNullWhenOnlyPrereleasesArePublished()
+    {
+        var handler = new RouteHandler(ReleasesUri.ToString(), Releases(
+            new
+            {
+                tag_name = "v1.1.0-beta.1", draft = false, prerelease = true, html_url = "https://x",
+                assets = Array.Empty<object>(),
+            }));
+        var client = new GitHubReleaseClient(new HttpClient(handler), ReleasesUri);
+
+        Assert.Null(await client.GetLatestStableReleaseAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetLatestStableReleaseAsync_ReturnsNullOnNetworkFailure()
     {
         var handler = new RouteHandler(ReleasesUri.ToString(), HttpStatusCode.InternalServerError);
         var client = new GitHubReleaseClient(new HttpClient(handler), ReleasesUri);
 
-        Assert.Null(await client.GetLatestPublishedReleaseAsync(CancellationToken.None));
+        Assert.Null(await client.GetLatestStableReleaseAsync(CancellationToken.None));
     }
 
     [Fact]

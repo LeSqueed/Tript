@@ -10,7 +10,6 @@ namespace Tript.App.Updater;
 
 internal sealed class GitHubReleaseClient
 {
-    // Not /releases/latest: it excludes prereleases and 404s while only prereleases exist.
     private static readonly Uri DefaultReleasesUri =
         new("https://api.github.com/repos/LeSqueed/Tript/releases?per_page=10");
 
@@ -28,7 +27,7 @@ internal sealed class GitHubReleaseClient
         _releasesUri = releasesUri ?? DefaultReleasesUri;
     }
 
-    internal async Task<GitHubRelease?> GetLatestPublishedReleaseAsync(CancellationToken cancellationToken)
+    internal async Task<GitHubRelease?> GetLatestStableReleaseAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -41,7 +40,7 @@ internal sealed class GitHubReleaseClient
             response.EnsureSuccessStatusCode();
             var releases = await response.Content
                 .ReadFromJsonAsync<List<GitHubRelease>>(JsonOptions, cancellationToken).ConfigureAwait(false);
-            return releases?.FirstOrDefault(release => !release.Draft);
+            return releases?.FirstOrDefault(release => !release.Draft && !release.Prerelease);
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException
             or TaskCanceledException)

@@ -57,7 +57,7 @@ internal sealed class UpdateManager : IDisposable
         try
         {
             SetStatus(UpdateStage.Checking);
-            var release = await _releaseClient.GetLatestPublishedReleaseAsync(cancellationToken)
+            var release = await _releaseClient.GetLatestStableReleaseAsync(cancellationToken)
                 .ConfigureAwait(false);
             if (release is null)
             {

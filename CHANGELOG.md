@@ -3,6 +3,13 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## Unreleased
+
+### Updates
+
+- **Tript only updates to stable releases.** Alpha and beta builds published on GitHub are no longer
+  offered as updates.
+
 ## 1.0.1 (2026-09-22)
 
 ### Library

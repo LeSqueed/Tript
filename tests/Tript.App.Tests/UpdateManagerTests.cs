@@ -331,7 +331,7 @@ public sealed class UpdateManagerTests : IDisposable
             {
                 tag_name = tag,
                 draft = false,
-                prerelease = true,
+                prerelease = false,
                 html_url = $"https://github.com/LeSqueed/Tript/releases/tag/{tag}",
                 assets,
             },

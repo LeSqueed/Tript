@@ -1,0 +1,172 @@
+# Every check a change has to pass, shared by ci.yml and release.yml so the two gates cannot drift.
+name: Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Unit and frontend (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The detection tests pin the tensor layout against the real weights in Git LFS. Without LFS
+      # they fail with an opaque ONNX Runtime protobuf-parse error, not a missing model.
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Build
+        run: dotnet build Tript.slnx -c Release --nologo
+
+      - name: Test
+        run: make test CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults"
+
+      - name: Name the failed tests
+        if: failure()
+        run: python3 scripts/report-failed-tests.py TestResults
+
+      - name: Keep the test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-linux
+          path: TestResults
+          retention-days: 7
+
+      # Restore rewrites packages.lock.json, so a change here means the committed lock files no
+      # longer describe the build, which only surfaces later as NU1004 on a locked publish.
+      - name: Lock files are unchanged by the build
+        run: git diff --exit-code -- '*packages.lock.json'
+
+  windows:
+    name: Unit, launcher and app host (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup
+
+      - name: Install the bundled ffmpeg
+        shell: pwsh
+        run: |
+          $make = Get-Content Makefile -Raw
+          $pin = { param($name) [regex]::Match($make, "(?m)^$name \?= (\S+)").Groups[1].Value }
+          $tag = & $pin 'FFMPEG_TAG'
+          $build = & $pin 'FFMPEG_BUILD'
+          $sha = & $pin 'FFMPEG_SHA256'
+          $zip = Join-Path $env:RUNNER_TEMP "$build.zip"
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$build.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $sha.ToUpperInvariant()) { throw "ffmpeg checksum mismatch" }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP "$build\bin" >> $env:GITHUB_PATH
+
+      - name: Build the frontend
+        working-directory: src/Tript.Web
+        run: npm run build
+
+      - name: Build
+        run: dotnet build Tript.slnx -c Release --nologo
+
+      # Serial on purpose: parallel test hosts trip an intermittent libobs JSON-parse crash.
+      - name: Test
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($project in 'App','Detection','Media','Recorder','Settings','GameDiscovery') {
+            dotnet test "tests/Tript.$project.Tests" -c Release -f net10.0 --nologo -m:1 `
+              --logger trx --results-directory TestResults
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Name the failed tests
+        if: failure()
+        run: python scripts/report-failed-tests.py TestResults
+
+      - name: Keep the test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-windows
+          path: TestResults
+          retention-days: 7
+
+      - name: Launcher update paths
+        shell: pwsh
+        run: ./tests/Tript.Launcher.Tests/Test-Launcher.ps1
+
+      - name: Published app host reaches READY
+        shell: pwsh
+        run: |
+          dotnet publish src/Tript.App/Tript.App.csproj -f net10.0 -c Release `
+            -r win-x64 --self-contained true -p:RestoreLockedMode=true -o publish-smoke --nologo
+          ./tests/Tript.Smoke/Test-AppHostReady.ps1 -AppHost publish-smoke/Tript.App.exe `
+            -WebRoot src/Tript.Web/dist
+
+      - name: Lock files are unchanged by the build
+        run: git diff --exit-code -- '*packages.lock.json'
+
+  obs-integration:
+    name: Integration against libobs (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup
+        with:
+          frontend: 'false'
+
+      - name: Install OBS Studio and a virtual display
+        run: |
+          sudo add-apt-repository -y ppa:obsproject/obs-studio
+          sudo apt-get update
+          sudo apt-get install -y obs-studio xvfb ffmpeg
+
+      - name: Test
+        run: >-
+          xvfb-run -a -s "-screen 0 1920x1080x24"
+          make test-integration CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults"
+
+      - name: Name the failed tests
+        if: failure()
+        run: python3 scripts/report-failed-tests.py TestResults
+
+      - name: Keep the test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-obs-integration
+          path: TestResults
+          retention-days: 7
+
+  linux-package:
+    name: Package installs and starts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup
+
+      - name: Build the package
+        run: make linux-package CONFIG=Release
+
+      - name: The package installs for a user and starts
+        run: tests/Tript.Smoke/test-linux-package.sh dist/Release-linux/Tript-*-linux-x64.tar.gz

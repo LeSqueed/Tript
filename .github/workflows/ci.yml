@@ -1,97 +1,18 @@
-# The gate that `make test` is: the .NET unit suites plus the frontend, on every push and PR, plus the
-# platform checks that start the packaged app on Windows and Linux.
-#
-# The OBS integration suite runs in its own job against OBS from the project's PPA on a virtual X
-# display. Releases do not wait on it: it exercises the system OBS a runner happens to install, and a
-# regression there should be read and fixed rather than block a tag that the unit suites passed.
 name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # The detection models live in Git LFS, and those tests pin the tensor layout against the
-          # real weights, so they fail outright rather than skipping without them, deliberately.
-          # Note the failure is an opaque ONNX Runtime protobuf-parse error, not a "no model found":
-          # an unfetched LFS pointer is still a file, so every existence check upstream of the load
-          # passes first.
-          lfs: true
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: src/Tript.Web/package-lock.json
-
-      # ffprobe backs the library's duration and thumbnail paths; Tript.Media.Tests drives the real
-      # binaries rather than a fake, so they have to be present.
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install frontend dependencies
-        working-directory: src/Tript.Web
-        run: npm ci
-
-      - name: Build
-        run: dotnet build Tript.slnx -c Release --nologo
-
-      - name: Test
-        run: make test CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults"
-
-      - name: Name the failed tests
-        if: failure()
-        run: python3 scripts/report-failed-tests.py TestResults
-
-      # Restore writes packages.lock.json, so a build or test that rewrites it means the
-      # committed lock files no longer describe the build. That used to pass silently and
-      # only surfaced later as NU1004 on a locked Windows publish.
-      - name: Lock files are unchanged by the build
-        run: git diff --exit-code -- '*packages.lock.json'
-
-  # Tript ships a Windows bundle that the job above only ever cross-compiles, so nothing started it
-  # on Windows before a release went out. Shared with release.yml, which must not ship without it.
-  windows:
-    uses: ./.github/workflows/windows-checks.yml
-
-  linux:
-    uses: ./.github/workflows/linux-checks.yml
-
-  obs-integration:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Install OBS Studio and a virtual display
-        run: |
-          sudo add-apt-repository -y ppa:obsproject/obs-studio
-          sudo apt-get update
-          sudo apt-get install -y obs-studio xvfb ffmpeg
-
-      - name: Integration tests against real libobs
-        run: >-
-          xvfb-run -a -s "-screen 0 1920x1080x24"
-          make test-integration CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults"
-
-      - name: Name the failed tests
-        if: failure()
-        run: python3 scripts/report-failed-tests.py TestResults
+  tests:
+    uses: ./.github/workflows/tests.yml

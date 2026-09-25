@@ -3,7 +3,10 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
-## Unreleased
+## 1.1.0 (2026-09-25)
+
+Tript now runs on Linux as well as Windows. Linux is less battle tested than Windows, so please
+report anything that looks wrong.
 
 ### Linux
 

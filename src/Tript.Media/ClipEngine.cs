@@ -235,7 +235,7 @@ public sealed class ClipEngine : IClipEngine
             return args;
         }
 
-        internal string Describe() => GpuToneMap ? $"{Encoder.Name} with GPU tone mapping" : Encoder.Name;
+        internal string Describe() => GpuToneMap ? $"{Encoder.Key} with GPU tone mapping" : Encoder.Key;
     }
 
     private static void TryDelete(string path)

@@ -79,23 +79,72 @@ public sealed class VideoEncoderSelectorTests
     }
 
     [Fact]
-    public void ProbeArgs_Vaapi_OpensTheDeviceAndUploadsFrames()
+    public void ProbeArgs_Vaapi_OpensTheGivenRenderNodeAndUploadsFrames()
     {
-        var args = VideoEncoderSelector.ProbeArgs(VideoEncoder.Vaapi).ToList();
+        var args = VideoEncoderSelector.ProbeArgs(VideoEncoder.VaapiOn("/dev/dri/renderD129")).ToList();
 
         Assert.True(args.IndexOf("-vaapi_device") < args.IndexOf("-i"));
+        Assert.Equal("/dev/dri/renderD129", args[args.IndexOf("-vaapi_device") + 1]);
         Assert.Equal("format=nv12,hwupload", args[args.IndexOf("-vf") + 1]);
     }
 
-    [Fact]
-    public void PlatformHardware_OffersEveryMajorVendor()
+    [Theory]
+    [InlineData(true, "h264_amf")]
+    [InlineData(false, "h264_vaapi")]
+    public void PlatformHardware_OffersEveryMajorVendor(bool windows, string platformEncoder)
     {
-        var names = VideoEncoder.PlatformHardware().Select(encoder => encoder.Name).ToList();
+        var encoders = VideoEncoder.PlatformHardware(windows, ["/dev/dri/renderD128"]);
+        var names = encoders.Select(encoder => encoder.Name).ToList();
 
         Assert.Contains("h264_nvenc", names);
         Assert.Contains("h264_qsv", names);
-        Assert.Contains(OperatingSystem.IsWindows() ? "h264_amf" : "h264_vaapi", names);
-        Assert.All(VideoEncoder.PlatformHardware(), encoder => Assert.True(encoder.IsHardware));
+        Assert.Contains(platformEncoder, names);
+        Assert.All(encoders, encoder => Assert.True(encoder.IsHardware));
+    }
+
+    [Fact]
+    public void PlatformHardware_OnLinux_OffersVaapiOncePerRenderNode_InOrder()
+    {
+        var vaapi = VideoEncoder.PlatformHardware(windows: false, ["/dev/dri/renderD128", "/dev/dri/renderD129"])
+            .Where(encoder => encoder.Name == "h264_vaapi")
+            .ToList();
+
+        Assert.Equal(["/dev/dri/renderD128", "/dev/dri/renderD129"], vaapi.Select(encoder => encoder.Device));
+    }
+
+    [Fact]
+    public void PlatformHardware_OnLinux_OffersNoVaapi_WithoutARenderNode()
+    {
+        Assert.DoesNotContain(VideoEncoder.PlatformHardware(windows: false, []),
+            encoder => encoder.Name == "h264_vaapi");
+    }
+
+    [Fact]
+    public void Current_TriesTheNextRenderNode_WhenTheFirstCannotEncode()
+    {
+        var probed = new List<string?>();
+        var selector = new VideoEncoderSelector(
+            [VideoEncoder.VaapiOn("/dev/dri/renderD128"), VideoEncoder.VaapiOn("/dev/dri/renderD129")],
+            candidate =>
+            {
+                probed.Add(candidate.Device);
+                return candidate.Device == "/dev/dri/renderD129" ? Works : Fails;
+            });
+
+        Assert.Equal("/dev/dri/renderD129", selector.Current.Device);
+        Assert.Equal(["/dev/dri/renderD128", "/dev/dri/renderD129"], probed);
+    }
+
+    [Fact]
+    public void Demote_OfOneRenderNode_MovesToTheNextRenderNode()
+    {
+        var selector = new VideoEncoderSelector(
+            [VideoEncoder.VaapiOn("/dev/dri/renderD128"), VideoEncoder.VaapiOn("/dev/dri/renderD129")],
+            _ => Works);
+
+        selector.Demote(selector.Current);
+
+        Assert.Equal("/dev/dri/renderD129", selector.Current.Device);
     }
 
     [Fact]

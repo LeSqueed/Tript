@@ -68,6 +68,34 @@ public static class FilePaths
             || IsUnder(fullPath, fullRoot);
     }
 
+    public static string ResolveLinks(string path)
+    {
+        const int MaximumLinkHops = 40;
+        var full = Path.GetFullPath(path);
+        var resolved = Path.GetPathRoot(full) ?? string.Empty;
+        var pending = new Queue<string>(SplitSegments(full[resolved.Length..]));
+        var hops = 0;
+        while (pending.TryDequeue(out var segment))
+        {
+            var next = Path.Combine(resolved, segment);
+            var target = new FileInfo(next).LinkTarget;
+            if (target is null)
+            {
+                resolved = next;
+                continue;
+            }
+
+            if (++hops > MaximumLinkHops)
+                return full;
+
+            var targetPath = Path.GetFullPath(target, resolved);
+            resolved = Path.GetPathRoot(targetPath) ?? string.Empty;
+            pending = new Queue<string>(SplitSegments(targetPath[resolved.Length..]).Concat(pending));
+        }
+
+        return TrimTrailingSeparators(resolved);
+    }
+
     public static string CaseFold(string path) => OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
 
     public static string TrimTrailingSeparators(string path)
@@ -83,6 +111,9 @@ public static class FilePaths
         var trimmed = TrimTrailingSeparators(path);
         return trimmed.EndsWith(Path.DirectorySeparatorChar) ? trimmed : trimmed + Path.DirectorySeparatorChar;
     }
+
+    private static string[] SplitSegments(string path)
+        => path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
     private static bool HasDriveRoot(string path)
         => path.Length >= 3

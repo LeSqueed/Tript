@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using Tript.Core;
+using Tript.TestSupport;
 using Xunit;
 
 namespace Tript.Settings.Tests;
@@ -96,5 +97,62 @@ public sealed class FilePathsTests
         var equal = FilePaths.Comparer.Equals("Game.exe", "game.exe");
         Assert.Equal(OperatingSystem.IsWindows(), equal);
         Assert.Equal(OperatingSystem.IsWindows() ? "GAME.EXE" : "game.exe", FilePaths.CaseFold("game.exe"));
+    }
+
+    [LinuxFact]
+    public void ResolveLinks_FollowsDirectoryLinksAnywhereInThePath()
+    {
+        var root = Directory.CreateTempSubdirectory("tript-links-").FullName;
+        try
+        {
+            var real = Directory.CreateDirectory(Path.Combine(root, "real", "Steam", "steamapps")).FullName;
+            Directory.CreateSymbolicLink(Path.Combine(root, "dot-steam"), Path.Combine(root, "config"));
+            Directory.CreateDirectory(Path.Combine(root, "config"));
+            Directory.CreateSymbolicLink(Path.Combine(root, "config", "steam"), Path.Combine("..", "real", "Steam"));
+
+            var resolved = FilePaths.ResolveLinks(Path.Combine(root, "dot-steam", "steam", "steamapps"));
+
+            Assert.Equal(real, resolved);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [LinuxFact]
+    public void ResolveLinks_KeepsAMissingTailAsWritten()
+    {
+        var root = Directory.CreateTempSubdirectory("tript-links-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "real"));
+            Directory.CreateSymbolicLink(Path.Combine(root, "link"), Path.Combine(root, "real"));
+
+            var resolved = FilePaths.ResolveLinks(Path.Combine(root, "link", "missing", "game.exe"));
+
+            Assert.Equal(Path.Combine(root, "real", "missing", "game.exe"), resolved);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [LinuxFact]
+    public void ResolveLinks_GivesUpOnALinkCycleAndReturnsThePathUnresolved()
+    {
+        var root = Directory.CreateTempSubdirectory("tript-links-").FullName;
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(root, "a"), Path.Combine(root, "b"));
+            File.CreateSymbolicLink(Path.Combine(root, "b"), Path.Combine(root, "a"));
+
+            Assert.Equal(Path.Combine(root, "a"), FilePaths.ResolveLinks(Path.Combine(root, "a")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 }

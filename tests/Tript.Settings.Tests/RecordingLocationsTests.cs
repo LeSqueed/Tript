@@ -39,6 +39,65 @@ public class RecordingLocationsTests : IDisposable
         Assert.Equal("Tript", leaf);
     }
 
+    private static Func<Environment.SpecialFolder, Environment.SpecialFolderOption, string> Folders(
+        string videos, string home, Environment.SpecialFolderOption? onlyWith = null) =>
+        (folder, option) =>
+        {
+            if (onlyWith is { } required && option != required)
+                return string.Empty;
+
+            return folder switch
+            {
+                Environment.SpecialFolder.MyVideos => videos,
+                Environment.SpecialFolder.UserProfile => home,
+                _ => string.Empty,
+            };
+        };
+
+    [Fact]
+    public void DefaultDirectory_OnLinux_UsesTheVideosFolderFromUserDirs()
+    {
+        var directory = RecordingLocations.DefaultDirectory(windows: false,
+            Folders("/home/ana/Filme", "/home/ana"), "/tmp");
+
+        Assert.Equal(Path.Combine("/home/ana/Filme", "Tript"), directory);
+    }
+
+    [Fact]
+    public void DefaultDirectory_OnLinux_AcceptsAVideosFolderThatDoesNotExistYet()
+    {
+        var directory = RecordingLocations.DefaultDirectory(windows: false,
+            Folders("/home/ana/Filme", "/home/ana", onlyWith: Environment.SpecialFolderOption.DoNotVerify), "/tmp");
+
+        Assert.Equal(Path.Combine("/home/ana/Filme", "Tript"), directory);
+    }
+
+    [Fact]
+    public void DefaultDirectory_OnLinux_FallsBackToVideosUnderHome()
+    {
+        var directory = RecordingLocations.DefaultDirectory(windows: false, Folders("", "/home/ana"), "/tmp");
+
+        Assert.Equal(Path.Combine("/home/ana", "Videos", "Tript"), directory);
+    }
+
+    [Fact]
+    public void DefaultDirectory_FallsBackToTheTempFolder_WithNoHome()
+    {
+        Assert.Equal(Path.Combine("/tmp", "Tript"),
+            RecordingLocations.DefaultDirectory(windows: false, Folders("", ""), "/tmp"));
+        Assert.Equal(Path.Combine("/tmp", "Tript"),
+            RecordingLocations.DefaultDirectory(windows: true, Folders("", ""), "/tmp"));
+    }
+
+    [Fact]
+    public void DefaultDirectory_OnWindows_UsesMyVideos_ThenTheProfile()
+    {
+        Assert.Equal(Path.Combine(@"C:\Users\ana\Videos", "Tript"),
+            RecordingLocations.DefaultDirectory(windows: true, Folders(@"C:\Users\ana\Videos", @"C:\Users\ana"), "/tmp"));
+        Assert.Equal(Path.Combine(@"C:\Users\ana", "Tript"),
+            RecordingLocations.DefaultDirectory(windows: true, Folders("", @"C:\Users\ana"), "/tmp"));
+    }
+
     [LinuxFact]
     public void DefaultDirectory_HonoursXdgVideosDir()
     {

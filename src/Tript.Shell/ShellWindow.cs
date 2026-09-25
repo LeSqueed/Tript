@@ -8,6 +8,7 @@ using Photino.NET;
 using Serilog;
 using Tript.App;
 using Tript.Settings;
+using Tript.Shell.Linux;
 
 namespace Tript.Shell;
 
@@ -27,7 +28,8 @@ internal sealed class ShellWindow : IDisposable
     private WindowPlacement? _lastSeenPlacement;
     private volatile bool _placementTracked;
     private WindowsTrayPresence? _tray;
-    private WindowsHotkeys? _hotkeys;
+    private IGlobalHotkeys? _hotkeys;
+    private LinuxShellNotifications? _linuxNotifications;
     private Timer? _visibilityWatch;
     private PhotinoWindow? _window;
     // These are written on the single-instance pipe thread, an AppHost background thread or a pool
@@ -47,6 +49,8 @@ internal sealed class ShellWindow : IDisposable
     // the window closed is an access violation no catch can stop. The startup update check raising
     // its "update ready" notification did exactly that and killed the process.
     private volatile bool _nativeReady;
+    private readonly IShellWindowControl _windowControl = ShellWindowControl.ForCurrentOs();
+    private TerminationSignals? _terminationSignals;
     private volatile bool _hotkeysStale;
     private int _visibilityTicking;
 
@@ -64,17 +68,17 @@ internal sealed class ShellWindow : IDisposable
         _tray = OperatingSystem.IsWindows() && File.Exists(_iconPath)
             ? new WindowsTrayPresence(
                 _iconPath,
-                () => _window is not null && WindowsWindow.IsVisible(_window),
+                () => _window is not null && _windowControl.IsVisible(_window),
                 () => _host.IsRecording,
                 HandleTrayCommand)
             : null;
 
         if (OperatingSystem.IsWindows())
             SystemEvents.SessionEnding += OnSessionEnding;
+        _terminationSignals = TerminationSignals.Register(() => StopRecordingThenExit("a termination signal"));
 
-        _hotkeys = OperatingSystem.IsWindows()
-            ? new WindowsHotkeys(HandleHotkey, _host.PushError)
-            : null;
+        _hotkeys = CreateHotkeys();
+        _linuxNotifications = OperatingSystem.IsLinux() ? new LinuxShellNotifications(_host) : null;
         _hotkeys?.ApplyBindings(SettingsResolver.ResolveEffectiveHotkeys(_host.SettingsStore.Load()));
         _host.SettingsChanged += settings =>
         {
@@ -90,7 +94,12 @@ internal sealed class ShellWindow : IDisposable
         _host.StatusChanged += UpdateTrayState;
         _host.RestartForUpdateRequested += RestartForUpdate;
         _host.NotificationRequested += (kind, title, body) =>
-            ShellNotifications.Show(_window, TryInvoke, _host, kind, title, body);
+        {
+            if (_linuxNotifications is { } linux)
+                linux.Show(kind, title, body);
+            else
+                ShellNotifications.Show(_window, TryInvoke, _host, kind, title, body);
+        };
 
         window.RegisterWindowClosingHandler((_, _) => OnClosing(window));
         AssignPickers(window);
@@ -137,8 +146,28 @@ internal sealed class ShellWindow : IDisposable
             if (watch.Dispose(settled))
                 settled.WaitOne(TimeSpan.FromSeconds(2));
         }
+        _terminationSignals?.Dispose();
         _hotkeys?.Dispose();
+        _linuxNotifications?.Dispose();
         _tray?.Dispose();
+    }
+
+    private IGlobalHotkeys? CreateHotkeys()
+    {
+        if (OperatingSystem.IsWindows())
+            return new WindowsHotkeys(HandleHotkey, _host.PushError);
+
+        if (OperatingSystem.IsLinux())
+        {
+            var hotkeys = new LinuxHotkeys(HandleHotkey, _host.PushError,
+                availability => _host.ReportGlobalHotkeys(availability.Available, availability.Note,
+                    availability.ManagedByDesktop, availability.Configurable),
+                _host.ReportDesktopHotkeyTriggers);
+            _host.GlobalHotkeyConfigurator = hotkeys.ConfigureInDesktop;
+            return hotkeys;
+        }
+
+        return null;
     }
 
     // Windows restart, shutdown and log off kill the process without any of the deliberate exit paths
@@ -146,7 +175,10 @@ internal sealed class ShellWindow : IDisposable
     // the only warning we get. Stop synchronously: the handler runs on the SystemEvents pump, not the
     // Photino message loop, and returning here is what tells Windows we are ready to go.
     [SupportedOSPlatform("windows")]
-    private void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+    private void OnSessionEnding(object? sender, SessionEndingEventArgs e) =>
+        StopRecordingThenExit(e.Reason.ToString());
+
+    private void StopRecordingThenExit(string reason)
     {
         try
         {
@@ -155,7 +187,7 @@ internal sealed class ShellWindow : IDisposable
         }
         catch (Exception exception)
         {
-            Log.Warning(exception, "Tript.Shell: the recording could not be stopped for {Reason}", e.Reason);
+            Log.Warning(exception, "Tript.Shell: the recording could not be stopped for {Reason}", reason);
         }
 
         RequestExit();
@@ -184,8 +216,16 @@ internal sealed class ShellWindow : IDisposable
             window.Maximized = placement.Maximized;
         }
 
-        if (File.Exists(_iconPath))
-            window.IconFile = _iconPath;
+        var windowIcon = OperatingSystem.IsWindows()
+            ? _iconPath
+            : Path.Combine(_host.Options.WebRoot, "tript.png");
+        if (File.Exists(windowIcon))
+            window.IconFile = windowIcon;
+        if (_linuxNotifications is { } linux)
+        {
+            window.RegisterFocusInHandler((_, _) => linux.SetWindowFocused(true));
+            window.RegisterFocusOutHandler((_, _) => linux.SetWindowFocused(false));
+        }
         if (OperatingSystem.IsWindows())
         {
             window.NotificationsEnabled = true;
@@ -229,7 +269,7 @@ internal sealed class ShellWindow : IDisposable
         {
             if (!_startupVisibilityApplied)
                 _startupVisibility = StartupVisibility.Window;
-            if (!TryInvoke(() => WindowsWindow.ShowWindow(window)))
+            if (!TryInvoke(() => _windowControl.Show(window)))
                 _activationPending = true;
         }
         catch (ApplicationException)
@@ -267,7 +307,7 @@ internal sealed class ShellWindow : IDisposable
             }
 
             Program.CloseShellOrRequestShutdown(
-                () => WindowsWindow.CloseWindow(window),
+                () => _windowControl.Close(window),
                 _host.Ipc.RequestShutdown,
                 () => Environment.Exit(1));
         });
@@ -294,7 +334,7 @@ internal sealed class ShellWindow : IDisposable
                 if (!_nativeReady)
                     break;
                 SavePlacement(window);
-                WindowsWindow.HideWindow(window);
+                _windowControl.Hide(window);
                 break;
             case TrayCommand.StartRecording:
                 RunInBackground(() => _host.StartRecordingOrReport(null), "start recording");
@@ -314,7 +354,7 @@ internal sealed class ShellWindow : IDisposable
         {
             var invoked = TryInvoke(() =>
             {
-                WindowsWindow.ShowWindow(window);
+                _windowControl.Show(window);
                 if (_webReady)
                 {
                     window.SendWebMessage(Program.NavigateSettingsMessage);
@@ -362,7 +402,7 @@ internal sealed class ShellWindow : IDisposable
         Interlocked.Exchange(ref _exitRequested, 1);
         _restartForUpdatePending = true;
         Program.CloseShellOrRequestShutdown(
-            () => WindowsWindow.CloseWindow(window),
+            () => _windowControl.Close(window),
             _host.Ipc.RequestShutdown,
             () => Environment.Exit(ShellExitCodes.RestartForUpdate));
     }
@@ -380,10 +420,10 @@ internal sealed class ShellWindow : IDisposable
         switch (decision)
         {
             case Program.WindowCloseDecision.HideToTray:
-                WindowsWindow.HideWindow(window);
+                _windowControl.Hide(window);
                 return true;
             case Program.WindowCloseDecision.MinimizeToTaskbar:
-                WindowsWindow.MinimizeWindow(window);
+                _windowControl.Minimize(window);
                 return true;
             case Program.WindowCloseDecision.StopRecordingThenExit:
                 RequestExit();
@@ -416,7 +456,7 @@ internal sealed class ShellWindow : IDisposable
         {
             _activationPending = false;
             _startupVisibility = StartupVisibility.Window;
-            WindowsWindow.ShowWindow(window);
+            _windowControl.Show(window);
         }
     }
 
@@ -438,12 +478,12 @@ internal sealed class ShellWindow : IDisposable
         _startupVisibilityApplied = true;
         if (_startupVisibility == StartupVisibility.Tray && TrayReachable())
         {
-            WindowsWindow.HideWindow(window);
+            _windowControl.Hide(window);
         }
         else if (_startupVisibility != StartupVisibility.Window)
         {
             _startupMinimizePending = true;
-            WindowsWindow.MinimizeWindow(window);
+            _windowControl.Minimize(window);
         }
     }
 
@@ -523,7 +563,7 @@ internal sealed class ShellWindow : IDisposable
         if (_host.SettingsStore.Load().General.MinimizeBehavior == MinimizeBehavior.Tray
             && TrayReachable())
         {
-            WindowsWindow.HideWindow(window);
+            _windowControl.Hide(window);
         }
     }
 
@@ -572,10 +612,9 @@ internal sealed class ShellWindow : IDisposable
     {
         try
         {
-            if (window.WindowHandle == IntPtr.Zero)
+            if (OperatingSystem.IsWindows() && window.WindowHandle == IntPtr.Zero)
                 return;
-            _host.SetWindowVisible(WindowsWindow.IsVisible(window) && !WindowsWindow.IsMinimized(window)
-                && !WindowsWindow.IsCoveredByFullscreenWindow(window));
+            _host.SetWindowVisible(_windowControl.IsSeenByTheUser(window));
         }
         catch (Exception exception)
         {

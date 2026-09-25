@@ -6,7 +6,7 @@ using Tript.Settings;
 
 namespace Tript.Shell;
 
-internal sealed class WindowsHotkeys : IDisposable
+internal sealed class WindowsHotkeys : IGlobalHotkeys
 {
     private const uint WmHotkey = 0x0312;
     private const uint ModNoRepeat = 0x4000;
@@ -29,7 +29,7 @@ internal sealed class WindowsHotkeys : IDisposable
         _messageWindow = CreateMessageWindow();
     }
 
-    internal void ApplyBindings(IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> effective)
+    public void ApplyBindings(IReadOnlyDictionary<HotkeyAction, HotkeyBinding?> effective)
     {
         foreach (var id in _registered.Keys)
             UnregisterHotKey(_messageWindow, id);

@@ -87,8 +87,8 @@ internal static class Program
 
                 if (!WebviewAudioSink.IsPresent())
                 {
-                    Console.Error.WriteLine(WebviewAudioSink.MissingSinkMessage);
                     Log.Fatal("Tript.Shell: {Message}", WebviewAudioSink.MissingSinkMessage);
+                    ReportStartupFailure("Tript could not start.", WebviewAudioSink.MissingSinkMessage);
                     return 1;
                 }
 
@@ -148,13 +148,11 @@ internal static class Program
         }
     }
 
-    // Tript.Shell is a WinExe, so there is no console and nothing the user can see when startup
-    // fails: double-clicking Tript just does nothing. This is the only feedback on that path.
+    // Tript.Shell is a WinExe, and a Linux desktop launch has no terminal either, so there is nothing
+    // the user can see when startup fails: launching Tript just does nothing. This is the only
+    // feedback on that path.
     private static void ReportStartupFailure(string summary, string? detail)
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
         const int maxDetail = 400;
         if (detail is { Length: > maxDetail })
             detail = detail[..maxDetail] + "...";
@@ -164,6 +162,12 @@ internal static class Program
             ? new[] { summary, "Details were written to:" + Environment.NewLine + logLocation }
             : new[] { summary, detail, "Details were written to:" + Environment.NewLine + logLocation };
         var text = string.Join(Environment.NewLine + Environment.NewLine, paragraphs);
+
+        if (!OperatingSystem.IsWindows())
+        {
+            StartupFailureDialog.Show(text);
+            return;
+        }
 
         try
         {
@@ -236,8 +240,9 @@ internal static class Program
         {
             closeShell();
         }
-        catch (ApplicationException)
+        catch (Exception exception)
         {
+            Log.Warning(exception, "Tript.Shell: the window could not be closed; shutting the host down instead");
             requestShutdown();
             forceExit();
         }

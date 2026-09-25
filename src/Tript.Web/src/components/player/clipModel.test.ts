@@ -99,7 +99,7 @@ describe('addRegion / removeRegion', () => {
   });
 });
 
-describe('moveRegionBy — dragging a region body', () => {
+describe('moveRegionBy: dragging a region body', () => {
   it('slides the region and preserves its length', () => {
     expect(moveRegionBy(region('a', 30, 40), 5, 100)).toEqual(region('a', 35, 45));
     expect(moveRegionBy(region('a', 30, 40), -12, 100)).toEqual(region('a', 18, 28));
@@ -122,7 +122,7 @@ describe('moveRegionBy — dragging a region body', () => {
   });
 });
 
-describe('resizeRegionStart / resizeRegionEnd — dragging an edge', () => {
+describe('resizeRegionStart / resizeRegionEnd: dragging an edge', () => {
   it('moves only the dragged edge', () => {
     expect(resizeRegionStart(region('a', 30, 40), 25, 100)).toEqual(region('a', 25, 40));
     expect(resizeRegionEnd(region('a', 30, 40), 55, 100)).toEqual(region('a', 30, 55));
@@ -156,7 +156,7 @@ describe('resizeRegionStart / resizeRegionEnd — dragging an edge', () => {
   });
 });
 
-describe('normalizeRegionBounds — the gate every edit goes through', () => {
+describe('normalizeRegionBounds: the gate every edit goes through', () => {
   it('orders reversed bounds', () => {
     expect(normalizeRegionBounds(60, 20, 100)).toEqual({ start: 20, end: 60 });
   });
@@ -339,7 +339,7 @@ function inBoundsRegionsFor(duration: number): TimelineRegion[] {
   );
 }
 
-describe('the bounds invariant — 0 <= start < end <= duration', () => {
+describe('the bounds invariant: 0 <= start < end <= duration', () => {
   it('no edit a caller can attempt puts a region outside the media', () => {
     for (const duration of DURATIONS) {
       for (const subject of ADVERSARIAL_REGIONS) {
@@ -475,7 +475,7 @@ describe('the bounds invariant — 0 <= start < end <= duration', () => {
   });
 });
 
-describe('the bug the invariant was violated by — a duration that was a placeholder', () => {
+describe('the bug the invariant was violated by: a duration that was a placeholder', () => {
   it('a stale oversized region is not edited into another oversized one', () => {
     const stale = region('stale', 200, 300);
     expect(resizeRegionStart(stale, 50, 100)).toEqual(stale);
@@ -505,7 +505,7 @@ describe('the bug the invariant was violated by — a duration that was a placeh
   });
 });
 
-describe('reconcileRegion(s) — what happens when the real duration is shorter', () => {
+describe('reconcileRegion(s): what happens when the real duration is shorter', () => {
   it('keeps a region that already fits, by identity', () => {
     const fits = region('a', 10, 20);
     expect(reconcileRegion(fits, 100)).toBe(fits);
@@ -540,7 +540,7 @@ describe('reconcileRegion(s) — what happens when the real duration is shorter'
   });
 });
 
-describe('resolveClipBounds — which duration is authoritative', () => {
+describe('resolveClipBounds: which duration is authoritative', () => {
   it('prefers the media over the metadata record, because the file is what gets cut', () => {
     expect(resolveClipBounds(8, 100)).toEqual({ seconds: 8, known: true });
     expect(resolveClipBounds(140, 100)).toEqual({ seconds: 140, known: true });
@@ -559,7 +559,7 @@ describe('resolveClipBounds — which duration is authoritative', () => {
   });
 });
 
-describe('markableDuration — only a measured length bounds a segment', () => {
+describe('markableDuration: only a measured length bounds a segment', () => {
   const declaredSeconds = 100;
   const realSeconds = 9.13;
 

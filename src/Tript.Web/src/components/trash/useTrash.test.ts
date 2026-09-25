@@ -83,7 +83,7 @@ describe('useTrash', () => {
     expect(sent).toEqual([]);
   });
 
-  it('empties the trash with no parameters at all — that is what makes it mean "everything"', () => {
+  it('empties the trash with no parameters at all: that is what makes it mean "everything"', () => {
     const { client, sent } = recordingClient();
     const { result } = renderHook(() => useTrash(client));
     sent.length = 0;

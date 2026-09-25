@@ -54,7 +54,7 @@ describe('parseTrashMessage', () => {
     );
   });
 
-  it('drops entries with no id — there is nothing a restore or purge could name', () => {
+  it('drops entries with no id: there is nothing a restore or purge could name', () => {
     const state = parseTrashMessage({
       entries: [entry({ id: 'good' }), { fileName: 'orphan.mp4', deletedAt: NOW }, 7],
       retentionHours: 24,
@@ -130,7 +130,7 @@ describe('times', () => {
     );
   });
 
-  it('says when the entry goes for good — including "never", which is a promise, not a blank', () => {
+  it('says when the entry goes for good, including "never", which is a promise, not a blank', () => {
     expect(formatPurgeAt(entry({ id: 'a', purgeAt: NOW + 22 * HOUR }), NOW)).toBe(
       'Deleted for good in 22 hours',
     );

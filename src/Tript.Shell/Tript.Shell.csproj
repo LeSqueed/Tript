@@ -24,7 +24,7 @@
     <!-- TrayIconFactory composites the status badges onto tript.ico at runtime, so the drawing API
          is needed on every TFM, not just the Windows-flavored one. Microsoft.Toolkit.Uwp.Notifications
          7.1.3 also pulls it in transitively at 4.7.0, which has a known critical RCE
-         (GHSA-rxg9-xrhp-64gj, Mac/Linux-only) — this explicit reference pins the patched version for
+         (GHSA-rxg9-xrhp-64gj, Mac/Linux-only); this explicit reference pins the patched version for
          that TFM too. Every call site is behind OperatingSystem.IsWindows(). -->
     <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
     <!-- SystemEvents.SessionEnding is how ShellWindow learns about a Windows restart or log off in

@@ -71,7 +71,7 @@ public sealed class ObsLifecycleTests
     [SkippableFact]
     public void TheLocale_RoundTripsByteIdentically()
     {
-        const string locale = "zh-Hàn — Ω — 🎮";
+        const string locale = "zh-Hàn \u2014 Ω \u2014 🎮";
 
         using var session = ObsSession.Start();
         session.Runtime.Locale = locale;

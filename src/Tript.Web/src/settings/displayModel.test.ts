@@ -107,7 +107,7 @@ describe('readAvailableDisplays', () => {
     ]);
   });
 
-  it('keeps an empty array as an empty array — it is an answer, not a failure', () => {
+  it('keeps an empty array as an empty array: it is an answer, not a failure', () => {
     expect(readAvailableDisplays([])).toEqual([]);
   });
 
@@ -133,7 +133,7 @@ describe('readDisplayFallbackWarning', () => {
     });
   });
 
-  it('is null without a requestedId — there is nothing to warn about', () => {
+  it('is null without a requestedId: there is nothing to warn about', () => {
     expect(readDisplayFallbackWarning(null)).toBeNull();
     expect(readDisplayFallbackWarning({})).toBeNull();
     expect(readDisplayFallbackWarning({ requestedId: '' })).toBeNull();

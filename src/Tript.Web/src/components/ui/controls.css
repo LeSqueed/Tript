@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  *
- * The control layer's styles — see docs/design-system.md §4. Every button, field and input in the
+ * The control layer's styles; see docs/design-system.md §4. Every button, field and input in the
  * app is styled here and nowhere else. `.btn` used to have its base in LibraryView.css with variants
  * spread across four stylesheets, including `.btn:disabled` declared twice with different values.
  */

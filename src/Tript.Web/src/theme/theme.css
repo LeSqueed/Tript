@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  *
- * The Tript theme — one theme block, activated by data-theme="tript" on the document root.
+ * The Tript theme: one theme block, activated by data-theme="tript" on the document root.
  *
  * Dark modern theme. The identity is a warm coral against quiet graphite surfaces. A contrast check
- * in the unit suite guards the text directions — see theme/contrast.test.ts.
+ * in the unit suite guards the text directions; see theme/contrast.test.ts.
  */
 
 :root,

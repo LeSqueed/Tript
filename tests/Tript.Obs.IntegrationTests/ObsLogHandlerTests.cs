@@ -51,7 +51,7 @@ public sealed class ObsLogHandlerTests
     public void ANonAsciiArgument_RoundTripsByteIdentically()
     {
         ObsTestEnvironment.RequireUsableRuntime();
-        const string original = "café — 日本語 — Ω — 🎮 — ünïcödé";
+        const string original = "café \u2014 日本語 \u2014 Ω \u2014 🎮 \u2014 ünïcödé";
         var received = new List<string>();
 
         using (ObsLog.Install((_, message) => received.Add(message)))

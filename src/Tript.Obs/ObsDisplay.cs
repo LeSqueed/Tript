@@ -21,7 +21,7 @@ internal static partial class ObsDisplayLabel
         if (!size.Success)
             return (text, 0, 0, false);
 
-        var name = text[..size.Index].TrimEnd(' ', '\t', ':', '(', '[', '-', '–', '—');
+        var name = text[..size.Index].TrimEnd(' ', '\t', ':', '(', '[', '-', '–', '\u2014');
         var position = PositionPattern().Match(text, size.Index + size.Length);
 
         return (

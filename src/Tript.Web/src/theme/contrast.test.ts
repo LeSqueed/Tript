@@ -44,7 +44,7 @@ describe('theme accent constraint', () => {
     expect(contrastRatio(PRIMARY, BASE_CONTENT)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('the accent is light, not dark — the trap only bites dark accents', () => {
+  it('the accent is light, not dark: the trap only bites dark accents', () => {
     const accentLum = luminance(ACCENT);
     expect(accentLum).toBeGreaterThan(0.35);
   });

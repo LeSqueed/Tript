@@ -15,7 +15,7 @@ const TRAINING_REGION_SURFACES = new Set([
 ]);
 const TRAINING = join(SRC_ROOT, 'components', 'training');
 const IPC = join(SRC_ROOT, 'ipc');
-const EM_DASH = '—';
+const EM_DASH = '\u2014';
 const RETIRED: { word: RegExp; instead: string }[] = [
   { word: /\brolling buffer\b/i, instead: 'instant replay' },
   { word: /\bmark in\b|\bmark out\b/i, instead: 'set start / set end' },
@@ -66,7 +66,7 @@ describe('plain language outside settings', () => {
           const trainingSurface = TRAINING_REGION_SURFACES.has(file) || file.startsWith(TRAINING);
           if (word.source.includes('region') && trainingSurface) continue;
           if (word.test(candidate)) {
-            offenders.push(`${relative(SRC_ROOT, file)}: "${candidate.trim()}" — say ${instead}`);
+            offenders.push(`${relative(SRC_ROOT, file)}: "${candidate.trim()}": say ${instead}`);
           }
         }
       }

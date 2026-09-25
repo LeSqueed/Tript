@@ -13,7 +13,7 @@ Training crops come from three sources:
    random owner names, italic shear, drop shadow, the red banner, and a faded variant.
 
 Every crop is labelled with the canonical phrase (``ELIMINATED SENTRY TURRET``,
-``PLAY OF THE GAME`` …) — the owner name is deliberately dropped, so labels are deterministic and
+``PLAY OF THE GAME`` …); the owner name is deliberately dropped, so labels are deterministic and
 the recogniser learns to skip the variable span.
 
 Output: ``dataset/ocr/{images/, labels.tsv, character_dict.txt, export.json}``.

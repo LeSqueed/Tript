@@ -173,7 +173,7 @@ public class ModelClassCountTests
 
         Assert.True(OnnxModelInspector.TryDeriveClassCount(dimensions, out var numClasses),
             $"Output {outputName} has shape [{string.Join(',', dimensions)}], which carries no " +
-            "static class dimension — the detector would be falling back to events.json.");
+            "static class dimension; the detector would be falling back to events.json.");
         var names = OnnxModelInspector.ParseClassNames(
             session.ModelMetadata.CustomMetadataMap.TryGetValue("names", out var raw) ? raw : null);
         Assert.NotNull(names);

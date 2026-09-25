@@ -37,29 +37,33 @@ internal sealed partial class AppHost
             return;
         }
 
-        PushGameCandidate(candidate, normalized);
+        PushGameCandidate(candidate, normalized,
+            CandidateResolverInput(candidate.Executable, normalized, _gameInventory.Inventory).Name);
     }
 
-    private void PushGameCandidate(FullscreenGameCandidate candidate, string normalized)
+    private void PushGameCandidate(FullscreenGameCandidate candidate, string normalized, string? name)
     {
         _ipc.Broadcast("gameCandidate", JsonSerializer.SerializeToElement(new
         {
             pid = candidate.ProcessId,
             executable = candidate.Executable,
             executablePath = normalized,
+            name,
         }, Wire.Options));
     }
 
     private async Task ResolveGameCandidateAsync(FullscreenGameCandidate candidate, string normalized)
     {
+        string? libraryName = null;
         try
         {
             await _gameInventory.CurrentScan.WaitAsync(_discoveryCancellation.Token).ConfigureAwait(false);
             var inventory = _gameInventory.Inventory;
             var resolution = CandidateResolverInput(candidate.Executable, normalized, inventory);
+            libraryName = resolution.Name;
             if (!resolution.StoreBacked)
             {
-                PushGameCandidate(candidate, normalized);
+                PushGameCandidate(candidate, normalized, libraryName);
                 return;
             }
             var resolved = await _resolverClient!.ResolveAsync(resolution.Input,
@@ -95,7 +99,7 @@ internal sealed partial class AppHost
                 if (!saved)
                 {
                     Log.Warning("AppHost: resolved game candidate was not saved: {Reason}", failure);
-                    PushGameCandidate(candidate, normalized);
+                    PushGameCandidate(candidate, normalized, libraryName);
                     return;
                 }
 
@@ -114,12 +118,12 @@ internal sealed partial class AppHost
         {
             Log.Warning(exception, "AppHost: game candidate resolution timed out for {Executable}",
                 candidate.Executable);
-            PushGameCandidate(candidate, normalized);
+            PushGameCandidate(candidate, normalized, libraryName);
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)
         {
             Log.Warning(exception, "AppHost: game candidate resolution failed for {Executable}", candidate.Executable);
-            PushGameCandidate(candidate, normalized);
+            PushGameCandidate(candidate, normalized, libraryName);
         }
         finally
         {
@@ -138,19 +142,24 @@ internal sealed partial class AppHost
         }, Wire.Options));
     }
 
-    internal sealed record CandidateResolution(string Input, bool StoreBacked);
+    internal sealed record CandidateResolution(string Input, bool StoreBacked, string? Name = null);
 
     internal static CandidateResolution CandidateResolverInput(string executable, string normalized,
         GameInventory inventory)
     {
-        var installed = inventory.Games
-            .Where(game => game.Store != GameStore.Ubisoft && FilePaths.IsUnder(normalized, game.InstallRoot))
+        var containing = inventory.Games
+            .Where(game => FilePaths.IsUnder(normalized, game.InstallRoot))
             .OrderByDescending(game => game.InstallRoot.Length)
-            .FirstOrDefault();
-        return installed is not null
-            ? new CandidateResolution(installed.ProductId.ToString(), true)
-            : new CandidateResolution($"executable:{ExecutableNames.Normalize(executable)}", false);
+            .ToArray();
+        var storeBacked = containing.FirstOrDefault(IsResolvableByStore);
+        var name = (storeBacked ?? containing.FirstOrDefault())?.DisplayName;
+        return storeBacked is not null
+            ? new CandidateResolution(storeBacked.ProductId.ToString(), true, name)
+            : new CandidateResolution($"executable:{ExecutableNames.Normalize(executable)}", false, name);
     }
+
+    private static bool IsResolvableByStore(InstalledGame game) =>
+        game.Store != GameStore.Ubisoft && game.Store.HasStoreProductIdentity();
 
     private void OnFullscreenCandidateCleared(FullscreenGameCandidate candidate)
     {

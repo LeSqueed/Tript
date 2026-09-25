@@ -109,6 +109,8 @@ public sealed class UpdateManagerTests : IDisposable
     {
         var zipBytes = BuildAppZip("Release-win");
         var routes = ReleaseRoutes(zipBytes, ValidHashOf(zipBytes));
+        routes[ReleasesUrl] = ReleaseListJson("v0.1.0-alpha.3",
+            assets: [WindowsZipAsset(zipBytes.Length), WindowsShaAsset(), LinuxPackageAsset()]);
         var handler = new RouteHandler(routes);
         using var manager = CreateManager(handler, supportsAutomaticApply: false);
 
@@ -116,6 +118,19 @@ public sealed class UpdateManagerTests : IDisposable
 
         var status = manager.Snapshot();
         Assert.Equal("available", status.Stage);
+        Assert.DoesNotContain(ZipUrl, handler.Requests);
+    }
+
+    [Fact]
+    public async Task NonWindowsPlatform_IgnoresAReleaseThatShipsNoLinuxPackage()
+    {
+        var zipBytes = BuildAppZip("Release-win");
+        var handler = new RouteHandler(ReleaseRoutes(zipBytes, ValidHashOf(zipBytes)));
+        using var manager = CreateManager(handler, supportsAutomaticApply: false);
+
+        await manager.CheckAsync(manual: true, CancellationToken.None);
+
+        Assert.Equal("upToDate", manager.Snapshot().Stage);
         Assert.DoesNotContain(ZipUrl, handler.Requests);
     }
 
@@ -319,6 +334,9 @@ public sealed class UpdateManagerTests : IDisposable
 
     private static object WindowsZipAsset(long size) =>
         new { name = "Tript-0.1.0-alpha.3-win-x64.zip", browser_download_url = ZipUrl, size };
+
+    private static object LinuxPackageAsset() =>
+        new { name = "Tript-0.1.0-alpha.3-linux-x64.tar.gz", browser_download_url = "https://api.test/assets/linux", size = 1 };
 
     private static object WindowsShaAsset() =>
         new { name = "Tript-0.1.0-alpha.3-win-x64.zip.sha256", browser_download_url = ShaUrl, size = 90 };

@@ -57,7 +57,8 @@ public sealed class GameIdReconciliationTests : IDisposable
             WebRoot = root,
             FakeRecorder = true,
         }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
-            gameIdAliases: new GameIdAliasStore(Path.Combine(root, "game-id-aliases.json")));
+            gameIdAliases: new GameIdAliasStore(Path.Combine(root, "game-id-aliases.json")),
+            storageProbe: AmpleStorage.Probe);
         host.SetInventoryForTesting(new GameInventory([
             new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
                 "Example Game", installRoot, ImmutableArray<string>.Empty),

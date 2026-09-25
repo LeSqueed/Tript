@@ -142,7 +142,8 @@ public sealed class HotkeySettingsUpdateTests : IDisposable
             SettingsPath = _settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker());
+        }, store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
         return (store, host);
     }
 }

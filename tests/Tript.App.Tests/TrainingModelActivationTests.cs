@@ -111,7 +111,8 @@ public sealed class TrainingModelActivationTests
             SettingsPath = settingsPath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, tracker);
+        }, store, runtime: null, tracker,
+            storageProbe: AmpleStorage.Probe);
 
         try
         {
@@ -226,7 +227,8 @@ public sealed class TrainingModelActivationTests
             SettingsPath = settingsPath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker());
+        }, store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
         ModelService.ConfigureModelRoots(modelRoot);
 
         FrameSourceRegistry.SetResolver(() => new InertFrameSource());

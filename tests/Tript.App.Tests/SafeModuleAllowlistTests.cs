@@ -28,8 +28,65 @@ public sealed class SafeModuleAllowlistTests
     [Fact]
     public void TheLinuxAllowlist_IsTheSystemModulesAndNothingElse() =>
         Assert.Equal(
-            ["obs-x264", "obs-ffmpeg", "obs-outputs", "linux-capture", "image-source", "linux-pulseaudio"],
+            [
+                "obs-x264", "obs-ffmpeg", "obs-outputs", "image-source", "linux-capture", "linux-pipewire",
+                "linux-pulseaudio", "obs-nvenc", "obs-qsv11", "linux-vkcapture"
+            ],
             Program.SafeModules(isWindows: false));
+
+    [Fact]
+    public void TheLinuxAllowlist_CarriesThePipeWireScreenCaptureModule() =>
+        Assert.Contains("linux-pipewire", Program.SafeModules(isWindows: false));
+
+    [Theory]
+    [InlineData("linux-pipewire")]
+    [InlineData("linux-capture")]
+    [InlineData("linux-pulseaudio")]
+    [InlineData("obs-nvenc")]
+    [InlineData("obs-qsv11")]
+    [InlineData("linux-vkcapture")]
+    public void OnLinux_AnOptionalModuleThatFailsToLoad_DoesNotStopStartup(string module) =>
+        Assert.Empty(Program.FatalModuleFailures([module], isWindows: false));
+
+    [Theory]
+    [InlineData("obs-x264")]
+    [InlineData("obs-ffmpeg")]
+    [InlineData("obs-outputs")]
+    [InlineData("image-source")]
+    public void OnLinux_ARequiredModuleThatFailsToLoad_StopsStartup(string module) =>
+        Assert.Equal([module], Program.FatalModuleFailures([module, "obs-nvenc"], isWindows: false));
+
+    [Fact]
+    public void OnLinuxWithoutTheNvidiaEncoderLibrary_TheNvencModuleIsNotLoaded()
+    {
+        var modules = Program.SafeModules(isWindows: false, nvidiaEncoderAvailable: false);
+
+        Assert.DoesNotContain("obs-nvenc", modules);
+        Assert.Contains("obs-qsv11", modules);
+        Assert.Contains("obs-ffmpeg", modules);
+    }
+
+    [Fact]
+    public void WithTheNvidiaEncoderLibrary_TheNvencModuleIsLoaded() =>
+        Assert.Contains("obs-nvenc", Program.SafeModules(isWindows: false, nvidiaEncoderAvailable: true));
+
+    [Theory]
+    [InlineData("Skipping module 'obs-vst', not on safe list", true)]
+    [InlineData("Failed to initialize module 'obs-nvenc.so'", false)]
+    [InlineData("Skipping module 'x' because it failed to load", false)]
+    public void OnlyTheIntendedModuleSkipsAreQuietened(string message, bool quiet) =>
+        Assert.Equal(quiet, Program.IsExpectedModuleSkip(message));
+
+    [Fact]
+    public void OnWindows_EveryBundledModuleIsRequired() =>
+        Assert.Equal(Program.SafeModules(isWindows: true), Program.RequiredModules(isWindows: true));
+
+    [Fact]
+    public void EveryRequiredModule_IsAlsoAllowedToLoad()
+    {
+        foreach (var isWindows in new[] { true, false })
+            Assert.Empty(Program.RequiredModules(isWindows).Except(Program.SafeModules(isWindows)));
+    }
 
     [Theory]
     [InlineData(true)]

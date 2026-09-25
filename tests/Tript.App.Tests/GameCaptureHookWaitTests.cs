@@ -26,7 +26,8 @@ public sealed class GameCaptureHookWaitTests : IDisposable
             WebRoot = _root,
             FakeRecorder = true,
         }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker(),
-            recorderStopTimeout: TimeSpan.FromMilliseconds(20));
+            recorderStopTimeout: TimeSpan.FromMilliseconds(20),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

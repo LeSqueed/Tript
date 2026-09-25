@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.ComponentModel;
 using System.Diagnostics;
 using Serilog;
+using Serilog.Events;
 using Tript.App.Content;
 using Tript.App.Ipc;
 using Tript.App.Models;
@@ -44,7 +45,9 @@ internal sealed partial class AppHost
         _detector.GameStopped += DetectedGameStopped;
         _detector.Start();
 
-        _fullscreenDetector = new FullscreenGameDetector(targets);
+        _fullscreenDetector = OperatingSystem.IsLinux()
+            ? FullscreenGameDetector.ForLinux(targets, InstalledGameRoots)
+            : new FullscreenGameDetector(targets);
         _fullscreenDetector.CandidateFound += OnFullscreenCandidateFound;
         _fullscreenDetector.CandidateCleared += OnFullscreenCandidateCleared;
         _fullscreenDetector.Start();
@@ -155,7 +158,8 @@ internal sealed partial class AppHost
 
         _detectionHost.Dispose();
         _detectionHost = null;
-        Log.Warning("AppHost: automatic detection did not start for {GameId}; recording continues without automatic bookmarks",
+        Log.Write(ModelService.HasDetectionBundleForGame(gameId) ? LogEventLevel.Warning : LogEventLevel.Information,
+            "AppHost: automatic detection did not start for {GameId}; recording continues without automatic bookmarks",
             gameId);
         return false;
     }
@@ -194,12 +198,27 @@ internal sealed partial class AppHost
             if (_shuttingDown)
                 throw new OperationCanceledException(cancellationToken);
 
-            ActivateDownloadedModelCore(gameId, _activeDetectionGameId, StopDetection,
+            var startWhenIdle = ShouldStartDetectionForLateModel(gameId,
+                recording: _recorder?.Snapshot.State == RecorderState.Recording,
+                stopPending: _stopFinalizationPending,
+                activeDetectionGameId: _activeDetectionGameId,
+                ownedByDetectedProcess: Volatile.Read(ref _recordingProcessOwner) is not null,
+                currentGameId: _currentGameId,
+                canonical: _gameIdAliases.Resolve);
+
+            var startedLate = ActivateDownloadedModelCore(gameId, _activeDetectionGameId, StopDetection,
                 () =>
                 {
                     ModelService.InvalidateModel(gameId);
                     GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, GameModelPaths.ModelsRoot);
-                }, StartDetection);
+                }, StartDetection, startWhenIdle);
+
+            if (startedLate)
+            {
+                Log.Information("AppHost: automatic detection started mid-recording for {GameId} once its model arrived",
+                    gameId);
+                PushState(IsRecording, CurrentGameId);
+            }
         }
 
 #if TRIPT_TRAINING
@@ -208,8 +227,22 @@ internal sealed partial class AppHost
         return Task.CompletedTask;
     }
 
-    internal static void ActivateDownloadedModelCore(string gameId, string? activeDetectionGameId,
-        Action stopDetection, Action install, Func<string, bool> startDetection)
+    internal static bool ShouldStartDetectionForLateModel(string gameId, bool recording, bool stopPending,
+        string? activeDetectionGameId, bool ownedByDetectedProcess, string? currentGameId,
+        Func<string?, string?> canonical)
+    {
+        if (!recording || stopPending || activeDetectionGameId is not null || !ownedByDetectedProcess
+            || currentGameId is null)
+        {
+            return false;
+        }
+
+        return string.Equals(canonical(currentGameId) ?? currentGameId, canonical(gameId) ?? gameId,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ActivateDownloadedModelCore(string gameId, string? activeDetectionGameId,
+        Action stopDetection, Action install, Func<string, bool> startDetection, bool startWhenIdle = false)
     {
         var restart = string.Equals(activeDetectionGameId, gameId, StringComparison.OrdinalIgnoreCase);
         if (restart)
@@ -224,6 +257,8 @@ internal sealed partial class AppHost
             if (restart)
                 startDetection(gameId);
         }
+
+        return !restart && startWhenIdle && startDetection(gameId);
     }
 
     private void OnModelStatusChanged(IReadOnlyList<GameModelStatus> statuses) =>

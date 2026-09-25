@@ -14,7 +14,7 @@ internal static class SettingsMessage
 {
     internal static JsonElement Build(SettingsModel settings, IReadOnlyList<AudioDeviceSetting> audioDevices,
         IReadOnlyList<ObsDisplay>? displays, IReadOnlyList<string>? availableEncoders,
-        DisplaySize? primaryDisplay, string? appVersion)
+        DisplaySize? primaryDisplay, string? appVersion, PlatformCapabilities? platformCapabilities = null)
     {
         var settingsNode = JsonSerializer.SerializeToNode(settings, SettingsSerialization.Options);
 
@@ -43,6 +43,8 @@ internal static class SettingsMessage
             displayFallbackWarning = DisplayFallbackWarning(settings.Capture, displays),
 
             appVersion,
+
+            platformCapabilities,
         }, Wire.Options);
     }
 

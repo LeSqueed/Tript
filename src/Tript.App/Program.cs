@@ -9,6 +9,7 @@ using Serilog;
 using Serilog.Events;
 using Tript.Detection;
 using Tript.App;
+using Tript.App.Content;
 using Tript.App.Models;
 using Tript.Obs;
 using Tript.Settings;
@@ -30,6 +31,7 @@ internal static class Program
         try
         {
             using var app = BuildApp(options);
+            using var signals = TerminationSignals.Register(app.Ipc.RequestShutdown);
             app.Run();
             return 0;
         }
@@ -59,7 +61,7 @@ internal static class Program
             {
                 _obsLogScope = ObsLog.Install(static (level, message) =>
                 {
-                    var serilogLevel = level switch
+                    var serilogLevel = IsExpectedModuleSkip(message) ? LogEventLevel.Debug : level switch
                     {
                         ObsLogLevel.Error => LogEventLevel.Error,
                         ObsLogLevel.Warning => LogEventLevel.Warning,
@@ -105,7 +107,8 @@ internal static class Program
         var tracker = new RecordingSessionTracker().Register();
 
         return new AppHost(options, store, runtime, tracker, primaryDisplay,
-            enableModelDelivery: !options.FakeRecorder);
+            enableModelDelivery: !options.FakeRecorder,
+            storageProbe: FixedStorageProbe.ForFakeRecorder(options.FakeRecorder, Environment.GetEnvironmentVariable));
     }
 
     private static ObsRuntime StartRuntimeOnHostThread(SettingsStore store)
@@ -177,29 +180,14 @@ internal static class Program
 
         InstallObsLogBridge();
 
-        _ = MuxerHelper.EnsureNextToApp(locations.ModuleBinaryDir);
+        if (MuxerHelper.EnsureNextToApp(locations.ModuleBinaryDir) is null)
+            Log.Warning("Tript.App: obs-ffmpeg-mux is not next to {Directory} and could not be linked there; " +
+                        "recordings will fail to start. Install obs-studio, or link its obs-ffmpeg-mux into that folder.",
+                Path.GetDirectoryName(Environment.ProcessPath));
 
-        ObsStartupOptions startup;
-        if (OperatingSystem.IsWindows())
-        {
-            startup = new ObsStartupOptions { Locale = "en-US" };
-        }
-        else
-        {
-            if (XInitThreads() == 0)
-                throw new InvalidOperationException("XInitThreads failed.");
-
-            var display = XOpenDisplay(null);
-            if (display == nint.Zero)
-                throw new InvalidOperationException("XOpenDisplay returned null; no X server reachable.");
-
-            startup = new ObsStartupOptions
-            {
-                Locale = "en-US",
-                NixPlatform = ObsNixPlatform.X11Egl,
-                NixPlatformDisplay = display
-            };
-        }
+        var startup = OperatingSystem.IsWindows()
+            ? new ObsStartupOptions { Locale = "en-US" }
+            : ConnectNixDisplay(locations.ModuleBinaryDir!);
 
         var runtime = ObsRuntime.Start(startup);
 
@@ -232,23 +220,26 @@ internal static class Program
         if (!runtime.ResetAudio(new ObsAudioSettings()))
             throw new InvalidOperationException("obs_reset_audio refused the default settings.");
 
-        foreach (var module in SafeModules(OperatingSystem.IsWindows()))
+        var isWindows = OperatingSystem.IsWindows();
+        foreach (var module in SafeModules(isWindows, isWindows || NvidiaEncoderLibraryLoads()))
             runtime.AddSafeModule(module);
 
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 
-        if (OperatingSystem.IsWindows())
-        {
-            var types = runtime.EnumerateInputTypes();
-            Log.Information("Tript.App: registered input types: {Types}", string.Join(", ", types));
-        }
-
+        Log.Information("Tript.App: registered input types: {Types}",
+            string.Join(", ", runtime.EnumerateInputTypes()));
         Log.Information("Tript.App: registered output types: {Types}",
             string.Join(", ", ObsOutput.EnumerateTypeIds()));
 
-        if (!report.AllLoaded)
-            throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", report.FailedModules)}");
+        var fatal = FatalModuleFailures(report.FailedModules, isWindows);
+        var tolerated = report.FailedModules.Except(fatal).ToArray();
+        if (tolerated.Length > 0)
+            Log.Warning("Tript.App: optional modules failed to load and are skipped: {Modules}",
+                string.Join(", ", tolerated));
+
+        if (fatal.Count > 0)
+            throw new InvalidOperationException($"Modules failed to load: {string.Join(", ", fatal)}");
 
         if (!runtime.HasVideo || !runtime.HasAudio)
             throw new InvalidOperationException("The runtime has no video or audio mix after reset.");
@@ -382,6 +373,73 @@ internal static class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetProcessDpiAwarenessContext(nint value);
 
+    private static ObsStartupOptions ConnectNixDisplay(string moduleBinaryDir)
+    {
+        var pipeWirePresent = File.Exists(Path.Combine(moduleBinaryDir, "linux-pipewire.so"));
+        var platform = NixPlatformSelector.FromEnvironment(pipeWirePresent);
+
+        if (platform == ObsNixPlatform.Wayland)
+        {
+            var wayland = wl_display_connect(null);
+            if (wayland != nint.Zero)
+            {
+                Log.Information("Tript.App: libobs runs on Wayland; the screen is captured through the desktop portal");
+                return new ObsStartupOptions
+                {
+                    Locale = "en-US",
+                    NixPlatform = ObsNixPlatform.Wayland,
+                    NixPlatformDisplay = wayland
+                };
+            }
+
+            Log.Warning("Tript.App: the Wayland compositor refused a connection; trying X11 instead");
+        }
+
+        if (XInitThreads() == 0)
+            throw new InvalidOperationException("XInitThreads failed.");
+
+        var display = XOpenDisplay(null);
+        if (display == nint.Zero)
+            throw new InvalidOperationException(
+                "No display server is reachable: neither Wayland nor X11 accepted a connection.");
+
+        Log.Information("Tript.App: libobs runs on X11 (pipewire plugin {PipeWire})",
+            pipeWirePresent ? "present" : "absent");
+        return new ObsStartupOptions
+        {
+            Locale = "en-US",
+            NixPlatform = ObsNixPlatform.X11Egl,
+            NixPlatformDisplay = display
+        };
+    }
+
+    internal static bool IsExpectedModuleSkip(string message) =>
+        message.StartsWith("Skipping module '", StringComparison.Ordinal)
+        && message.Contains("not on safe list", StringComparison.Ordinal);
+
+    internal static IReadOnlyList<string> FatalModuleFailures(IReadOnlyList<string> failedModules, bool isWindows)
+    {
+        var required = RequiredModules(isWindows);
+        return failedModules.Where(module => required.Contains(module, StringComparer.Ordinal)).ToArray();
+    }
+
+    internal static IReadOnlyList<string> RequiredModules(bool isWindows) =>
+        isWindows
+            ? SafeModules(isWindows: true)
+            : new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "image-source" };
+
+    private static bool NvidiaEncoderLibraryLoads()
+    {
+        if (!NativeLibrary.TryLoad("libnvidia-encode.so.1", out var handle))
+            return false;
+
+        NativeLibrary.Free(handle);
+        return true;
+    }
+
+    internal static IReadOnlyList<string> SafeModules(bool isWindows, bool nvidiaEncoderAvailable) =>
+        SafeModules(isWindows).Where(module => nvidiaEncoderAvailable || module != "obs-nvenc").ToArray();
+
     internal static IReadOnlyList<string> SafeModules(bool isWindows) =>
         isWindows
 
@@ -389,10 +447,17 @@ internal static class Program
             // recording playable after a crash. It also carries the RTMP/FLV outputs, which Tript
             // never creates. Keep in step with OBS_MODULES in the Makefile.
             ? new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
-            : new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "linux-capture", "image-source", "linux-pulseaudio" };
+            : new[]
+            {
+                "obs-x264", "obs-ffmpeg", "obs-outputs", "image-source", "linux-capture", "linux-pipewire",
+                "linux-pulseaudio", "obs-nvenc", "obs-qsv11", "linux-vkcapture"
+            };
 
     [DllImport("libX11.so.6", CharSet = CharSet.Ansi)]
     private static extern nint XOpenDisplay(string? name);
+
+    [DllImport("libwayland-client.so.0", CharSet = CharSet.Ansi)]
+    private static extern nint wl_display_connect(string? name);
 
     [DllImport("libX11.so.6")]
     private static extern int XInitThreads();

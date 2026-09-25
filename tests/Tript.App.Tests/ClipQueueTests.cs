@@ -29,7 +29,8 @@ public sealed class ClipQueueTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, settings, runtime: null, new RecordingSessionTracker());
+        }, settings, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     [Fact]

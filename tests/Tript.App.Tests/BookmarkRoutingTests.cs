@@ -33,7 +33,8 @@ public sealed class BookmarkRoutingTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, _store, runtime: null, _tracker, recorderStopTimeout: TimeSpan.FromMilliseconds(50));
+        }, _store, runtime: null, _tracker, recorderStopTimeout: TimeSpan.FromMilliseconds(50),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

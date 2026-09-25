@@ -26,7 +26,8 @@ public sealed class UiLoadGatingTests : IDisposable
             WebRoot = _root,
             FakeRecorder = true,
         }, store, runtime: null, new RecordingSessionTracker(),
-            recorderStopTimeout: TimeSpan.FromMilliseconds(50));
+            recorderStopTimeout: TimeSpan.FromMilliseconds(50),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

@@ -27,7 +27,8 @@ public sealed class FolderPickerTests : IDisposable
             SettingsPath = _settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker());
+        }, _store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose() => _host.Dispose();

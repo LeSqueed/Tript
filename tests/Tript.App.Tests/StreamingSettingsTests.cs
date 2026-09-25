@@ -96,8 +96,8 @@ public sealed class StreamingSettingsTests : IDisposable
     [Fact]
     public void TheConflictWarnings_UsePlainPunctuation()
     {
-        Assert.DoesNotContain('—', AppHost.HookConflictWarning);
-        Assert.DoesNotContain('—', AppHost.HookConflictFallbackWarning);
+        Assert.DoesNotContain('\u2014', AppHost.HookConflictWarning);
+        Assert.DoesNotContain('\u2014', AppHost.HookConflictFallbackWarning);
     }
 
     private (SettingsStore Store, AppHost Host) NewHost()
@@ -109,7 +109,8 @@ public sealed class StreamingSettingsTests : IDisposable
             SettingsPath = _settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker());
+        }, store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
         return (store, host);
     }
 }

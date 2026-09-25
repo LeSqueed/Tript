@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Globalization;
+
 namespace Tript.App.Content;
 
 internal readonly record struct VolumeSpace(string RootPath, long FreeBytes, long TotalBytes);
@@ -32,4 +34,20 @@ internal sealed class DriveInfoStorageProbe : IStorageProbe
             return null;
         }
     }
+}
+
+internal sealed class FixedStorageProbe(long freeBytes) : IStorageProbe
+{
+    internal const string FreeBytesEnvironmentVariable = "TRIPT_FAKE_RECORDER_FREE_BYTES";
+
+    internal static FixedStorageProbe? ForFakeRecorder(bool fakeRecorder, Func<string, string?> environment) =>
+        fakeRecorder && long.TryParse(environment(FreeBytesEnvironmentVariable), NumberStyles.None,
+            CultureInfo.InvariantCulture, out var freeBytes)
+            ? new FixedStorageProbe(freeBytes)
+            : null;
+
+    public VolumeSpace? Measure(string path) =>
+        string.IsNullOrWhiteSpace(path)
+            ? null
+            : new VolumeSpace(Path.GetPathRoot(Path.GetFullPath(path)) ?? string.Empty, freeBytes, freeBytes * 2);
 }

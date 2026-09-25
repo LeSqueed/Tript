@@ -99,6 +99,17 @@ public sealed class AudioDeviceInventoryTests
         Assert.Equal(2, inventory.Snapshot.Count);
     }
 
+    [Theory]
+    [InlineData(true, true, nameof(AudioDeviceSource.Wasapi))]
+    [InlineData(true, false, nameof(AudioDeviceSource.Wasapi))]
+    [InlineData(false, true, nameof(AudioDeviceSource.Obs))]
+    [InlineData(false, false, nameof(AudioDeviceSource.None))]
+    public void SourceFor_AsksWasapiOnWindows_AndLibobsElsewhereOnceItRuns(bool windows, bool obsRunning,
+        string expected)
+    {
+        Assert.Equal(expected, AudioDeviceInventory.SourceFor(windows, obsRunning).ToString());
+    }
+
     private static AudioDeviceSetting Device(string id, string name, AudioSourceKind direction) => new()
     {
         Id = id,

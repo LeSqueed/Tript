@@ -30,7 +30,8 @@ public sealed class HotkeyActionsTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, _store, runtime: null, _sessionTracker, recorderStopTimeout: TimeSpan.FromMilliseconds(50));
+        }, _store, runtime: null, _sessionTracker, recorderStopTimeout: TimeSpan.FromMilliseconds(50),
+            storageProbe: AmpleStorage.Probe);
 
         _clipEngine = new RecordingClipEngine();
         typeof(AppHost).GetField("_clipEngine", BindingFlags.Instance | BindingFlags.NonPublic)!

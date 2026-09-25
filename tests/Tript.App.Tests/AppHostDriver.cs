@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Tript.App.Content;
 
 namespace Tript.App.Tests;
 
@@ -107,7 +108,10 @@ internal sealed class AppHostDriver : IDisposable, IAsyncDisposable
         startInfo.ArgumentList.Add("--log-dir");
         startInfo.ArgumentList.Add(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, "logs"));
         if (fake)
+        {
             startInfo.ArgumentList.Add("--fake-recorder");
+            startInfo.Environment[FixedStorageProbe.FreeBytesEnvironmentVariable] = AmpleStorage.FreeBytesText;
+        }
         startInfo.ArgumentList.Add("--disable-updater");
         if (fakeRecorderSettingsTrace is not null)
             startInfo.Environment[FakeRecorderSession.SettingsTraceEnvironmentVariable] = fakeRecorderSettingsTrace;

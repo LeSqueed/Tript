@@ -375,9 +375,90 @@ internal sealed partial class AppHost
         }
     }
 
+    internal void ForgetScreenShareChoice()
+    {
+        lock (_recorderGate)
+        {
+            if (_recorder is not null && _recorder.Snapshot.State != RecorderState.Idle)
+            {
+                PushError("Stop the recording before choosing a different screen.");
+                return;
+            }
+
+            _portalRestoreTokens.Forget();
+            if (_recorder is not null && _recorderSession is ObsRecorderSession)
+            {
+                Log.Information("AppHost: forgot the screen-share choice; the next recording asks again");
+                _streamShare?.SetCapture(null);
+                _recorder.Dispose();
+                _recorder = null;
+                _recorderSession.Dispose();
+                _recorderSession = null;
+            }
+        }
+
+        PushSettings();
+    }
+
+    private void RememberPortalConsent(IRecorderSession? session)
+    {
+        if (session is not ObsRecorderSession { PortalRestoreToken: { } token } || !_portalRestoreTokens.Save(token))
+            return;
+
+        Log.Information("AppHost: remembered the screen-share consent for the next session");
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            if (!_disposed)
+                PushSettings();
+        });
+    }
+
+    private static bool PortalCaptureWasPq(IRecorderSession? session)
+    {
+        if (!OperatingSystem.IsLinux() || session is not ObsRecorderSession { PortalCaptureSize: { } size })
+            return false;
+
+        var outputs = LinuxHdrOutputs.Query();
+        var pq = LinuxHdrOutputs.CaptureIsPq(outputs, size.Width, size.Height);
+        if (pq is null && outputs.Count > 0)
+            Log.Warning("AppHost: outputs of the captured size {Width}x{Height} disagree about HDR; " +
+                        "the recording keeps its SDR label", size.Width, size.Height);
+        return pq == true;
+    }
+
+    private void RelabelAsPqInBackground(string path, Action then)
+    {
+        if (_libraryTools.Value is not { } tools)
+        {
+            Log.Warning("AppHost: {Path} was captured from an HDR desktop but ffmpeg is missing, " +
+                        "so it keeps its SDR label", path);
+            then();
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var outcome = PqRelabeller.Relabel(tools.Ffmpeg, new MediaProbe(tools.Ffprobe), path);
+                if (outcome.Labelled)
+                    Log.Information("AppHost: labelled {Path} as HDR (Rec.2100 PQ) without re-encoding", path);
+                else
+                    Log.Warning("AppHost: {Path} could not be labelled HDR: {Reason}", path, outcome.Failure);
+            }
+            finally
+            {
+                then();
+                if (!_disposed)
+                    PushContent();
+            }
+        });
+    }
+
     private void FinalizeStoppedRecordingLocked()
     {
         StopMetadataCheckpoints();
+        RememberPortalConsent(_recorderSession);
         _recorder!.DrainCompletedOutput();
         StopDetection();
         SetBackgroundWorkSuspendedForRecording(false);
@@ -393,6 +474,7 @@ internal sealed partial class AppHost
         var sourcePath = _activeOutputPath;
         var recordsSession = _activeRecordingMode?.RecordsSession() == true;
         var live = _liveHighlights.Finish();
+        var labelAsPq = recordsSession && sourcePath is not null && PortalCaptureWasPq(_recorderSession);
 
         var session = _sessionTracker.Stop();
         if (session is not null && _pendingMetadata is not null && recordsSession)
@@ -407,10 +489,21 @@ internal sealed partial class AppHost
                     .Where(bookmark => !live.SavedBookmarkIds.Contains(bookmark.Id))
                     .ToList();
                 if (unsavedBookmarks.Count > 0)
-                    QueueAutomaticClips(sourcePath, _pendingMetadata.VideoPath, unsavedBookmarks,
-                        _pendingMetadata.GameId);
+                {
+                    var sessionPath = _pendingMetadata.VideoPath;
+                    var gameId = _pendingMetadata.GameId;
+                    if (labelAsPq)
+                        RelabelAsPqInBackground(sourcePath, () => QueueAutomaticClips(sourcePath, sessionPath,
+                            unsavedBookmarks, gameId));
+                    else
+                        QueueAutomaticClips(sourcePath, sessionPath, unsavedBookmarks, gameId);
+                    labelAsPq = false;
+                }
             }
         }
+
+        if (labelAsPq)
+            RelabelAsPqInBackground(sourcePath!, () => { });
 
         _pendingMetadata = null;
         _activeOutputPath = null;
@@ -636,7 +729,11 @@ internal sealed partial class AppHost
             return;
         }
 
-        var policy = CapturePolicy.From(settings);
+        var gameCaptureAvailable = _runtime is null || ObsCaptureSource.FindGameCaptureId() is not null;
+        if (!gameCaptureAvailable && settings.CaptureMethod == DisplayCaptureMethod.Game)
+            Log.Warning("AppHost: game capture was chosen but no game-capture source is installed " +
+                        "(on Linux, install obs-vkcapture); recording the screen instead");
+        var policy = CapturePolicy.From(settings, gameCaptureAvailable);
         if (_recorder is not null)
         {
             if (_recorderSession is not ObsRecorderSession existing || existing.Policy == policy)
@@ -647,6 +744,7 @@ internal sealed partial class AppHost
             _streamShare?.SetCapture(null);
             _recorder.Dispose();
             _recorder = null;
+            RememberPortalConsent(_recorderSession);
             _recorderSession.Dispose();
             _recorderSession = null;
         }
@@ -661,7 +759,8 @@ internal sealed partial class AppHost
             _colourSource = ObsSource.CreatePrivate("color_source", "app colour", colourSettings);
         }
 
-        var session = new ObsRecorderSession(_runtime, _colourSource, gameCaptureTarget: null, policy);
+        var session = new ObsRecorderSession(_runtime, _colourSource, gameCaptureTarget: null, policy,
+            _portalRestoreTokens.Load());
         _recorderSession = session;
         _recorder = new RecorderStateMachine(session, settings);
         _streamShare?.SetCapture(session.GameCaptureSource);

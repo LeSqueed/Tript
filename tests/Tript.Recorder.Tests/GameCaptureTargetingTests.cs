@@ -147,4 +147,23 @@ public sealed class GameCaptureTargetingTests
         new("capture_cursor", ObsPropertyType.Bool, []),
         new("hook_rate", ObsPropertyType.List, [])
     ];
+
+    [Fact]
+    public void OnWindows_GamesAreCapturedByTheWinCaptureHook() =>
+        Assert.Equal("game_capture", ObsCaptureSource.SelectGameCaptureId(
+            ["game_capture", "monitor_capture"], isWindows: true));
+
+    [Fact]
+    public void OnLinux_GamesAreCapturedByVkcaptureWhenItIsInstalled() =>
+        Assert.Equal("vkcapture-source", ObsCaptureSource.SelectGameCaptureId(
+            ["xshm_input", "pipewire-screen-capture-source", "vkcapture-source"], isWindows: false));
+
+    [Fact]
+    public void OnLinux_WithoutVkcapture_ThereIsNoGameCaptureLayer() =>
+        Assert.Null(ObsCaptureSource.SelectGameCaptureId(
+            ["xshm_input", "pipewire-screen-capture-source", "game_capture"], isWindows: false));
+
+    [Fact]
+    public void OnWindows_TheVkcaptureSourceIsNeverUsed() =>
+        Assert.Null(ObsCaptureSource.SelectGameCaptureId(["vkcapture-source"], isWindows: true));
 }

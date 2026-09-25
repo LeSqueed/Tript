@@ -41,6 +41,23 @@ public sealed class DisplayCaptureFallbackTests
     }
 
     [Fact]
+    public void OnWayland_TheScreenCaptureSourceIsPreferredOverTheObsoleteDesktopCaptureId()
+    {
+        string[] registered =
+            ["xshm_input", "pipewire-desktop-capture-source", "pipewire-screen-capture-source", "pipewire-window-capture-source"];
+
+        Assert.Equal("pipewire-screen-capture-source", ObsCaptureSource.SelectDisplayCaptureId(
+            registered,
+            ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: true)));
+    }
+
+    [Fact]
+    public void OnX11_ThePortalScreenCaptureIsTheFallbackWhenXshmIsMissing() =>
+        Assert.Equal("pipewire-screen-capture-source", ObsCaptureSource.SelectDisplayCaptureId(
+            ["pipewire-screen-capture-source"],
+            ObsCaptureSource.DisplayCaptureIdPreference(isWindows: false, preferPortal: false)));
+
+    [Fact]
     public void ARuntimeWithNoDisplayCapture_ReportsNoIdRatherThanGuessing()
     {
         Assert.Null(ObsCaptureSource.SelectDisplayCaptureId(

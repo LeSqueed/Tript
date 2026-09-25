@@ -59,6 +59,38 @@ public sealed class CapturePolicyTests
         Assert.Equal(TimeSpan.FromSeconds(25), policy.GameCaptureTimeout);
     }
 
+    [Fact]
+    public void GameCaptureWithNoGameCaptureSource_RecordsTheScreenInsteadOfABlackFrame()
+    {
+        var settings = new Settings.Settings();
+        settings.Capture.Method = DisplayCaptureMethod.Game;
+
+        var policy = CapturePolicy.From(SettingsResolver.Resolve(settings), gameCaptureAvailable: false);
+
+        Assert.Equal(DisplayCaptureMethod.Display, policy.Method);
+        Assert.True(policy.IncludesDisplayCapture);
+    }
+
+    [Theory]
+    [InlineData(DisplayCaptureMethod.Auto)]
+    [InlineData(DisplayCaptureMethod.Display)]
+    public void OtherMethods_AreKeptWhenThereIsNoGameCaptureSource(DisplayCaptureMethod method)
+    {
+        var settings = new Settings.Settings();
+        settings.Capture.Method = method;
+
+        Assert.Equal(method, CapturePolicy.From(SettingsResolver.Resolve(settings), gameCaptureAvailable: false).Method);
+    }
+
+    [Fact]
+    public void GameCapture_IsKeptWhenAGameCaptureSourceExists()
+    {
+        var settings = new Settings.Settings();
+        settings.Capture.Method = DisplayCaptureMethod.Game;
+
+        Assert.Equal(DisplayCaptureMethod.Game, CapturePolicy.From(SettingsResolver.Resolve(settings)).Method);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]

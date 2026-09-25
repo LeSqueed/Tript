@@ -8,13 +8,16 @@ namespace Tript.Recorder;
 
 internal static class CaptureSourceFactory
 {
-    private const string GameCaptureId = "game_capture";
+    private const string GameCaptureId = ObsCaptureSource.WinGameCaptureId;
+    private const string VkCaptureWindowKey = "window";
+    private const string VkCaptureAnyClient = "";
     private const string CaptureModeKey = "capture_mode";
     private const string WindowCaptureModeValue = "window";
     private const string HookRateKey = "hook_rate";
     private const long FastestHookRate = 3;
 
-    internal static ObsSource? CreateDisplay(string? preferredDisplayId, out ObsDisplay? selected)
+    internal static ObsSource? CreateDisplay(string? preferredDisplayId, string? portalRestoreToken,
+        out ObsDisplay? selected)
     {
         selected = null;
 
@@ -25,7 +28,7 @@ internal static class CaptureSourceFactory
             return null;
         }
 
-        var source = ObsSource.CreatePrivate(displayId, "app display");
+        var source = CreateDisplaySource(displayId, portalRestoreToken);
         try
         {
             var displays = ObsCaptureSource.EnumerateDisplays(source);
@@ -39,7 +42,11 @@ internal static class CaptureSourceFactory
                     preferredDisplayId, selected?.Name, selected?.Id);
             }
 
-            if (selected is null)
+            if (selected is null && ObsCaptureSource.IsPortalCapture(displayId))
+            {
+                Log.Information("ObsRecorderSession: {DisplayId} lets the desktop choose the screen", displayId);
+            }
+            else if (selected is null)
             {
                 Log.Warning("ObsRecorderSession: {DisplayId} enumerated no monitors; " +
                             "the display layer keeps the plugin's default.", displayId);
@@ -61,7 +68,38 @@ internal static class CaptureSourceFactory
         return source;
     }
 
-    internal static ObsSource? CreateGame(ObsGameCaptureTarget? target)
+    private static ObsSource CreateDisplaySource(string displayId, string? portalRestoreToken)
+    {
+        if (!ObsCaptureSource.IsPortalCapture(displayId))
+            return ObsSource.CreatePrivate(displayId, "app display");
+
+        using var settings = new ObsSettings();
+        if (!string.IsNullOrEmpty(portalRestoreToken))
+            settings.SetString(ObsCaptureSource.PortalRestoreTokenKey, portalRestoreToken);
+
+        Log.Information("ObsRecorderSession: capturing the screen through the desktop portal ({Consent})",
+            string.IsNullOrEmpty(portalRestoreToken) ? "asking for consent" : "reusing the remembered consent");
+        return ObsSource.CreatePrivate(displayId, "app display", settings);
+    }
+
+    internal static ObsSource? CreateGame(ObsGameCaptureTarget? target) =>
+        ObsCaptureSource.FindGameCaptureId() switch
+        {
+            ObsCaptureSource.WinGameCaptureId => CreateWinGameCapture(target),
+            ObsCaptureSource.VkCaptureId => CreateVkCapture(),
+            _ => null
+        };
+
+    private static ObsSource CreateVkCapture()
+    {
+        using var settings = new ObsSettings();
+        settings.SetString(VkCaptureWindowKey, VkCaptureAnyClient);
+
+        Log.Information("ObsRecorderSession: games are captured through obs-vkcapture (the most recent client)");
+        return ObsSource.CreatePrivate(ObsCaptureSource.VkCaptureId, "app capture", settings);
+    }
+
+    private static ObsSource? CreateWinGameCapture(ObsGameCaptureTarget? target)
     {
         var properties = ObsSourceProperties.EnumerateTypeProperties(GameCaptureId);
         if (properties.Count == 0)

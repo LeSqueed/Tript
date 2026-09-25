@@ -16,7 +16,7 @@ public sealed record CapturePolicy(
 
     public bool IncludesDisplayCapture => Method != DisplayCaptureMethod.Game;
 
-    public static CapturePolicy From(ResolvedRecorderSettings settings)
+    public static CapturePolicy From(ResolvedRecorderSettings settings, bool gameCaptureAvailable = true)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -24,6 +24,10 @@ public sealed record CapturePolicy(
             ? settings.GameCaptureTimeout
             : Default.GameCaptureTimeout;
 
-        return new CapturePolicy(settings.CaptureMethod, settings.Display, timeout);
+        var method = settings.CaptureMethod == DisplayCaptureMethod.Game && !gameCaptureAvailable
+            ? DisplayCaptureMethod.Display
+            : settings.CaptureMethod;
+
+        return new CapturePolicy(method, settings.Display, timeout);
     }
 }

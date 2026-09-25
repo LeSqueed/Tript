@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      ZIP: Tript-${{ needs.verify.outputs.version }}-win-x64.zip
+      ARCHIVE: Tript-${{ needs.verify.outputs.version }}-win-x64.zip
     steps:
       - uses: actions/checkout@v7
         with:
@@ -78,20 +78,20 @@ jobs:
 
       - name: Package
         run: |
-          (cd dist && mv Release-win Tript && zip -qr "../$ZIP" Tript)
-          sha256sum "$ZIP" > "$ZIP.sha256"
+          (cd dist && mv Release-win Tript && zip -qr "../$ARCHIVE" Tript)
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
 
       - name: The bundle is complete
         run: |
-          tests/Tript.Smoke/check-windows-bundle.sh "$ZIP"
-          unzip -p "$ZIP" Tript/App/resolver.json | tests/Tript.Smoke/check-production-resolver.sh
+          tests/Tript.Smoke/check-windows-bundle.sh "$ARCHIVE"
+          unzip -p "$ARCHIVE" Tript/App/resolver.json | tests/Tript.Smoke/check-production-resolver.sh
 
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows
           path: |
-            ${{ env.ZIP }}
-            ${{ env.ZIP }}.sha256
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
           retention-days: 1
           if-no-files-found: error
 

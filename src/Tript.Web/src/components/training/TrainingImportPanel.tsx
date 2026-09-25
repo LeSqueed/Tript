@@ -3,16 +3,14 @@
 import { useEffect, useState } from 'react';
 import type { IpcClient } from '../../ipc/websocketClient';
 import { Button, Field, TextField } from '../ui/controls';
-
-const SOURCE_PLACEHOLDER = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
-  ? String.raw`C:\Users\You\Documents\Tript training`
-  : '/home/you/tript-training';
+import { examplePaths, usePlatformCapabilities } from '../../app/platformCapabilities';
 
 export function TrainingImportPanel({ client, importing, onImport }: {
   client: IpcClient;
   importing: boolean;
   onImport: (sourcePath: string) => void;
 }) {
+  const { platform } = usePlatformCapabilities();
   const [sourcePath, setSourcePath] = useState('');
   const [pickerStatus, setPickerStatus] = useState<'idle' | 'selected' | 'cancelled'>('idle');
 
@@ -50,7 +48,7 @@ export function TrainingImportPanel({ client, importing, onImport }: {
       </div>
       <Field label="Training folder" hint="The selected folder is copied into this game's local workspace.">
         <div className="training-path-row">
-          <TextField value={sourcePath} onChange={setSourcePath} placeholder={SOURCE_PLACEHOLDER} aria-label="Training folder" />
+          <TextField value={sourcePath} onChange={setSourcePath} placeholder={examplePaths(platform).trainingFolder} aria-label="Training folder" />
           <Button variant="ghost" onClick={() => client.send('BrowseTrainingFolder')}>Browse</Button>
         </div>
       </Field>

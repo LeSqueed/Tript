@@ -15,6 +15,7 @@ import { GeneralPage } from '../settings/pages/GeneralPage';
 import { HotkeysPage } from '../settings/pages/HotkeysPage';
 import { StoragePage } from '../settings/pages/StoragePage';
 import { useStorage } from '../components/storage/useStorage';
+import { PlatformCapabilitiesContext, usePlatformCapabilities } from '../app/platformCapabilities';
 
 const PAGES: { id: SettingsPageName; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -71,6 +72,8 @@ export function SettingsView({
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
+  const inheritedCapabilities = usePlatformCapabilities();
+  const capabilities = controller.platformCapabilities ?? inheritedCapabilities;
   const storage = useStorage(client);
 
   useSendOnConnect(client, 'ListGames');
@@ -109,6 +112,7 @@ export function SettingsView({
   });
 
   return (
+    <PlatformCapabilitiesContext.Provider value={capabilities}>
     <section className="settings-view">
       <div className="settings-layout">
         <div className="settings-tabs" role="tablist" aria-label="Settings sections">
@@ -198,6 +202,7 @@ export function SettingsView({
             page={page}
             availableDisplays={controller.availableDisplays}
             externalPushCount={controller.externalPushCount}
+            onForgetScreenChoice={() => client.send('ForgetScreenShareChoice')}
           />
           )}
           {page === 'game' && (
@@ -242,6 +247,7 @@ export function SettingsView({
             update={controller.update}
             page={page}
             bufferDurationSeconds={controller.settings.buffer.duration}
+            onConfigureDesktopShortcuts={() => client.send('ConfigureGlobalHotkeys')}
           />
           )}
           </>
@@ -249,5 +255,6 @@ export function SettingsView({
         </div>
       </div>
     </section>
+    </PlatformCapabilitiesContext.Provider>
   );
 }

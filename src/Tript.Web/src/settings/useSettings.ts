@@ -12,6 +12,7 @@ import type {
 } from './settingsModel';
 import type { SettingsUpdateResultMessage } from '../ipc/protocol';
 import { readAvailableDisplays, readDisplayFallbackWarning } from './displayModel';
+import { readPlatformCapabilities, type PlatformCapabilities } from '../app/platformCapabilities';
 
 export type SettingsPageName =
   | 'recording'
@@ -99,6 +100,7 @@ export interface SettingsController {
   availableDisplays: DisplayInfo[] | null;
   displayFallbackWarning: DisplayFallbackWarning | null;
   appVersion?: string | null;
+  platformCapabilities?: PlatformCapabilities;
 }
 
 function readDisplayResolution(value: unknown): DisplayResolution | undefined {
@@ -125,6 +127,7 @@ export function useSettings(client: IpcClient): SettingsController {
   const [availableDisplays, setAvailableDisplays] = useState<DisplayInfo[] | null>(null);
   const [displayFallbackWarning, setDisplayFallbackWarning] = useState<DisplayFallbackWarning | null>(null);
   const [appVersion, setAppVersion] = useState<string | null | undefined>(undefined);
+  const [platformCapabilities, setPlatformCapabilities] = useState<PlatformCapabilities | undefined>(undefined);
   const [settingsUpdateResult, setSettingsUpdateResult] = useState<SettingsUpdateResultMessage | null>(null);
   const pendingCauses = useRef(new Set<string>());
 
@@ -151,6 +154,10 @@ export function useSettings(client: IpcClient): SettingsController {
       setAvailableDisplays(readAvailableDisplays(message.availableDisplays));
       setDisplayFallbackWarning(readDisplayFallbackWarning(message.displayFallbackWarning));
       setAppVersion(typeof message.appVersion === 'string' ? message.appVersion : null);
+      const pushedCapabilities = readPlatformCapabilities(message.platformCapabilities);
+      if (pushedCapabilities) {
+        setPlatformCapabilities(pushedCapabilities);
+      }
       setHasSettings(true);
       if (!isSelfEcho) {
         setExternalPushCount((count) => count + 1);
@@ -218,6 +225,7 @@ export function useSettings(client: IpcClient): SettingsController {
     availableDisplays,
     displayFallbackWarning,
     appVersion,
+    platformCapabilities,
   };
 }
 

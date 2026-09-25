@@ -72,6 +72,7 @@ export interface SettingsMessage {
   availableDisplays?: DisplayInfo[] | null;
   displayFallbackWarning?: DisplayFallbackWarning | null;
   appVersion?: string | null;
+  platformCapabilities?: unknown;
 }
 
 export interface DisplayInfo {
@@ -205,6 +206,7 @@ export interface GameCandidateMessage {
   pid: number;
   executable: string;
   executablePath: string;
+  name?: string;
 }
 
 export interface GameCandidateActionResultMessage {
@@ -786,6 +788,8 @@ export type CommandName =
   | 'ReclaimStorage'
   | 'UpdateSettings'
   | 'SetVideoLocation'
+  | 'ConfigureGlobalHotkeys'
+  | 'ForgetScreenShareChoice'
   | 'SelectGameExecutable'
   | 'SearchGames'
   | 'ResolveGameSearch'

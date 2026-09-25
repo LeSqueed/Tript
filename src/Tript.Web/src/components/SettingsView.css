@@ -21,7 +21,8 @@
 .settings-tab {
   flex: 0 0 auto;
   margin-bottom: -1px;
-  padding: 8px 12px;
+  padding: 8px 10px;
+  white-space: nowrap;
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;

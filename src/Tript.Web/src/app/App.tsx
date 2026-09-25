@@ -34,6 +34,7 @@ import { useAppNavigation } from './useAppNavigation';
 import { useClipJobs, type ClipJobResult } from './useClipJobs';
 import { useDeleteFlow } from './useDeleteFlow';
 import { useHostPreferences } from './useHostPreferences';
+import { PlatformCapabilitiesContext, useHostPlatformCapabilities } from './platformCapabilities';
 import { TripwireMark } from '../components/TripwireMark';
 import { Icon } from '../components/ui/Icon';
 import { trainingEnabled } from '../buildFeatures';
@@ -91,6 +92,7 @@ function AppShell({
   const reachability = useHostReachability(connectionState);
   const windowVisible = useWindowVisible(client);
   const preferences = useHostPreferences(client, connectionState);
+  const capabilities = useHostPlatformCapabilities(client);
 
   useEffect(() => {
     (window as PhotinoShellWindow).external?.sendMessage?.('tript:ready');
@@ -116,6 +118,13 @@ function AppShell({
     adoptPlayerItem,
     showSettings,
   } = navigation;
+
+  const showLibrary = navigation.showLibrary;
+  useEffect(() => {
+    if (route === 'streamer' && !capabilities.obsSharing) {
+      showLibrary();
+    }
+  }, [route, capabilities.obsSharing, showLibrary]);
 
   const trash = useTrash(client);
   const deletion = useDeleteFlow({
@@ -189,6 +198,7 @@ function AppShell({
   const sessionsActive = route === 'sessions' || (route === 'player' && playerReturnRoute === 'sessions');
 
   return (
+    <PlatformCapabilitiesContext.Provider value={capabilities}>
     <div className="app-shell" data-window-hidden={windowVisible ? undefined : ''}>
       <header className="app-topbar">
         <div className="app-brand">
@@ -214,6 +224,7 @@ function AppShell({
             <Icon name="monitor" className="nav-glyph" />
             <span>Sessions</span>
           </button>
+          {capabilities.obsSharing && (
           <button
             type="button"
             className={route === 'streamer' ? 'nav-item active' : 'nav-item'}
@@ -223,6 +234,7 @@ function AppShell({
             <Icon name="broadcast" className="nav-glyph" />
             <span>Streamer</span>
           </button>
+          )}
           <button
             type="button"
             className={route === 'settings' ? 'nav-item active' : 'nav-item'}
@@ -333,7 +345,7 @@ function AppShell({
               />
             </div>
           )}
-          {route === 'streamer' && <StreamerView client={client} />}
+          {route === 'streamer' && capabilities.obsSharing && <StreamerView client={client} />}
           <div hidden={route !== 'settings'}>
             <SettingsView
               client={client}
@@ -356,5 +368,6 @@ function AppShell({
         />
       )}
     </div>
+    </PlatformCapabilitiesContext.Provider>
   );
 }

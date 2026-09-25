@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { CaptureSettings, DisplayCaptureMethod, DisplayInfo, GameSettings } from '../settingsModel';
-import { Field, SelectField, TextField } from '../../components/ui/controls';
+import { Button, Field, SelectField, TextField } from '../../components/ui/controls';
+import { usePlatformCapabilities } from '../../app/platformCapabilities';
 import {
   buildDisplayOptions,
   displayFieldMode,
@@ -18,6 +19,18 @@ const CAPTURE_METHODS: { value: DisplayCaptureMethod; label: string }[] = [
   { value: 'Display', label: 'A specific monitor' },
 ];
 
+const CAPTURE_METHOD_HINT =
+  "How Tript gets the picture. Automatic uses the game's own window when it can and the monitor otherwise; Game window attaches OBS game capture to the detected game; A specific monitor records that monitor.";
+
+const LINUX_CAPTURE_METHOD_HINT =
+  'How Tript gets the picture. Game window captures the game directly through obs-vkcapture when it is installed, and records the screen otherwise; Automatic does the same; A specific monitor always records the screen.';
+
+const DESKTOP_SCREEN_REMEMBERED =
+  'Your desktop asked which screen to share, and Tript remembers your choice for every recording.';
+
+const DESKTOP_SCREEN_NOT_YET_CHOSEN =
+  'Your desktop asks which screen to share the first time you record. Tript remembers your choice after that.';
+
 const DISPLAY_HINT =
   'The monitor the display capture records. Under Automatic it is what shows until game capture takes over.';
 
@@ -28,6 +41,7 @@ export function CapturePage({
   page,
   availableDisplays,
   externalPushCount,
+  onForgetScreenChoice,
 }: {
   settings: CaptureSettings;
   game: GameSettings;
@@ -35,7 +49,10 @@ export function CapturePage({
   page: SettingsPageName;
   availableDisplays?: DisplayInfo[] | null;
   externalPushCount: number;
+  onForgetScreenChoice?: () => void;
 }) {
+  const capabilities = usePlatformCapabilities();
+  const desktopChoosesScreen = capabilities.screenChosenByDesktop;
   const showDisplay = settings.method === 'Auto' || settings.method === 'Display';
   const displays = availableDisplays ?? null;
   const mode = displayFieldMode(displays);
@@ -62,7 +79,7 @@ export function CapturePage({
     <div className="settings-page" data-page="capture">
       <Field
         label="Capture method"
-        hint="How Tript gets the picture. Automatic uses the game's own window when it can and the monitor otherwise; Game window attaches OBS game capture to the detected game; A specific monitor records that monitor."
+        hint={capabilities.platform === 'linux' ? LINUX_CAPTURE_METHOD_HINT : CAPTURE_METHOD_HINT}
       >
         <SelectField
           value={settings.method}
@@ -71,7 +88,19 @@ export function CapturePage({
         />
       </Field>
 
-      {showDisplay && mode === 'picker' && (
+      {showDisplay && desktopChoosesScreen && (
+        <div className="field" data-testid="capture-display-desktop">
+          <span className="field-label">Screen</span>
+          <p className="muted small">
+            {capabilities.screenChoiceRemembered ? DESKTOP_SCREEN_REMEMBERED : DESKTOP_SCREEN_NOT_YET_CHOSEN}
+          </p>
+          {capabilities.screenChoiceRemembered && onForgetScreenChoice && (
+            <Button onClick={onForgetScreenChoice}>Choose a different screen</Button>
+          )}
+        </div>
+      )}
+
+      {showDisplay && !desktopChoosesScreen && mode === 'picker' && (
         <Field label="Display" hint={DISPLAY_HINT}>
           <SelectField
             data-testid="capture-display-select"
@@ -82,7 +111,7 @@ export function CapturePage({
         </Field>
       )}
 
-      {showDisplay && mode === 'text' && (
+      {showDisplay && !desktopChoosesScreen && mode === 'text' && (
         <Field
           label="Display"
           hint={`${DISPLAY_HINT} This machine's monitors could not be listed, so the identifier is typed.`}
@@ -96,7 +125,7 @@ export function CapturePage({
         </Field>
       )}
 
-      {showDisplay && mode === 'none' && (
+      {showDisplay && !desktopChoosesScreen && mode === 'none' && (
         <div className="field" data-testid="capture-display-none">
           <span className="field-label">Display</span>
           <p className="muted small">

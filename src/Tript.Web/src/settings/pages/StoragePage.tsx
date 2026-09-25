@@ -15,6 +15,7 @@ import {
 import { ConfirmDialog } from '../../components/ui/confirmDialog';
 import { StatusDot } from '../../components/ui/Ui';
 import { StorageBar } from '../../components/storage/StorageBar';
+import { examplePaths, usePlatformCapabilities } from '../../app/platformCapabilities';
 import {
   formatStorageSize,
   fromGigabytes,
@@ -44,13 +45,6 @@ const TRASH_RETENTION = [
 const MINIMUM_GIGABYTES = 1;
 const MAXIMUM_GIGABYTES = 2048;
 const GAMES_BEFORE_COLLAPSE = 6;
-
-function nativeDirectoryExample(): { placeholder: string; defaultLabel: string } {
-  const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
-  return windows
-    ? { placeholder: String.raw`D:\Recordings`, defaultLabel: String.raw`Videos\Tript` }
-    : { placeholder: '/home/you/Videos/Tript', defaultLabel: 'Videos/Tript' };
-}
 
 export function StoragePage({
   settings,
@@ -106,7 +100,8 @@ export function StoragePage({
     update(page, { whenFull, policyConfirmed: true });
   }
 
-  const directoryExample = nativeDirectoryExample();
+  const paths = examplePaths(usePlatformCapabilities().platform);
+  const directoryExample = { placeholder: paths.recordingFolder, defaultLabel: paths.defaultRecordingFolder };
 
   const storedRetention = recording.trashRetentionHours ?? 24;
   const retentionValue = String(storedRetention <= 0 ? 0 : storedRetention);

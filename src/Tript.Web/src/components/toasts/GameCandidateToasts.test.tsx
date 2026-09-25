@@ -112,6 +112,35 @@ describe('GameCandidateToasts', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('names a candidate after its library entry and adds it under that name', () => {
+    const { client, emit, sent } = fakeClient();
+    renderBridge(client);
+    const named = { ...CANDIDATE, executable: 'Hades.exe', executablePath: '/games/Hades/x64/Hades.exe', name: 'Hades' };
+    act(() => emit('gameCandidate', named));
+
+    expect(screen.getByRole('status').textContent).toContain('Hades (/games/Hades/x64/Hades.exe) is running fullscreen');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add as custom game' }));
+
+    const requestId = (sent.at(-1)?.parameters as { requestId: string }).requestId;
+    expect(sent).toContainEqual({
+      method: 'AddGameCandidate',
+      parameters: { requestId, name: 'Hades', executablePath: named.executablePath },
+    });
+  });
+
+  it('ignores a blank library name and falls back to the executable', () => {
+    const { client, emit, sent } = fakeClient();
+    renderBridge(client);
+    act(() => emit('gameCandidate', { ...CANDIDATE, name: '  ' }));
+
+    expect(screen.getByRole('status').textContent).toContain(`${CANDIDATE.executablePath} is running fullscreen`);
+    expect(screen.getByRole('status').textContent).not.toContain('(');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add as custom game' }));
+    expect((sent.at(-1)?.parameters as { name: string }).name).toBe(CANDIDATE.executable);
+  });
+
   it('sends IgnoreGameCandidate when the user dismisses it', () => {
     const { client, emit, sent } = fakeClient();
     renderBridge(client);

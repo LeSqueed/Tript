@@ -27,6 +27,7 @@ export function GameCandidateToasts({ client }: { client: IpcClient }) {
           pid: typeof parsed.pid === 'number' ? parsed.pid : 0,
           executable: parsed.executable,
           executablePath: parsed.executablePath,
+          ...(typeof parsed.name === 'string' && parsed.name.trim() !== '' ? { name: parsed.name.trim() } : {}),
         });
       }
     });
@@ -72,7 +73,7 @@ export function GameCandidateToasts({ client }: { client: IpcClient }) {
     setError(null);
     client.send('AddGameCandidate', {
       requestId,
-      name: candidate.executable,
+      name: candidate.name ?? candidate.executable,
       executablePath: candidate.executablePath,
     });
   }, [candidate, client]);
@@ -96,7 +97,7 @@ export function GameCandidateToasts({ client }: { client: IpcClient }) {
       key: 'game-candidate',
       kind: 'info',
       duration: 0,
-      message: `${candidate.executablePath} is running fullscreen but is not a known game. Add it as a custom game?`,
+      message: `${candidate.name ? `${candidate.name} (${candidate.executablePath})` : candidate.executablePath} is running fullscreen but is not a known game. Add it as a custom game?`,
       note: error ?? undefined,
       actions: [
         { label: 'Add as custom game', onClick: addAsCustomGame, disabled: pending !== null },

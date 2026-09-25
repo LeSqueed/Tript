@@ -66,11 +66,9 @@ public sealed class ShutdownFinalizationTests : IDisposable
         var output = Field<FakeRecorderSession.FakeOutput>(session, "_output");
         output.CompleteStopSynchronously = false;
 
-        // Fires after StopRecording's own WaitForIdle has already given up, so the finalization is
-        // genuinely handed to CompletePendingStop while Dispose is running.
         var completer = new Thread(() =>
         {
-            Thread.Sleep(400);
+            SpinWait.SpinUntil(() => Field<bool>(_host, "_stopFinalizationPending"), TimeSpan.FromSeconds(10));
             session.CompleteStop();
         });
         completer.Start();

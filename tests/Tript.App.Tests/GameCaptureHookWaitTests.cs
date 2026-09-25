@@ -71,9 +71,16 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         };
         InjectRecorder(session);
         _host.TrackDetectedGameStarted(OverwatchProcess());
-        using var hookTimer = new Timer(_ => session.Hooked = true, null, 200, Timeout.Infinite);
+        var hooker = new Thread(() =>
+        {
+            session.WaitEntered.Wait(TimeSpan.FromSeconds(5));
+            Thread.Sleep(200);
+            session.Hooked = true;
+        });
+        hooker.Start();
 
         Assert.True(_host.StartRecording("Overwatch"));
+        hooker.Join();
 
         Assert.True(session.WaitReturnedHooked);
         Assert.True(_host.IsRecording);

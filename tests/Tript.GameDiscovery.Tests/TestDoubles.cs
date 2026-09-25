@@ -72,3 +72,23 @@ internal sealed class FakeXboxPackages(params XboxPackage[] packages) : IXboxPac
 {
     public IEnumerable<XboxPackage> GetInstalledPackages(CancellationToken cancellationToken = default) => packages;
 }
+
+internal sealed class CountingFileSystem : IDiscoveryFileSystem
+{
+    private readonly PhysicalDiscoveryFileSystem _inner = new();
+    private readonly Dictionary<string, int> _reads = [];
+
+    public int ReadsOf(string fileName) =>
+        _reads.Where(read => Path.GetFileName(read.Key) == fileName).Sum(read => read.Value);
+    public bool FileExists(string path) => _inner.FileExists(path);
+    public bool DirectoryExists(string path) => _inner.DirectoryExists(path);
+    public string ReadAllText(string path)
+    {
+        _reads[path] = _reads.GetValueOrDefault(path) + 1;
+        return _inner.ReadAllText(path);
+    }
+    public IEnumerable<string> EnumerateFiles(string path, string searchPattern) => _inner.EnumerateFiles(path, searchPattern);
+    public IEnumerable<string> EnumerateDirectories(string path) => _inner.EnumerateDirectories(path);
+    public string GetFullPath(string path) => _inner.GetFullPath(path);
+    public string ResolveLinks(string path) => _inner.ResolveLinks(path);
+}

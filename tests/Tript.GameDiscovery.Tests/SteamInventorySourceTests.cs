@@ -80,4 +80,21 @@ public sealed class SteamInventorySourceTests
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
             await new SteamInventorySource(new PhysicalDiscoveryFileSystem(), registry).DiscoverAsync(cancellation.Token));
     }
+
+    [Fact]
+    public async Task RegistryInstallKeepsListingSteamworksRedistributables()
+    {
+        using var fixture = new TempFixture();
+        var steam = fixture.DirectoryPath("Steam");
+        fixture.DirectoryPath("Steam", "steamapps", "common", "Steamworks Shared");
+        fixture.FilePath("\"AppState\" { \"appid\" \"228980\" \"name\" \"Steamworks Common Redistributables\" \"installdir\" \"Steamworks Shared\" }",
+            "Steam", "steamapps", "appmanifest_228980.acf");
+        var registry = new FakeRegistry();
+        registry.Value(RegistryHiveId.CurrentUser, RegistryViewId.Registry64,
+            @"Software\Valve\Steam", "SteamPath", steam);
+
+        var inventory = await new SteamInventorySource(new PhysicalDiscoveryFileSystem(), registry).DiscoverAsync();
+
+        Assert.Equal("228980", Assert.Single(inventory.Games).ProductId.Value);
+    }
 }

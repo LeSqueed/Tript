@@ -17,6 +17,7 @@ public interface IDiscoveryFileSystem
     IEnumerable<string> EnumerateFiles(string path, string searchPattern);
     IEnumerable<string> EnumerateDirectories(string path);
     string GetFullPath(string path);
+    string ResolveLinks(string path) => GetFullPath(path);
 }
 
 public enum RegistryHiveId

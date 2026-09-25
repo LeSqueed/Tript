@@ -12,6 +12,13 @@ public enum GameStore
     EA,
     Ubisoft,
     Xbox,
+    Gog,
+    Local,
+}
+
+public static class GameStoreIdentity
+{
+    public static bool HasStoreProductIdentity(this GameStore store) => store != GameStore.Local;
 }
 
 public enum DiagnosticSeverity

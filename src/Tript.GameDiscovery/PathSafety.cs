@@ -53,4 +53,21 @@ public static class PathSafety
             return false;
         }
     }
+
+    public static bool TryResolveExistingDirectory(IDiscoveryFileSystem fileSystem, string candidate, out string resolved)
+    {
+        resolved = string.Empty;
+        if (!TryCanonicalize(fileSystem, candidate, out var canonical) || !fileSystem.DirectoryExists(canonical))
+            return false;
+
+        try
+        {
+            resolved = FilePaths.TrimTrailingSeparators(fileSystem.ResolveLinks(canonical));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            resolved = canonical;
+        }
+        return true;
+    }
 }

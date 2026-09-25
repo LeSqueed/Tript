@@ -41,7 +41,7 @@ These are just ideas right now, nothing is set in stone. For things like permane
   whenever you want one yourself.
 - **Native notifications:** a toast and a sound cue when recording starts, stops, or something
   goes wrong.
-- **Streaming with OBS:** OBS and Tript record games the same way, and if both do it at once one of
+- **Streaming with OBS (Windows):** OBS and Tript record games the same way, and if both do it at once one of
   them may only see a black screen. Turn on sharing in the Streamer tab and Tript sends the game
   picture to OBS instead, with a delay of about 17 ms at 60 FPS. In OBS, install the
   [Spout2 Plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin), add a *Spout2
@@ -51,13 +51,16 @@ These are just ideas right now, nothing is set in stone. For things like permane
 
 ## Supported games
 
-Tript is in early **alpha**, and right now that means one supported game: **Overwatch** (events should create bookmarks regardless of language, but for the best experience I'd suggest English. Other languages are planned to be added with hopefully community help and feedback). The goal is to make it relatively easy to add more games in the future, perhaps even allowing community models to be created.
+Right now there is one supported game: **Overwatch** (events should create bookmarks regardless of language, but for the best experience I'd suggest English. Other languages are planned to be added with hopefully community help and feedback). The goal is to make it relatively easy to add more games in the future, perhaps even allowing community models to be created.
 
 ## Status
 
-Tript is **alpha software**. Expect rough edges. Windows is the primary supported platform today.
-The downloadable build is self-contained and bundles everything it needs, including OBS itself, so
-there's nothing separate to install. Linux is untested, it might work, it might not. 
+Tript runs on **Windows** and **Linux**. The Windows download is self-contained and bundles
+everything it needs, including OBS itself, so there's nothing separate to install. The Linux version
+uses the OBS Studio from your distribution; see [Linux](#linux) below.
+
+Windows has seen the most real use. Linux is newer and less battle tested, and so far both have
+mainly been used with AMD graphics. Expect the odd rough edge there, and please report it.
 
 ## Things that need testing (uncomfirmed or likely to cause issues)
 
@@ -67,10 +70,14 @@ Found one of these, or something else? Join the Discord and let me know.
 
 - **Wide screen event detection** currently the model is trained and regions are based on a 16:9 aspect ratio. Other aspect ratio's are untested. I'd love to receive feedback with a ideally a high quality recording.
 - **Non English game clients** to give the best experience, Tript tries to avoid creating events when you are dead and spectating the person who eliminated you or when you are spectating a teammate. To ensure we only show your best moments. This is done based on text on your screen. Leading to it creating bookmarks or highlights of moments that are not of interest to you.
-- **Nvidia and Intel GPUs** I only had access to an AMD GPU during testing. Nvidia or Intel will hopefully work out of the box. Report issues if you do encounter them.
+- **Nvidia and Intel GPUs** I only had access to an AMD GPU during testing, on Windows and on Linux. Nvidia or Intel will hopefully work out of the box. Report issues if you do encounter them.
 - **Sharing with OBS** works here with one GPU and one OBS install. Multi-GPU machines, other Spout
   receivers and HDR games are untested, so report anything that looks off.
-- **Automated game detection outside of Steam** - Tript tries to automatically detect when you are playing a game and add it to the games library. The only tested launcher is currently Steam. If you find it is not properly detecting games, please report on this. Including your install location and what launcher you use to play the game.
+- **Linux** is less battle tested than Windows. It has mainly been used on sway with an AMD GPU.
+  KDE, GNOME and X11 desktops, Nvidia and Intel GPUs, and games other than Overwatch under Proton all
+  need more real-world testing. Include your distribution, desktop and the log from
+  `~/.local/state/Tript/logs` when you report something.
+- **Automated game detection outside of Steam** - Tript tries to automatically detect when you are playing a game and add it to the games library. The only tested launcher is currently Steam. On Linux, Tript also reads Heroic and Lutris libraries, which are untested so far. If you find it is not properly detecting games, please report on this. Including your install location and what launcher you use to play the game.
 
 ## Getting started
 
@@ -80,6 +87,41 @@ Found one of these, or something else? Join the Discord and let me know.
 3. Run `Tript.exe`.
 
 **Requirements:** Windows 10 or later.
+
+### Linux
+
+1. Install the system packages Tript uses:
+   - **Debian/Ubuntu:** `obs-studio libwebkit2gtk-4.1-0 gstreamer1.0-plugins-good ffmpeg`. Ubuntu's own
+     `obs-studio` can be older than 30.1; use the [OBS PPA](https://obsproject.com/kb/linux-installation)
+     if it is.
+   - **Fedora:** `obs-studio webkit2gtk4.1 gstreamer1-plugins-good ffmpeg` (OBS and ffmpeg from RPM Fusion).
+   - **Arch:** `obs-studio webkit2gtk-4.1 gst-plugins-good ffmpeg`.
+2. Download `Tript-<version>-linux-x64.tar.gz` from the
+   [Releases page](https://github.com/LeSqueed/Tript/releases/latest) and unpack it.
+3. Run `./install.sh` inside the unpacked folder. It installs Tript for your user, adds it to your
+   application menu and lists anything that is still missing. `./install.sh --uninstall` removes it
+   again and keeps your recordings and settings.
+
+On Wayland, the first recording asks which screen to share. Tript remembers the answer. To capture a
+game directly rather than the whole screen, install
+[obs-vkcapture](https://github.com/nowrep/obs-vkcapture) and add `obs-gamecapture %command%` to the
+game's Steam launch options.
+
+Tript notices games from Steam, Heroic and Lutris, and any game running fullscreen in an X11 or
+XWayland window. Games that run as native Wayland windows outside those launchers need adding by
+hand as a custom game.
+
+Global hotkeys use your desktop's shortcut portal on Wayland (KDE Plasma, GNOME 48 and newer), which
+asks you to confirm them the first time and decides the keys. On sway and other wlroots desktops
+they only work while an X11 or XWayland window, such as a Proton game, has focus. On X11 they work
+directly. Tray icons, starting with the system and sharing the game picture with OBS are
+Windows-only for now.
+
+If your desktop runs in HDR mode, recordings are labelled HDR once they stop. They are 8-bit, so
+smooth gradients may show some banding; 10-bit HDR recording isn't possible on Linux yet.
+
+Linux updates are not installed automatically: Tript tells you when a new version is out and links
+to its release page.
 
 ## License
 
@@ -102,13 +144,15 @@ files and detection won't work).
 
 **Linux system packages:** `libwebkit2gtk-4.1-0` and `gstreamer1.0-plugins-good` (both needed for
 the desktop shell window), and `obs-studio` 30.1+ with `obs-ffmpeg-mux` for real recording (OBS is
-discovered at runtime on Linux; Windows bundles its own copy instead). A display server (X11, or
-Wayland with XWayland) is required for real recording.
+discovered at runtime on Linux; Windows bundles its own copy instead). Real recording needs a
+Wayland session with the PipeWire screen-capture portal, or X11. `TRIPT_DISPLAY_PLATFORM=x11|wayland`
+forces one.
 
 ```sh
 make web      # build the React frontend only
 make shell    # frontend + publish the desktop shell into dist/<config>
 make windows  # Windows self-contained publish with the bundled OBS runtime (cross-compiles from Linux)
+make linux-package  # self-contained Linux tarball + .sha256 in dist/<config>-linux
 make test     # .NET test suite + frontend Vitest suite
 make run      # run the assembled build (prefers the desktop shell, falls back to the headless host)
 ```

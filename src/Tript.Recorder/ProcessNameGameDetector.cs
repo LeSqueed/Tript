@@ -11,6 +11,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
 {
     private readonly TimeSpan _pollInterval;
     private readonly Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> _processProbe;
+    private readonly IProcessFiles _processFiles = new ProcProcessFiles();
     private readonly object _gate = new();
     private readonly SerializedDetectorCallbackQueue _callbacks =
         new("Tript process detector callbacks");
@@ -215,6 +216,11 @@ public sealed class ProcessNameGameDetector : IGameDetector
                     continue;
                 }
 
+                var linux = OperatingSystem.IsLinux();
+                var identity = linux ? ReadLinuxIdentity(processId) : null;
+                if (identity is not null)
+                    executable = identity.Executable;
+
                 if (!candidates.Contains(NormalizeProcessName(executable)))
                     continue;
 
@@ -223,7 +229,11 @@ public sealed class ProcessNameGameDetector : IGameDetector
                 catch (Exception exception) when (IsInspectionFailure(exception)) { }
 
                 string? path;
-                if (previous.TryGetValue(processId, out var known)
+                if (linux)
+                {
+                    path = CanonicalLinuxPath(identity?.ExecutablePath);
+                }
+                else if (previous.TryGetValue(processId, out var known)
                     && SameProcessIdentity(known.StartTime, startTime))
                 {
                     path = known.Path;
@@ -244,6 +254,33 @@ public sealed class ProcessNameGameDetector : IGameDetector
         lock (_gate)
             _probed = probed;
         return snapshots;
+    }
+
+    private ProcessIdentity? ReadLinuxIdentity(int processId)
+    {
+        try
+        {
+            return LinuxProcessIdentity.Read(_processFiles, processId);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? CanonicalLinuxPath(string? path)
+    {
+        if (path is null)
+            return null;
+
+        try
+        {
+            return FilePaths.ResolveLinks(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return path;
+        }
     }
 
     private void Enqueue(
@@ -313,7 +350,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
             if (executable.Length == 0)
                 throw new ArgumentException("A target executable must contain a file name.", nameof(targets));
 
-            var path = NormalizePath(target.ExecutablePath);
+            var path = NormalizeTargetPath(target.ExecutablePath);
             if (!string.IsNullOrWhiteSpace(target.ExecutablePath) && path is null)
                 throw new ArgumentException("A target executable path must be valid.", nameof(targets));
 
@@ -334,6 +371,12 @@ public sealed class ProcessNameGameDetector : IGameDetector
     }
 
     internal static string? NormalizePath(string? path) => FilePaths.TryGetFullPath(path);
+
+    private static string? NormalizeTargetPath(string? path)
+    {
+        var normalized = NormalizePath(path);
+        return OperatingSystem.IsLinux() ? CanonicalLinuxPath(normalized) : normalized;
+    }
 
     public static string NormalizeProcessName(string name) => ExecutableNames.Normalize(name);
 

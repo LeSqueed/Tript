@@ -367,6 +367,83 @@ public sealed class FullscreenGameDetectorTests
     public void SystemPathPrefixDoesNotMatchASimilarlyNamedUserFolder()
         => Assert.False(FilePaths.IsUnder("C:\\WindowsGames\\game.exe", "C:\\Windows"));
 
+    [Fact]
+    public void ALibraryGame_IsPreferredOverTheFullscreenWindow()
+    {
+        var library = new FullscreenGameCandidate(51, "hunter", GamePath("hunter.exe"));
+        var window = new FullscreenGameCandidate(52, "celeste", GamePath("celeste.exe"));
+
+        Assert.Equal(51, FoundByPreferredProbes([], () => library, () => window)?.ProcessId);
+    }
+
+    [Fact]
+    public void WithoutALibraryGame_TheFullscreenWindowIsProposed()
+    {
+        var window = new FullscreenGameCandidate(52, "celeste", GamePath("celeste.exe"));
+
+        Assert.Equal(52, FoundByPreferredProbes([], () => null, () => window)?.ProcessId);
+    }
+
+    [Fact]
+    public void AnAlreadyKnownLibraryGame_DoesNotHideANewFullscreenGame()
+    {
+        var library = new FullscreenGameCandidate(51, "hunter", GamePath("hunter.exe"));
+        var window = new FullscreenGameCandidate(52, "celeste", GamePath("celeste.exe"));
+
+        var found = FoundByPreferredProbes(
+            [new GameDetectionTarget("hunter", "hunter.exe", GamePath("hunter.exe"))], () => library, () => window);
+
+        Assert.Equal(52, found?.ProcessId);
+    }
+
+    [Fact]
+    public void WhileALibraryGameIsFound_TheFullscreenWindowIsNotRead()
+    {
+        var library = new FullscreenGameCandidate(51, "hunter", GamePath("hunter.exe"));
+        var windowReads = 0;
+
+        FoundByPreferredProbes([], () => library, () =>
+        {
+            windowReads++;
+            return null;
+        });
+
+        Assert.Equal(0, windowReads);
+    }
+
+    [Fact]
+    public void DisposingTheDetector_DisposesTheProbeItOwns()
+    {
+        var owned = new DisposalRecorder();
+        var detector = new FullscreenGameDetector([], [() => null], TimeSpan.FromHours(1), owned);
+
+        detector.Dispose();
+
+        Assert.True(owned.Disposed);
+    }
+
+    private static FullscreenGameCandidate? FoundByPreferredProbes(
+        IEnumerable<GameDetectionTarget> targets,
+        params Func<FullscreenGameCandidate?>[] probes)
+    {
+        using var detector = new FullscreenGameDetector(targets, probes, TimeSpan.FromHours(1), ownedProbe: null);
+        FullscreenGameCandidate? found = null;
+        detector.CandidateFound += candidate => found = candidate;
+
+        detector.PollOnce();
+        detector.PollOnce();
+        detector.WaitForCallbacks();
+
+        return found;
+    }
+
+    private sealed class DisposalRecorder : IDisposable
+    {
+        internal bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
+    }
+
     private static FullscreenGameDetector Detector(
         IEnumerable<GameDetectionTarget> targets,
         Func<FullscreenGameCandidate?> probe)

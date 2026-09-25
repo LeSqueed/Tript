@@ -19,7 +19,9 @@ public sealed class FullscreenGameDetector : IDisposable
     private const uint MonitorDefaultToNearest = 2;
     private static readonly ProcessPathCache ProbedPaths = new();
     private readonly TimeSpan _pollInterval;
-    private readonly Func<FullscreenGameCandidate?> _candidateProbe;
+    private readonly IReadOnlyList<Func<FullscreenGameCandidate?>> _candidateProbes;
+    private readonly IDisposable? _ownedProbe;
+    private readonly bool _probeWorksHere;
     private readonly object _gate = new();
     private readonly SerializedDetectorCallbackQueue _callbacks =
         new("Tript fullscreen detector callbacks");
@@ -37,16 +39,41 @@ public sealed class FullscreenGameDetector : IDisposable
         TimeSpan? pollInterval = null)
         : this(knownTargets, ProbeCandidate, pollInterval)
     {
+        _probeWorksHere = OperatingSystem.IsWindows();
+    }
+
+    public static FullscreenGameDetector ForLinux(
+        IEnumerable<GameDetectionTarget> knownTargets,
+        Func<IReadOnlyList<string>> installRoots,
+        TimeSpan? pollInterval = null)
+    {
+        var libraryProcesses = LinuxGameProcessProbe.ForThisMachine(installRoots);
+        var activeWindow = X11ActiveWindowProbe.ForThisMachine();
+        return new(knownTargets, [libraryProcesses.Probe, activeWindow.Probe],
+            pollInterval ?? TimeSpan.FromSeconds(2), activeWindow);
     }
 
     internal FullscreenGameDetector(
         IEnumerable<GameDetectionTarget> knownTargets,
         Func<FullscreenGameCandidate?> candidateProbe,
         TimeSpan? pollInterval = null)
+        : this(knownTargets, [candidateProbe], pollInterval, ownedProbe: null)
     {
-        ArgumentNullException.ThrowIfNull(candidateProbe);
+    }
+
+    internal FullscreenGameDetector(
+        IEnumerable<GameDetectionTarget> knownTargets,
+        IReadOnlyList<Func<FullscreenGameCandidate?>> candidateProbesInPreferenceOrder,
+        TimeSpan? pollInterval,
+        IDisposable? ownedProbe)
+    {
+        ArgumentNullException.ThrowIfNull(candidateProbesInPreferenceOrder);
+        foreach (var probe in candidateProbesInPreferenceOrder)
+            ArgumentNullException.ThrowIfNull(probe, nameof(candidateProbesInPreferenceOrder));
         _knownTargets = CreateKnownTargetSet(knownTargets);
-        _candidateProbe = candidateProbe;
+        _candidateProbes = [.. candidateProbesInPreferenceOrder];
+        _ownedProbe = ownedProbe;
+        _probeWorksHere = true;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(1);
     }
 
@@ -67,7 +94,7 @@ public sealed class FullscreenGameDetector : IDisposable
 
     public void Start()
     {
-        if (!OperatingSystem.IsWindows())
+        if (!_probeWorksHere)
             return;
 
         lock (_gate)
@@ -89,6 +116,7 @@ public sealed class FullscreenGameDetector : IDisposable
             _timer = null;
         }
         _callbacks.Dispose();
+        _ownedProbe?.Dispose();
     }
 
     internal void PollOnce() => OnTick(null);
@@ -122,14 +150,16 @@ public sealed class FullscreenGameDetector : IDisposable
     private void Poll()
     {
         long targetVersion;
+        KnownTargetSet knownTargets;
         lock (_gate)
         {
             if (_disposed)
                 return;
             targetVersion = _targetVersion;
+            knownTargets = _knownTargets;
         }
 
-        var probed = NormalizeCandidate(_candidateProbe());
+        var probed = FirstNewCandidate(knownTargets);
         FullscreenGameCandidate? cleared = null;
         FullscreenGameCandidate? found = null;
 
@@ -137,9 +167,6 @@ public sealed class FullscreenGameDetector : IDisposable
         {
             if (_disposed || targetVersion != _targetVersion)
                 return;
-
-            if (probed is not null && IsKnown(probed, _knownTargets))
-                probed = null;
 
             if (_activeCandidate is not null && SameCandidate(_activeCandidate, probed))
             {
@@ -181,6 +208,18 @@ public sealed class FullscreenGameDetector : IDisposable
             Enqueue(CandidateCleared, cleared, targetVersion);
         if (found is not null)
             Enqueue(CandidateFound, found, targetVersion);
+    }
+
+    private FullscreenGameCandidate? FirstNewCandidate(KnownTargetSet knownTargets)
+    {
+        foreach (var probe in _candidateProbes)
+        {
+            var candidate = NormalizeCandidate(probe());
+            if (candidate is not null && !IsKnown(candidate, knownTargets))
+                return candidate;
+        }
+
+        return null;
     }
 
     private static FullscreenGameCandidate? NormalizeCandidate(FullscreenGameCandidate? candidate)

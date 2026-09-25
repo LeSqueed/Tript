@@ -1,19 +1,20 @@
 # Tript build & packaging Makefile.
 #
 # Targets:
-#   all        build the current OS (Debug) — the dev loop
+#   all        build the current OS (Debug), the dev loop
 #   dev        build + run the app (Debug, --fake-recorder by default for a no-hardware dev session)
 #   release    build the current OS in Release
 #   linux      publish a framework-dependent Linux build into dist/<config>
 #   windows    publish a Windows build with Tript.exe at dist/<config>-win and its runtime under App/
+#   linux-package  build the self-contained Linux tarball + .sha256 into dist/<config>-linux
 #   shell      build the frontend + publish the desktop shell (Tript.Shell, Photino window)
 #   publish-shell-win  publish the Windows desktop shell (Tript.Shell, Photino window) into App/
 #   launcher-windows   build the native Windows Tript.exe launcher (requires mingw-w64)
 #   obs-fetch  download the pinned OBS Studio Windows portable zip into third_party/
 #   ffmpeg-fetch  download the pinned, checksum-verified ffmpeg Windows build into third_party/
 #   test       run the .NET test suite + the frontend Vitest suite
-#   run        run the assembled binary — prefers the desktop shell, falls back to the headless host
-#   cut-release  bump the version, commit, tag, and push — triggers .github/workflows/release.yml
+#   run        run the assembled binary; prefers the desktop shell, falls back to the headless host
+#   cut-release  bump the version, commit, tag, and push; triggers .github/workflows/release.yml
 #   clean      remove build outputs
 #
 # Flags (defaults):
@@ -29,6 +30,7 @@
 #   WIN_LAUNCHER_CC=<compiler>    mingw-w64 C compiler (default x86_64-w64-mingw32-gcc)
 #   WIN_LAUNCHER_WINDRES=<tool>   mingw-w64 resource compiler (default x86_64-w64-mingw32-windres)
 #   VERSION=<x.y.z-suffix>        cut-release: version to bump to (default: auto-increment)
+#   TEST_ARGS=<args>              extra dotnet test arguments (CI passes a TRX logger)
 #
 # The Linux build is framework-dependent and expects OBS as a system dependency (the app
 # discovers it at runtime). The Windows build bundles a pinned OBS Studio portable zip.
@@ -37,7 +39,7 @@
 #
 # The desktop shell (shell/publish-shell) publishes src/Tript.Shell next to the app host. The shell
 # reuses the app host's construction seam and points a native Photino window at the same UI. On
-# Linux it needs the webkit2gtk-4.1 system package (NOT webkitgtk-6.0) — see README. `run` prefers
+# Linux it needs the webkit2gtk-4.1 system package (NOT webkitgtk-6.0); see README. `run` prefers
 # the shell binary when it has been built and falls back to the headless host (which prints the UI
 # URL at http://localhost:8892/).
 
@@ -73,6 +75,7 @@ WIN_LAUNCHER_WINDRES ?= x86_64-w64-mingw32-windres
 .PHONY: all dev release linux windows obs-fetch ffmpeg-fetch restore-windows test test-dotnet test-web test-integration test-all
 .PHONY: run clean shell publish-shell cut-release
 .PHONY: web frontend publish publish-linux publish-windows publish-shell-win assemble-windows launcher-windows
+.PHONY: linux-package
 
 all: linux
 
@@ -106,7 +109,7 @@ publish-windows: restore-windows
 # The OBS runtime is curated here to match exactly what the app's SafeModules allowlist loads
 # (src/Tript.App/Program.cs). The allowlist is the safety net: a module that is not shipped can
 # never be loaded, so slimming the bundle cannot change runtime behaviour. Every vendor's encoder
-# probe ships, so the bundle is not AMD- or NVIDIA-specific — each machine's probe binary resolves
+# probe ships, so the bundle is not AMD- or NVIDIA-specific: each machine's probe binary resolves
 # next to the app process exe (os_get_executable_path_ptr) and registers only the encoders whose
 # hardware is actually present.
 
@@ -167,11 +170,11 @@ assemble-windows: obs-fetch ffmpeg-fetch
 
 	# The subprocess helpers the plugins spawn, resolved from the app process exe path: the muxer
 	# (obs-ffmpeg) and the encoder capability probes (obs-amf-test, obs-nvenc-test, obs-qsv-test).
-	# Without a probe binary the corresponding hardware encoder ids never register — a missing
+	# Without a probe binary the corresponding hardware encoder ids never register. A missing
 	# obs-nvenc-test.exe silently leaves an NVIDIA machine with software-only encoding.
 	#
 	# A shell glob, not $(wildcard): make caches the directory listings it globs, and obs-fetch
-	# creates these files during the same run — so a cached empty result would ship no probes at
+	# creates these files during the same run, so a cached empty result would ship no probes at
 	# all. And no "|| true" on either: both failures are silent and neither is survivable. Without
 	# the muxer there is no recording; without a probe the machine quietly falls back to software
 	# encoding, which is the difference between a playable capture and a slideshow.
@@ -212,7 +215,7 @@ publish-shell:
 		--self-contained $(SELF_CONTAINED) -p:EnableTraining=$(TRAINING) \
 		-o $(PUBLISH_DIR)
 	# The shell resolves its UI root from ./dist next to the binary (DefaultWebRoot prefers the
-	# published layout), so the built frontend must ship into the publish folder here — a shell
+	# published layout), so the built frontend must ship into the publish folder here: a shell
 	# build must not depend on a prior publish-linux having populated it.
 	mkdir -p $(PUBLISH_DIR)/dist
 	cp -r $(WEB_SRC)/dist/* $(PUBLISH_DIR)/dist/
@@ -284,6 +287,31 @@ release:
 
 linux: publish-linux
 
+# ---- linux package ----
+# A self-contained tarball: the .NET runtime ships inside, OBS, WebKitGTK and GStreamer stay system
+# dependencies. install.sh installs it for the current user and links the system obs-ffmpeg-mux
+# beside the app, where libobs looks for it.
+PACKAGE_VERSION = $(shell sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' Directory.Build.props)
+LINUX_PACKAGE_NAME = Tript-$(PACKAGE_VERSION)-linux-x64
+LINUX_PACKAGE_ROOT = $(DIST_DIR)/$(CONFIG)-linux
+LINUX_PACKAGE_DIR = $(LINUX_PACKAGE_ROOT)/$(LINUX_PACKAGE_NAME)
+
+linux-package: web
+	rm -rf $(LINUX_PACKAGE_ROOT)
+	mkdir -p $(LINUX_PACKAGE_DIR)/app
+	for project in $(APP_CS)/Tript.App.csproj src/Tript.Shell/Tript.Shell.csproj; do \
+		dotnet publish $$project -f net10.0 -c $(CONFIG) -r linux-x64 --self-contained true \
+			-p:EnableTraining=$(TRAINING) -p:RestoreLockedMode=true -o $(LINUX_PACKAGE_DIR)/app || exit 1; \
+	done
+	mkdir -p $(LINUX_PACKAGE_DIR)/app/dist
+	cp -r $(WEB_SRC)/dist/* $(LINUX_PACKAGE_DIR)/app/dist/
+	rm -f $(LINUX_PACKAGE_DIR)/app/obs-ffmpeg-mux $(LINUX_PACKAGE_DIR)/app/*.pdb
+	install -m 755 packaging/linux/tript packaging/linux/install.sh $(LINUX_PACKAGE_DIR)/
+	install -m 644 packaging/linux/tript.desktop.in $(LINUX_PACKAGE_DIR)/
+	cd $(LINUX_PACKAGE_ROOT) && tar -czf $(LINUX_PACKAGE_NAME).tar.gz $(LINUX_PACKAGE_NAME) && \
+		sha256sum $(LINUX_PACKAGE_NAME).tar.gz > $(LINUX_PACKAGE_NAME).tar.gz.sha256
+	@echo "Linux package: $(LINUX_PACKAGE_ROOT)/$(LINUX_PACKAGE_NAME).tar.gz"
+
 windows: publish-windows
 
 # ---- release tagging ----
@@ -310,7 +338,7 @@ cut-release:
 		base="$${current%.*}"; n="$${current##*.}"; \
 		case "$$n" in \
 			''|*[!0-9]*) \
-				echo "cut-release: can't auto-increment '$$current' — pass VERSION= explicitly." >&2; \
+				echo "cut-release: can't auto-increment '$$current'; pass VERSION= explicitly." >&2; \
 				exit 1;; \
 		esac; \
 		next="$$base.$$((n + 1))"; \
@@ -339,14 +367,14 @@ run:
 	else \
 		echo "No shell binary at $(SHELL_BIN); falling back to headless host."; \
 		cd $(PUBLISH_DIR) && ./Tript.App $$([ "$(FAKE_RECORDER)" = "true" ] && echo --fake-recorder) \
-			& echo "Tript is up — open the URL on the host's own READY line above (Ctrl-C to stop)."; \
+			& echo "Tript is up: open the URL on the host's own READY line above (Ctrl-C to stop)."; \
 		echo "The bare http://localhost:8892/ is refused: the UI needs the per-launch key on that line."; \
 		wait; \
 	fi
 
 # ---- test ----
 # `test` is the gate that is meant to be green on any developer machine: the .NET unit suites plus
-# the frontend. The OBS integration suite is NOT in it — see `test-integration` below for why.
+# the frontend. The OBS integration suite is NOT in it; see `test-integration` below for why.
 #
 # Both halves always run, and the exit code reflects both. They used to be two recipe lines, which
 # meant make stopped at the first failure and the entire frontend suite was silently skipped
@@ -369,7 +397,7 @@ test:
 test-dotnet:
 	@fail=0; \
 	for project in $(UNIT_TEST_PROJECTS); do \
-		dotnet test $$project -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1 || fail=1; \
+		dotnet test $$project -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1 $(TEST_ARGS) || fail=1; \
 	done; \
 	exit $$fail
 
@@ -385,7 +413,7 @@ test-web:
 # the obs-ffmpeg-mux helper. On a machine that does not have them it fails for reasons that have
 # nothing to do with the change under test, which is exactly how a gate stops being read.
 test-integration:
-	dotnet test tests/Tript.Obs.IntegrationTests -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1
+	dotnet test tests/Tript.Obs.IntegrationTests -c $(CONFIG) -f net10.0 -p:EnableTraining=$(TRAINING) --nologo -m:1 $(TEST_ARGS)
 
 test-all: test test-integration
 

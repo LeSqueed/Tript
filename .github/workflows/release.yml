@@ -1,4 +1,4 @@
-# Builds the Windows alpha bundle and publishes it as a GitHub Release whenever a version tag is
+# Builds the Windows bundle and the Linux tarball and publishes them as a GitHub Release whenever a version tag is
 # pushed. Runs on ubuntu-latest, not windows-latest: `make windows` cross-compiles the whole bundle
 # (dotnet publish -r win-x64, plain shell, and the apt-installable mingw-w64 cross-compiler for the
 # native launcher) without ever needing a Windows host, matching how `README.md` already builds it.
@@ -27,8 +27,11 @@ jobs:
   windows:
     uses: ./.github/workflows/windows-checks.yml
 
+  linux:
+    uses: ./.github/workflows/linux-checks.yml
+
   release:
-    needs: windows
+    needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,7 +62,7 @@ jobs:
 
       - name: Test
         # A tag push does not run ci.yml (it only triggers on branches), so this workflow is the
-        # only gate a tagged release goes through — it must run the full suite itself, not just
+        # only gate a tagged release goes through, so it must run the full suite itself, not just
         # rebuild. Uses the same `make test` ci.yml runs, so the two gates never drift apart.
         run: make test CONFIG=Release
 
@@ -74,7 +77,7 @@ jobs:
       - name: Point resolver.json at the production resolver
         # config/resolver.json ships via a Content Include (Tript.App.csproj) that copies it
         # verbatim into the publish output as ./resolver.json. Overwriting the checkout's copy
-        # here — never committed back — means `make windows` bakes the production resolver into
+        # here (never committed back) means `make windows` bakes the production resolver into
         # the release build instead of the checked-in localhost dev default.
         env:
           RESOLVER_URL: ${{ secrets.RESOLVER_URL }}
@@ -94,6 +97,14 @@ jobs:
           sha256sum "$ZIP" > "$ZIP.sha256"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
+      - name: Build Linux package
+        run: |
+          make linux-package CONFIG=Release
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARBALL="Tript-${VERSION}-linux-x64.tar.gz"
+          mv "dist/Release-linux/$TARBALL" "dist/Release-linux/$TARBALL.sha256" .
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -103,7 +114,7 @@ jobs:
             FLAGS+=(--prerelease)
           fi
           gh release create "$GITHUB_REF_NAME" \
-            "$ZIP" "$ZIP.sha256" \
+            "$ZIP" "$ZIP.sha256" "$TARBALL" "$TARBALL.sha256" \
             --title "Tript $GITHUB_REF_NAME" \
             --generate-notes \
             "${FLAGS[@]}"

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Tript
+GenericName=Game Recorder
+Comment=Records your games and bookmarks the moments worth keeping
+Exec=@EXEC@
+Icon=tript
+Terminal=false
+Categories=AudioVideo;Video;Recorder;Game;
+Keywords=record;clip;capture;obs;highlight;
+StartupNotify=true
+StartupWMClass=Tript.Shell

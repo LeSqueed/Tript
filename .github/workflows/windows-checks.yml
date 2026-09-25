@@ -10,6 +10,9 @@ name: Windows checks
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -59,10 +62,15 @@ jobs:
         run: |
           $failed = $false
           foreach ($project in 'App','Detection','Media','Recorder','Settings','GameDiscovery') {
-            dotnet test "tests/Tript.$project.Tests" -c Release -f net10.0 --nologo -m:1
+            dotnet test "tests/Tript.$project.Tests" -c Release -f net10.0 --nologo -m:1 `
+              --logger trx --results-directory TestResults
             if ($LASTEXITCODE -ne 0) { $failed = $true }
           }
           if ($failed) { exit 1 }
+
+      - name: Name the failed tests
+        if: failure()
+        run: python scripts/report-failed-tests.py TestResults
 
       # The launcher is the one component that can leave an install unable to start: it swaps
       # updates into place and rolls a broken one back. These drive the compiled launcher itself.

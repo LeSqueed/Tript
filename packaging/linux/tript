@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (c) 2026 LeSqueed and the Tript contributors
+set -eu
+
+self="$(readlink -f "$0")"
+app_dir="$(dirname "$self")/app"
+[ -x "$app_dir/Tript.Shell" ] || app_dir="$(dirname "$self")"
+
+exec "$app_dir/Tript.Shell" "$@"

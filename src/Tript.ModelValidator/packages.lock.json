@@ -36,14 +36,14 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.0.1, )",
-          "Tript.Obs": "[1.0.1, )"
+          "Tript.Core": "[1.1.0, )",
+          "Tript.Obs": "[1.1.0, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.0.1, )"
+          "Tript.Core": "[1.1.0, )"
         }
       }
     },

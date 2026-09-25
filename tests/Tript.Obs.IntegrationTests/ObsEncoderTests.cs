@@ -12,6 +12,12 @@ public sealed class ObsEncoderTests
     private const string VaapiId = "ffmpeg_vaapi";
     private const string Av1VaapiId = "av1_ffmpeg_vaapi";
 
+    private static bool MachineHasARenderNode() =>
+        Directory.Exists("/dev/dri") && Directory.EnumerateFileSystemEntries("/dev/dri", "renderD*").Any();
+
+    private static void RequireVaapiHardware() =>
+        Skip.IfNot(MachineHasARenderNode(), "This machine has no GPU render node, so libobs offers no VAAPI encoder.");
+
     private static ObsSession StartSession()
     {
         var session = ObsSession.StartWithSourceTypes();
@@ -27,11 +33,21 @@ public sealed class ObsEncoderTests
 
         Assert.Contains(X264Id, ids);
         Assert.Contains(AacId, ids);
-        Assert.Contains(VaapiId, ids);
-        Assert.Contains(Av1VaapiId, ids);
 
         Assert.Equal("h264", ObsEncoder.GetTypeCodec(X264Id));
         Assert.Equal("aac", ObsEncoder.GetTypeCodec(AacId));
+    }
+
+    [SkippableFact]
+    public void AMachineWithAGpuRenderNode_ExposesTheVaapiEncoders()
+    {
+        RequireVaapiHardware();
+        using var session = StartSession();
+
+        var ids = ObsEncoder.EnumerateTypeIds();
+
+        Assert.Contains(VaapiId, ids);
+        Assert.Contains(Av1VaapiId, ids);
     }
 
     [SkippableFact]
@@ -113,6 +129,14 @@ public sealed class ObsEncoderTests
         using var session = StartSession();
 
         Assert.Equal(ObsEncoderCaps.DynBitrate | ObsEncoderCaps.Roi, ObsEncoder.GetTypeCaps(X264Id));
+    }
+
+    [SkippableFact]
+    public void TheVaapiEncoder_IsMarkedInternal()
+    {
+        RequireVaapiHardware();
+        using var session = StartSession();
+
         Assert.Equal(ObsEncoderCaps.Internal, ObsEncoder.GetTypeCaps(VaapiId));
     }
 
@@ -262,6 +286,7 @@ public sealed class ObsEncoderTests
     [SkippableFact]
     public void TheVaapiFamily_OffersMaxrateAndQpRatherThanMaxBitrateAndCqp()
     {
+        RequireVaapiHardware();
         using var session = StartSession();
 
         var properties = ObsEncoder.EnumerateTypeProperties(VaapiId);
@@ -399,6 +424,7 @@ public sealed class ObsEncoderTests
     [SkippableFact]
     public void RoiIsRefusedOnAnEncoderWithoutTheCapability()
     {
+        RequireVaapiHardware();
         using var session = StartSession();
 
         using var vaapi = ObsEncoder.CreateVideo(VaapiId, "no roi");

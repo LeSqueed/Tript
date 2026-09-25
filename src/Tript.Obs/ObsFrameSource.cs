@@ -22,6 +22,10 @@ internal sealed class ObsFrameSource : IFrameSource
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
 
+        if (frameRateDivisor == 0)
+            throw new ObsException(
+                "A frame-rate divisor of zero delivers no frames; libobs accepts it silently, so it is refused here.");
+
         if (!_runtime.TryGetVideoHandle(out var video))
             throw new ObsException(
                 "No video pipeline is running, so no frame subscription can be created. " +

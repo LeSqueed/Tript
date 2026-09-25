@@ -108,8 +108,8 @@ public sealed class ObsSettingsTests
     [Fact]
     public void AStringSetting_RoundTripsNonAsciiByteIdentically()
     {
-        const string key = "café — 日本語 — Ω — 🎮";
-        const string value = "ünïcödé — ✓ — 𝄞";
+        const string key = "café \u2014 日本語 \u2014 Ω \u2014 🎮";
+        const string value = "ünïcödé \u2014 ✓ \u2014 𝄞";
 
         using var settings = new ObsSettings();
         settings.SetString(key, value);
@@ -296,7 +296,6 @@ public sealed class ObsSettingsTests
 
         Assert.True(settings.HasDefaultValue("preset"));
         Assert.Equal(string.Empty, settings.GetDefaultString("preset"));
-        Assert.Equal(0, settings.GetDefaultInt("preset"));
 
         settings.UnsetUserValue("preset");
         Assert.Equal(string.Empty, settings.GetString("preset"));

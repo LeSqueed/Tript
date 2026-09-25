@@ -74,7 +74,7 @@ describe('TrashList listing', () => {
 });
 
 describe('TrashList restore', () => {
-  it('restores one entry without a confirmation — it undoes something', () => {
+  it('restores one entry without a confirmation: it undoes something', () => {
     const { trash } = renderTrash([ranked, shot]);
     fireEvent.click(screen.getByRole('button', { name: 'Restore Ranked win' }));
     expect(screen.queryByTestId('confirm-delete')).toBeNull();

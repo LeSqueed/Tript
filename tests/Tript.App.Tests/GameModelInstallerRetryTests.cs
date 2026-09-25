@@ -29,10 +29,16 @@ public sealed class GameModelInstallerRetryTests : IDisposable
     {
         var modelsRoot = Path.Combine(_root, "models");
         var staged = StageModel("overwatch");
-        var scanned = new FileStream(Path.Combine(staged, "model.onnx"), FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var releaser = new Timer(_ => scanned.Dispose(), null, TimeSpan.FromMilliseconds(600), Timeout.InfiniteTimeSpan);
+        using var scanned = new FileStream(Path.Combine(staged, "model.onnx"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        var releaser = new Thread(() =>
+        {
+            Thread.Sleep(600);
+            scanned.Dispose();
+        }) { IsBackground = true };
+        releaser.Start();
 
         GameModelInstaller.InstallValidatedDirectory("overwatch", staged, modelsRoot);
+        releaser.Join();
 
         Assert.True(File.Exists(Path.Combine(modelsRoot, "overwatch", "model.onnx")));
     }

@@ -333,19 +333,26 @@ public sealed class ObsFrameSourceTests
     private const string ColourSourceId = "color_source";
 
     [SkippableFact]
-    public void DisposingAfterAVideoReset_DoesNotDisconnectFromTheFreedHandle()
+    public void ALiveSubscription_KeepsVideoActiveUntilItIsDisposed()
     {
         using var session = ObsSession.StartWithSourceTypes();
+        var settings = new ObsVideoSettings
+        {
+            BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720
+        };
 
         var subscription = FrameSourceRegistry.Current.Subscribe(
             FramePixelFormat.Bgra, 320, 180, Noop.OnFrame, frameRateDivisor: 1);
-
-        session.ResetVideoOrThrow(new ObsVideoSettings
+        try
         {
-            BaseWidth = 1280, BaseHeight = 720, OutputWidth = 1280, OutputHeight = 720
-        });
+            Assert.Equal(ObsVideoResetResult.CurrentlyActive, session.Runtime.ResetVideo(settings));
+        }
+        finally
+        {
+            subscription.Dispose();
+        }
 
-        subscription.Dispose();
+        Assert.Equal(ObsVideoResetResult.Success, session.Runtime.ResetVideo(settings));
     }
 
     [SkippableFact]

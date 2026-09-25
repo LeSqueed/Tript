@@ -26,7 +26,8 @@ public sealed class ShutdownFinalizationTests : IDisposable
             FakeRecorder = true,
         }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker(),
             recorderStopTimeout: TimeSpan.FromMilliseconds(100),
-            pendingStopFinalizeTimeout: TimeSpan.FromSeconds(5));
+            pendingStopFinalizeTimeout: TimeSpan.FromSeconds(5),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

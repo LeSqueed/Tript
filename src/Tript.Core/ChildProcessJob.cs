@@ -22,13 +22,19 @@ public static class ChildProcessJob
 
     private static readonly Lazy<nint> Job = new(Create, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private static readonly Lazy<ChildProcessReaper> Reaper =
+        new(CreateReaper, LazyThreadSafetyMode.ExecutionAndPublication);
+
     internal static nint Handle => Job.Value;
 
     public static void Track(Process process)
     {
         ArgumentNullException.ThrowIfNull(process);
         if (!OperatingSystem.IsWindows())
+        {
+            Reaper.Value.Track(process);
             return;
+        }
 
         var job = Job.Value;
         if (job == nint.Zero)
@@ -47,6 +53,18 @@ public static class ChildProcessJob
         {
             // The child already exited, so there is nothing left to tie.
         }
+    }
+
+    private static ChildProcessReaper CreateReaper()
+    {
+        var reaper = new ChildProcessReaper();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => reaper.Dispose();
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.IsTerminating)
+                reaper.Dispose();
+        };
+        return reaper;
     }
 
     private static nint Create()

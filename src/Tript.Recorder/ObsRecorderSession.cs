@@ -38,7 +38,7 @@ public sealed class ObsRecorderSession : IRecorderSession
     private readonly GameCaptureHookProbe _hookProbe;
 
     public ObsRecorderSession(ObsRuntime runtime, ObsSource source, ObsGameCaptureTarget? gameCaptureTarget = null,
-        CapturePolicy? policy = null)
+        CapturePolicy? policy = null, string? portalRestoreToken = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(source);
@@ -55,7 +55,8 @@ public sealed class ObsRecorderSession : IRecorderSession
 
             if (Policy.IncludesDisplayCapture)
             {
-                _displaySource = CaptureSourceFactory.CreateDisplay(Policy.PreferredDisplayId, out var display);
+                _displaySource = CaptureSourceFactory.CreateDisplay(Policy.PreferredDisplayId, portalRestoreToken,
+                    out var display);
                 SelectedDisplay = display;
                 if (_displaySource is not null)
                 {
@@ -92,6 +93,25 @@ public sealed class ObsRecorderSession : IRecorderSession
     public bool IsGameCaptureHooked => _hookProbe.IsHooked;
 
     public bool HasDisplayFallback => _displaySource is not null;
+
+    public (int Width, int Height)? PortalCaptureSize =>
+        _displaySource is { } source && ObsCaptureSource.IsPortalCapture(source.Id)
+        && source.Width > 0 && source.Height > 0
+            ? ((int)source.Width, (int)source.Height)
+            : null;
+
+    public string? PortalRestoreToken
+    {
+        get
+        {
+            if (_displaySource is null || !ObsCaptureSource.IsPortalCapture(_displaySource.Id))
+                return null;
+
+            using var settings = _displaySource.GetSettings();
+            var token = settings.GetString(ObsCaptureSource.PortalRestoreTokenKey);
+            return string.IsNullOrEmpty(token) ? null : token;
+        }
+    }
 
     public IRecorderOutput CreateOutput(ResolvedRecorderSettings settings)
     {

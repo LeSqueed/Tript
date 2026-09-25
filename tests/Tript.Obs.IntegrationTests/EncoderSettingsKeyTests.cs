@@ -29,7 +29,7 @@ public sealed class EncoderSettingsKeyTests
                 failures.Add($"{key.Key}: written but reports no user value");
         }
 
-        Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Count == 0, $"{family}: {string.Join("; ", failures)}");
     }
 
     [Theory]
@@ -59,7 +59,7 @@ public sealed class EncoderSettingsKeyTests
                 failures.Add($"{key.Key}: a default alone was reported as a user value");
         }
 
-        Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Count == 0, $"{family}: {string.Join("; ", failures)}");
     }
 
     [Theory]
@@ -84,7 +84,7 @@ public sealed class EncoderSettingsKeyTests
             }
         }
 
-        Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Count == 0, $"{family}: {string.Join("; ", failures)}");
     }
 
     [Theory]
@@ -102,7 +102,7 @@ public sealed class EncoderSettingsKeyTests
             .Select(key => $"{key.Key}: expected {Describe(key.Sample)}, got {Describe(EncoderSettingsKeyTable.Read(settings, key))}")
             .ToArray();
 
-        Assert.True(failures.Length == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Length == 0, $"{family}: {string.Join("; ", failures)}");
 
         var written = settings.EnumerateEntries().Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(keys.Select(key => key.Key).ToHashSet(StringComparer.Ordinal), written);
@@ -150,7 +150,7 @@ public sealed class EncoderSettingsKeyTests
             }
         }
 
-        Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Count == 0, $"{family}: {string.Join("; ", failures)}");
     }
 
     [Theory]
@@ -174,7 +174,7 @@ public sealed class EncoderSettingsKeyTests
             }
         }
 
-        Assert.True(failures.Count == 0, $"{family} — {string.Join("; ", failures)}");
+        Assert.True(failures.Count == 0, $"{family}: {string.Join("; ", failures)}");
     }
 
     [Fact]

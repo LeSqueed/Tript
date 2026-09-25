@@ -7,7 +7,7 @@
 # the field types are ffprobe's own (width/height numbers, sample_rate/bit_rate strings). The four
 # colour fields are always present, falling back to "unspecified" when the file does not carry them.
 #
-# A file ffprobe cannot read is not an error here — it reports empty objects, which is how the
+# A file ffprobe cannot read is not an error here: it reports empty objects, which is how the
 # killed-muxer test proves an unfinalised recording is not a playable MP4. Only a missing argument
 # or a missing ffprobe exits non-zero.
 set -uo pipefail

@@ -55,7 +55,7 @@ public static class ObsRuntimeLocator
 
             var moduleBinary = FindLinuxModuleBinaryDir(runtimeDir, out var moduleData);
             if (moduleBinary is not null)
-                return new ObsRuntimeLocations(runtimeDir, moduleBinary, moduleData, FindLinuxCoreDataDir());
+                return new ObsRuntimeLocations(runtimeDir, moduleBinary, moduleData, FindLinuxCoreDataDir(runtimeDir));
         }
 
         var pkgConfigDir = PkgConfigLibDir();
@@ -63,7 +63,7 @@ public static class ObsRuntimeLocator
         {
             var moduleBinary = FindLinuxModuleBinaryDir(pkgConfigDir, out var moduleData);
             if (moduleBinary is not null)
-                return new ObsRuntimeLocations(pkgConfigDir, moduleBinary, moduleData, FindLinuxCoreDataDir());
+                return new ObsRuntimeLocations(pkgConfigDir, moduleBinary, moduleData, FindLinuxCoreDataDir(pkgConfigDir));
         }
 
         foreach (var candidate in new[]
@@ -76,7 +76,7 @@ public static class ObsRuntimeLocator
         {
             var moduleBinary = FindLinuxModuleBinaryDir(candidate, out var moduleData);
             if (moduleBinary is not null)
-                return new ObsRuntimeLocations(candidate, moduleBinary, moduleData, FindLinuxCoreDataDir());
+                return new ObsRuntimeLocations(candidate, moduleBinary, moduleData, FindLinuxCoreDataDir(candidate));
         }
 
         return new ObsRuntimeLocations(null, null, null, null);
@@ -104,35 +104,46 @@ public static class ObsRuntimeLocator
         return null;
     }
 
-    private static string? FindLinuxCoreDataDir()
+    private const string SystemShareRoot = "/usr/share/obs";
+
+    internal static string? InstallPrefixOf(string libDir)
     {
-        foreach (var candidate in new[]
+        var segments = libDir.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var index = segments.Length - 1; index >= 0; index--)
         {
-            "/usr/share/obs/obs-studio/",
-            "/usr/share/obs/",
-        })
-        {
-            if (Directory.Exists(candidate))
-                return candidate;
+            if (segments[index].StartsWith("lib", StringComparison.Ordinal))
+                return "/" + string.Join('/', segments[..index]);
         }
 
         return null;
     }
 
-    private static string? FindLinuxModuleDataDir(string libDir)
+    internal static IReadOnlyList<string> LinuxShareRoots(string libDir)
     {
-        foreach (var candidate in new[]
-        {
-            "/usr/share/obs/obs-plugins",
-            "/usr/share/obs/obs-studio/plugins",
-        })
-        {
-            if (Directory.Exists(candidate))
-                return candidate;
-        }
-
-        return null;
+        var roots = new List<string>();
+        if (InstallPrefixOf(libDir) is { } prefix)
+            roots.Add(prefix.TrimEnd('/') + "/share/obs");
+        if (!roots.Contains(SystemShareRoot, StringComparer.Ordinal))
+            roots.Add(SystemShareRoot);
+        return roots;
     }
+
+    private static string? FindLinuxCoreDataDir(string libDir) =>
+        FirstExisting(LinuxShareRoots(libDir).SelectMany(root => new[]
+        {
+            Path.Combine(root, "obs-studio") + "/",
+            root + "/",
+        }));
+
+    private static string? FindLinuxModuleDataDir(string libDir) =>
+        FirstExisting(LinuxShareRoots(libDir).SelectMany(root => new[]
+        {
+            Path.Combine(root, "obs-plugins"),
+            Path.Combine(root, "obs-studio", "plugins"),
+        }));
+
+    private static string? FirstExisting(IEnumerable<string> candidates) =>
+        candidates.FirstOrDefault(Directory.Exists);
 
     private static string? PkgConfigLibDir()
     {

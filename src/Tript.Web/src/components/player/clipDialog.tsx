@@ -67,7 +67,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
           </div>
           {dialog.regions.length === 0 ? (
             <p className="muted small">
-              No clips yet — set one in the player: press I where it should start, then O where it
+              No clips yet. Set one in the player: press I where it should start, then O where it
               should end (or M for a {DEFAULT_REGION_SECONDS}s clip around where you are). Close this
               dialog to reach the timeline; the clips you set stay put.
             </p>
@@ -96,7 +96,7 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
             <span className="subheading">Audio tracks</span>
             <p className="clip-field-hint">
               The recording carried {dialog.audio.tracks.length} track
-              {dialog.audio.tracks.length === 1 ? '' : 's'} — adjust per-track volume or mute.
+              {dialog.audio.tracks.length === 1 ? '' : 's'}. Adjust per-track volume or mute.
             </p>
             <ul className="clip-audio-list">
               {dialog.audio.tracks.map((track) => {

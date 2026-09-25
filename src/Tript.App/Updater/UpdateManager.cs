@@ -107,7 +107,16 @@ internal sealed class UpdateManager : IDisposable
 
             if (!_supportsAutomaticApply)
             {
-                SetStatus(UpdateStage.Available, version: versionText, releaseUrl: release.HtmlUrl);
+                if (GitHubReleaseClient.ShipsLinuxPackage(release))
+                {
+                    SetStatus(UpdateStage.Available, version: versionText, releaseUrl: release.HtmlUrl);
+                }
+                else
+                {
+                    Log.Information("UpdateManager: {Version} ships no Linux package; not offering it", versionText);
+                    SetStatus(UpdateStage.UpToDate);
+                }
+
                 return;
             }
 

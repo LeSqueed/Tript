@@ -14,6 +14,9 @@ public sealed class ExecutableNamesTests
     [InlineData("alpha", "alpha")]
     [InlineData(@"C:\Games\Doom\doom.exe", "doom")]
     [InlineData("/opt/games/doom", "doom")]
+    [InlineData(@"Z:\home\u\.steam\steam\steamapps\common\Overwatch\Overwatch.exe", "Overwatch")]
+    [InlineData("/home/u/.steam/steam/steamapps/common/Overwatch/Overwatch.exe", "Overwatch")]
+    [InlineData("/opt/games/Gravity Circuit/GravityCircuit.x86_64", "GravityCircuit.x86_64")]
     [InlineData("", "")]
     [InlineData(null, "")]
     public void Normalize_KeepsOnlyTheBaseName(string? input, string expected)

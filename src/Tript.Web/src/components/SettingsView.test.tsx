@@ -6,6 +6,7 @@ import { createIpcClient } from '../ipc/websocketClient';
 import { MockWebSocket, createMockSocketFactory } from '../ipc/test/mockWebSocket';
 import { SettingsView } from './SettingsView';
 import { ToastProvider } from './ui/toast/ToastProvider';
+import { WINDOWS_CAPABILITIES, type PlatformCapabilities } from '../app/platformCapabilities';
 import type {
   AudioSourceKind,
   CaptureSettings,
@@ -1002,7 +1003,7 @@ function displaySelect(): HTMLSelectElement {
   return screen.getByTestId('capture-display-select') as HTMLSelectElement;
 }
 
-describe('SettingsView capture page — monitor selection', () => {
+describe('SettingsView capture page: monitor selection', () => {
   afterEach(() => {
     cleanup();
   });
@@ -1064,5 +1065,203 @@ describe('SettingsView capture page — monitor selection', () => {
     const note = screen.getByTestId('capture-display-none').textContent ?? '';
     expect(note).toContain('No monitors were detected');
     expect(note).toContain('DP-3 (not connected)');
+  });
+});
+
+const LINUX_CAPABILITIES: PlatformCapabilities = {
+  platform: 'linux',
+  tray: false,
+  startWithSystem: false,
+  hideToTray: false,
+  obsSharing: false,
+  globalHotkeys: true,
+  globalHotkeysNote: null,
+  notifications: true,
+  notificationSounds: true,
+  globalHotkeysManagedByDesktop: false,
+  globalHotkeysConfigurable: false,
+  desktopHotkeyTriggers: { toggleRecording: null, manualBookmark: null, quickClip: null },
+  screenChosenByDesktop: false,
+  screenChoiceRemembered: false,
+};
+
+const PORTAL_CAPABILITIES: PlatformCapabilities = {
+  ...LINUX_CAPABILITIES,
+  globalHotkeysManagedByDesktop: true,
+  globalHotkeysConfigurable: true,
+  desktopHotkeyTriggers: { toggleRecording: 'Meta+F9', manualBookmark: 'Ctrl+Alt+B', quickClip: null },
+};
+
+function pushCapabilities(
+  ws: MockWebSocket,
+  capabilities: PlatformCapabilities,
+  settings = makeSettings(),
+) {
+  act(() => {
+    ws.serverMessage(JSON.stringify({ method: 'settings', content: { settings, platformCapabilities: capabilities } }));
+  });
+}
+
+function openPage(name: string) {
+  fireEvent.click(screen.getByRole('tab', { name }));
+}
+
+describe('SettingsView platform capabilities', () => {
+  it('offers every Windows desktop option when the host is Windows', () => {
+    const { ws } = renderSettings('general');
+    pushCapabilities(ws, WINDOWS_CAPABILITIES);
+
+    expect(screen.getByLabelText('Start with Windows')).toBeTruthy();
+    expect(screen.getByLabelText(/^Minimize button/)).toBeTruthy();
+    expect(screen.getByLabelText(/^When closing Tript/)).toBeTruthy();
+    const startup = screen.getByLabelText(/^Startup visibility/) as HTMLSelectElement;
+    expect(Array.from(startup.options).map((option) => option.value)).toEqual(['Window', 'Minimized', 'Tray']);
+  });
+
+  it('hides autostart and every tray option on a platform without a tray', () => {
+    const { ws } = renderSettings('general');
+    pushCapabilities(ws, LINUX_CAPABILITIES);
+
+    expect(screen.queryByLabelText('Start with Windows')).toBeNull();
+    expect(screen.queryByLabelText(/^Minimize button/)).toBeNull();
+    expect(screen.queryByLabelText(/^When closing Tript/)).toBeNull();
+    expect(screen.queryByText('Window and tray')).toBeNull();
+    const startup = screen.getByLabelText(/^Startup visibility/) as HTMLSelectElement;
+    expect(Array.from(startup.options).map((option) => option.value)).toEqual(['Window', 'Minimized']);
+  });
+
+  it('shows a saved tray startup as minimized where there is no tray', () => {
+    const { ws } = renderSettings('general');
+    const settings = makeSettings();
+    settings.general.startupVisibility = 'Tray';
+    pushCapabilities(ws, LINUX_CAPABILITIES, settings);
+
+    expect((screen.getByLabelText(/^Startup visibility/) as HTMLSelectElement).value).toBe('Minimized');
+  });
+
+  it('hides the toggles for notifications the desktop cannot show', () => {
+    const { ws } = renderSettings('general');
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, notifications: false });
+
+    const errors = screen.getByText('Errors').closest('.field') as HTMLElement;
+    expect(within(errors).queryByLabelText('Show notification')).toBeNull();
+    expect(within(errors).getByLabelText('Play sound')).toBeTruthy();
+  });
+
+  it('hides the sound toggles when no sound player is available', () => {
+    const { ws } = renderSettings('general');
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, notificationSounds: false });
+
+    const started = screen.getByText('Recording started').closest('.field') as HTMLElement;
+    expect(within(started).getByLabelText('Show notification')).toBeTruthy();
+    expect(within(started).queryByLabelText('Play sound')).toBeNull();
+  });
+
+  it('hides the notification section when the desktop can neither show nor sound them', () => {
+    const { ws } = renderSettings('general');
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, notifications: false, notificationSounds: false });
+
+    expect(screen.queryByLabelText('Enable desktop notifications')).toBeNull();
+    expect(screen.queryByText('Recording started')).toBeNull();
+  });
+
+  it('explains that hotkeys are unavailable instead of offering them', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, globalHotkeys: false });
+    openPage('Hotkeys');
+
+    expect(screen.getByText(/Global hotkeys are not available on this desktop/)).toBeTruthy();
+    expect(screen.queryByLabelText('Enable global hotkeys')).toBeNull();
+    expect(screen.queryByLabelText('Toggle recording hotkey')).toBeNull();
+  });
+
+  it('shows the host note about how hotkeys work on this desktop', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, globalHotkeysNote: 'Only while an X11 window has focus.' });
+    openPage('Hotkeys');
+
+    expect(screen.getByText('Only while an X11 window has focus.')).toBeTruthy();
+    expect(screen.getByLabelText('Toggle recording hotkey')).toBeTruthy();
+  });
+
+  it('shows the shortcuts the desktop assigned instead of capture fields it would ignore', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, PORTAL_CAPABILITIES);
+    openPage('Hotkeys');
+
+    expect(screen.getByLabelText('Toggle recording hotkey').textContent).toBe('Meta+F9');
+    expect(screen.getByLabelText('Manual bookmark hotkey').textContent).toBe('Ctrl+Alt+B');
+    expect(screen.getByLabelText('Quick clip hotkey').textContent).toBe('Not assigned by the desktop yet');
+    expect(screen.queryByRole('button', { name: /Press a key|Record/i })).toBeNull();
+  });
+
+  it("opens the desktop's shortcut settings from the hotkeys page", () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, PORTAL_CAPABILITIES);
+    openPage('Hotkeys');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change shortcuts…' }));
+
+    const methods = ws.sent.map((frame) => (JSON.parse(frame) as { method?: string }).method);
+    expect(methods).toContain('ConfigureGlobalHotkeys');
+  });
+
+  it("points to the desktop's settings when the portal cannot open them itself", () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, { ...PORTAL_CAPABILITIES, globalHotkeysConfigurable: false });
+    openPage('Hotkeys');
+
+    expect(screen.queryByRole('button', { name: 'Change shortcuts…' })).toBeNull();
+    expect(screen.getByText(/keyboard shortcut settings/)).toBeTruthy();
+  });
+
+  it('keeps the capture fields where Tript itself grabs the keys', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, LINUX_CAPABILITIES);
+    openPage('Hotkeys');
+
+    expect(screen.queryByRole('button', { name: 'Change shortcuts…' })).toBeNull();
+    expect(screen.getByLabelText('Toggle recording hotkey').tagName).not.toBe('P');
+  });
+
+  it('explains that the desktop picks the screen instead of reporting no monitors', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, screenChosenByDesktop: true });
+    openPage('Capture');
+
+    const screenField = screen.getByTestId('capture-display-desktop');
+    expect(screenField.textContent).toContain('asks which screen to share the first time you record');
+    expect(screen.queryByTestId('capture-display-none')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Choose a different screen' })).toBeNull();
+  });
+
+  it('lets a remembered screen choice be forgotten so the next recording asks again', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, { ...LINUX_CAPABILITIES, screenChosenByDesktop: true, screenChoiceRemembered: true });
+    openPage('Capture');
+
+    expect(screen.getByTestId('capture-display-desktop').textContent).toContain('remembers your choice');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a different screen' }));
+
+    const methods = ws.sent.map((frame) => (JSON.parse(frame) as { method?: string }).method);
+    expect(methods).toContain('ForgetScreenShareChoice');
+  });
+
+  it('describes vkcapture as the Linux game capture', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, LINUX_CAPABILITIES);
+    openPage('Capture');
+
+    expect(screen.getByText(/obs-vkcapture/)).toBeTruthy();
+  });
+
+  it('suggests a home-directory recording folder on Linux and a drive on Windows', () => {
+    const { ws } = renderSettings();
+    pushCapabilities(ws, LINUX_CAPABILITIES);
+    openPage('Storage');
+    expect(screen.getByPlaceholderText('e.g. /home/you/Videos/Tript')).toBeTruthy();
+
+    pushCapabilities(ws, WINDOWS_CAPABILITIES);
+    expect(screen.getByPlaceholderText(String.raw`e.g. D:\Recordings`)).toBeTruthy();
   });
 });

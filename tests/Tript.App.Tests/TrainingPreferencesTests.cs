@@ -167,7 +167,8 @@ public sealed class TrainingPreferencesTests
                 ControlPort = 0,
                 UiPort = 0,
                 ContentPort = 0,
-            }, settings, runtime: null, new RecordingSessionTracker());
+            }, settings, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
         }
 
         internal AppHost Host { get; }

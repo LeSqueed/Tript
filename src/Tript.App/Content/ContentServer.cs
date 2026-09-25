@@ -23,7 +23,7 @@ internal sealed class ContentServer : LocalHttpListener
         new(@"bytes=(\d*)-(\d*)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex PathSegment =
-        new(@"(^|/)\.\.(/|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        new(@"(^|[/\\])\.\.([/\\]|$)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private volatile string _contentRoot;
     private readonly CancellationTokenSource _cts = new();
@@ -57,16 +57,6 @@ internal sealed class ContentServer : LocalHttpListener
     {
         try
         {
-            var rawPath = context.Request.RawUrl ?? string.Empty;
-            if (rawPath.Contains("/../", StringComparison.Ordinal)
-                || rawPath.Contains("/..", StringComparison.Ordinal)
-                || rawPath.Contains("%2e", StringComparison.OrdinalIgnoreCase))
-            {
-                context.Response.StatusCode = 403;
-                context.Response.Close();
-                return;
-            }
-
             if (!_token.Authorises(context.Request))
             {
                 context.Response.StatusCode = 403;
@@ -74,7 +64,7 @@ internal sealed class ContentServer : LocalHttpListener
                 return;
             }
 
-            var path = context.Request.Url?.AbsolutePath ?? "/";
+            var path = UnnormalisedPath(context.Request.RawUrl);
             var match = ContentRoute.Match(path);
             if (match.Success)
             {
@@ -96,6 +86,11 @@ internal sealed class ContentServer : LocalHttpListener
         {
             try { context.Response.Abort(); } catch { }
         }
+        catch (HttpListenerException exception)
+        {
+            Log.Debug("Content: the client closed the connection mid-response ({Reason})", exception.Message);
+            try { context.Response.Abort(); } catch { }
+        }
         catch (Exception exception)
         {
             Log.Warning(exception, "Content: a request failed");
@@ -108,6 +103,13 @@ internal sealed class ContentServer : LocalHttpListener
             {
             }
         }
+    }
+
+    private static string UnnormalisedPath(string? rawUrl)
+    {
+        var raw = rawUrl ?? "/";
+        var query = raw.IndexOf('?');
+        return query >= 0 ? raw[..query] : raw;
     }
 
     private static string Decode(string routePath)

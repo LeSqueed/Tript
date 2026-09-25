@@ -11,7 +11,7 @@
          pinned OBS line, a monitor to enumerate) report as skips, not failures. xunit 2.x does NOT
          honour a dynamic skip on its own: Xunit.Sdk.SkipException compiles and throws the
          $XunitDynamicSkip$ token, but nothing in v2 translates it, so the test is reported as a
-         FAILURE — measured here. SkippableFact is what translates the token; the tests carry
+         FAILURE (measured here). SkippableFact is what translates the token; the tests carry
          [SkippableFact] / [SkippableTheory] and throw Xunit.SkipException. Assert.Skip is xunit v3
          and is not available here. -->
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />

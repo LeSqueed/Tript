@@ -16,7 +16,7 @@
     <!-- Machine-dependent tests (a real recorder needs a display, the clip and thumbnail tests need
          ffmpeg) opt out with a dynamic skip. xunit 2.x does NOT honour one: Xunit.Sdk.SkipException
          compiles and throws the $XunitDynamicSkip$ token, but nothing in v2 translates it, so every
-         such test was reported as a FAILURE — which is how CI first went red on a runner with no
+         such test was reported as a FAILURE, which is how CI first went red on a runner with no
          display. SkippableFact is what translates the token; the tests carry [SkippableFact] /
          [SkippableTheory] and throw Xunit.SkipException. Assert.Skip is xunit v3 and is not
          available here. -->

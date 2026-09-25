@@ -54,7 +54,7 @@ describe('selection set helpers', () => {
     expect(removeSelection(selected, ['nothing:here'])).toEqual(selected);
   });
 
-  it('never mutates the array it was given — a pushed list is shared with the source', () => {
+  it('never mutates the array it was given: a pushed list is shared with the source', () => {
     const original = [selectionKey(a)];
     toggleSelection(original, selectionKey(b));
     addSelection(original, [selectionKey(b)]);

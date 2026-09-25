@@ -50,6 +50,14 @@ internal sealed class GitHubReleaseClient
         }
     }
 
+    internal static bool ShipsLinuxPackage(GitHubRelease release)
+    {
+        var tag = release.TagName.Trim().TrimStart('v', 'V');
+        var packageName = $"Tript-{tag}-linux-x64.tar.gz";
+        return tag.Length > 0
+            && release.Assets.Any(asset => string.Equals(asset.Name, packageName, StringComparison.Ordinal));
+    }
+
     internal static (string Version, string ZipAssetName, string Sha256AssetName)? ParseTagAndAssetNames(
         GitHubRelease release)
     {

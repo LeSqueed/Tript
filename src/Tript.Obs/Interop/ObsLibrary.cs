@@ -71,6 +71,8 @@ internal static class ObsLibrary
             $"Set {RuntimeDirectoryVariable} or call ObsRuntime.SetRuntimeDirectory to point at the bundled runtime.");
     }
 
-    private static string[] CandidateFileNames() =>
-        OperatingSystem.IsWindows() ? ["obs64.dll", "obs.dll"] : ["libobs.so.0", "libobs.so"];
+    private static string[] CandidateFileNames() => CandidateFileNames(OperatingSystem.IsWindows());
+
+    internal static string[] CandidateFileNames(bool isWindows) =>
+        isWindows ? ["obs64.dll", "obs.dll"] : ["libobs.so.0", "libobs.so.30", "libobs.so"];
 }

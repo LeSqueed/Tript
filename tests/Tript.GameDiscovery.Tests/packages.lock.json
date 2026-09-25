@@ -101,8 +101,15 @@
         "dependencies": {
           "Tript.Core": "[1.0.1, )"
         }
+      },
+      "tript.testsupport": {
+        "type": "Project",
+        "dependencies": {
+          "xunit": "[2.9.2, )"
+        }
       }
     },
+    "net10.0/linux-x64": {},
     "net10.0/win-x64": {}
   }
 }

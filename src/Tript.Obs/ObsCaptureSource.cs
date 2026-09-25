@@ -58,6 +58,28 @@ public static class ObsCaptureSource
 
     private const string WindowMatchWildcard = "*";
 
+    public const string PipeWireScreenCaptureId = "pipewire-screen-capture-source";
+    public const string PipeWireDesktopCaptureId = "pipewire-desktop-capture-source";
+    public const string PortalRestoreTokenKey = "RestoreToken";
+
+    public const string WinGameCaptureId = "game_capture";
+    public const string VkCaptureId = "vkcapture-source";
+
+    public static string? SelectGameCaptureId(IReadOnlyList<string> registeredTypeIds, bool isWindows)
+    {
+        ArgumentNullException.ThrowIfNull(registeredTypeIds);
+
+        var wanted = isWindows ? WinGameCaptureId : VkCaptureId;
+        return registeredTypeIds.Contains(wanted, StringComparer.Ordinal) ? wanted : null;
+    }
+
+    public static string? FindGameCaptureId() =>
+        SelectGameCaptureId(ObsSourceProperties.EnumerateTypeIds(), OperatingSystem.IsWindows());
+
+    public static bool IsPortalCapture(string typeId) =>
+        typeId is PipeWireScreenCaptureId or PipeWireDesktopCaptureId;
+    private const string XshmInputId = "xshm_input";
+
     public static string BuildWindowMatchString(ObsGameCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -83,8 +105,8 @@ public static class ObsCaptureSource
             return ["monitor_capture", "display_capture"];
 
         return preferPortal
-            ? ["pipewire-desktop-capture-source", "xshm_input"]
-            : ["xshm_input", "pipewire-desktop-capture-source"];
+            ? [PipeWireScreenCaptureId, PipeWireDesktopCaptureId, XshmInputId]
+            : [XshmInputId, PipeWireScreenCaptureId, PipeWireDesktopCaptureId];
     }
 
     public static string? SelectDisplayCaptureId(IReadOnlyList<string> registeredTypeIds, IReadOnlyList<string> preference)
@@ -214,7 +236,7 @@ public static class ObsCaptureSource
     }
 
     private static IReadOnlyList<ObsSourceProperty> DiscoverGameCaptureProperties() =>
-        ObsSourceProperties.EnumerateTypeProperties("game_capture");
+        ObsSourceProperties.EnumerateTypeProperties(WinGameCaptureId);
 
     private static bool ApplyTarget(ObsSettings settings, IReadOnlyList<ObsSourceProperty> properties, ObsGameCaptureTarget target)
     {

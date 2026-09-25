@@ -43,7 +43,7 @@ describe('serializeCommand', () => {
     expect(wire.parameters.protocolVersion).toBe(1);
   });
 
-  it('uses camelCase field names — a wrong-cased field is absent, so serialisation is the guard', () => {
+  it('uses camelCase field names: a wrong-cased field is absent, so serialisation is the guard', () => {
     const wire = serializeCommand('DeleteContent', {
       contentType: 'recording',
       fileName: 'sessions/a.mp4',

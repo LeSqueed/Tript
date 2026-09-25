@@ -55,4 +55,18 @@ public sealed class GameDiscoveryService(IEnumerable<IGameInventorySource> sourc
             sources.Add(new XboxPackageInventorySource(fileSystem, xboxPackages));
         return new(sources);
     }
+
+    [SupportedOSPlatform("linux")]
+    public static GameDiscoveryService CreateLinuxDefault(string? homeDirectory = null)
+    {
+        var home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home))
+            return new([]);
+        var fileSystem = new PhysicalDiscoveryFileSystem();
+        return new([
+            SteamInventorySource.ForLinuxHome(fileSystem, home),
+            new HeroicInventorySource(fileSystem, home),
+            new LutrisInventorySource(fileSystem, home),
+        ]);
+    }
 }

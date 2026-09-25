@@ -9,9 +9,12 @@ public sealed record VideoEncoder(
     IReadOnlyList<string> OutputArgs,
     IReadOnlyList<string> InputArgs,
     IReadOnlyList<string> GlobalArgs,
-    string FilterSuffix)
+    string FilterSuffix,
+    string? Device = null)
 {
     private static readonly IReadOnlyList<string> HardwareDecode = ["-hwaccel", "auto"];
+
+    public string Key => Device is null ? Name : $"{Name} on {Device}";
 
     public static VideoEncoder Software { get; } = new("libx264", false, [], [], [], string.Empty);
 
@@ -27,10 +30,15 @@ public sealed record VideoEncoder(
         ["-preset", "medium", "-global_quality", "23", "-pix_fmt", "nv12"],
         HardwareDecode, [], string.Empty);
 
-    public static VideoEncoder Vaapi { get; } = new("h264_vaapi", true,
+    public static VideoEncoder VaapiOn(string renderNode) => new("h264_vaapi", true,
         ["-rc_mode", "CQP", "-qp", "23"],
-        HardwareDecode, ["-vaapi_device", "/dev/dri/renderD128"], ",format=nv12,hwupload");
+        HardwareDecode, ["-vaapi_device", renderNode], ",format=nv12,hwupload", renderNode);
 
     public static IReadOnlyList<VideoEncoder> PlatformHardware() =>
-        OperatingSystem.IsWindows() ? [Nvenc, Amf, Qsv] : [Nvenc, Vaapi, Qsv];
+        OperatingSystem.IsWindows()
+            ? PlatformHardware(windows: true, [])
+            : PlatformHardware(windows: false, VaapiRenderNodes.Discover());
+
+    internal static IReadOnlyList<VideoEncoder> PlatformHardware(bool windows, IReadOnlyList<string> vaapiRenderNodes) =>
+        windows ? [Nvenc, Amf, Qsv] : [Nvenc, .. vaapiRenderNodes.Select(VaapiOn), Qsv];
 }

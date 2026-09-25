@@ -212,6 +212,7 @@ export interface SettingsMessageContent {
   availableDisplays?: DisplayInfo[] | null;
   displayFallbackWarning?: DisplayFallbackWarning | null;
   appVersion?: string | null;
+  platformCapabilities?: unknown;
 }
 
 export interface DisplayResolution {

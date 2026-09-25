@@ -8,6 +8,8 @@ using Tript.Settings;
 
 namespace Tript.Shell;
 
+internal readonly record struct NotificationPlan(bool Notify, bool PlaySound);
+
 internal static class ShellNotifications
 {
     internal static void Show(PhotinoWindow? window, Func<Action, bool> invoke, AppHost host, NotificationKind kind,
@@ -48,6 +50,16 @@ internal static class ShellNotifications
         {
             Log.Warning(exception, "Tript.Shell: could not send notification");
         }
+    }
+
+    internal static NotificationPlan Plan(NotificationSettings settings, NotificationKind kind, bool windowFocused,
+        bool canNotify, bool canPlaySound)
+    {
+        if (!settings.Enabled || windowFocused)
+            return new NotificationPlan(false, false);
+
+        return new NotificationPlan(canNotify && NotificationEnabled(settings, kind),
+            canPlaySound && SoundEnabled(settings, kind));
     }
 
     internal static bool NotificationEnabled(NotificationSettings settings, NotificationKind kind) => kind switch

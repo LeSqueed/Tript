@@ -132,6 +132,8 @@ internal sealed partial class AppHost : IDisposable
 
     private bool _disposed;
 
+    private readonly PortalRestoreTokenStore _portalRestoreTokens;
+
     internal AppHost(AppOptions options, SettingsStore settingsStore, ObsRuntime? runtime,
         RecordingSessionTracker sessionTracker, DisplaySize? primaryDisplay = null,
         TimeSpan? recorderStopTimeout = null, bool enableModelDelivery = false,
@@ -142,6 +144,8 @@ internal sealed partial class AppHost : IDisposable
         IStorageProbe? storageProbe = null)
     {
         _storageProbe = storageProbe ?? new DriveInfoStorageProbe();
+        _portalRestoreTokens = new PortalRestoreTokenStore(Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(options.SettingsPath))!, PortalRestoreTokenStore.FileName));
         _contentPush = new CoalescingRunner(BroadcastContent, ReportContentFailure);
         _clipQueue = new SerialWorkQueue<ClipRequest>(ProcessClip, ReportClipFailure);
         _options = options;
@@ -149,7 +153,7 @@ internal sealed partial class AppHost : IDisposable
         _runtime = runtime;
         _audioLevels = new AudioLevelFeed(settingsStore,
             runtime is null ? null : new ObsAudioLevelMonitor(),
-            audioDeviceInventory ?? new AudioDeviceInventory(),
+            audioDeviceInventory ?? AudioDeviceInventory.ForPlatform(obsRunning: runtime is not null),
             BroadcastAudioLevels,
             PushSettings,
             deferDeviceRefresh: () => _maintenance.IsRecording);
@@ -163,9 +167,7 @@ internal sealed partial class AppHost : IDisposable
         TrainingWorkspaceMigration.Migrate(_gameCatalog, TrainingPaths.RootPath,
             TrainingPaths.InstalledModelsPath);
 #endif
-        _gameInventory = new GameInventoryScanner(OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
-            ? GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider())
-            : null);
+        _gameInventory = new GameInventoryScanner(CreateGameDiscovery());
         _recorderStopTimeout = recorderStopTimeout ?? TimeSpan.FromSeconds(10);
         _pendingStopFinalizeTimeout = pendingStopFinalizeTimeout ?? _recorderStopTimeout;
 
@@ -431,6 +433,7 @@ internal sealed partial class AppHost : IDisposable
         {
             recorder = _recorder;
             recorderSession = _recorderSession;
+            RememberPortalConsent(recorderSession);
             colourSource = _colourSource;
             runtime = _runtime;
             _recorder = null;
@@ -611,7 +614,9 @@ internal sealed partial class AppHost : IDisposable
         }
 
         if (!string.IsNullOrWhiteSpace(pickedPath))
-            PushError("That is not an executable file; choose a .exe before saving.");
+            PushError(OperatingSystem.IsWindows()
+                ? "That is not an executable file; choose a .exe before saving."
+                : "That is not a file; choose the game's executable before saving.");
         _ipc.Broadcast("selectedGameExecutable", JsonSerializer.SerializeToElement(
             new { requestId, filePath = (string?)null }, Wire.Options));
     }
@@ -877,21 +882,25 @@ internal sealed partial class AppHost : IDisposable
 
     internal void PushSettings()
     {
-        var displays = EnumerateDisplays();
+        var displayId = _runtime is null ? null : ObsCaptureSource.FindDisplayCaptureId();
+        var screenChosenByDesktop = displayId is not null && ObsCaptureSource.IsPortalCapture(displayId);
+        var displays = screenChosenByDesktop || displayId is null ? null : EnumerateDisplays(displayId);
         _ipc.Broadcast("settings", SettingsMessage.Build(
             _settingsStore.Load(),
             _audioLevels.Devices,
             displays,
             _runtime is null ? null : ObsEncoderPolicy.EnumerateUsableEncoderIds(),
             _primaryDisplay,
-            UpdateManager.CurrentInstalledVersion()));
+            UpdateManager.CurrentInstalledVersion(),
+            Capabilities with
+            {
+                ScreenChosenByDesktop = screenChosenByDesktop,
+                ScreenChoiceRemembered = screenChosenByDesktop && _portalRestoreTokens.Load() is not null,
+            }));
     }
 
-    private IReadOnlyList<ObsDisplay>? EnumerateDisplays()
+    private static IReadOnlyList<ObsDisplay>? EnumerateDisplays(string displayId)
     {
-        if (_runtime is null || ObsCaptureSource.FindDisplayCaptureId() is not { } displayId)
-            return null;
-
         try
         {
             using var probe = ObsSource.CreatePrivate(displayId, "app display probe");

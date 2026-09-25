@@ -398,6 +398,64 @@ public sealed class ProcessNameGameDetectorTests
         Assert.True(await Task.Run(() => exited.Wait(TimeSpan.FromSeconds(5))));
     }
 
+    [LinuxFact]
+    public void ProtonProcess_MatchesTheDiscoveredLinuxPathAndStopsWhenItExits()
+    {
+        const string installed = "/home/u/.local/share/Steam/steamapps/common/Overwatch/Overwatch.exe";
+        var files = new FakeProcessFiles(
+            LinuxProcessIdentityTests.Line(@"Z:\home\u\.local\share\Steam\steamapps\common\Overwatch\Overwatch.exe"),
+            "/opt/proton/files/bin/wine64-preloader");
+        var running = true;
+        using var detector = Detector(
+            [new("overwatch-id", "Overwatch.exe", installed)],
+            names =>
+            {
+                var identity = LinuxProcessIdentity.Read(files, 77)!;
+                return running && names.Contains(ProcessNameGameDetector.NormalizeProcessName(identity.Executable))
+                    ? [new(77, identity.Executable, identity.ExecutablePath, StartTime(1))]
+                    : [];
+            });
+        var started = new List<DetectedGameProcess>();
+        var stopped = new List<DetectedGameProcess>();
+        detector.GameStarted += started.Add;
+        detector.GameStopped += stopped.Add;
+
+        detector.PollOnce();
+        running = false;
+        detector.PollOnce();
+        detector.WaitForCallbacks();
+
+        var game = Assert.Single(started);
+        Assert.Equal(new DetectedGameProcess("overwatch-id", 77, "Overwatch", installed, StartTime(1)), game);
+        Assert.Equal(game, Assert.Single(stopped));
+    }
+
+    [LinuxFact]
+    public void LinuxPathTarget_ConfiguredThroughALinkMatchesTheProcessCanonicalPath()
+    {
+        var root = Directory.CreateTempSubdirectory("tript-detector-").FullName;
+        try
+        {
+            var library = Directory.CreateDirectory(Path.Combine(root, "share", "Steam")).FullName;
+            Directory.CreateSymbolicLink(Path.Combine(root, "steam"), library);
+            var canonical = Path.Combine(library, "steamapps", "common", "Game", "game.x86_64");
+            using var detector = Detector(
+                [new("game-id", "game.x86_64", Path.Combine(root, "steam", "steamapps", "common", "Game", "game.x86_64"))],
+                _ => [new(41, "game.x86_64", canonical)]);
+            var started = new List<DetectedGameProcess>();
+            detector.GameStarted += started.Add;
+
+            detector.PollOnce();
+            detector.WaitForCallbacks();
+
+            Assert.Equal(canonical, Assert.Single(started).ExecutablePath);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private static ProcessNameGameDetector Detector(
         IEnumerable<GameDetectionTarget> targets,
         Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> probe)

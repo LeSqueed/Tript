@@ -14,6 +14,8 @@ internal static class AppLog
 {
     private const int RetainedFiles = 10;
 
+    private const string LogsFolderName = "logs";
+
     // Tript runs for days in the background, and pruning only ran at startup, so a single session
     // could grow one file without bound. Rolling at a fixed size keeps disk use capped at roughly
     // RetainedFiles * MaxFileBytes.
@@ -24,7 +26,22 @@ internal static class AppLog
     private static string? _logDirectoryOverride;
 
     internal static string LogDirectory =>
-        Volatile.Read(ref _logDirectoryOverride) ?? Path.Combine(SettingsFilePaths.ConfigDirectory, "logs");
+        Volatile.Read(ref _logDirectoryOverride) ?? DefaultLogDirectory(OperatingSystem.IsWindows(),
+            Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            () => SettingsFilePaths.ConfigDirectory);
+
+    internal static string DefaultLogDirectory(bool windows, Func<string, string?> environment, string home,
+        Func<string> configDirectory)
+    {
+        if (windows)
+            return Path.Combine(configDirectory(), LogsFolderName);
+
+        var stateHome = environment("XDG_STATE_HOME");
+        var root = !string.IsNullOrEmpty(stateHome) && Path.IsPathRooted(stateHome)
+            ? stateHome
+            : Path.Combine(home, ".local", "state");
+        return Path.Combine(root, SettingsFilePaths.DirectoryName, LogsFolderName);
+    }
 
     internal static string? CurrentFile { get; private set; }
 

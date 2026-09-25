@@ -9,16 +9,23 @@ internal sealed class InventoryBuilder(GameStore store)
     private readonly List<InstalledGame> _games = [];
     private readonly List<SourceDiagnostic> _diagnostics = [];
 
-    public void AddGame(string productId, string displayName, string installRoot, IEnumerable<string>? executables = null)
+    public void AddGame(string productId, string displayName, string installRoot, IEnumerable<string>? executables = null) =>
+        AddGame(store, productId, displayName, installRoot, executables);
+
+    public void AddGame(GameStore gameStore, string productId, string displayName, string installRoot,
+        IEnumerable<string>? executables = null)
     {
         if (string.IsNullOrWhiteSpace(productId) || string.IsNullOrWhiteSpace(displayName))
             return;
-        _games.Add(new InstalledGame(store, new ProductId(store, productId.Trim()), displayName.Trim(),
+        _games.Add(new InstalledGame(gameStore, new ProductId(gameStore, productId.Trim()), displayName.Trim(),
             installRoot, executables?.Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray() ?? []));
     }
 
     public void Warn(string code, string message, string? location = null) =>
-        _diagnostics.Add(new(store, DiagnosticSeverity.Warning, code, message, location));
+        Warn(store, code, message, location);
+
+    public void Warn(GameStore diagnosticStore, string code, string message, string? location = null) =>
+        _diagnostics.Add(new(diagnosticStore, DiagnosticSeverity.Warning, code, message, location));
 
     public SourceInventory Build() => new(
         GameReconciliation.Merge(_games),

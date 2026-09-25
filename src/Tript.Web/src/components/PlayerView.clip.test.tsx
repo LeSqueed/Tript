@@ -149,7 +149,7 @@ function markDefaultSegment(): void {
   });
 }
 
-describe('clip dialog — default region from the playbar', () => {
+describe('clip dialog: default region from the playbar', () => {
   beforeEach(() => {
     stubLayout();
     vi.useFakeTimers();
@@ -180,7 +180,7 @@ describe('clip dialog — default region from the playbar', () => {
   });
 });
 
-describe('clip dialog — region list in the player', () => {
+describe('clip dialog: region list in the player', () => {
   beforeEach(() => {
     stubLayout();
     vi.useFakeTimers();
@@ -214,7 +214,7 @@ describe('clip dialog — region list in the player', () => {
   });
 });
 
-describe('clip dialog — combine vs separate payloads through the player', () => {
+describe('clip dialog: combine vs separate payloads through the player', () => {
   beforeEach(() => {
     stubLayout();
     vi.useFakeTimers();

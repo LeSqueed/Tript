@@ -33,7 +33,8 @@ public sealed class AutomaticClipStopGateTests : IDisposable
             WebRoot = _root,
             FakeRecorder = true,
         }, _store, runtime: null, new RecordingSessionTracker(),
-            recorderStopTimeout: TimeSpan.FromMilliseconds(50));
+            recorderStopTimeout: TimeSpan.FromMilliseconds(50),
+            storageProbe: AmpleStorage.Probe);
 
         _clipEngine = new RecordingClipEngine();
         typeof(AppHost).GetField("_clipEngine", BindingFlags.Instance | BindingFlags.NonPublic)!

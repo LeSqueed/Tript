@@ -6,6 +6,7 @@ import type { GeneralSettings, RecordingSettings } from '../settingsModel';
 import type { IpcClient } from '../../ipc/websocketClient';
 import type { UpdateProgressMessage } from '../../ipc/protocol';
 import { Button, Checkbox, Field, SelectField, Toggle } from '../../components/ui/controls';
+import { usePlatformCapabilities } from '../../app/platformCapabilities';
 
 const STARTUP_VISIBILITY = [
   { value: 'Window', label: 'Open the Tript window' },
@@ -16,6 +17,21 @@ const STARTUP_VISIBILITY = [
 const MINIMIZE_BEHAVIOR = [
   { value: 'Taskbar', label: 'Minimize to the taskbar' },
   { value: 'Tray', label: 'Hide to the tray' },
+];
+
+type NotificationToggle =
+  | 'enabled'
+  | 'recordingStarted'
+  | 'recordingStartedSound'
+  | 'recordingStopped'
+  | 'recordingStoppedSound'
+  | 'errors'
+  | 'errorsSound';
+
+const NOTIFICATION_ROWS: { label: string; notification: NotificationToggle; sound: NotificationToggle }[] = [
+  { label: 'Recording started', notification: 'recordingStarted', sound: 'recordingStartedSound' },
+  { label: 'Recording stopped', notification: 'recordingStopped', sound: 'recordingStoppedSound' },
+  { label: 'Errors', notification: 'errors', sound: 'errorsSound' },
 ];
 
 const CLOSE_BEHAVIOR = [
@@ -39,6 +55,18 @@ export function GeneralPage({
   appVersion?: string | null;
 }) {
   const [updateStatus, setUpdateStatus] = useState<UpdateProgressMessage | null>(null);
+  const capabilities = usePlatformCapabilities();
+  const startupVisibilityOptions = capabilities.tray
+    ? STARTUP_VISIBILITY
+    : STARTUP_VISIBILITY.filter((option) => option.value !== 'Tray');
+  const startupVisibility = !capabilities.tray && settings.startupVisibility === 'Tray'
+    ? 'Minimized'
+    : settings.startupVisibility;
+  const startupVisibilityHint = capabilities.platform === 'windows'
+    ? 'Choose whether the Windows desktop shell opens a window when it starts. Other platforms use their normal window behavior.'
+    : 'Choose whether the Tript window opens or starts minimized.';
+  const showNotificationToggles = capabilities.notifications;
+  const showSoundToggles = capabilities.notificationSounds;
 
   useEffect(() => client.on('updateProgress', (content) => {
     setUpdateStatus(content as UpdateProgressMessage | null);
@@ -54,7 +82,7 @@ export function GeneralPage({
     errorsSound: true,
   };
 
-  function updateNotification(name: keyof GeneralSettings['notifications'], value: boolean) {
+  function updateNotification(name: NotificationToggle, value: boolean) {
     update(page, { notifications: { [name]: value } });
   }
 
@@ -92,16 +120,18 @@ export function GeneralPage({
 
       <section className="settings-section" aria-labelledby="general-startup-heading">
         <h3 className="subheading" id="general-startup-heading">Startup</h3>
+        {capabilities.startWithSystem && (
         <Toggle
           checked={settings.startWithWindows}
           onChange={(checked) => update(page, { startWithWindows: checked })}
           label="Start with Windows"
         />
-        <Field label="Startup visibility" hint="Choose whether the Windows desktop shell opens a window when it starts. Other platforms use their normal window behavior.">
+        )}
+        <Field label="Startup visibility" hint={startupVisibilityHint}>
           <SelectField
-            value={settings.startupVisibility}
+            value={startupVisibility}
             onChange={(value) => update(page, { startupVisibility: value })}
-            options={STARTUP_VISIBILITY}
+            options={startupVisibilityOptions}
             aria-label="Startup visibility"
           />
         </Field>
@@ -129,6 +159,7 @@ export function GeneralPage({
         </Field>
       </section>
 
+      {capabilities.hideToTray && (
       <section className="settings-section" aria-labelledby="general-window-heading">
         <h3 className="subheading" id="general-window-heading">Window and tray</h3>
         <Field label="Minimize button" hint="The native minimize button can leave Tript available in the tray.">
@@ -148,7 +179,9 @@ export function GeneralPage({
           />
         </Field>
       </section>
+      )}
 
+      {(showNotificationToggles || showSoundToggles) && (
       <section className="settings-section" aria-labelledby="general-notification-heading">
         <h3 className="subheading" id="general-notification-heading">Notifications</h3>
         <Toggle
@@ -156,58 +189,31 @@ export function GeneralPage({
           onChange={(checked) => updateNotification('enabled', checked)}
           label="Enable desktop notifications"
         />
-        <div className="field">
-          <span className="field-label">Recording started</span>
-          <div className="toggle-pair">
-            <Toggle
-              checked={notifications.recordingStarted}
-              onChange={(checked) => updateNotification('recordingStarted', checked)}
-              label="Show notification"
-              disabled={!notifications.enabled}
-            />
-            <Toggle
-              checked={notifications.recordingStartedSound}
-              onChange={(checked) => updateNotification('recordingStartedSound', checked)}
-              label="Play sound"
-              disabled={!notifications.enabled}
-            />
+        {NOTIFICATION_ROWS.map((row) => (
+          <div className="field" key={row.label}>
+            <span className="field-label">{row.label}</span>
+            <div className="toggle-pair">
+              {showNotificationToggles && (
+                <Toggle
+                  checked={notifications[row.notification]}
+                  onChange={(checked) => updateNotification(row.notification, checked)}
+                  label="Show notification"
+                  disabled={!notifications.enabled}
+                />
+              )}
+              {showSoundToggles && (
+                <Toggle
+                  checked={notifications[row.sound]}
+                  onChange={(checked) => updateNotification(row.sound, checked)}
+                  label="Play sound"
+                  disabled={!notifications.enabled}
+                />
+              )}
+            </div>
           </div>
-        </div>
-        <div className="field">
-          <span className="field-label">Recording stopped</span>
-          <div className="toggle-pair">
-            <Toggle
-              checked={notifications.recordingStopped}
-              onChange={(checked) => updateNotification('recordingStopped', checked)}
-              label="Show notification"
-              disabled={!notifications.enabled}
-            />
-            <Toggle
-              checked={notifications.recordingStoppedSound}
-              onChange={(checked) => updateNotification('recordingStoppedSound', checked)}
-              label="Play sound"
-              disabled={!notifications.enabled}
-            />
-          </div>
-        </div>
-        <div className="field">
-          <span className="field-label">Errors</span>
-          <div className="toggle-pair">
-            <Toggle
-              checked={notifications.errors}
-              onChange={(checked) => updateNotification('errors', checked)}
-              label="Show notification"
-              disabled={!notifications.enabled}
-            />
-            <Toggle
-              checked={notifications.errorsSound}
-              onChange={(checked) => updateNotification('errorsSound', checked)}
-              label="Play sound"
-              disabled={!notifications.enabled}
-            />
-          </div>
-        </div>
+        ))}
       </section>
+      )}
 
       <section className="settings-section" aria-labelledby="general-diagnostics-heading">
         <h3 className="subheading" id="general-diagnostics-heading">Diagnostics</h3>

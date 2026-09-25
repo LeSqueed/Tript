@@ -19,18 +19,25 @@ internal static class RecorderColourPolicy
 
         var configured = ObsEncoderPolicy.IsUsableId(settings.Encoder) ? settings.Encoder : null;
 
+        var capturedColourSpace = CaptureColourSpace(runtime);
         var plan = HdrPlanner.Decide(
-            CaptureColourSpace(runtime),
+            capturedColourSpace,
             HdrDisplayProbe.AnyDisplayIsHdr(),
             settings.EnableHdr,
             candidates,
             configured);
+
+        if (!OperatingSystem.IsWindows() && !plan.UseHdr && capturedColourSpace is null)
+            plan = plan with { Reason = UndetectableHdrReason };
 
         Log.Information("ObsRecorderSession: recording in {Colour} with '{Encoder}': {Reason}.",
             plan.UseHdr ? "HDR (Rec.2100 PQ, 10-bit P010)" : "SDR (Rec.709)", plan.EncoderId, plan.Reason);
 
         return plan;
     }
+
+    internal const string UndetectableHdrReason =
+        "Linux screen capture cannot report HDR; a recording of a desktop in HDR mode is labelled PQ once it stops";
 
     internal static HdrPlan ApplyToCanvas(ObsRuntime runtime, HdrPlan plan, Action onCanvasReset,
         Action<HdrPlan> applyCaptureColour)

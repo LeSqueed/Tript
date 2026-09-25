@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  *
  * The in-player clip dialog (T9). A panel over the player, dark modern theme.
- * Text on the accent is always dark (--color-accent-content) — the accent-contrast rule.
+ * Text on the accent is always dark (--color-accent-content): the accent-contrast rule.
  */
 
 .clip-dialog {

@@ -63,7 +63,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('clip dialog — default region', () => {
+describe('clip dialog: default region', () => {
   it('opening proposes a default region centred on the playbar cursor', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
@@ -83,7 +83,7 @@ describe('clip dialog — default region', () => {
   });
 });
 
-describe('clip dialog — region list', () => {
+describe('clip dialog: region list', () => {
   it('creating a region updates the region list', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
@@ -110,7 +110,7 @@ describe('clip dialog — region list', () => {
   });
 });
 
-describe('clip dialog — marking segments (the in/out path from the player)', () => {
+describe('clip dialog: marking segments (the in/out path from the player)', () => {
   it('keeps segments marked before the dialog was ever opened, instead of reseeding a proposal', () => {
     const { dialog } = probe();
     act(() => dialog().attachSession(session));
@@ -196,7 +196,7 @@ describe('clip dialog — marking segments (the in/out path from the player)', (
   });
 });
 
-describe('clip dialog — adjusting a region', () => {
+describe('clip dialog: adjusting a region', () => {
   it('typed bounds change the region, including the seeded default', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
@@ -275,7 +275,7 @@ describe('clip dialog — adjusting a region', () => {
   });
 });
 
-describe('clip dialog — create payloads', () => {
+describe('clip dialog: create payloads', () => {
   it('combine sends ONE CreateClip carrying all marked regions as segments', () => {
     const { dialog, sent } = probe();
     act(() => dialog().openDialog(session, 42));
@@ -345,7 +345,7 @@ describe('clip dialog — create payloads', () => {
   });
 });
 
-describe('clip dialog — importProgress surface', () => {
+describe('clip dialog: importProgress surface', () => {
   it('marks the in-flight clip as importing when the clip is sent', () => {
     const { dialog } = probe();
     act(() => dialog().openDialog(session, 42));
@@ -420,7 +420,7 @@ function boundedProbe(initialDuration: number): {
   };
 }
 
-describe('clip dialog — the clippable duration', () => {
+describe('clip dialog: the clippable duration', () => {
   it('clamps marks to the media length even when the session claims to be longer', () => {
     const { dialog } = boundedProbe(8);
     act(() => dialog().attachSession(session));

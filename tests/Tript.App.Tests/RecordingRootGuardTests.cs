@@ -30,7 +30,8 @@ public sealed class RecordingRootGuardTests : IDisposable
             SettingsPath = _settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker());
+        }, _store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

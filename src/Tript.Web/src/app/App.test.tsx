@@ -5,6 +5,7 @@ import { render, screen, fireEvent, cleanup, act, within } from '@testing-librar
 import { App } from './App';
 import { MockWebSocket } from '../ipc/test/mockWebSocket';
 import { captureSessionToken } from '../ipc/sessionToken';
+import { WINDOWS_CAPABILITIES } from './platformCapabilities';
 
 function compactWindow(): void {
   window.matchMedia = ((query: string) => ({
@@ -244,6 +245,24 @@ describe('App shell', () => {
     expect(window.location.hash).toBe('#streamer');
     expect(screen.getByTestId('streamer-view')).toBeTruthy();
     expect(screen.queryByTestId('library-groups')).toBeNull();
+  });
+
+  it('hides the streamer page where the host cannot share with OBS', () => {
+    window.location.hash = '#streamer';
+    renderApp();
+    connect();
+
+    act(() => {
+      activeSocket().serverMessage(JSON.stringify({
+        method: 'settings',
+        content: { settings: {}, platformCapabilities: { ...WINDOWS_CAPABILITIES, platform: 'linux', obsSharing: false } },
+      }));
+    });
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(nav).queryByRole('button', { name: 'Streamer' })).toBeNull();
+    expect(screen.queryByTestId('streamer-view')).toBeNull();
+    expect(window.location.hash).toBe('#library');
   });
 
   it('can reopen settings after navigating back to the library', () => {

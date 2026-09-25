@@ -67,6 +67,8 @@ internal sealed class AppController
                 _host.UpdateSettings(parsed?.Settings, parsed?.RequestId);
             },
             ["SetVideoLocation"] = (_, _) => _host.RequestVideoLocation(),
+            ["ConfigureGlobalHotkeys"] = (_, _) => _host.ConfigureGlobalHotkeys(),
+            ["ForgetScreenShareChoice"] = (_, _) => _host.ForgetScreenShareChoice(),
             ["BrowseTrainingFolder"] = (_, _) => _host.RequestTrainingFolder(),
             ["SelectGameExecutable"] = (parameters, _) => _host.RequestGameExecutable(
                 parameters.Deserialize<SelectGameExecutableParameters>()?.RequestId ?? string.Empty),

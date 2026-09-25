@@ -110,7 +110,7 @@ public class YoloOutputStrideTests
             }
 
             Assert.True(Max(output.Values.AsSpan(0, YoloBoxChannels * anchors)) > 1f,
-                "Box rows are already normalized — the YOLO parser divides them by the model input " +
+                "Box rows are already normalized: the YOLO parser divides them by the model input " +
                 "size and would shrink every box to nothing.");
 
             Assert.True(Max(output.Values.AsSpan((YoloBoxChannels - 1) * anchors)) > 1f,

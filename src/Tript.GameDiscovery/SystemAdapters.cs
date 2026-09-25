@@ -2,6 +2,7 @@
 
 using Microsoft.Win32;
 using System.Runtime.Versioning;
+using Tript.Core;
 
 namespace Tript.GameDiscovery;
 
@@ -15,6 +16,7 @@ public sealed class PhysicalDiscoveryFileSystem : IDiscoveryFileSystem
     public IEnumerable<string> EnumerateDirectories(string path) =>
         Directory.EnumerateDirectories(path, "*", SearchOption.TopDirectoryOnly);
     public string GetFullPath(string path) => Path.GetFullPath(path);
+    public string ResolveLinks(string path) => FilePaths.ResolveLinks(path);
 }
 
 [SupportedOSPlatform("windows")]

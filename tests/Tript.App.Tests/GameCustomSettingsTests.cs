@@ -36,7 +36,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker());
+        }, _store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()
@@ -123,7 +124,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = store.FilePath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
         host.SetInventoryForTesting(new GameInventory([
             new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
                 "Example Game", installRoot, ImmutableArray<string>.Empty),
@@ -161,7 +163,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = store.FilePath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
         host.SetInventoryForTesting(new GameInventory([
             new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
                 "Example Game", installRoot, ImmutableArray<string>.Empty),
@@ -191,7 +194,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = store.FilePath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
 
         host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
 
@@ -220,6 +224,57 @@ public sealed class GameCustomSettingsTests : IDisposable
             Path.Combine(_contentRoot, "elsewhere", "example.exe"), new GameInventory([], []));
         Assert.Equal("executable:FPSAimTrainer-Win64-Shipping", unrooted.Input);
         Assert.False(unrooted.StoreBacked);
+        Assert.Null(unrooted.Name);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_CarriesTheLibraryNameOfTheContainingGame()
+    {
+        var installRoot = Path.Combine(_contentRoot, "Games", "Hades");
+        var inventory = new GameInventory([
+            new InstalledGame(GameStore.Gog, new ProductId(GameStore.Gog, "1418100723"),
+                "Hades", installRoot, ImmutableArray<string>.Empty),
+        ], []);
+
+        var resolution = AppHost.CandidateResolverInput("Hades.exe", Path.Combine(installRoot, "x64", "Hades.exe"), inventory);
+
+        Assert.Equal("gog:1418100723", resolution.Input);
+        Assert.True(resolution.StoreBacked);
+        Assert.Equal("Hades", resolution.Name);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_InsideAGameWithoutAStoreIdentity_IsNamedButNotStoreBacked()
+    {
+        var installRoot = Path.Combine(_contentRoot, "Games", "osu");
+        var inventory = new GameInventory([
+            new InstalledGame(GameStore.Local, new ProductId(GameStore.Local, installRoot),
+                "osu!", installRoot, ImmutableArray<string>.Empty),
+        ], []);
+
+        var resolution = AppHost.CandidateResolverInput("osu!.exe", Path.Combine(installRoot, "osu!.exe"), inventory);
+
+        Assert.Equal("executable:osu!", resolution.Input);
+        Assert.False(resolution.StoreBacked);
+        Assert.Equal("osu!", resolution.Name);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_PrefersTheStoreIdentityOverANestedGameWithoutOne()
+    {
+        var steamRoot = Path.Combine(_contentRoot, "steamapps", "common", "Launcher");
+        var nestedRoot = Path.Combine(steamRoot, "Mods", "Standalone");
+        var inventory = new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "10"),
+                "Launcher", steamRoot, ImmutableArray<string>.Empty),
+            new InstalledGame(GameStore.Local, new ProductId(GameStore.Local, nestedRoot),
+                "Standalone Mod", nestedRoot, ImmutableArray<string>.Empty),
+        ], []);
+
+        var resolution = AppHost.CandidateResolverInput("mod.exe", Path.Combine(nestedRoot, "mod.exe"), inventory);
+
+        Assert.Equal("steam:10", resolution.Input);
+        Assert.Equal("Launcher", resolution.Name);
     }
 
     [Fact]
@@ -234,7 +289,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = _store.FilePath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
         var messages = new List<(string Method, JsonElement Content)>();
         var client = new ClientHandle((method, content) => messages.Add((method, content)));
 
@@ -289,7 +345,8 @@ public sealed class GameCustomSettingsTests : IDisposable
             SettingsPath = _store.FilePath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver);
+        }, _store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
         var messages = new List<(string Method, JsonElement Content)>();
         var client = new ClientHandle((method, content) => messages.Add((method, content)));
 
@@ -619,6 +676,44 @@ public sealed class GameCustomSettingsTests : IDisposable
         }
     }
 #endif
+
+    [LinuxFact]
+    public void NormalizePickedExecutable_OnLinux_AcceptsNativeAndProtonPrefixExecutables()
+    {
+        var native = ExecutablePath("GravityCircuit.x86_64");
+        File.WriteAllText(native, "native");
+        var prefixFolder = Directory.CreateDirectory(
+            Path.Combine(_contentRoot, "compatdata", "42", "pfx", "drive_c", "Games", "Solitaire")).FullName;
+        var prefixed = Path.Combine(prefixFolder, "solitaire.exe");
+        File.WriteAllText(prefixed, "windows");
+
+        Assert.Equal(native, AppHost.NormalizePickedExecutable(native));
+        Assert.Equal(prefixed, AppHost.NormalizePickedExecutable(prefixed));
+        Assert.Null(AppHost.NormalizePickedExecutable(prefixFolder));
+        Assert.Null(AppHost.NormalizePickedExecutable(Path.Combine(_contentRoot, "missing.x86_64")));
+    }
+
+    [LinuxFact]
+    public void CustomGame_OnLinux_SavesANativeExecutableWithoutAnExeExtension()
+    {
+        var native = ExecutablePath("GravityCircuit.x86_64");
+        File.WriteAllText(native, "native");
+
+        Assert.True(_host.UpdateSettings(JsonSerializer.SerializeToElement(new
+        {
+            game = new
+            {
+                gameList = new[]
+                {
+                    new { id = "custom-gravity", name = "Gravity Circuit", executablePath = native },
+                },
+            },
+        })));
+
+        var game = Assert.Single(_host.GameList, candidate => candidate.Id == "custom-gravity");
+        Assert.Equal("GravityCircuit.x86_64", game.Executable);
+        Assert.Equal(native, game.ExecutablePath);
+    }
 
     [WindowsFact]
     public void NormalizePickedExecutable_AcceptsOnlyExistingExecutables()

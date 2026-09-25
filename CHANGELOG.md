@@ -5,6 +5,60 @@ this file; their notes are on the [GitHub releases page](https://github.com/LeSq
 
 ## Unreleased
 
+### Linux
+
+- **Tript now has a Linux download.** Releases carry `Tript-<version>-linux-x64.tar.gz`. Unpack it
+  and run `./install.sh` to install Tript for your user, with a launcher and an application-menu
+  entry. .NET is included. OBS Studio 30.1 or later, WebKitGTK 4.1 and the GStreamer good plugins
+  come from your distribution, and the installer lists any that are missing.
+- **Recording works on Wayland.** Tript captures the screen through the desktop's screen-sharing
+  prompt, which appears the first time you record rather than at launch. Your choice is remembered,
+  and "Choose a different screen" under Settings → Capture asks again. X11 desktops still use X11
+  screen capture.
+- **Games are captured directly when obs-vkcapture is installed**, the same way Windows captures
+  them. Without it, Tript records the screen, including when "Game" capture is selected, instead
+  of producing a black video.
+- **Global hotkeys work on Linux.** On Wayland they go through the desktop's shortcut portal, which
+  asks you to confirm them once. The Hotkeys page then shows the keys your desktop assigned and opens
+  its shortcut settings to change them. On X11 they work directly. Where neither is available, the
+  hotkey settings say so.
+- **Notifications and sounds on Linux**: desktop notifications with the Tript icon, and the same start
+  and stop sounds as on Windows.
+- **Steam games are found on Linux**, including Flatpak and Snap Steam installs, and games running
+  under Proton are recognised when you launch them.
+- **Heroic and Lutris libraries are read too**, so Epic, GOG and Lutris games are recognised and
+  named after their library entry.
+- **New games are noticed while you play them.** A game running from one of those libraries, or
+  any game running fullscreen in an X11 or XWayland window, is offered for your library, as the
+  fullscreen detection does on Windows.
+- **Recordings of an HDR desktop are labelled HDR.** They used to look grey and washed out. They
+  stay 8-bit, so smooth gradients may show some banding.
+- **The audio settings list your real Linux devices**, not only the default one.
+- **The default recording folder follows your desktop's Videos folder**, including a translated one.
+- **Logs moved to `~/.local/state/Tript/logs`.**
+- **Clips are encoded on the right GPU** on machines with more than one. `TRIPT_VAAPI_DEVICE` picks
+  one explicitly.
+- **"Open file location" works for folders with spaces in their names.**
+- **Clip exports stop when Tript exits**, instead of carrying on in the background.
+- **Settings only show what works on Linux.** The tray, start-with-system and OBS sharing options are
+  hidden there.
+- **Tript explains why it did not start.** A missing OBS, WebKitGTK or GStreamer plugin now shows a
+  dialog instead of doing nothing.
+- **Closing the window, logging out or shutting down finishes the recording first**, so the file
+  stays playable.
+- **The Linux build only offers updates that include a Linux download.**
+- Linux is less battle tested than Windows, and has mainly been used on sway with AMD graphics.
+  Please report anything that looks wrong.
+
+### Detection
+
+- **Detection starts as soon as a game's model arrives.** A recording that began while the model
+  was still downloading used to run without automatic bookmarks until the next recording.
+
+### Games
+
+- The example path under "Add a custom game" shows single backslashes on Windows.
+
 ### Updates
 
 - **Tript only updates to stable releases.** Alpha and beta builds published on GitHub are no longer

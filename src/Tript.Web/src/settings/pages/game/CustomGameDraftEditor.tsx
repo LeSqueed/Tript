@@ -2,6 +2,7 @@
 
 import type { GameSetting } from '../../settingsModel';
 import { Button, TextField } from '../../../components/ui/controls';
+import { examplePaths, usePlatformCapabilities } from '../../../app/platformCapabilities';
 import { isAbsoluteExecutablePath, type CustomGameDraft, type CustomGameDraftState } from './useCustomGameDraft';
 
 export function CustomGameDraftEditor({
@@ -16,6 +17,7 @@ export function CustomGameDraftEditor({
   builtInIds: ReadonlySet<string>;
 }) {
   const { validationAttempted, submissionError } = state;
+  const { platform } = usePlatformCapabilities();
   const nameMissing = validationAttempted && draft.name.trim() === '';
   const executableInvalid = validationAttempted && !isAbsoluteExecutablePath(draft.executablePath.trim());
 
@@ -75,7 +77,7 @@ export function CustomGameDraftEditor({
               id="custom-game-executable"
               value={draft.executablePath}
               onChange={state.setExecutablePath}
-              placeholder="C:\\Games\\Example\\game.exe"
+              placeholder={examplePaths(platform).gameExecutable}
               aria-invalid={executableInvalid}
               aria-describedby={executableInvalid ? 'custom-game-executable-error' : submissionError ? 'custom-game-save-error' : undefined}
             />

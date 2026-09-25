@@ -27,7 +27,8 @@ public sealed class RenameContentTests : IDisposable
             WebRoot = _contentRoot,
             FakeRecorder = true,
         }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null,
-            new RecordingSessionTracker());
+            new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()

@@ -31,23 +31,7 @@ internal sealed partial class AppHost
 
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"/select,\"{path.Replace("\"", string.Empty)}\"",
-                    UseShellExecute = true,
-                });
-            }
-            else if (OperatingSystem.IsMacOS())
-            {
-                Process.Start("open", $"-R \"{path.Replace("\"", string.Empty)}\"");
-            }
-            else
-            {
-                Process.Start("xdg-open", Path.GetDirectoryName(path)!);
-            }
+            FileManagerCommands.Launch(FileManagerCommands.RevealFile(path, FileManagerCommands.CurrentPlatform));
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
@@ -64,25 +48,10 @@ internal sealed partial class AppHost
         try
         {
             Directory.CreateDirectory(directory);
-            if (OperatingSystem.IsWindows())
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = current is not null && File.Exists(current)
-                        ? $"/select,\"{current.Replace("\"", string.Empty)}\""
-                        : $"\"{directory.Replace("\"", string.Empty)}\"",
-                    UseShellExecute = true,
-                });
-            }
-            else if (OperatingSystem.IsMacOS())
-            {
-                Process.Start("open", $"\"{directory.Replace("\"", string.Empty)}\"");
-            }
-            else
-            {
-                Process.Start("xdg-open", directory);
-            }
+            var platform = FileManagerCommands.CurrentPlatform;
+            FileManagerCommands.Launch(platform == DesktopPlatform.Windows && current is not null && File.Exists(current)
+                ? FileManagerCommands.RevealFile(current, platform)
+                : FileManagerCommands.OpenFolder(directory, platform));
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception
             or IOException or UnauthorizedAccessException)

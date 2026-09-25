@@ -166,7 +166,7 @@ public sealed class ObsInteropTests
     {
         ObsTestEnvironment.RequireUsableRuntime();
 
-        const string original = "café — 日本語 — Ω — 🎮 — ünïcödé";
+        const string original = "café \u2014 日本語 \u2014 Ω \u2014 🎮 \u2014 ünïcödé";
         var expected = Encoding.UTF8.GetBytes(original);
 
         var bmemdup = (delegate* unmanaged[Cdecl]<nint, nuint, nint>)

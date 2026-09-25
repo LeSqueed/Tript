@@ -83,6 +83,22 @@ public sealed class WindowsStartupRegistrationTests
         Assert.Equal(["shutdown", "force-exit"], events);
     }
 
+    [Theory]
+    [InlineData(typeof(DllNotFoundException))]
+    [InlineData(typeof(EntryPointNotFoundException))]
+    [InlineData(typeof(InvalidOperationException))]
+    public void CloseShellOrRequestShutdown_FallsBackWhateverTheCloseThrows(Type failure)
+    {
+        var events = new List<string>();
+
+        Tript.Shell.Program.CloseShellOrRequestShutdown(
+            () => throw (Exception)Activator.CreateInstance(failure, "close failed")!,
+            () => events.Add("shutdown"),
+            () => events.Add("force-exit"));
+
+        Assert.Equal(["shutdown", "force-exit"], events);
+    }
+
     [Fact]
     public void RequestShutdown_IsLatchedForAHostThatHasNotStartedWaitingYet()
     {

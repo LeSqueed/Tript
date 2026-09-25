@@ -7,10 +7,10 @@ namespace Tript.Shell;
 
 internal static class HotkeyBindingFormat
 {
-    private const uint ModAlt = 0x0001;
-    private const uint ModControl = 0x0002;
-    private const uint ModShift = 0x0004;
-    private const uint ModWin = 0x0008;
+    internal const uint ModAlt = 0x0001;
+    internal const uint ModControl = 0x0002;
+    internal const uint ModShift = 0x0004;
+    internal const uint ModWin = 0x0008;
     private const uint VirtualKeyF1 = 0x70;
 
     internal static bool TryParse(HotkeyBinding binding, out uint modifiers, out uint virtualKey)

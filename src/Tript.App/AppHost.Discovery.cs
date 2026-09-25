@@ -8,6 +8,15 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
+    private static GameDiscoveryService? CreateGameDiscovery()
+    {
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240))
+            return GameDiscoveryService.CreateDefault(new WindowsXboxPackageProvider());
+        if (OperatingSystem.IsLinux())
+            return GameDiscoveryService.CreateLinuxDefault();
+        return null;
+    }
+
     private void StartDiscoveryScan()
     {
         if (_detector is not null)
@@ -65,5 +74,8 @@ internal sealed partial class AppHost
         _fullscreenDetector?.UpdateKnownTargets(targets);
     }
 
-    internal void SetInventoryForTesting(GameInventory inventory) => _gameInventory.Inventory = inventory;
+    private IReadOnlyList<string> InstalledGameRoots() =>
+        _gameInventory.Inventory.Games.Select(game => game.InstallRoot).ToList();
+
+        internal void SetInventoryForTesting(GameInventory inventory) => _gameInventory.Inventory = inventory;
 }

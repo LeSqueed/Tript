@@ -18,18 +18,8 @@ internal static class NativeSound
 
     internal static void Play(NotificationKind kind, string webRoot)
     {
-        var fileName = kind switch
-        {
-            NotificationKind.RecordingStarted => "recording-started.wav",
-            NotificationKind.RecordingStopped => "recording-stopped.wav",
-            NotificationKind.Error => "error.wav",
-            _ => null,
-        };
-        if (fileName is null)
-            return;
-
-        var path = Path.Combine(webRoot, "sounds", fileName);
-        if (File.Exists(path))
+        var path = NotificationSoundFiles.PathFor(kind, webRoot);
+        if (path is not null && File.Exists(path))
             PlaySound(path, IntPtr.Zero, SndFilename | SndAsync | SndNodefault);
     }
 }

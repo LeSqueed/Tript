@@ -30,7 +30,8 @@ public sealed class GameCatalogueTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = _contentRoot,
             FakeRecorder = true,
-        }, _store, runtime: null, new RecordingSessionTracker());
+        }, _store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
     }
 
     public void Dispose()
@@ -64,7 +65,8 @@ public sealed class GameCatalogueTests : IDisposable
             SettingsPath = settingsPath,
             WebRoot = root,
             FakeRecorder = true,
-        }, store, runtime: null, new RecordingSessionTracker());
+        }, store, runtime: null, new RecordingSessionTracker(),
+            storageProbe: AmpleStorage.Probe);
 
         Assert.Equal(OverwatchId, Assert.Single(host.GameList).Id);
         var persisted = SettingsSerialization.Deserialize(File.ReadAllText(settingsPath));

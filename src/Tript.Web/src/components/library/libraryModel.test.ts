@@ -412,7 +412,7 @@ describe('deriveLibrary', () => {
     expect(deriveLibrary(many, query({ pageSize: Number.NaN }), NOW).pageCount).toBe(3);
   });
 
-  it('renders every item when nothing is filtered — a missing field never hides content', () => {
+  it('renders every item when nothing is filtered: a missing field never hides content', () => {
     const all = deriveLibrary(ALL, query(), NOW);
     expect(all.items).toHaveLength(4);
     expect(all.items.map(itemLabel)).toContain('session-bare.mp4');

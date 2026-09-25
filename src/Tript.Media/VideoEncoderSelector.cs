@@ -66,7 +66,7 @@ public sealed class VideoEncoderSelector
 
         lock (_gate)
         {
-            _rejected.Add(failed.Name);
+            _rejected.Add(failed.Key);
             if (ReferenceEquals(_current, failed))
                 _current = null;
         }
@@ -77,19 +77,19 @@ public sealed class VideoEncoderSelector
         var tried = new List<string>();
         foreach (var candidate in _candidates)
         {
-            if (_rejected.Contains(candidate.Name))
+            if (_rejected.Contains(candidate.Key))
                 continue;
 
             var outcome = _probe(candidate);
             if (outcome.Succeeded)
             {
                 Diagnostics.Report(DiagnosticLevel.Information,
-                    $"Clips: encoding with {candidate.Name} (GPU){Tried(tried)}");
+                    $"Clips: encoding with {candidate.Key} (GPU){Tried(tried)}");
                 return candidate;
             }
 
-            _rejected.Add(candidate.Name);
-            tried.Add($"{candidate.Name} ({FfmpegRunner.Tail(outcome.StandardError, 200).Trim()})");
+            _rejected.Add(candidate.Key);
+            tried.Add($"{candidate.Key} ({FfmpegRunner.Tail(outcome.StandardError, 200).Trim()})");
         }
 
         if (_candidates.Count > 0)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using Tript.Recorder;
 using Tript.Settings;
 
 namespace Tript.App;
@@ -16,8 +17,21 @@ internal sealed class AudioDeviceInventory
     internal AudioDeviceInventory(
         Func<AudioSourceKind, (bool Success, IReadOnlyList<AudioDeviceSetting> Devices)>? enumerate = null)
     {
-        _enumerate = enumerate ?? Enumerate;
+        _enumerate = enumerate ?? EnumerateWasapi;
     }
+
+    internal static AudioDeviceInventory ForPlatform(bool obsRunning) =>
+        new(SourceFor(OperatingSystem.IsWindows(), obsRunning) switch
+        {
+            AudioDeviceSource.Wasapi => EnumerateWasapi,
+            AudioDeviceSource.Obs => EnumerateObs,
+            _ => _ => (true, []),
+        });
+
+    internal static AudioDeviceSource SourceFor(bool windows, bool obsRunning) =>
+        windows ? AudioDeviceSource.Wasapi
+        : obsRunning ? AudioDeviceSource.Obs
+        : AudioDeviceSource.None;
 
     internal IReadOnlyList<AudioDeviceSetting> Snapshot
     {
@@ -76,9 +90,15 @@ internal sealed class AudioDeviceInventory
         .OrderBy(device => device.Id, StringComparer.Ordinal)
         .ToArray();
 
-    private static (bool Success, IReadOnlyList<AudioDeviceSetting> Devices) Enumerate(AudioSourceKind kind)
+    private static (bool Success, IReadOnlyList<AudioDeviceSetting> Devices) EnumerateWasapi(AudioSourceKind kind)
     {
         var success = WasapiDeviceEnumerator.TryEnumerate(kind, out var devices);
+        return (success, devices);
+    }
+
+    private static (bool Success, IReadOnlyList<AudioDeviceSetting> Devices) EnumerateObs(AudioSourceKind kind)
+    {
+        var success = ObsAudioDeviceEnumerator.TryEnumerate(kind, out var devices);
         return (success, devices);
     }
 
@@ -96,4 +116,11 @@ internal sealed class AudioDeviceInventory
         }
         return true;
     }
+}
+
+internal enum AudioDeviceSource
+{
+    None,
+    Wasapi,
+    Obs,
 }

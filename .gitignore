@@ -5,14 +5,14 @@ TestResults/
 *.user
 .DS_Store
 
-# Local tooling configuration and working notes — not part of the product.
+# Local tooling configuration and working notes: not part of the product.
 .claude/
 CLAUDE.md
 
 
-# Working notes and per-feature task packets — not part of the product.
+# Working notes and per-feature task packets: not part of the product.
 docs/
-# Screenshot captures — regenerate with `cd src/Tript.Web && npm run shots`.
+# Screenshot captures; regenerate with `cd src/Tript.Web && npm run shots`.
 docs/shots/
 # The settings file that run gives its host, so captures are always of a fresh install.
 docs/shots-settings.json

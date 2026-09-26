@@ -4,6 +4,7 @@
 using System.Reflection;
 using Tript.Recorder;
 using Tript.Settings;
+using Tript.TestSupport;
 using Xunit;
 using RecorderStateMachine = Tript.Recorder.Recorder;
 
@@ -71,9 +72,16 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         };
         InjectRecorder(session);
         _host.TrackDetectedGameStarted(OverwatchProcess());
-        using var hookTimer = new Timer(_ => session.Hooked = true, null, 200, Timeout.Infinite);
+        var hooker = new Thread(() =>
+        {
+            session.WaitEntered.Wait(TimeSpan.FromSeconds(5));
+            Thread.Sleep(200);
+            session.Hooked = true;
+        });
+        hooker.Start();
 
         Assert.True(_host.StartRecording("Overwatch"));
+        hooker.Join();
 
         Assert.True(session.WaitReturnedHooked);
         Assert.True(_host.IsRecording);
@@ -170,6 +178,50 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         Assert.Null(_host.CurrentDetectedGameId());
     }
 
+    [LinuxFact]
+    public void AGameLaunchedWithTheCaptureLayer_WaitsPastTheUsualLimitForItsHook()
+    {
+        var session = new HookProbeSession
+        {
+            Policy = new CapturePolicy(DisplayCaptureMethod.Auto, null, TimeSpan.FromMilliseconds(100))
+        };
+        InjectRecorder(session);
+        _host.LinuxProcessFiles = new GameEnvironment(captureLayer: true);
+        _host.TrackDetectedGameStarted(OverwatchProcess());
+        var hooker = new Thread(() =>
+        {
+            session.WaitEntered.Wait(TimeSpan.FromSeconds(5));
+            Thread.Sleep(600);
+            session.Hooked = true;
+        });
+        hooker.Start();
+
+        Assert.True(_host.StartRecording("Overwatch"));
+        hooker.Join();
+
+        Assert.True(session.WaitReturnedHooked);
+        Assert.Equal(GameCaptureWait.LaunchedForCaptureLimit, session.LastDeadline);
+        Assert.True(_host.StopRecording());
+    }
+
+    [LinuxFact]
+    public void AGameLaunchedWithoutTheCaptureLayer_RecordsTheScreenWithoutWaiting()
+    {
+        var session = new HookProbeSession
+        {
+            Policy = new CapturePolicy(DisplayCaptureMethod.Auto, null, TimeSpan.FromSeconds(5))
+        };
+        InjectRecorder(session);
+        _host.LinuxProcessFiles = new GameEnvironment(captureLayer: false);
+        _host.TrackDetectedGameStarted(OverwatchProcess());
+
+        Assert.True(_host.StartRecording("Overwatch"));
+
+        Assert.False(session.WaitEntered.IsSet);
+        Assert.True(_host.IsRecording);
+        Assert.True(_host.StopRecording());
+    }
+
     private static DetectedGameProcess OverwatchProcess() =>
         new("Overwatch", 4001, "Overwatch", @"C:\Games\Overwatch\Overwatch.exe");
 
@@ -217,9 +269,12 @@ public sealed class GameCaptureHookWaitTests : IDisposable
 
         public void ClearSourceFromChannel() => ClearSourceCalls++;
 
+        public TimeSpan? LastDeadline { get; private set; }
+
         public bool WaitForGameCapture(TimeSpan deadline, TimeSpan warningAfter, Action showWarning,
             Action clearWarning, CancellationToken cancellationToken)
         {
+            LastDeadline = deadline;
             WaitEntered.Set();
             var started = DateTime.UtcNow;
             while (!cancellationToken.IsCancellationRequested)
@@ -242,5 +297,17 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         public void Dispose()
         {
         }
+    }
+
+    private sealed class GameEnvironment(bool captureLayer) : IProcessFiles
+    {
+        public string? ReadCommandLine(int processId) => null;
+
+        public string? ReadExecutableLink(int processId) => "/usr/bin/wine64-preloader";
+
+        public string? ReadEnvironmentVariable(int processId, string name) =>
+            captureLayer && name == "OBS_VKCAPTURE" ? "1" : null;
+
+        public string? ReadCommandName(int processId) => "Overwatch.exe";
     }
 }

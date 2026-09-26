@@ -84,6 +84,7 @@ internal sealed partial class AppHost
         bool applyDisplay = false, string? displayId = null)
     {
         IRecorderSession? hookWaitSession = null;
+        var hookDeadline = TimeSpan.Zero;
         CancellationTokenSource? waitCancellation = null;
         bool hookWaitCancelled = false;
         bool hookFellBack = false;
@@ -133,8 +134,7 @@ internal sealed partial class AppHost
 
             EnsureRecorderBuilt(resolved);
 
-            if (effectiveGameId is not null)
-                RetargetGameCapture(effectiveGameId);
+            RetargetGameCapture(effectiveGameId, processOwner);
 
             Volatile.Write(ref _recordingProcessOwner, processOwner);
             SetBackgroundWorkSuspendedForRecording(true);
@@ -142,8 +142,10 @@ internal sealed partial class AppHost
 
             if (processOwner is not null &&
                 _recorderSession is { } session &&
-                session.Policy.IncludesGameCapture && session.HasGameCaptureSource)
+                session.Policy.IncludesGameCapture && session.HasGameCaptureSource &&
+                HookDeadlineFor(session, processOwner) is { } deadline)
             {
+                hookDeadline = deadline;
                 Log.Information("AppHost: waiting for the {GameId} game-capture hook before recording starts",
                     effectiveGameId);
                 SetHookConflictSuspected(false);
@@ -162,10 +164,9 @@ internal sealed partial class AppHost
         try
         {
             var hasFallback = hookWaitSession.HasDisplayFallback;
-            var deadline = hasFallback ? hookWaitSession.Policy.GameCaptureTimeout : Timeout.InfiniteTimeSpan;
             var warningAfter = hasFallback ? TimeSpan.Zero : hookWaitSession.Policy.GameCaptureTimeout;
             var hookReady = hookWaitSession.WaitForGameCapture(
-                deadline,
+                hookDeadline,
                 warningAfter,
                 () => PushWarning(HookWaitWarning()),
                 () => PushWarning(null),
@@ -176,7 +177,7 @@ internal sealed partial class AppHost
             {
                 Log.Information("AppHost: the {GameId} game-capture hook did not attach within {Timeout}s; " +
                                 "starting the recording on the display layer and keeping the hook retry",
-                    effectiveGameId, deadline.TotalSeconds);
+                    effectiveGameId, hookDeadline.TotalSeconds);
             }
         }
         finally
@@ -415,7 +416,8 @@ internal sealed partial class AppHost
 
     private static bool PortalCaptureWasPq(IRecorderSession? session)
     {
-        if (!OperatingSystem.IsLinux() || session is not ObsRecorderSession { PortalCaptureSize: { } size })
+        if (!OperatingSystem.IsLinux()
+            || session is not ObsRecorderSession { RecordedFromGameCapture: false, PortalCaptureSize: { } size })
             return false;
 
         var outputs = LinuxHdrOutputs.Query();
@@ -766,14 +768,40 @@ internal sealed partial class AppHost
         _streamShare?.SetCapture(session.GameCaptureSource);
     }
 
-    private void RetargetGameCapture(string gameId)
+    internal IProcessFiles LinuxProcessFiles { get; set; } = new ProcProcessFiles();
+
+    private TimeSpan? HookDeadlineFor(IRecorderSession session, string processOwner)
+    {
+        var captureLayerLoaded = OperatingSystem.IsWindows()
+                                 || DetectedGameTracker.ProcessIdOf(processOwner) is not { } processId
+            ? null
+            : VkCaptureClient.IsLoadedInto(LinuxProcessFiles, processId);
+
+        var deadline = GameCaptureWait.Deadline(session.HasDisplayFallback, session.Policy.GameCaptureTimeout,
+            captureLayerLoaded);
+        if (deadline is null)
+            Log.Information("AppHost: the game was not launched with obs-vkcapture; recording the screen");
+        return deadline;
+    }
+
+    private void RetargetGameCapture(string? gameId, string? processOwner)
     {
         if (_recorderSession is not ObsRecorderSession session)
             return;
 
+        if (!OperatingSystem.IsWindows())
+        {
+            session.RetargetVkCapture(DetectedGameTracker.ProcessIdOf(processOwner) is { } processId
+                ? VkCaptureClient.NameOf(LinuxProcessFiles, processId)
+                : null);
+            return;
+        }
+
+        if (gameId is null)
+            return;
+
         var name = GameCaptureName(gameId);
-        var executable = OperatingSystem.IsWindows() ? $"{name}.exe" : name;
-        session.RetargetGame(new ObsGameCaptureTarget(null, null, executable));
+        session.RetargetGame(new ObsGameCaptureTarget(null, null, $"{name}.exe"));
     }
 
     internal string GameCaptureName(string gameId)

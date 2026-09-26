@@ -1,13 +1,6 @@
-# Builds the Windows bundle and the Linux tarball and publishes them as a GitHub Release whenever a version tag is
-# pushed. Runs on ubuntu-latest, not windows-latest: `make windows` cross-compiles the whole bundle
-# (dotnet publish -r win-x64, plain shell, and the apt-installable mingw-w64 cross-compiler for the
-# native launcher) without ever needing a Windows host, matching how `README.md` already builds it.
-#
-# This workflow does not publish detection models. Model delivery is a separate, already-live
-# concern: GameModelManager fetches its manifest from the production resolver's /manifest endpoint
-# (see the resolver.json step below) rather than data/model-manifest.json whenever a resolver.json
-# is present, and models reach the resolver via its own admin API (ResolverAdminClient), not this
-# workflow or publish-model.yml.
+# Publishes a GitHub Release for a version tag in stages: the tag is checked, the full test suite
+# runs, each platform is built and checked on its own, and only then are all four files published
+# together, so a release never goes out with one platform missing.
 name: Release
 
 on:
@@ -15,70 +8,64 @@ on:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  # The bundle is cross-compiled below and never started there, and a tag push does not run
-  # ci.yml, so without this a release could go out on a Windows build nothing had ever launched.
-  windows:
-    uses: ./.github/workflows/windows-checks.yml
-
-  linux:
-    uses: ./.github/workflows/linux-checks.yml
-
-  release:
-    needs: [windows, linux]
+  verify:
+    name: Tag matches the version
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: Directory.Build.props
+          sparse-checkout-cone-mode: false
+
+      - id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Fq "<Version>${VERSION}</Version>" Directory.Build.props; then
+            echo "::error title=Version::Tag $GITHUB_REF_NAME does not match <Version> in Directory.Build.props"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-alpha* || "$VERSION" == *-beta* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  tests:
+    needs: verify
+    uses: ./.github/workflows/tests.yml
+
+  release-windows:
+    name: Release (Windows)
+    needs: [verify, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ARCHIVE: Tript-${{ needs.verify.outputs.version }}-win-x64.zip
     steps:
       - uses: actions/checkout@v7
         with:
           lfs: true
 
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
+      - uses: ./.github/actions/setup
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: src/Tript.Web/package-lock.json
+      - name: Install the launcher's cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
 
-      - name: Install system dependencies
-        # ffmpeg backs Tript.Media.Tests (the test gate below); mingw-w64 cross-compiles the
-        # native Windows launcher later in this job.
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mingw-w64
-
-      - name: Install frontend dependencies
-        working-directory: src/Tript.Web
-        run: npm ci
-
-      - name: Build
-        run: dotnet build Tript.slnx -c Release --nologo
-
-      - name: Test
-        # A tag push does not run ci.yml (it only triggers on branches), so this workflow is the
-        # only gate a tagged release goes through, so it must run the full suite itself, not just
-        # rebuild. Uses the same `make test` ci.yml runs, so the two gates never drift apart.
-        run: make test CONFIG=Release
-
-      - name: Verify tag matches Directory.Build.props version
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if ! grep -Fq "<Version>${TAG_VERSION}</Version>" Directory.Build.props; then
-            echo "Tag $GITHUB_REF_NAME does not match <Version> in Directory.Build.props" >&2
-            exit 1
-          fi
-
+      # Tript.App.csproj copies config/resolver.json into the build as is, so overwriting the
+      # checked-in localhost default here bakes the production resolver into the release.
       - name: Point resolver.json at the production resolver
-        # config/resolver.json ships via a Content Include (Tript.App.csproj) that copies it
-        # verbatim into the publish output as ./resolver.json. Overwriting the checkout's copy
-        # here (never committed back) means `make windows` bakes the production resolver into
-        # the release build instead of the checked-in localhost dev default.
         env:
           RESOLVER_URL: ${{ secrets.RESOLVER_URL }}
           RESOLVER_API_KEY: ${{ secrets.RESOLVER_API_KEY }}
@@ -86,35 +73,99 @@ jobs:
           jq -n --arg url "$RESOLVER_URL" --arg key "$RESOLVER_API_KEY" \
             '{url: $url, apiKey: $key}' > config/resolver.json
 
-      - name: Build Windows bundle
+      - name: Build the bundle
         run: make windows CONFIG=Release
 
       - name: Package
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ZIP="Tript-${VERSION}-win-x64.zip"
-          (cd dist && mv Release-win Tript && zip -r "../$ZIP" Tript)
-          sha256sum "$ZIP" > "$ZIP.sha256"
-          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          (cd dist && mv Release-win Tript && zip -qr "../$ARCHIVE" Tript)
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
 
-      - name: Build Linux package
+      - name: The bundle is complete
+        run: |
+          tests/Tript.Smoke/check-windows-bundle.sh "$ARCHIVE"
+          unzip -p "$ARCHIVE" Tript/App/resolver.json | tests/Tript.Smoke/check-production-resolver.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+          retention-days: 1
+          if-no-files-found: error
+
+  release-linux:
+    name: Release (Linux)
+    needs: [verify, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PACKAGE: Tript-${{ needs.verify.outputs.version }}-linux-x64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup
+
+      - name: Point resolver.json at the production resolver
+        env:
+          RESOLVER_URL: ${{ secrets.RESOLVER_URL }}
+          RESOLVER_API_KEY: ${{ secrets.RESOLVER_API_KEY }}
+        run: |
+          jq -n --arg url "$RESOLVER_URL" --arg key "$RESOLVER_API_KEY" \
+            '{url: $url, apiKey: $key}' > config/resolver.json
+
+      - name: Build the package
         run: |
           make linux-package CONFIG=Release
-          VERSION="${GITHUB_REF_NAME#v}"
-          TARBALL="Tript-${VERSION}-linux-x64.tar.gz"
-          mv "dist/Release-linux/$TARBALL" "dist/Release-linux/$TARBALL.sha256" .
-          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          mv "dist/Release-linux/$PACKAGE.tar.gz" "dist/Release-linux/$PACKAGE.tar.gz.sha256" .
 
-      - name: Create GitHub Release
+      - name: The package installs for a user and starts
+        run: |
+          tests/Tript.Smoke/test-linux-package.sh "$PACKAGE.tar.gz"
+          tar -xzOf "$PACKAGE.tar.gz" "$PACKAGE/app/resolver.json" | tests/Tript.Smoke/check-production-resolver.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: |
+            ${{ env.PACKAGE }}.tar.gz
+            ${{ env.PACKAGE }}.tar.gz.sha256
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [verify, release-windows, release-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Checksums match
+        working-directory: release
+        run: sha256sum -c ./*.sha256
+
+      - name: Create the GitHub Release
+        working-directory: release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           FLAGS=()
-          if [[ "$GITHUB_REF_NAME" == *-alpha* || "$GITHUB_REF_NAME" == *-beta* ]]; then
+          if [[ "$PRERELEASE" == true ]]; then
             FLAGS+=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" \
-            "$ZIP" "$ZIP.sha256" "$TARBALL" "$TARBALL.sha256" \
+          gh release create "$GITHUB_REF_NAME" ./* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Tript $GITHUB_REF_NAME" \
             --generate-notes \
             "${FLAGS[@]}"

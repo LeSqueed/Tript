@@ -12,6 +12,7 @@ public sealed class HdrPlanTests
     private static readonly VideoEncoderCandidate Nvenc = new("obs_nvenc_h264_tex", "h264");
     private static readonly VideoEncoderCandidate NvencHevc = new("obs_nvenc_hevc_tex", "hevc");
     private static readonly VideoEncoderCandidate NvencAv1 = new("obs_nvenc_av1_tex", "av1");
+    private static readonly VideoEncoderCandidate VaapiHevc = new("hevc_ffmpeg_vaapi_tex", "hevc");
 
     [Fact]
     public void AnSdrDisplay_RecordsSdr_EvenWithAnHdrEncoderAvailable()
@@ -259,6 +260,18 @@ public sealed class HdrPlanTests
         Assert.True(plan.UseHdr);
         Assert.Equal(ObsVideoFormat.P010, plan.OutputFormat);
         Assert.Equal(ObsColorSpace.Rec2100Pq, plan.ColorSpace);
+    }
+
+    [Fact]
+    public void AVaapiHevcEncoder_LeavesTheProfileToOptForMain10ItselfOnP010()
+    {
+        var plan = HdrPlanner.Decide(
+            capturedColorSpace: ObsSourceColorSpace.Extended709,
+            displayIsHdr: false, hdrEnabledInSettings: true, [X264, VaapiHevc], configuredEncoderId: null);
+
+        Assert.True(plan.UseHdr);
+        Assert.Equal("hevc_ffmpeg_vaapi_tex", plan.EncoderId);
+        Assert.Null(plan.Profile);
     }
 
     [Theory]

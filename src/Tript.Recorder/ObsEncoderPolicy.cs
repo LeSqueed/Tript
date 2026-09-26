@@ -155,6 +155,8 @@ internal static class ObsEncoderPolicy
         return Math.Clamp(ceiling, target, MaxBitrateKbps);
     }
 
+    internal static bool TakesNamedProfile(string encoderId) => ClassifyFamily(encoderId) != EncoderFamily.Vaapi;
+
     private static EncoderFamily ClassifyFamily(string encoderId)
     {
         if (string.Equals(encoderId, X264Id, StringComparison.Ordinal))

@@ -14,11 +14,15 @@ internal interface IProcessFiles
     string? ReadExecutableLink(int processId);
 
     string? ReadEnvironmentVariable(int processId, string name);
+
+    string? ReadCommandName(int processId);
 }
 
 internal sealed class ProcProcessFiles : IProcessFiles
 {
     public string? ReadCommandLine(int processId) => ReadText(processId, "cmdline");
+
+    public string? ReadCommandName(int processId) => ReadText(processId, "comm")?.TrimEnd('\n');
 
     public string? ReadExecutableLink(int processId)
     {

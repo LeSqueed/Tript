@@ -3,6 +3,19 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.1.1 (2026-09-26)
+
+### Linux
+
+- **HDR games captured through obs-vkcapture are recorded in HDR.** Tript never asked the captured
+  game whether it was in HDR, so these recordings always came out SDR. They are now recorded in
+  10-bit HDR. Screen capture of an HDR desktop is still 8-bit and labelled HDR.
+- **Tript captures the game, not its wrapper.** With gamescope or a launch script, obs-vkcapture
+  could pick up the wrapper instead of the game.
+- **A slow-loading game is still captured directly.** Tript gave up on obs-vkcapture after ten
+  seconds and recorded the screen for the whole session. It now waits up to two minutes for a game
+  started with obs-gamecapture, and records the screen straight away for a game started without it.
+
 ## 1.1.0 (2026-09-25)
 
 Tript now runs on Linux as well as Windows. Linux is less battle tested than Windows, so please

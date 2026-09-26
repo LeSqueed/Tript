@@ -94,6 +94,8 @@ public sealed class ObsRecorderSession : IRecorderSession
 
     public bool HasDisplayFallback => _displaySource is not null;
 
+    public bool RecordedFromGameCapture { get; private set; }
+
     public (int Width, int Height)? PortalCaptureSize =>
         _displaySource is { } source && ObsCaptureSource.IsPortalCapture(source.Id)
         && source.Width > 0 && source.Height > 0
@@ -143,7 +145,9 @@ public sealed class ObsRecorderSession : IRecorderSession
         if (!ObsEncoder.IsTypeRegistered(FfmpegAacId))
             throw new ObsException($"No loaded module registers the audio encoder '{FfmpegAacId}'.");
 
-        var plan = RecorderColourPolicy.Resolve(Runtime, settings);
+        var hookedGameColourSpace = HookedGameColourSpace();
+        RecordedFromGameCapture = hookedGameColourSpace is not null;
+        var plan = RecorderColourPolicy.Resolve(Runtime, settings, hookedGameColourSpace);
         plan = RecorderColourPolicy.ApplyToCanvas(Runtime, plan, PlaceSourceOnChannel, ApplyCaptureColour);
         ApplyCaptureColour(plan);
 
@@ -286,6 +290,15 @@ public sealed class ObsRecorderSession : IRecorderSession
         Runtime.SetOutputSource(VideoChannel, (ObsSource?)null);
     }
 
+    public void RetargetVkCapture(string? clientName)
+    {
+        if (_gameCaptureSource is not { Id: ObsCaptureSource.VkCaptureId } source)
+            return;
+
+        CaptureSourceFactory.RetargetVkCapture(source, clientName);
+        Log.Information("ObsRecorderSession: obs-vkcapture captures {Client}", clientName ?? "the most recent client");
+    }
+
     public bool RetargetGame(ObsGameCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -371,6 +384,16 @@ public sealed class ObsRecorderSession : IRecorderSession
             Log.Warning(exception, "ObsRecorderSession: this libobs has no scene-item bounds API; " +
                                    "the scene renders unbounded.");
         }
+    }
+
+    private ObsSourceColorSpace? HookedGameColourSpace()
+    {
+        if (_gameCaptureSource is not { } game || !_hookProbe.IsHooked)
+            return null;
+
+        var space = game.ColorSpace;
+        Log.Information("ObsRecorderSession: the hooked game reports {ColourSpace}", space);
+        return space;
     }
 
     private void ApplyCaptureColour(HdrPlan plan)

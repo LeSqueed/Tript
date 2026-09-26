@@ -117,5 +117,7 @@ public sealed class LinuxGameProcessProbeTests
         public string? ReadExecutableLink(int processId) => Executables.GetValueOrDefault(processId);
 
         public string? ReadEnvironmentVariable(int processId, string name) => null;
+
+        public string? ReadCommandName(int processId) => null;
     }
 }

@@ -29,6 +29,7 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker(),
             recorderStopTimeout: TimeSpan.FromMilliseconds(20),
             storageProbe: AmpleStorage.Probe);
+        _host.LinuxProcessFiles = new GameEnvironment(captureLayer: null);
     }
 
     public void Dispose()
@@ -299,15 +300,16 @@ public sealed class GameCaptureHookWaitTests : IDisposable
         }
     }
 
-    private sealed class GameEnvironment(bool captureLayer) : IProcessFiles
+    private sealed class GameEnvironment(bool? captureLayer) : IProcessFiles
     {
         public string? ReadCommandLine(int processId) => null;
 
-        public string? ReadExecutableLink(int processId) => "/usr/bin/wine64-preloader";
+        public string? ReadExecutableLink(int processId) =>
+            captureLayer is null ? null : "/usr/bin/wine64-preloader";
 
         public string? ReadEnvironmentVariable(int processId, string name) =>
-            captureLayer && name == "OBS_VKCAPTURE" ? "1" : null;
+            captureLayer == true && name == "OBS_VKCAPTURE" ? "1" : null;
 
-        public string? ReadCommandName(int processId) => "Overwatch.exe";
+        public string? ReadCommandName(int processId) => captureLayer is null ? null : "Overwatch.exe";
     }
 }

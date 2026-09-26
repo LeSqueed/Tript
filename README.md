@@ -105,7 +105,9 @@ Found one of these, or something else? Join the Discord and let me know.
 On Wayland, the first recording asks which screen to share. Tript remembers the answer. To capture a
 game directly rather than the whole screen, install
 [obs-vkcapture](https://github.com/nowrep/obs-vkcapture) and add `obs-gamecapture %command%` to the
-game's Steam launch options.
+game's Steam launch options. A game started through your own script or gamescope works the same way:
+put `obs-gamecapture` in front, as in `obs-gamecapture ~/.local/bin/my-launcher.sh %command%`. Tript
+records the screen straight away for games started without it.
 
 Tript notices games from Steam, Heroic and Lutris, and any game running fullscreen in an X11 or
 XWayland window. Games that run as native Wayland windows outside those launchers need adding by
@@ -117,8 +119,9 @@ they only work while an X11 or XWayland window, such as a Proton game, has focus
 directly. Tray icons, starting with the system and sharing the game picture with OBS are
 Windows-only for now.
 
-If your desktop runs in HDR mode, recordings are labelled HDR once they stop. They are 8-bit, so
-smooth gradients may show some banding; 10-bit HDR recording isn't possible on Linux yet.
+A game captured through obs-vkcapture that runs in HDR itself is recorded in 10-bit HDR. Screen
+capture of a desktop in HDR mode is labelled HDR once the recording stops, but stays 8-bit, so
+smooth gradients may show some banding.
 
 Linux updates are not installed automatically: Tript tells you when a new version is out and links
 to its release page.

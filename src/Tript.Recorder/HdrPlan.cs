@@ -77,7 +77,8 @@ public static class HdrPlanner
         {
             UseHdr = true,
             EncoderId = hdrEncoder.Id,
-            Profile = hdrEncoder.Codec.Equals(Hevc, StringComparison.OrdinalIgnoreCase) ? "main10" : null,
+            Profile = hdrEncoder.Codec.Equals(Hevc, StringComparison.OrdinalIgnoreCase)
+                      && ObsEncoderPolicy.TakesNamedProfile(hdrEncoder.Id) ? "main10" : null,
             Reason = $"{because} and '{hdrEncoder.Id}' can encode it"
         };
     }

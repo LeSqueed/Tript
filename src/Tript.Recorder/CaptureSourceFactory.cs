@@ -90,6 +90,13 @@ internal static class CaptureSourceFactory
             _ => null
         };
 
+    internal static void RetargetVkCapture(ObsSource source, string? clientName)
+    {
+        using var settings = new ObsSettings();
+        settings.SetString(VkCaptureWindowKey, clientName ?? VkCaptureAnyClient);
+        source.Update(settings);
+    }
+
     private static ObsSource CreateVkCapture()
     {
         using var settings = new ObsSettings();

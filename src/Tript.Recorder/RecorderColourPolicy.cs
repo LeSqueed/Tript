@@ -11,7 +11,8 @@ internal static class RecorderColourPolicy
 {
     private const string ForceSdrKey = "force_sdr";
 
-    internal static HdrPlan Resolve(ObsRuntime runtime, ResolvedRecorderSettings settings)
+    internal static HdrPlan Resolve(ObsRuntime runtime, ResolvedRecorderSettings settings,
+        ObsSourceColorSpace? hookedGameColourSpace)
     {
         var candidates = ObsEncoderPolicy.EnumerateVideoEncoderCandidates();
         if (candidates.Count == 0)
@@ -19,7 +20,7 @@ internal static class RecorderColourPolicy
 
         var configured = ObsEncoderPolicy.IsUsableId(settings.Encoder) ? settings.Encoder : null;
 
-        var capturedColourSpace = CaptureColourSpace(runtime);
+        var capturedColourSpace = CapturedColourSpace(CaptureColourSpace(runtime), hookedGameColourSpace);
         var plan = HdrPlanner.Decide(
             capturedColourSpace,
             HdrDisplayProbe.AnyDisplayIsHdr(),
@@ -35,6 +36,9 @@ internal static class RecorderColourPolicy
 
         return plan;
     }
+
+    internal static ObsSourceColorSpace? CapturedColourSpace(ObsSourceColorSpace? displayProbe,
+        ObsSourceColorSpace? hookedGame) => displayProbe ?? hookedGame;
 
     internal const string UndetectableHdrReason =
         "Linux screen capture cannot report HDR; a recording of a desktop in HDR mode is labelled PQ once it stops";

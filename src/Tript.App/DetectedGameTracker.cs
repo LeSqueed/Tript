@@ -64,6 +64,11 @@ internal sealed class DetectedGameTracker
         return $"{process.ProcessId}:{process.ProcessStartTime?.UtcTicks ?? 0}:{path}";
     }
 
+    internal static int? ProcessIdOf(string? owner) =>
+        owner is not null && int.TryParse(owner.AsSpan(0, Math.Max(0, owner.IndexOf(':'))), out var processId)
+            ? processId
+            : null;
+
     private string? LatestOwnerLocked(string gameId)
     {
         for (var index = _processes.Count - 1; index >= 0; index--)

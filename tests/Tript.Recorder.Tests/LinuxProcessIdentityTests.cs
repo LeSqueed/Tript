@@ -192,4 +192,6 @@ internal sealed class FakeProcessFiles(string? commandLine, string? executableLi
         EnvironmentRead = true;
         return name == "WINEPREFIX" ? WinePrefix : null;
     }
+
+    public string? ReadCommandName(int processId) => null;
 }

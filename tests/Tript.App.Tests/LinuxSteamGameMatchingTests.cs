@@ -81,5 +81,7 @@ public sealed class LinuxSteamGameMatchingTests : IDisposable
         public string? ReadExecutableLink(int processId) => "/opt/proton/files/bin/wine64-preloader";
 
         public string? ReadEnvironmentVariable(int processId, string name) => null;
+
+        public string? ReadCommandName(int processId) => null;
     }
 }

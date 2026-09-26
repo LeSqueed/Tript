@@ -99,7 +99,7 @@
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.1.0, )"
+          "Tript.Core": "[1.1.1, )"
         }
       }
     },
@@ -203,7 +203,7 @@
       "tript.media": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.1.0, )"
+          "Tript.Core": "[1.1.1, )"
         }
       }
     },

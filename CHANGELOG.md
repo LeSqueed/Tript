@@ -3,6 +3,32 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.2.0 (2026-09-27)
+
+### Games
+
+- **Overwatch is added like every other game.** It used to be built into Tript and always sat in
+  your games list, even if you never played it. Tript now adds it the first time you launch it, and
+  downloads its detection model then. If you already had Overwatch set up, your settings, clips and
+  model carry over.
+- **Battle.net games are recognised on Windows.** Tript now finds games installed through
+  Battle.net, so launching one adds it automatically, the same as games from other launchers.
+- **One games list shows what is supported.** Settings → Games no longer has a separate "Unsupported
+  games" section. Each game shows a **Supported** tag when Tript can find highlights in it, a
+  **Request this game** button when it can't yet, and progress while its detection model downloads.
+  If a download fails, **Download model** tries again.
+- **Tript follows the copy of a game you launch.** With the same game installed twice, for example
+  on Steam and on Battle.net, launching either one records it.
+- **Reset overrides works on every game** that has per-game overrides, and it no longer clears
+  anything besides those overrides.
+
+### Fixes
+
+- **A game that gains support is picked up sooner.** Tript checked for new detection models once a
+  day, so a newly supported game could show as unsupported for up to a day. It now checks again
+  while a listed game has no model, and retries straight away when a model download fails because
+  its information was out of date.
+
 ## 1.1.1 (2026-09-26)
 
 ### Linux

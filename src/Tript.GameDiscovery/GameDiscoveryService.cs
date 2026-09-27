@@ -49,6 +49,7 @@ public sealed class GameDiscoveryService(IEnumerable<IGameInventorySource> sourc
             new EpicInventorySource(fileSystem, epicLocations),
             new EaInventorySource(fileSystem, registry),
             new UbisoftInventorySource(fileSystem, registry),
+            new BattleNetInventorySource(fileSystem, registry),
             new XboxInventorySource(fileSystem, new FixedDriveProvider()),
         };
         if (xboxPackages is not null)

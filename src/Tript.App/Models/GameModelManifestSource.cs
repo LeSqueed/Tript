@@ -24,6 +24,7 @@ internal sealed class GameModelManifestSource
     private readonly Uri _uri;
     private readonly HttpClient _http;
     private readonly Func<DateTimeOffset> _utcNow;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     internal GameModelManifestSource(string manifestPath, string statePath, string? bundledPath, Uri? uri,
         HttpClient http, Func<DateTimeOffset> utcNow)
@@ -36,11 +37,26 @@ internal sealed class GameModelManifestSource
         _utcNow = utcNow;
     }
 
-    internal async Task<GameModelManifest?> GetAsync(CancellationToken cancellationToken)
+    internal async Task<GameModelManifest?> GetAsync(string? gameId, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await GetLockedAsync(gameId, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<GameModelManifest?> GetLockedAsync(string? gameId, CancellationToken cancellationToken)
     {
         var cached = ModelJsonFiles.Read<GameModelManifest>(_manifestPath) ?? ModelJsonFiles.Read<GameModelManifest>(_bundledPath);
         var cacheState = ModelJsonFiles.Read<GameModelManifestCache>(_statePath);
-        if (cached is not null && cacheState is not null &&
+        var listsGame = gameId is null || cached?.Games.Any(game =>
+            string.Equals(game.GameId, gameId, StringComparison.OrdinalIgnoreCase)) == true;
+        if (cached is not null && cacheState is not null && listsGame &&
             _utcNow() - cacheState.CheckedAt < CheckInterval)
         {
             return Validate(cached);
@@ -112,6 +128,27 @@ internal sealed class GameModelManifestSource
                 return Validate(cached);
             }
             throw;
+        }
+    }
+
+    internal async Task InvalidateAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var cacheState = ModelJsonFiles.Read<GameModelManifestCache>(_statePath);
+            if (cacheState is null)
+                return;
+
+            ModelJsonFiles.WriteAtomic(_statePath, new GameModelManifestCache { ETag = cacheState.ETag });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log.Debug(exception, "GameModelManager: could not mark the model manifest stale");
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 

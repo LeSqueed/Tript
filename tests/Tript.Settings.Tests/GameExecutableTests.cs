@@ -76,11 +76,15 @@ public class GameExecutableTests
     }
 
     [Fact]
-    public void TheDefaultGameListEntry_StillResolvesAnExecutable()
+    public void AGameWithoutAnExecutable_FallsBackToItsName()
     {
-        var game = Assert.Single(new GameSettings().GameList);
+        var game = new GameSetting { Id = "5JWDDE307Z5127JK7KM4YCB1XW", Name = "Overwatch" };
 
         Assert.Null(game.Executable);
         Assert.Equal("Overwatch", game.EffectiveExecutable);
     }
+
+    [Fact]
+    public void TheDefaultGameList_IsEmpty()
+        => Assert.Empty(new GameSettings().GameList);
 }

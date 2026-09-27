@@ -9,24 +9,22 @@ namespace Tript.App.Training;
 
 internal static class TrainingWorkspaceMigration
 {
-    internal static void Migrate(GameCatalog catalog, string trainingRoot, string installedModelsRoot)
+    internal static void Migrate(IEnumerable<KeyValuePair<string, string>> legacyGameIds, string trainingRoot,
+        string installedModelsRoot)
     {
-        foreach (var entry in catalog.Entries)
+        foreach (var (legacyId, gameId) in legacyGameIds)
         {
-            foreach (var legacyId in entry.LegacyGameIds ?? [])
+            try
             {
-                try
-                {
-                    MigrateWorkspaceDirectory(Path.Combine(trainingRoot, legacyId),
-                        Path.Combine(trainingRoot, entry.GameId));
-                    MigrateModelDirectory(Path.Combine(installedModelsRoot, legacyId),
-                        Path.Combine(installedModelsRoot, entry.GameId));
-                }
-                catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
-                {
-                    Log.Warning(exception, "Could not migrate training files from {LegacyGameId} to {GameId}",
-                        legacyId, entry.GameId);
-                }
+                MigrateWorkspaceDirectory(Path.Combine(trainingRoot, legacyId),
+                    Path.Combine(trainingRoot, gameId));
+                MigrateModelDirectory(Path.Combine(installedModelsRoot, legacyId),
+                    Path.Combine(installedModelsRoot, gameId));
+            }
+            catch (Exception exception) when (TrainingWorkspace.IsTransientFileSystemError(exception))
+            {
+                Log.Warning(exception, "Could not migrate training files from {LegacyGameId} to {GameId}",
+                    legacyId, gameId);
             }
         }
     }

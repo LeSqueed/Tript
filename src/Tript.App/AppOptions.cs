@@ -159,34 +159,15 @@ internal sealed class AppOptions
             throw new ArgumentException("The IPC ports must be distinct values between 1 and 65535.");
     }
 
-    internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, GameCatalog catalog,
-        string? overrideJson, out bool settingsMigrated, GameIdAliasStore? aliases = null)
+    internal static List<GameInfo> LoadCatalogue(Settings.Settings settings, string? overrideJson,
+        out bool settingsMigrated, GameIdAliasStore aliases)
     {
-        settingsMigrated = MigrateLegacyGameIds(settings.Game.GameList, catalog, aliases);
+        settingsMigrated = MigrateLegacyGameIds(settings.Game.GameList, aliases);
 
         var games = new List<GameInfo>();
-        var packagedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var entry in catalog.Entries)
-        {
-            packagedIds.Add(entry.GameId);
-            var setting = settings.Game.GameList.FirstOrDefault(game =>
-                string.Equals(game.Id, entry.GameId, StringComparison.OrdinalIgnoreCase));
-            games.Add(new GameInfo
-            {
-                Id = entry.GameId,
-                Name = string.IsNullOrWhiteSpace(setting?.Name)
-                    ? string.IsNullOrWhiteSpace(entry.Name) ? entry.GameId : entry.Name
-                    : setting.Name,
-                Executable = entry.Executable,
-                BuiltIn = true,
-                Detected = false,
-            });
-        }
-
         foreach (var setting in settings.Game.GameList)
         {
-            if (packagedIds.Contains(setting.Id) || string.IsNullOrWhiteSpace(setting.Id))
+            if (string.IsNullOrWhiteSpace(setting.Id))
                 continue;
 
             games.Add(new GameInfo
@@ -197,7 +178,6 @@ internal sealed class AppOptions
                 ExecutablePath = string.IsNullOrWhiteSpace(setting.ExecutablePath)
                     ? null
                     : setting.ExecutablePath.Trim(),
-                BuiltIn = false,
                 Detected = false,
             });
         }
@@ -219,22 +199,37 @@ internal sealed class AppOptions
         return games;
     }
 
-    private static bool MigrateLegacyGameIds(List<Settings.GameSetting> gameList, GameCatalog catalog,
-        GameIdAliasStore? aliases)
+    private static bool MigrateLegacyGameIds(List<Settings.GameSetting> gameList, GameIdAliasStore aliases)
     {
         var migrated = false;
+        var fromLegacyDefault = new HashSet<Settings.GameSetting>();
         foreach (var game in gameList)
         {
-            var current = aliases?.Resolve(game.Id) ?? catalog.ResolveLegacyGameId(game.Id);
+            var current = aliases.Resolve(game.Id);
             if (current is not null && !string.Equals(current, game.Id, StringComparison.OrdinalIgnoreCase))
             {
+                if (LegacyGameIds.Map.ContainsKey(game.Id))
+                    fromLegacyDefault.Add(game);
                 game.Id = current;
                 migrated = true;
             }
         }
 
+        migrated |= gameList.RemoveAll(game => fromLegacyDefault.Contains(game) && IsUntouched(game)) > 0;
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         migrated |= gameList.RemoveAll(game => !string.IsNullOrWhiteSpace(game.Id) && !seen.Add(game.Id)) > 0;
         return migrated;
     }
+
+    private static bool IsUntouched(Settings.GameSetting game) =>
+        string.IsNullOrWhiteSpace(game.ExecutablePath)
+        && string.IsNullOrWhiteSpace(game.Executable)
+        && string.IsNullOrWhiteSpace(game.IconId)
+        && game.AutoRecordOverride is null
+        && game.RecordingModeOverride is null
+        && game.QualityOverride is null
+        && game.CaptureMethodOverride is null
+        && game.AutomaticClipOverride is null
+        && game.UnknownProperties.Count == 0;
 }

@@ -122,13 +122,56 @@ public sealed class GameModelManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task FreshCachedManifest_AvoidsAnotherNetworkCheck()
+    public async Task FreshCachedManifest_ThatListsTheGame_AvoidsAnotherNetworkCheck()
+    {
+        var handler = await EnsureWithCachedManifest(
+            Manifest("Overwatch", apiVersion: 2, revision: 1, 100, new string('a', 64), "https://models.test/ow.zip"),
+            """{"checkedAt":"2026-08-26T12:00:00+00:00"}""");
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task FreshCachedManifest_WithoutTheGame_IsCheckedAgain()
+    {
+        var handler = await EnsureWithCachedManifest("""{"schemaVersion":1,"games":[]}""",
+            """{"checkedAt":"2026-08-26T12:00:00+00:00"}""");
+
+        Assert.Equal(["https://models.test/manifest.json"], handler.Requests);
+    }
+
+    [Fact]
+    public async Task FreshCachedManifest_WithoutTheGame_IsNotCheckedAgainWithinTheRetryInterval()
+    {
+        var handler = await EnsureWithCachedManifest("""{"schemaVersion":1,"games":[]}""",
+            """{"checkedAt":"2026-08-26T12:00:00+00:00","lastAttemptAt":"2026-08-26T12:55:00+00:00"}""");
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ACustomModel_IsReportedAsReadyWithoutANetworkCheck()
+    {
+        var handler = new RouteHandler(new Dictionary<string, byte[]>());
+        using var manager = new GameModelManager((_, _, _) => Task.CompletedTask,
+            modelsRoot: ModelsRoot, manifestPath: Path.Combine(_root, "manifest.json"),
+            manifestStatePath: Path.Combine(_root, "manifest-state.json"),
+            manifestUri: new Uri("https://models.test/manifest.json"),
+            httpClient: new HttpClient(handler), hasCustomModel: _ => true);
+
+        await manager.EnsureModelAsync("Overwatch");
+
+        var status = Assert.Single(manager.Snapshot());
+        Assert.Equal("ready", status.Stage);
+        Assert.Empty(handler.Requests);
+    }
+
+    private async Task<RouteHandler> EnsureWithCachedManifest(string manifest, string state)
     {
         var manifestPath = Path.Combine(_root, "manifest.json");
         var statePath = Path.Combine(_root, "manifest-state.json");
-        File.WriteAllText(manifestPath, "{\"schemaVersion\":1,\"games\":[]}");
-        File.WriteAllText(statePath,
-            "{\"checkedAt\":\"2026-08-26T12:00:00+00:00\"}");
+        File.WriteAllText(manifestPath, manifest);
+        File.WriteAllText(statePath, state);
         var handler = new RouteHandler(new Dictionary<string, byte[]>());
         using var manager = new GameModelManager((_, _, _) => Task.CompletedTask,
             modelsRoot: ModelsRoot, manifestPath: manifestPath, manifestStatePath: statePath,
@@ -136,8 +179,7 @@ public sealed class GameModelManagerTests : IDisposable
             httpClient: new HttpClient(handler), utcNow: () => new DateTimeOffset(2026, 8, 26, 13, 0, 0, TimeSpan.Zero));
 
         await manager.EnsureModelAsync("Overwatch");
-
-        Assert.Empty(handler.Requests);
+        return handler;
     }
 
     [Fact]
@@ -157,6 +199,85 @@ public sealed class GameModelManagerTests : IDisposable
 
         Assert.Equal("error", Assert.Single(manager.Snapshot()).Stage);
         Assert.False(Directory.Exists(Path.Combine(ModelsRoot, "BrokenGame")));
+    }
+
+    [Fact]
+    public async Task AFailedInstall_ChecksTheManifestAgain_ButDoesNotRedownloadTheSameRelease()
+    {
+        var package = new byte[] { 1, 2, 3 };
+        var manifest = Manifest("BrokenGame", apiVersion: 1, revision: 1,
+            package.Length, new string('0', 64), "https://models.test/broken.zip");
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
+            ["https://models.test/broken.zip"] = package,
+        });
+        using var manager = CreateManager(handler, (_, _, _) => Task.CompletedTask);
+
+        await manager.EnsureModelAsync("BrokenGame");
+
+        Assert.Equal(2, handler.Requests.Count(url => url == "https://models.test/manifest.json"));
+        Assert.Single(handler.Requests, url => url == "https://models.test/broken.zip");
+        Assert.Equal("error", Assert.Single(manager.Snapshot()).Stage);
+    }
+
+    [Fact]
+    public async Task AFailedInstallFromAStaleCache_InstallsTheNewerReleaseInTheSameAttempt()
+    {
+        var staleManifest = Manifest("Overwatch", apiVersion: 1, revision: 1,
+            3, new string('0', 64), "https://models.test/stale.zip");
+        File.WriteAllText(Path.Combine(_root, "manifest.json"), staleManifest);
+        File.WriteAllText(Path.Combine(_root, "manifest-state.json"),
+            """{"checkedAt":"2026-08-26T11:30:00+00:00","lastAttemptAt":"2026-08-26T11:30:00+00:00"}""");
+        var package = BuildOverwatchPackage(revision: 2);
+        var packageHash = Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
+        var liveManifest = Manifest("Overwatch", apiVersion: 1, revision: 2,
+            package.Length, packageHash, "https://models.test/overwatch.zip");
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(liveManifest),
+            ["https://models.test/stale.zip"] = [1, 2, 3],
+            ["https://models.test/overwatch.zip"] = package,
+        });
+        using var manager = CreateManager(handler, async (gameId, stagedPath, _) =>
+        {
+            GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, ModelsRoot);
+            await Task.CompletedTask;
+        });
+
+        await manager.EnsureModelAsync("Overwatch");
+
+        Assert.Equal(
+            ["https://models.test/stale.zip", "https://models.test/manifest.json", "https://models.test/overwatch.zip"],
+            handler.Requests);
+        var status = Assert.Single(manager.Snapshot());
+        Assert.Equal("ready", status.Stage);
+        Assert.Equal(2, status.Revision);
+    }
+
+    [Fact]
+    public async Task ASuccessfulInstall_KeepsUsingTheFreshManifest()
+    {
+        var package = BuildOverwatchPackage(revision: 2);
+        var packageHash = Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant();
+        var manifest = Manifest("Overwatch", apiVersion: 1, revision: 2,
+            package.Length, packageHash, "http://127.0.0.1:8895/overwatch.zip");
+        var handler = new RouteHandler(new Dictionary<string, byte[]>
+        {
+            ["https://models.test/manifest.json"] = Encoding.UTF8.GetBytes(manifest),
+            ["http://127.0.0.1:8895/overwatch.zip"] = package,
+        });
+        using var manager = CreateManager(handler, async (gameId, stagedPath, _) =>
+        {
+            GameModelInstaller.InstallValidatedDirectory(gameId, stagedPath, ModelsRoot);
+            await Task.CompletedTask;
+        });
+
+        await manager.EnsureModelAsync("Overwatch");
+        await manager.EnsureModelAsync("Overwatch");
+
+        Assert.Single(handler.Requests, url => url == "https://models.test/manifest.json");
+        Assert.Equal("ready", Assert.Single(manager.Snapshot()).Stage);
     }
 
     [Fact]

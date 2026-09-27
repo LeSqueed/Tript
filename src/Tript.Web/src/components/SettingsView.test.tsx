@@ -308,7 +308,7 @@ describe('SettingsView', () => {
     renderSettings();
     fireEvent.click(screen.getByRole('tab', { name: 'Games' }));
     expect(screen.queryByLabelText(/^Game-capture timeout/)).toBeNull();
-    expect(screen.getByText(/known games come from the project catalogue/i)).toBeTruthy();
+    expect(screen.getByText(/Games are added when Tript recognizes them/i)).toBeTruthy();
     expect(screen.queryByLabelText(/^Capture mode/)).toBeNull();
   });
 

@@ -121,7 +121,7 @@ public sealed class AutomaticClipWindowValidationTests
 
 public sealed class AutomaticClipWindowUpdateTests : IDisposable
 {
-    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+    private const string OverwatchId = "5JWDDE307Z5127JK7KM4YCB1XW";
     private const string InvertedWindowJson =
         """{"recording":{"automaticClipBeforeSeconds":10,"automaticClipAfterSeconds":5}}""";
 
@@ -172,7 +172,7 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
     [Fact]
     public void ARejectedPerGameOverride_IsNotPersisted()
     {
-        Seed("""{"game":{"gameList":[{"id":"Overwatch","name":"Overwatch"}]}}""");
+        Seed("""{"game":{"gameList":[{"id":"5JWDDE307Z5127JK7KM4YCB1XW","name":"Overwatch"}]}}""");
         var (store, host) = NewHost();
         using var scope = host;
 
@@ -184,7 +184,7 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
                 {
                     new
                     {
-                        id = "Overwatch",
+                        id = OverwatchId,
                         name = "Overwatch",
                         automaticClipOverride = new { beforeSeconds = 30, afterSeconds = 10 },
                     },
@@ -226,7 +226,7 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
     [Fact]
     public void AValidPerGameOverridePatch_IsAcceptedAndStored()
     {
-        Seed("""{"game":{"gameList":[{"id":"Overwatch","name":"Overwatch"}]}}""");
+        Seed("""{"game":{"gameList":[{"id":"5JWDDE307Z5127JK7KM4YCB1XW","name":"Overwatch"}]}}""");
         var (store, host) = NewHost();
         using var scope = host;
 
@@ -238,7 +238,7 @@ public sealed class AutomaticClipWindowUpdateTests : IDisposable
                 {
                     new
                     {
-                        id = "Overwatch",
+                        id = OverwatchId,
                         name = "Overwatch",
                         automaticClipOverride = new { beforeSeconds = 2, afterSeconds = 10 },
                     },

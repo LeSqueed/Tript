@@ -349,7 +349,7 @@ internal sealed class ContentCatalogue
 
         if (item.Game is null && item.GameId is null
             && ContentLayout.GameSegment(sourcePath) is { } segment
-            && _games.FindByIdOrName(segment) is { } known)
+            && _games.GameForFolder(segment) is { } known)
         {
             item.GameId = known.Id;
             item.Game = known.Name;
@@ -381,7 +381,7 @@ internal sealed class ContentCatalogue
 
         if (game is null && gameId is null
             && (ContentLayout.GameSegment(clip.SourceSessionPath) ?? ContentLayout.GameSegment(clip.FilePath)) is { } segment
-            && _games.FindByIdOrName(segment) is { } known)
+            && _games.GameForFolder(segment) is { } known)
         {
             gameId = known.Id;
             game = known.Name;

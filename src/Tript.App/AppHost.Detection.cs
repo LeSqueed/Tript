@@ -56,6 +56,8 @@ internal sealed partial class AppHost
     private void DetectedGameStarted(DetectedGameProcess process)
     {
         var (owner, gameId) = TrackDetectedGameStarted(process);
+        RunGuarded(() => RememberDetectedExecutablePath(process.GameId, process.ExecutablePath),
+            "saving the detected executable path");
         PushState(IsRecording, CurrentGameId);
         EnsureManagedModel(gameId);
         if (!ShouldAutoRecord(gameId))
@@ -180,8 +182,8 @@ internal sealed partial class AppHost
                 return;
         }
 
-        if (_modelManager is null || !_gameCatalog.Entries.Any(game =>
-                string.Equals(game.GameId, gameId, StringComparison.OrdinalIgnoreCase)))
+        if (_modelManager is null || IsCustomGameId(gameId) || !GameList.Any(game =>
+                string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }

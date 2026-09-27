@@ -9,12 +9,10 @@ export function CustomGameDraftEditor({
   state,
   draft,
   gameList,
-  builtInIds,
 }: {
   state: CustomGameDraftState;
   draft: CustomGameDraft;
   gameList: GameSetting[];
-  builtInIds: ReadonlySet<string>;
 }) {
   const { validationAttempted, submissionError } = state;
   const { platform } = usePlatformCapabilities();
@@ -43,7 +41,7 @@ export function CustomGameDraftEditor({
           {state.searchResults.length > 0 && <div className="game-search-results" role="listbox" aria-label="Game search results">
             {state.searchResults.map((result, index) => {
               const id = result.gameId?.trim();
-              const duplicate = id ? gameList.some((game) => game.id.toLowerCase() === id.toLowerCase()) || builtInIds.has(id.toLowerCase()) : false;
+              const duplicate = id ? gameList.some((game) => game.id.toLowerCase() === id.toLowerCase()) : false;
               const resolvable = Boolean(id || result.igdbId || result.steamAppId);
               const disabled = !resolvable || duplicate || state.resolving;
               return <button

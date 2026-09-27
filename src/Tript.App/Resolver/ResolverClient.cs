@@ -31,11 +31,16 @@ internal sealed class ResolverClient : IDisposable
     internal ResolverConfig Config => _config;
 
     internal async Task<ResolvedGame> ResolveAsync(string input, CancellationToken cancellationToken = default)
+        => await ResolveAsync(input, nameHint: null, cancellationToken);
+
+    internal async Task<ResolvedGame> ResolveAsync(string input, string? nameHint,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(input);
-        var game = await GetAsync<ResolvedGame>(
-            _config.Endpoint($"resolve?input={Uri.EscapeDataString(input.Trim())}"), authenticated: true,
-            cancellationToken);
+        var query = $"resolve?input={Uri.EscapeDataString(input.Trim())}";
+        if (!string.IsNullOrWhiteSpace(nameHint))
+            query += $"&name={Uri.EscapeDataString(nameHint.Trim())}";
+        var game = await GetAsync<ResolvedGame>(_config.Endpoint(query), authenticated: true, cancellationToken);
         _registry?.TryUpsert(game);
         return game;
     }

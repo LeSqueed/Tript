@@ -88,6 +88,73 @@ public sealed class UbisoftInventorySource(IDiscoveryFileSystem fileSystem, IDis
     }
 }
 
+public sealed class BattleNetInventorySource(IDiscoveryFileSystem fileSystem, IDiscoveryRegistry registry) : IGameInventorySource
+{
+    private const string ParentKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+    private const string LauncherUid = "battle.net";
+    public GameStore Store => GameStore.BattleNet;
+
+    public ValueTask<SourceInventory> DiscoverAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new InventoryBuilder(Store);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var view in Enum.GetValues<RegistryViewId>())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IEnumerable<string> entries;
+            try { entries = registry.GetSubKeyNames(RegistryHiveId.LocalMachine, view, ParentKey).ToArray(); }
+            catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
+            {
+                result.Warn("battlenet.registry", ex.Message, ParentKey);
+                continue;
+            }
+            foreach (var entry in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var key = $@"{ParentKey}\{entry}";
+                try
+                {
+                    var uninstall = registry.GetString(RegistryHiveId.LocalMachine, view, key, "UninstallString");
+                    if (UidOf(uninstall) is not { } uid || uid.Equals(LauncherUid, StringComparison.OrdinalIgnoreCase)
+                        || !seen.Add(uid))
+                    {
+                        continue;
+                    }
+
+                    var install = registry.GetString(RegistryHiveId.LocalMachine, view, key, "InstallLocation");
+                    var name = registry.GetString(RegistryHiveId.LocalMachine, view, key, "DisplayName") ?? entry;
+                    if (install is not null && PathSafety.TryCanonicalize(fileSystem, install, out var root))
+                        result.AddGame(uid, name, root);
+                }
+                catch (Exception ex) when (RegistryExceptions.IsExpected(ex))
+                {
+                    result.Warn("battlenet.registry", ex.Message, key);
+                }
+            }
+        }
+        return ValueTask.FromResult(result.Build());
+    }
+
+    private static string? UidOf(string? uninstallString)
+    {
+        if (string.IsNullOrWhiteSpace(uninstallString)
+            || !uninstallString.Contains("Blizzard Uninstaller", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        const string flag = "--uid=";
+        var start = uninstallString.IndexOf(flag, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+            return null;
+
+        start += flag.Length;
+        var end = uninstallString.IndexOfAny([' ', '"'], start);
+        var uid = (end < 0 ? uninstallString[start..] : uninstallString[start..end]).Trim();
+        return uid.Length == 0 ? null : uid;
+    }
+}
+
 internal static class RegistryExceptions
 {
     public static bool IsExpected(Exception exception) =>

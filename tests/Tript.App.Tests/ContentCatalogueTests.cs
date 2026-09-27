@@ -16,7 +16,7 @@ namespace Tript.App.Tests;
 [Collection(AppHostCollection.Name)]
 public sealed class ContentCatalogueTests : IDisposable
 {
-    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+    private const string OverwatchId = "5JWDDE307Z5127JK7KM4YCB1XW";
 
     private readonly AppHostCollectionFixture _fixture;
     private readonly string _contentRoot;

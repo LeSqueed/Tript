@@ -42,6 +42,8 @@ internal sealed class AppController
                 parameters.Deserialize<CreateAutomaticClipsParameters>()),
             ["PauseAutomaticClips"] = (_, _) => _host.ToggleAutomaticClipPause(),
             ["ListGames"] = (_, _) => { _host.PushGameList(); _host.PushModelStatus(); },
+            ["DownloadGameModel"] = (parameters, _) =>
+                _host.DownloadGameModel(parameters.Deserialize<DownloadGameModelParameters>()?.GameId),
             ["DeleteContent"] = (parameters, _) => _host.DeleteContent(parameters.Deserialize<DeleteContentParameters>()),
             ["DeleteMultipleContent"] = (parameters, _) => _host.DeleteMultipleContent(
                 parameters.Deserialize<DeleteMultipleContentParameters>()),

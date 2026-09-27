@@ -3,7 +3,6 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Tript.Core;
 
 namespace Tript.Settings;
 
@@ -103,7 +102,7 @@ public sealed class GameSettings
     [JsonConverter(typeof(SecondsTimeSpanConverter))]
     public TimeSpan GameCaptureTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
-    public List<GameSetting> GameList { get; set; } = [new() { Id = Ulid.Derive("builtin:Overwatch"), Name = "Overwatch" }];
+    public List<GameSetting> GameList { get; set; } = [];
 
     public bool AutoRecordDetectedGames { get; set; } = true;
 

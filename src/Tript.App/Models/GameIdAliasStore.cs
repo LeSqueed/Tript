@@ -22,6 +22,9 @@ internal sealed class GameIdAliasStore
             if (!string.IsNullOrWhiteSpace(oldId) && !string.IsNullOrWhiteSpace(newId))
                 _aliases[oldId] = newId;
         }
+
+        foreach (var (oldId, newId) in LegacyGameIds.Map)
+            _aliases.TryAdd(oldId, newId);
     }
 
     internal string? Resolve(string? id)

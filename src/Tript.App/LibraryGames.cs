@@ -31,13 +31,21 @@ internal sealed class LibraryGames
             string.Equals(game.Id, value, StringComparison.OrdinalIgnoreCase)
             || string.Equals(game.Name, value, StringComparison.OrdinalIgnoreCase));
 
+    internal (string Id, string Name)? GameForFolder(string segment)
+    {
+        if (FindByIdOrName(segment) is { } known)
+            return (known.Id, known.Name);
+        return _aliases.Resolve(segment) is { } id ? (id, segment) : null;
+    }
+
     internal string? ResolveLegacyGameId(string? gameName)
     {
         if (string.IsNullOrWhiteSpace(gameName))
             return null;
 
         return FindByIdOrName(gameName)?.Id
-            ?? All.FirstOrDefault(game => ExecutableNames.Equal(ExecutableOf(game), gameName))?.Id;
+            ?? All.FirstOrDefault(game => ExecutableNames.Equal(ExecutableOf(game), gameName))?.Id
+            ?? _aliases.Resolve(gameName);
     }
 
     internal string? ResolveStoredGameId(string? storedId, string? gameName) =>

@@ -608,6 +608,10 @@ export interface ResolveGameSearchParameters {
   input: string;
 }
 
+export interface DownloadGameModelParameters {
+  gameId: string;
+}
+
 export interface RequestGameAddParameters {
   requestId: string;
   gameId: string;
@@ -741,6 +745,7 @@ export type CommandParameters =
   | SearchGamesParameters
   | ResolveGameSearchParameters
   | RequestGameAddParameters
+  | DownloadGameModelParameters
   | AddGameCandidateParameters
   | IgnoreGameCandidateParameters
   | OpenFileLocationParameters
@@ -794,6 +799,7 @@ export type CommandName =
   | 'SearchGames'
   | 'ResolveGameSearch'
   | 'RequestGameAdd'
+  | 'DownloadGameModel'
   | 'AddGameCandidate'
   | 'IgnoreGameCandidate'
   | 'OpenFileLocation'

@@ -13,6 +13,7 @@ public enum GameStore
     Ubisoft,
     Xbox,
     Gog,
+    BattleNet,
     Local,
 }
 

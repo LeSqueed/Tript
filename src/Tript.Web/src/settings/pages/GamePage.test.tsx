@@ -3,17 +3,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { GamePage } from './GamePage';
-import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameAddRequestedMessage, GameModelStatus, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import type { GameSettings, RecordingMode } from '../settingsModel';
 import { ToastProvider } from '../../components/ui/toast/ToastProvider';
 
-const PACKAGED_ID = 'Overwatch';
+const GAME_ID = '5JWDDE307Z5127JK7KM4YCB1XW';
 const SETTINGS: GameSettings = {
   gameCaptureTimeout: 10,
   ignoredApplications: [],
   gameList: [
     {
-      id: PACKAGED_ID,
+      id: GAME_ID,
       name: 'Overwatch',
       executablePath: 'C:\\Program Files\\Overwatch\\Overwatch.exe',
       captureMethodOverride: { method: 'Game' },
@@ -41,12 +41,12 @@ function renderPage(
   const onSearchGames = vi.fn();
   const onResolveGameSearch = vi.fn();
   const onRequestGame = vi.fn();
+  const onDownloadModel = vi.fn();
   const view = (
     selected = selectedGameExecutable,
     settingsUpdateResult: SettingsUpdateResultMessage | null = null,
     gameSearchResults: GameSearchResultsMessage | null = null,
     resolvedGameSearch: ResolvedGameSearchMessage | null = null,
-    catalogueGames: GameInfo[] = [],
     modelStatuses: GameModelStatus[] = [],
     gameAddRequested: GameAddRequestedMessage | null = null,
   ) => (
@@ -56,7 +56,6 @@ function renderPage(
         update={update}
         page="game"
         externalPushCount={0}
-        builtInGameIds={[PACKAGED_ID]}
         selectedGameExecutable={selected}
         settingsUpdateResult={settingsUpdateResult}
         onBrowseExecutable={onBrowseExecutable}
@@ -64,10 +63,10 @@ function renderPage(
         onSearchGames={onSearchGames}
         resolvedGameSearch={resolvedGameSearch}
         onResolveGameSearch={onResolveGameSearch}
-        catalogueGames={catalogueGames}
         modelStatuses={modelStatuses}
         gameAddRequested={gameAddRequested}
         onRequestGame={onRequestGame}
+        onDownloadModel={onDownloadModel}
         globalClipBeforeSeconds={globalClipBeforeSeconds}
         globalClipAfterSeconds={globalClipAfterSeconds}
         globalRecordingMode={globalRecordingMode}
@@ -78,7 +77,7 @@ function renderPage(
     </ToastProvider>
   );
   const result = render(view());
-  return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, onRequestGame, view };
+  return { ...result, update, onBrowseExecutable, onSearchGames, onResolveGameSearch, onRequestGame, onDownloadModel, view };
 }
 
 function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverride']) {
@@ -87,7 +86,7 @@ function oneGame(override?: GameSettings['gameList'][number]['automaticClipOverr
     ignoredApplications: [],
     gameList: [
       {
-        id: PACKAGED_ID,
+        id: GAME_ID,
         name: 'Overwatch',
 
         ...(override !== undefined ? { automaticClipOverride: override } : {}),
@@ -153,7 +152,7 @@ describe('custom games', () => {
 
   it('edits the custom name and path atomically without changing its id or overrides', () => {
     const { update } = renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1]);
     fireEvent.change(screen.getByLabelText('Game name'), { target: { value: 'Renamed game' } });
     fireEvent.change(screen.getByLabelText('Executable path'), {
       target: { value: 'E:\\Renamed\\renamed.exe' },
@@ -170,7 +169,7 @@ describe('custom games', () => {
 
   it('removes only the selected custom entry', () => {
     const { update } = renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[1]);
     expect(gameListFrom(update)).toEqual([SETTINGS.gameList[0]]);
   });
 
@@ -232,29 +231,39 @@ describe('custom games', () => {
   });
 });
 
-describe('packaged games', () => {
-  it('renders packaged identity and executable as immutable values', () => {
-    renderPage();
-    expect(screen.getByText('Overwatch', { selector: 'strong' })).toBeTruthy();
+describe('resolved games', () => {
+  it('can be edited and removed like any other game', () => {
+    const { update } = renderPage();
     expect(screen.getByText('C:\\Program Files\\Overwatch\\Overwatch.exe')).toBeTruthy();
-    expect(screen.queryByDisplayValue('Overwatch')).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+    expect(gameListFrom(update)).toEqual([SETTINGS.gameList[1]]);
   });
 
-  it('resets a packaged row to the minimal packaged identity', () => {
-    const { update } = renderPage();
+  it('offers to reset overrides only on games that have them, removing only the overrides', () => {
+    const game = { ...SETTINGS.gameList[0], executable: 'Overwatch.exe', iconId: 'icon-1', integrations: { enabled: false } };
+    const { update } = renderPage({ ...SETTINGS, gameList: [game, SETTINGS.gameList[1]] });
+    expect(screen.getAllByRole('button', { name: 'Reset overrides' })).toHaveLength(1);
+
     fireEvent.click(screen.getByRole('button', { name: 'Reset overrides' }));
+
     expect(gameListFrom(update)).toEqual([
-      { id: PACKAGED_ID, name: 'Overwatch' },
+      {
+        id: GAME_ID,
+        name: 'Overwatch',
+        executablePath: 'C:\\Program Files\\Overwatch\\Overwatch.exe',
+        executable: 'Overwatch.exe',
+        iconId: 'icon-1',
+        integrations: { enabled: false },
+      },
       SETTINGS.gameList[1],
     ]);
   });
 
-  it('matches packaged ids case-insensitively', () => {
-    renderPage({ ...SETTINGS, gameList: [{ ...SETTINGS.gameList[0], id: 'overwatch' }] });
-    expect(screen.getByRole('button', { name: 'Reset overrides' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  it('says the executable is detected on first launch until a path is known', () => {
+    renderPage(oneGame());
+    expect(screen.getByText('Detected on first launch')).toBeTruthy();
   });
 });
 
@@ -276,7 +285,7 @@ describe('automatic clip overrides', () => {
 
     expect(update).toHaveBeenCalledTimes(1);
     expect(gameListFrom(update)[0]).toEqual({
-      id: PACKAGED_ID,
+      id: GAME_ID,
       name: 'Overwatch',
 
       automaticClipOverride: { beforeSeconds: 3, afterSeconds: null },
@@ -308,7 +317,7 @@ describe('automatic clip overrides', () => {
     fireEvent.change(screen.getByLabelText('Before (s)'), { target: { value: '' } });
 
     expect(gameListFrom(update)[0]).toEqual({
-      id: PACKAGED_ID,
+      id: GAME_ID,
       name: 'Overwatch',
     });
   });
@@ -476,7 +485,7 @@ describe('per-game override disclosure', () => {
       gameCaptureTimeout: 10,
       gameList: [
         {
-          id: PACKAGED_ID,
+          id: GAME_ID,
           name: 'Overwatch',
 
           qualityOverride: { fps: 144 },
@@ -506,7 +515,7 @@ describe('per-game override disclosure', () => {
 
     expect(update).toHaveBeenCalledTimes(1);
     expect(gameListFrom(update)[0]).toEqual({
-      id: PACKAGED_ID,
+      id: GAME_ID,
       name: 'Overwatch',
 
       recordingModeOverride: { mode: 'SessionWithReplayBuffer' },
@@ -563,7 +572,7 @@ describe('automatic capture', () => {
     renderPage({
       gameCaptureTimeout: 10,
       ignoredApplications: [],
-      gameList: [{ id: PACKAGED_ID, name: 'Overwatch', autoRecordOverride: false }],
+      gameList: [{ id: GAME_ID, name: 'Overwatch', autoRecordOverride: false }],
     });
 
     expect(screen.getByText('modified')).toBeTruthy();
@@ -597,43 +606,62 @@ describe('focusing a game from a deep link', () => {
   });
 });
 
-describe('unsupported games', () => {
-  const STATUS = { gameId: 'unsupported-game', stage: 'unsupported' as const };
-  const CATALOGUE = [{ id: 'unsupported-game', name: 'Some Unreleased Game', detected: false }];
+describe('model support', () => {
+  const GAME = 'custom-existing';
+  const UNSUPPORTED = { gameId: GAME, stage: 'unsupported' as const };
 
-  it('renders a row for every unsupported model status regardless of the gameList overrides', () => {
-    const { view, rerender } = renderPage({ gameCaptureTimeout: 10, gameList: [], ignoredApplications: [] });
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+  it('tags a game that has a model as supported, in the games list itself', () => {
+    const { view, rerender } = renderPage();
+    rerender(view(null, null, null, null, [{ gameId: GAME, stage: 'ready', revision: 4 }]));
 
-    const row = screen.getByTestId('unsupported-game-row');
-    expect(row.textContent).toContain('Some Unreleased Game');
-    expect(screen.getByRole('button', { name: 'Request this game' })).toBeTruthy();
-  });
-
-  it('does not render the section when nothing is unsupported', () => {
-    renderPage();
+    const row = document.querySelector(`[data-game-id="${GAME}"]`)!;
+    expect(row.querySelector('[data-testid="game-supported"]')?.textContent).toBe('Supported');
+    expect(screen.queryByRole('button', { name: 'Request this game' })).toBeNull();
     expect(screen.queryByTestId('unsupported-games')).toBeNull();
   });
 
-  it('sends RequestGameAdd for the clicked game', () => {
+  it('shows download progress while a model is installing', () => {
+    const { view, rerender } = renderPage();
+    rerender(view(null, null, null, null, [
+      { gameId: GAME, stage: 'downloading', completedBytes: 50, totalBytes: 200 },
+    ]));
+
+    expect(screen.getByTestId('game-model-progress').textContent).toBe('Downloading model 25%');
+  });
+
+  it('offers to download the model when installing it failed', () => {
+    const { view, rerender, onDownloadModel } = renderPage();
+    rerender(view(null, null, null, null, [{ gameId: GAME, stage: 'error', message: 'network down' }]));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download model' }));
+    expect(onDownloadModel).toHaveBeenCalledWith(GAME);
+  });
+
+  it('shows nothing for a game whose model state is not known yet', () => {
+    renderPage();
+    expect(screen.queryByTestId('game-supported')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Request this game' })).toBeNull();
+  });
+
+  it('sends RequestGameAdd for an unsupported game', () => {
     const { view, rerender, onRequestGame } = renderPage();
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+    rerender(view(null, null, null, null, [UNSUPPORTED]));
 
     fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
 
     expect(onRequestGame).toHaveBeenCalledTimes(1);
-    expect(onRequestGame.mock.calls[0][1]).toBe('unsupported-game');
+    expect(onRequestGame.mock.calls[0][1]).toBe(GAME);
   });
 
   it('shows the button as Requested and a quiet toast for an already-requested response, not an error', () => {
     const { view, rerender, onRequestGame } = renderPage();
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+    rerender(view(null, null, null, null, [UNSUPPORTED]));
     fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
     const requestId = onRequestGame.mock.calls[0][0] as string;
 
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS], {
+    rerender(view(null, null, null, null, [UNSUPPORTED], {
       requestId,
-      gameId: 'unsupported-game',
+      gameId: GAME,
       status: 'alreadyRequested',
     }));
 
@@ -644,13 +672,13 @@ describe('unsupported games', () => {
 
   it('shows a wait message with hours for a rate-limited response', () => {
     const { view, rerender, onRequestGame } = renderPage();
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS]));
+    rerender(view(null, null, null, null, [UNSUPPORTED]));
     fireEvent.click(screen.getByRole('button', { name: 'Request this game' }));
     const requestId = onRequestGame.mock.calls[0][0] as string;
 
-    rerender(view(null, null, null, null, CATALOGUE, [STATUS], {
+    rerender(view(null, null, null, null, [UNSUPPORTED], {
       requestId,
-      gameId: 'unsupported-game',
+      gameId: GAME,
       status: 'rateLimited',
       retryAfterSeconds: 21600,
     }));

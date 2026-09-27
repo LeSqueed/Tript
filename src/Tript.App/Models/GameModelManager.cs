@@ -93,51 +93,41 @@ internal sealed class GameModelManager : IDisposable
     private async Task EnsureModelCoreAsync(string gameId, CancellationToken cancellationToken)
     {
         if (_hasCustomModel?.Invoke(gameId) == true)
+        {
+            SetStatus(gameId, GameModelStage.Ready, message: "Custom model");
             return;
+        }
 
         try
         {
-            SetStatus(gameId, GameModelStage.Checking);
-            var manifest = await _manifest.GetAsync(cancellationToken).ConfigureAwait(false);
-            var game = manifest?.Games.FirstOrDefault(entry =>
-                string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
-            if (game is null)
+            GameModelRelease? failedRelease = null;
+            string? failure = null;
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                SetStatus(gameId, GameModelStage.Unsupported,
-                    message: "No model has been published for this game yet.");
-                return;
+                var release = await SelectReleaseAsync(gameId, cancellationToken).ConfigureAwait(false);
+                if (release is null)
+                    return;
+                if (failedRelease is not null && SameRelease(release, failedRelease))
+                    break;
+
+                try
+                {
+                    await DownloadValidateAndActivateAsync(gameId, release, cancellationToken).ConfigureAwait(false);
+                    SetStatus(gameId, GameModelStage.Ready, release.Revision);
+                    return;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException
+                    || !cancellationToken.IsCancellationRequested)
+                {
+                    Log.Warning(exception, "GameModelManager: installing revision {Revision} failed for {GameId}",
+                        release.Revision, gameId);
+                    await _manifest.InvalidateAsync(cancellationToken).ConfigureAwait(false);
+                    failedRelease = release;
+                    failure = exception.Message;
+                }
             }
 
-            var release = game.Releases
-                .Where(candidate => GameModelPackage.IsCompatible(candidate, _appVersion))
-                .OrderByDescending(candidate => candidate.Revision)
-                .FirstOrDefault();
-            var hasUsableModel = ModelService.HasModelForGame(gameId);
-            if (release is null)
-            {
-                if (hasUsableModel)
-                    ClearStatus(gameId);
-                else if (game.Releases.Count == 0)
-                    SetStatus(gameId, GameModelStage.Unsupported,
-                        message: "No model has been published for this game yet.");
-                else
-                    SetStatus(gameId, GameModelStage.Unsupported,
-                        message: $"No model API {SupportedModelApiVersion} release is available.");
-                return;
-            }
-
-            var installed = ModelJsonFiles.Read<InstalledGameModel>(
-                Path.Combine(_modelsRoot, gameId, "installed.json"));
-            var officialHealthy = installed is not null && GameModelPackage.IsInstalledHealthy(_modelsRoot, gameId, installed);
-            if (installed is not null && installed.ModelApiVersion == SupportedModelApiVersion &&
-                installed.Revision >= release.Revision && officialHealthy)
-            {
-                ClearStatus(gameId);
-                return;
-            }
-
-            await DownloadValidateAndActivateAsync(gameId, release, cancellationToken).ConfigureAwait(false);
-            SetStatus(gameId, GameModelStage.Ready, release.Revision);
+            SetStatus(gameId, GameModelStage.Error, message: failure);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -149,6 +139,52 @@ internal sealed class GameModelManager : IDisposable
             SetStatus(gameId, GameModelStage.Error, message: exception.Message);
         }
     }
+
+    private async Task<GameModelRelease?> SelectReleaseAsync(string gameId, CancellationToken cancellationToken)
+    {
+        SetStatus(gameId, GameModelStage.Checking);
+        var manifest = await _manifest.GetAsync(gameId, cancellationToken).ConfigureAwait(false);
+        var game = manifest?.Games.FirstOrDefault(entry =>
+            string.Equals(entry.GameId, gameId, StringComparison.OrdinalIgnoreCase));
+        if (game is null)
+        {
+            SetStatus(gameId, GameModelStage.Unsupported,
+                message: "No model has been published for this game yet.");
+            return null;
+        }
+
+        var release = game.Releases
+            .Where(candidate => GameModelPackage.IsCompatible(candidate, _appVersion))
+            .OrderByDescending(candidate => candidate.Revision)
+            .FirstOrDefault();
+        if (release is null)
+        {
+            if (ModelService.HasModelForGame(gameId))
+                SetStatus(gameId, GameModelStage.Ready);
+            else if (game.Releases.Count == 0)
+                SetStatus(gameId, GameModelStage.Unsupported,
+                    message: "No model has been published for this game yet.");
+            else
+                SetStatus(gameId, GameModelStage.Unsupported,
+                    message: $"No model API {SupportedModelApiVersion} release is available.");
+            return null;
+        }
+
+        var installed = ModelJsonFiles.Read<InstalledGameModel>(
+            Path.Combine(_modelsRoot, gameId, "installed.json"));
+        if (installed is not null && installed.ModelApiVersion == SupportedModelApiVersion &&
+            installed.Revision >= release.Revision && GameModelPackage.IsInstalledHealthy(_modelsRoot, gameId, installed))
+        {
+            SetStatus(gameId, GameModelStage.Ready, installed.Revision);
+            return null;
+        }
+
+        return release;
+    }
+
+    private static bool SameRelease(GameModelRelease left, GameModelRelease right) =>
+        left.ModelApiVersion == right.ModelApiVersion && left.Revision == right.Revision
+        && string.Equals(left.Sha256, right.Sha256, StringComparison.OrdinalIgnoreCase);
 
     private async Task DownloadValidateAndActivateAsync(string gameId, GameModelRelease release,
         CancellationToken cancellationToken)

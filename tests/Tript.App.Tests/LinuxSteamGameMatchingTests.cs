@@ -2,7 +2,6 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using Tript.Core;
-using Tript.GameDiscovery;
 using Tript.Recorder;
 using Tript.TestSupport;
 using Xunit;
@@ -11,29 +10,19 @@ namespace Tript.App.Tests;
 
 public sealed class LinuxSteamGameMatchingTests : IDisposable
 {
+    private const string OverwatchId = "5JWDDE307Z5127JK7KM4YCB1XW";
+
     private readonly string _home = FilePaths.ResolveLinks(Directory.CreateTempSubdirectory("tript-linux-steam-").FullName);
 
     public void Dispose() => Directory.Delete(_home, true);
 
-    [Fact]
-    public async Task PackagedOverwatchIsFoundInADiscoveredLinuxSteamLibrary()
-    {
-        var executable = InstallOverwatch();
-
-        var path = (await ScannerFor(_home)).FindProcessPath(PackagedOverwatch(), "Overwatch.exe");
-
-        Assert.Equal(executable, path);
-    }
-
     [LinuxFact]
-    public async Task OverwatchRunningUnderProtonIsDetectedAgainstItsDiscoveredPath()
+    public void OverwatchRunningUnderProtonIsDetectedAgainstItsResolvedPath()
     {
         var executable = InstallOverwatch();
-        var entry = PackagedOverwatch();
-        var discovered = (await ScannerFor(_home)).FindProcessPath(entry, entry.Executable);
         var files = new ProtonProcessFiles("Z:" + executable.Replace('/', '\\'));
         using var detector = new ProcessNameGameDetector(
-            [new GameDetectionTarget(entry.GameId, entry.Executable, discovered)],
+            [new GameDetectionTarget(OverwatchId, "Overwatch.exe", executable)],
             candidates =>
             {
                 var identity = LinuxProcessIdentity.Read(files, 4242)!;
@@ -49,7 +38,7 @@ public sealed class LinuxSteamGameMatchingTests : IDisposable
         detector.WaitForCallbacks();
 
         Assert.NotNull(started);
-        Assert.Equal(entry.GameId, started.GameId);
+        Assert.Equal(OverwatchId, started.GameId);
         Assert.Equal(executable, started.ExecutablePath);
     }
 
@@ -62,16 +51,6 @@ public sealed class LinuxSteamGameMatchingTests : IDisposable
         var executable = Path.Combine(install, "Overwatch.exe");
         File.WriteAllText(executable, "not a real PE; only the path matters");
         return executable;
-    }
-
-    private static GameCatalogEntry PackagedOverwatch() =>
-        GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json")).EntryById("Overwatch")
-            ?? throw new InvalidOperationException("The packaged catalogue has no Overwatch entry.");
-
-    private static async Task<GameInventoryScanner> ScannerFor(string home)
-    {
-        var discovery = new GameDiscoveryService([SteamInventorySource.ForLinuxHome(new PhysicalDiscoveryFileSystem(), home)]);
-        return new GameInventoryScanner(null) { Inventory = await discovery.DiscoverAsync() };
     }
 
     private sealed class ProtonProcessFiles(string windowsExecutable) : IProcessFiles

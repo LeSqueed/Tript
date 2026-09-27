@@ -66,7 +66,7 @@ internal sealed partial class AppHost
                 PushGameCandidate(candidate, normalized, libraryName);
                 return;
             }
-            var resolved = await _resolverClient!.ResolveAsync(resolution.Input,
+            var resolved = await _resolverClient!.ResolveAsync(resolution.Input, resolution.Name,
                 _discoveryCancellation.Token);
             if (_disposed || _shuttingDown)
                 return;
@@ -87,10 +87,14 @@ internal sealed partial class AppHost
                         {
                             Id = resolved.GameId,
                             Name = displayName,
-                            ExecutablePath = _gameCatalog.EntryById(resolved.GameId) is null ? normalized : null,
+                            ExecutablePath = normalized,
                         };
                         settings.Game.GameList.Add(game);
                         wasNew = true;
+                    }
+                    else if (!FilePaths.Comparer.Equals(game.ExecutablePath?.Trim() ?? string.Empty, normalized))
+                    {
+                        game.ExecutablePath = normalized;
                     }
                     return ValidateGameList(settings.Game.GameList, out var validationError)
                         ? null

@@ -343,6 +343,28 @@
   flex: 1;
 }
 
+.game-row-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.game-row-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.game-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .game-row-overrides {
   display: flex;
   flex-wrap: wrap;
@@ -417,4 +439,18 @@
   .game-row-main {
     flex-wrap: wrap;
   }
+}
+
+.game-support-pill {
+  color: var(--color-accent);
+  border-color: var(--color-accent-line);
+}
+
+.game-row-name .pill-muted {
+  border-color: currentColor;
+}
+
+.game-support-error {
+  color: var(--color-error);
+  border-color: var(--color-error);
 }

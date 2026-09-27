@@ -9,7 +9,7 @@ namespace Tript.App.Tests;
 
 public sealed class GameExecutableRoutingTests : IDisposable
 {
-    private const string OverwatchId = "57ZZVAZ0PJK8VQGPKB728QE57C";
+    private const string OverwatchId = "5JWDDE307Z5127JK7KM4YCB1XW";
 
     private readonly string _contentRoot;
     private readonly SettingsStore _store;
@@ -54,27 +54,78 @@ public sealed class GameExecutableRoutingTests : IDisposable
     }
 
     [Fact]
-    public void TheProjectCatalogueCarriesTheKnownExecutable()
+    public void AResolvedGameCarriesTheExecutableOfItsPath()
     {
-        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
+        Catalogue(new GameSetting
+        {
+            Id = OverwatchId,
+            Name = "Overwatch",
+            ExecutablePath = Path.Combine(_contentRoot, "Overwatch", "Overwatch.exe"),
+        });
 
         Assert.Equal("Overwatch.exe", Assert.Single(_host.GameList).Executable);
     }
 
     [Fact]
-    public void SettingsDoNotReplaceTheProjectCatalogueIdentity()
+    public void APathlessResolvedGame_IsTargetedByItsExecutableName()
+    {
+        Catalogue(new GameSetting { Id = OverwatchId, Name = "Overwatch" });
+
+        var target = Assert.Single(_host.BuildDetectionTargets());
+        Assert.Equal(OverwatchId, target.GameId);
+        Assert.Equal("Overwatch", target.Executable);
+        Assert.Null(target.ExecutablePath);
+    }
+
+    [Fact]
+    public void APathlessCustomGame_IsNotTargeted()
+    {
+        Catalogue(new GameSetting { Id = "custom-doom", Name = "Doom" });
+
+        Assert.Empty(_host.BuildDetectionTargets());
+    }
+
+    [Fact]
+    public void AGameMatchedByName_RemembersTheDetectedPath()
+    {
+        var executable = Path.Combine(_contentRoot, "Overwatch", "Overwatch.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, "exe");
+        Catalogue(new GameSetting { Id = OverwatchId, Name = "Overwatch", AutoRecordOverride = false });
+
+        _host.RememberDetectedExecutablePath(OverwatchId, executable);
+
+        var saved = Assert.Single(_store.Load().Game.GameList);
+        Assert.Equal(executable, saved.ExecutablePath);
+        Assert.False(saved.AutoRecordOverride);
+        Assert.Equal(executable, Assert.Single(_host.BuildDetectionTargets()).ExecutablePath);
+    }
+
+    [Fact]
+    public void AGameWithAPath_DoesNotTakeOnAnotherDetectedPath()
+    {
+        var existing = Path.Combine(_contentRoot, "A", "Overwatch.exe");
+        var other = Path.Combine(_contentRoot, "B", "Overwatch.exe");
+        foreach (var path in new[] { existing, other })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "exe");
+        }
+        Catalogue(new GameSetting { Id = OverwatchId, Name = "Overwatch", ExecutablePath = existing });
+
+        _host.RememberDetectedExecutablePath(OverwatchId, other);
+
+        Assert.Equal(existing, Assert.Single(_store.Load().Game.GameList).ExecutablePath);
+    }
+
+    [Fact]
+    public void OnlyTheGamesInSettingsAreListed()
     {
         Catalogue(new GameSetting { Id = "cs2", Name = "Counter-Strike 2", Executable = "cs2.exe" });
 
-        var games = _host.GameList;
-        var overwatch = Assert.Single(games, game => game.Id == OverwatchId);
-        Assert.Equal("Overwatch", overwatch.Name);
-        Assert.Equal("Overwatch.exe", overwatch.Executable);
-
-        var cs2 = Assert.Single(games, game => game.Id == "cs2");
+        var cs2 = Assert.Single(_host.GameList);
         Assert.Equal("Counter-Strike 2", cs2.Name);
         Assert.Equal("cs2.exe", cs2.Executable);
-        Assert.False(cs2.BuiltIn);
     }
 
     [Fact]
@@ -86,8 +137,8 @@ public sealed class GameExecutableRoutingTests : IDisposable
             JsonSerializer.Serialize(_host.GameList, Wire.Options));
 
         var entry = document.RootElement[0];
-        Assert.Equal("Overwatch", entry.GetProperty("name").GetString());
-        Assert.Equal("Overwatch.exe", entry.GetProperty("executable").GetString());
+        Assert.Equal("Counter-Strike 2", entry.GetProperty("name").GetString());
+        Assert.Equal("cs2.exe", entry.GetProperty("executable").GetString());
     }
 
     [Fact]
@@ -117,7 +168,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
     [InlineData("Overwatch.exe")]
     [InlineData("Overwatch")]
     [InlineData("OVERWATCH.EXE")]
-    public void TheKnownExecutableResolvesToTheProjectGame(string executable)
+    public void ALegacyOverwatchEntryWithAnExecutable_ResolvesToTheResolvedId(string executable)
     {
         Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch", Executable = executable });
 
@@ -127,7 +178,7 @@ public sealed class GameExecutableRoutingTests : IDisposable
     [Fact]
     public void AGameWithNoExecutable_IsStillResolvedByItsDisplayName()
     {
-        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
+        Catalogue(new GameSetting { Id = OverwatchId, Name = "Overwatch" });
 
         Assert.Equal(OverwatchId, _host.ResolveDetectedGameId("Overwatch"));
     }

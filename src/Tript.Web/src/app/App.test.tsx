@@ -171,7 +171,7 @@ describe('App shell', () => {
     expect(afterConnect).toBeGreaterThan(0);
     act(() => socket.serverMessage(JSON.stringify({
       method: 'gameList',
-      content: [{ id: 'Overwatch', name: 'Overwatch', detected: false, builtIn: true }],
+      content: [{ id: '5JWDDE307Z5127JK7KM4YCB1XW', name: 'Overwatch', detected: false }],
     })));
     expect(listGamesCount()).toBe(afterConnect);
   });

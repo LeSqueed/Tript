@@ -27,16 +27,9 @@ describe('useHostPreferences', () => {
     return { ...hook, ws, push };
   }
 
-  it('asks for the game list and keeps the built-in games it reports', () => {
-    const { result, ws, push } = setup();
+  it('asks for the game list once connected', () => {
+    const { ws } = setup();
     expect(ws.sent.some((frame) => frame.includes('"ListGames"'))).toBe(true);
-    const fallback = result.current.builtInGameIds;
-
-    push('gameList', [{ id: 'custom-1', builtIn: false }]);
-    expect(result.current.builtInGameIds).toBe(fallback);
-
-    push('gameList', [{ id: 'game-a', builtIn: true }, { id: 'custom-1', builtIn: false }]);
-    expect(result.current.builtInGameIds).toEqual(['game-a']);
   });
 
   it('follows the clip and delete settings', () => {

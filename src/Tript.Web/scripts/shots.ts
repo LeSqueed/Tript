@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
@@ -23,6 +23,9 @@ const SETTINGS_SOURCE = process.env.SHOTS_SETTINGS
   ?? join(process.env.APPDATA ?? join(process.env.HOME ?? '', '.config'), 'Tript', 'settings.json');
 const FOCUS = process.env.SHOTS_SESSION ?? 'Ranked with the squad';
 const HERO_AT = (process.env.SHOTS_HERO_AT ?? '100').split(',').map(Number);
+const SUPPORTED_GAMES = new Set((process.env.SHOTS_SUPPORTED_GAMES ?? '5JWDDE307Z5127JK7KM4YCB1XW').split(','));
+
+let pushToPage: ((method: string, content: unknown) => void) | null = null;
 
 function buildFrontend(): void {
   const web = join(import.meta.dirname, '..');
@@ -137,6 +140,7 @@ async function openApp(browser: Browser, host: Host): Promise<Page> {
   await page.route('http://localhost:8893/**', (route) =>
     route.continue({ url: route.request().url().replace(':8893/', `:${PORTS.content}/`) }));
   await page.routeWebSocket('ws://localhost:8894/**', (socket) => {
+    pushToPage = (method, content) => socket.send(JSON.stringify({ method, content }));
     const upstream = new WebSocket(socket.url().replace(':8894/', `:${PORTS.control}/`));
     const pending: string[] = [];
     upstream.onopen = () => {
@@ -422,7 +426,15 @@ async function trash(page: Page): Promise<void> {
   await page.getByRole('radio', { name: 'All' }).click();
 }
 
-async function settingsPages(page: Page): Promise<void> {
+function showModelSupport(settingsPath: string): void {
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { game?: { gameList?: { id: string }[] } };
+  const models = (settings.game?.gameList ?? []).map((game) => SUPPORTED_GAMES.has(game.id)
+    ? { gameId: game.id, stage: 'ready', revision: 4 }
+    : { gameId: game.id, stage: 'unsupported' });
+  pushToPage?.('modelStatus', { models });
+}
+
+async function settingsPages(page: Page, settingsPath: string): Promise<void> {
   for (const [tab, name] of [
     ['General', 'settings-general'],
     ['Recording', 'settings-recording'],
@@ -434,10 +446,12 @@ async function settingsPages(page: Page): Promise<void> {
     ['Hotkeys', 'settings-hotkeys'],
   ]) {
     await settingsTab(page, tab);
+    if (tab === 'Games') showModelSupport(settingsPath);
     await shoot(page, name);
   }
 
   await settingsTab(page, 'Games');
+  showModelSupport(settingsPath);
   await button(page, 'Add custom game').click();
   await page.waitForTimeout(400);
   await shoot(page, 'custom-game-editor');
@@ -486,7 +500,7 @@ async function main(): Promise<void> {
       await library(page);
       await player(page);
       await trash(page);
-      await settingsPages(page);
+      await settingsPages(page, settings);
       await recording(page);
       await page.close();
     } finally {

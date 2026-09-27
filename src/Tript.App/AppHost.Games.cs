@@ -161,11 +161,10 @@ internal sealed partial class AppHost
 
     internal void ReloadGameList()
     {
-        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _gameCatalog, _options.GameListJson,
+        var games = AppOptions.LoadCatalogue(_settingsStore.Load(), _options.GameListJson,
             out var settingsMigrated, _gameIdAliases);
         if (settingsMigrated)
             _settingsStore.Save();
-        AttachDiscoveredProcessPaths(games);
         lock (_gameListGate)
         {
             _catalogueGames = games;
@@ -181,8 +180,9 @@ internal sealed partial class AppHost
             return;
 
         var games = GameList;
-        manager.PruneStatuses(games.Select(game => game.Id).ToArray());
-        foreach (var game in games)
+        var modelGames = games.Where(game => !IsCustomGameId(game.Id)).ToArray();
+        manager.PruneStatuses(modelGames.Select(game => game.Id).ToArray());
+        foreach (var game in modelGames)
         {
             try
             {
@@ -195,13 +195,73 @@ internal sealed partial class AppHost
         }
     }
 
+    internal void RememberDetectedExecutablePath(string gameId, string? executablePath)
+    {
+        var normalized = NormalizePickedExecutable(executablePath);
+        if (normalized is null || IsCustomGameId(gameId) || _disposed)
+            return;
+        if (!GameList.Any(game => string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(game.ExecutablePath)))
+        {
+            return;
+        }
+
+        lock (_settingsUpdateGate)
+        {
+            var changed = false;
+            var saved = _settingsStore.TryUpdate(settings =>
+            {
+                var entry = settings.Game.GameList.FirstOrDefault(value =>
+                    string.Equals(value.Id, gameId, StringComparison.OrdinalIgnoreCase));
+                if (entry is null || !string.IsNullOrWhiteSpace(entry.ExecutablePath))
+                    return null;
+
+                entry.ExecutablePath = normalized;
+                changed = true;
+                return ValidateGameList(settings.Game.GameList, out var validationError) ? null : validationError;
+            }, out _, out var failure);
+
+            if (!saved)
+            {
+                Log.Warning("AppHost: the detected path for {GameId} was not saved: {Reason}", gameId, failure);
+                return;
+            }
+            if (!changed)
+                return;
+
+            ReloadGameList();
+            RebuildDetectionTargets();
+            PushGameList();
+            PushSettings();
+        }
+    }
+
+    internal void DownloadGameModel(string? gameId)
+    {
+        var manager = _modelManager;
+        gameId = gameId?.Trim();
+        if (manager is null || _disposed || string.IsNullOrEmpty(gameId) || IsCustomGameId(gameId)
+            || !GameList.Any(game => string.Equals(game.Id, gameId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = manager.EnsureModelAsync(gameId);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     internal async Task ReconcileCustomGameIdentitiesAsync()
     {
         if (_resolverClient is null || _disposed)
             return;
 
         var candidates = GameList
-            .Where(game => game.Id.StartsWith("custom-", StringComparison.OrdinalIgnoreCase)
+            .Where(game => IsCustomGameId(game.Id)
                 && !string.IsNullOrWhiteSpace(game.ExecutablePath))
             .ToArray();
         if (candidates.Length == 0)
@@ -222,8 +282,8 @@ internal sealed partial class AppHost
             ResolvedGame resolved;
             try
             {
-                resolved = await _resolverClient.ResolveAsync(resolution.Input, _discoveryCancellation.Token)
-                    .ConfigureAwait(false);
+                resolved = await _resolverClient.ResolveAsync(resolution.Input, resolution.Name,
+                    _discoveryCancellation.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (_discoveryCancellation.IsCancellationRequested)
             {
@@ -255,7 +315,10 @@ internal sealed partial class AppHost
                         !ReferenceEquals(value, entry)
                         && string.Equals(value.Id, resolved.GameId, StringComparison.OrdinalIgnoreCase));
                     if (existingCanonical is not null)
+                    {
+                        MergeInto(existingCanonical, entry);
                         settings.Game.GameList.Remove(entry);
+                    }
                     else
                         entry.Id = resolved.GameId;
 
@@ -286,23 +349,6 @@ internal sealed partial class AppHost
         }
     }
 
-    private void AttachDiscoveredProcessPaths(List<GameInfo> games)
-    {
-        var inventory = _gameInventory.Inventory;
-        if (inventory.Games.IsDefaultOrEmpty)
-            return;
-
-        foreach (var game in games)
-        {
-            if (!game.BuiltIn || !string.IsNullOrWhiteSpace(game.ExecutablePath))
-                continue;
-
-            var discovered = DiscoveredProcessPath(game.Id, game.Executable ?? string.Empty);
-            if (discovered is not null)
-                game.ExecutablePath = discovered;
-        }
-    }
-
     internal bool ValidateGameList(IReadOnlyList<GameSetting> gameList, out string? failure,
         bool requireExistingExecutables = false)
     {
@@ -324,17 +370,6 @@ internal sealed partial class AppHost
                 return false;
             }
 
-            if (_gameCatalog.EntryById(game.Id) is not null)
-            {
-                if (!string.IsNullOrWhiteSpace(game.ExecutablePath))
-                {
-                    failure = $"'{game.Id}' is a packaged game; its executable identity cannot be changed.";
-                    return false;
-                }
-
-                continue;
-            }
-
             try
             {
                 GameModelPaths.ValidateGameId(game.Id);
@@ -352,6 +387,9 @@ internal sealed partial class AppHost
             }
 
             var path = game.ExecutablePath?.Trim();
+            if (string.IsNullOrWhiteSpace(path) && !IsCustomGameId(game.Id))
+                continue;
+
             if (string.IsNullOrWhiteSpace(path) || !FilePaths.IsFullyQualified(path))
             {
                 failure = $"'{game.Id}' needs an exact absolute executable path.";
@@ -391,6 +429,21 @@ internal sealed partial class AppHost
 
         return true;
     }
+
+    private static void MergeInto(GameSetting target, GameSetting source)
+    {
+        if (string.IsNullOrWhiteSpace(target.ExecutablePath))
+            target.ExecutablePath = source.ExecutablePath;
+        target.IconId ??= source.IconId;
+        target.AutoRecordOverride ??= source.AutoRecordOverride;
+        target.RecordingModeOverride ??= source.RecordingModeOverride;
+        target.QualityOverride ??= source.QualityOverride;
+        target.CaptureMethodOverride ??= source.CaptureMethodOverride;
+        target.AutomaticClipOverride ??= source.AutomaticClipOverride;
+    }
+
+    private static bool IsCustomGameId(string gameId) =>
+        gameId.StartsWith("custom-", StringComparison.OrdinalIgnoreCase);
 
     internal static bool ValidateAutomaticClipWindows(SettingsModel settings, out string? failure)
     {

@@ -350,7 +350,6 @@ function AppShell({
             <SettingsView
               client={client}
               active={route === 'settings' && windowVisible}
-              builtInGameIds={preferences.builtInGameIds}
               focusGameId={gameSettingsFocus}
               onFocusGameHandled={() => setGameSettingsFocus(null)}
               focusPage={settingsPageFocus}

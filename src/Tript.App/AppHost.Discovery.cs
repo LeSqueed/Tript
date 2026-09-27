@@ -23,7 +23,7 @@ internal sealed partial class AppHost
             _gameInventory.Start(_discoveryCancellation.Token, OnInventoryDiscovered);
     }
 
-    private List<GameDetectionTarget> BuildDetectionTargets()
+    internal List<GameDetectionTarget> BuildDetectionTargets()
     {
         var targets = new List<GameDetectionTarget>();
         foreach (var game in GameList)
@@ -31,40 +31,21 @@ internal sealed partial class AppHost
             if (string.IsNullOrWhiteSpace(game.Executable))
                 continue;
 
-            if (!game.BuiltIn)
-            {
-                var customPath = NormalizePickedExecutable(game.ExecutablePath);
-                if (customPath is not null)
-                    targets.Add(new GameDetectionTarget(game.Id, game.Executable,
-                        ProcessNameGameDetector.NormalizePath(customPath)));
-                continue;
-            }
-
-            var discoveredPath = DiscoveredProcessPath(game.Id, game.Executable);
-            targets.Add(discoveredPath is null
-                ? new GameDetectionTarget(game.Id, game.Executable)
-                : new GameDetectionTarget(game.Id, game.Executable, discoveredPath));
+            var path = NormalizePickedExecutable(game.ExecutablePath);
+            if (path is not null)
+                targets.Add(new GameDetectionTarget(game.Id, game.Executable,
+                    ProcessNameGameDetector.NormalizePath(path)));
+            else if (string.IsNullOrWhiteSpace(game.ExecutablePath) && !IsCustomGameId(game.Id))
+                targets.Add(new GameDetectionTarget(game.Id, game.Executable));
         }
 
         return targets;
     }
 
-    private string? DiscoveredProcessPath(string gameId, string executable) =>
-        _gameInventory.FindProcessPath(_gameCatalog.EntryById(gameId), executable);
-
     private void OnInventoryDiscovered()
     {
-        if (_disposed)
-            return;
-
-        var previousPaths = GameList.Select(game => (game.Id, game.ExecutablePath)).ToList();
-        ReloadGameList();
-        var discoveredPaths = GameList.Select(game => (game.Id, game.ExecutablePath)).ToList();
-        if (!previousPaths.SequenceEqual(discoveredPaths))
-        {
-            RebuildDetectionTargets();
-            PushGameList();
-        }
+        if (!_disposed)
+            _ = ReconcileCustomGameIdentitiesAsync();
     }
 
     private void RebuildDetectionTargets()

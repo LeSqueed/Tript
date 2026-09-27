@@ -55,7 +55,6 @@ internal sealed partial class AppHost : IDisposable
     private readonly ClipTitleStore _clipTitles;
     private readonly ThumbnailStore _thumbnails;
     private readonly TrashStore _trash;
-    private readonly GameCatalog _gameCatalog;
     private readonly GameIdAliasStore _gameIdAliases;
     private readonly GameModelManager? _modelManager;
     private readonly ResolverClient? _resolverClient;
@@ -162,9 +161,8 @@ internal sealed partial class AppHost : IDisposable
         _resolverClient = resolverClient;
         _gameIdAliases = gameIdAliases ?? new GameIdAliasStore();
         _libraryProbe = new LibraryProbe(() => _libraryTools.Value?.Ffprobe);
-        _gameCatalog = GameCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "games.json"));
 #if TRIPT_TRAINING
-        TrainingWorkspaceMigration.Migrate(_gameCatalog, TrainingPaths.RootPath,
+        TrainingWorkspaceMigration.Migrate(LegacyGameIds.NewestFirst, TrainingPaths.RootPath,
             TrainingPaths.InstalledModelsPath);
 #endif
         _gameInventory = new GameInventoryScanner(CreateGameDiscovery());
@@ -483,37 +481,31 @@ internal sealed partial class AppHost : IDisposable
         if (!Directory.Exists(modelsRoot))
             return;
 
-        foreach (var entry in _gameCatalog.Entries)
+        foreach (var (legacy, gameId) in LegacyGameIds.NewestFirst)
         {
-            foreach (var legacy in entry.LegacyGameIds ?? Array.Empty<string>())
-            {
-                if (string.IsNullOrWhiteSpace(legacy))
-                    continue;
+            var from = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(legacy));
+            var to = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(gameId));
+            if (!Directory.Exists(from) || Directory.Exists(to))
+                continue;
 
-                var from = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(legacy));
-                var to = Path.Combine(modelsRoot, GameModelPaths.ValidateGameId(entry.GameId));
-                if (Directory.Exists(from) && !Directory.Exists(to))
+            try
+            {
+                Directory.Move(from, to);
+                var installedPath = Path.Combine(to, "installed.json");
+                if (File.Exists(installedPath)
+                    && JsonNode.Parse(File.ReadAllText(installedPath)) is JsonObject installed)
                 {
-                    try
-                    {
-                        Directory.Move(from, to);
-                        var installedPath = Path.Combine(to, "installed.json");
-                        if (File.Exists(installedPath)
-                            && JsonNode.Parse(File.ReadAllText(installedPath)) is JsonObject installed)
-                        {
-                            installed["gameId"] = entry.GameId;
-                            var temporaryPath = installedPath + ".tmp";
-                            File.WriteAllText(temporaryPath, installed.ToJsonString(Wire.Options));
-                            File.Move(temporaryPath, installedPath, true);
-                        }
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                        or JsonException)
-                    {
-                        Log.Warning("could not migrate model folder {From} to {To}: {Reason}",
-                            from, to, exception.Message);
-                    }
+                    installed["gameId"] = gameId;
+                    var temporaryPath = installedPath + ".tmp";
+                    File.WriteAllText(temporaryPath, installed.ToJsonString(Wire.Options));
+                    File.Move(temporaryPath, installedPath, true);
                 }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                or JsonException)
+            {
+                Log.Warning("could not migrate model folder {From} to {To}: {Reason}",
+                    from, to, exception.Message);
             }
         }
     }

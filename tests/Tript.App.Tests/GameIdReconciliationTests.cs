@@ -128,6 +128,30 @@ public sealed class GameIdReconciliationTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileCustomGameIdentitiesAsync_MovesPathAndOverridesOntoAPathlessCanonicalEntry()
+    {
+        var (host, store, _, executablePath, _) = CreateStoreBackedHost();
+        using (host)
+        {
+            var settings = store.Load();
+            settings.Game.GameList =
+            [
+                new GameSetting { Id = "custom-abc", Name = "Example Game", ExecutablePath = executablePath, AutoRecordOverride = false },
+                new GameSetting { Id = CanonicalGameId, Name = "Example Game" },
+            ];
+            store.Save();
+            host.ReloadGameList();
+
+            await host.ReconcileCustomGameIdentitiesAsync();
+
+            var merged = Assert.Single(store.Load().Game.GameList);
+            Assert.Equal(CanonicalGameId, merged.Id);
+            Assert.Equal(executablePath, merged.ExecutablePath);
+            Assert.False(merged.AutoRecordOverride);
+        }
+    }
+
+    [Fact]
     public async Task ReconcileCustomGameIdentitiesAsync_WithoutStoreEvidence_LeavesTheEntryUntouched()
     {
         var (host, store, _, _, handler) = CreateStoreBackedHost();

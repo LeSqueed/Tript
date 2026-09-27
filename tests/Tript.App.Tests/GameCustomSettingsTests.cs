@@ -73,7 +73,6 @@ public sealed class GameCustomSettingsTests : IDisposable
             })));
 
             var game = Assert.Single(_host.GameList, candidate => candidate.Id == "custom-doom");
-            Assert.False(game.BuiltIn);
             Assert.Equal("Doom", game.Name);
             Assert.Equal(Path.GetFileName(exe), game.Executable);
             Assert.Equal(exe, game.ExecutablePath);
@@ -93,7 +92,8 @@ public sealed class GameCustomSettingsTests : IDisposable
     public void AutoRecordOverride_OnlyChangesTheGlobalDefaultWhenPresent()
     {
         var settings = _store.Load();
-        var game = Assert.Single(settings.Game.GameList);
+        var game = new GameSetting { Id = "5JWDDE307Z5127JK7KM4YCB1XW", Name = "Overwatch" };
+        settings.Game.GameList.Add(game);
 
         Assert.True(_host.ShouldAutoRecord(game.Id));
         game.AutoRecordOverride = false;
@@ -138,7 +138,7 @@ public sealed class GameCustomSettingsTests : IDisposable
         var game = Assert.Single(store.Load().Game.GameList, value => value.Id == ResolverHandler.GameId);
         Assert.Equal("Example Game", game.Name);
         Assert.Equal(executablePath, game.ExecutablePath);
-        Assert.Equal("/resolve?input=steam%3A824270", Assert.Single(handler.Requests));
+        Assert.Equal("/resolve?input=steam%3A824270&name=Example%20Game", Assert.Single(handler.Requests));
 
         Assert.True(host.ShouldAutoRecord(ResolverHandler.GameId));
     }
@@ -175,6 +175,128 @@ public sealed class GameCustomSettingsTests : IDisposable
         Assert.True(SpinWait.SpinUntil(() => host.GameList.Any(game => game.Id == ResolverHandler.GameId),
             TimeSpan.FromSeconds(3)));
         Assert.False(host.ShouldAutoRecord(ResolverHandler.GameId));
+    }
+
+    [Fact]
+    public void FullscreenCandidate_FillsInThePathOfAGameListedWithoutOne()
+    {
+        var root = Path.Combine(_contentRoot, "resolved-pathless");
+        var installRoot = Path.Combine(root, "steamapps", "common", "ExampleGame");
+        Directory.CreateDirectory(installRoot);
+        var executablePath = Path.Combine(installRoot, "example.exe");
+        File.WriteAllText(executablePath, "exe");
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        store.Load().Game.GameList.Add(new GameSetting
+        {
+            Id = ResolverHandler.GameId,
+            Name = "Example Game",
+            AutoRecordOverride = false,
+        });
+        store.Save();
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
+        host.SetInventoryForTesting(new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
+                "Example Game", installRoot, ImmutableArray<string>.Empty),
+        ], []));
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
+
+        Assert.True(SpinWait.SpinUntil(
+            () => host.GameList.Any(game => game.Id == ResolverHandler.GameId && game.ExecutablePath == executablePath),
+            TimeSpan.FromSeconds(3)));
+        var game = Assert.Single(store.Load().Game.GameList);
+        Assert.Equal(executablePath, game.ExecutablePath);
+        Assert.False(game.AutoRecordOverride);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_ForAGameListedAtAnotherPath_SwitchesToTheLaunchedCopy()
+    {
+        var root = Path.Combine(_contentRoot, "resolved-other-install");
+        var installRoot = Path.Combine(root, "steamapps", "common", "ExampleGame");
+        var launched = Path.Combine(installRoot, "example.exe");
+        var previous = Path.Combine(root, "Games", "ExampleGame", "example.exe");
+        foreach (var path in new[] { launched, previous })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "exe");
+        }
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        store.Load().Game.GameList.Add(new GameSetting
+        {
+            Id = ResolverHandler.GameId,
+            Name = "Example Game",
+            ExecutablePath = previous,
+            AutoRecordOverride = false,
+        });
+        store.Save();
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
+        host.SetInventoryForTesting(new GameInventory([
+            new InstalledGame(GameStore.Steam, new ProductId(GameStore.Steam, "824270"),
+                "Example Game", installRoot, ImmutableArray<string>.Empty),
+        ], []));
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", launched));
+
+        Assert.True(SpinWait.SpinUntil(
+            () => host.GameList.Any(game => game.Id == ResolverHandler.GameId && game.ExecutablePath == launched),
+            TimeSpan.FromSeconds(3)));
+        var game = Assert.Single(store.Load().Game.GameList);
+        Assert.Equal(launched, game.ExecutablePath);
+        Assert.False(game.AutoRecordOverride);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_FromBattleNet_ResolvesItsUidWithTheNameAsAHint()
+    {
+        var root = Path.Combine(_contentRoot, "resolved-battlenet");
+        var installRoot = Path.Combine(root, "Games", "Overwatch");
+        var executablePath = Path.Combine(installRoot, "_retail_", "Overwatch.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(executablePath)!);
+        File.WriteAllText(executablePath, "exe");
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        var handler = new ResolverHandler();
+        using var http = new HttpClient(handler);
+        using var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http);
+        using var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
+        host.SetInventoryForTesting(new GameInventory([
+            new InstalledGame(GameStore.BattleNet, new ProductId(GameStore.BattleNet, "prometheus"),
+                "Overwatch", installRoot, ImmutableArray<string>.Empty),
+        ], []));
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "Overwatch.exe", executablePath));
+
+        Assert.True(SpinWait.SpinUntil(() => host.GameList.Any(game => game.Id == ResolverHandler.GameId),
+            TimeSpan.FromSeconds(3)));
+        Assert.Equal("/resolve?input=battlenet%3Aprometheus&name=Overwatch", Assert.Single(handler.Requests));
+        Assert.Equal(executablePath, Assert.Single(store.Load().Game.GameList).ExecutablePath);
     }
 
     [Fact]
@@ -435,13 +557,38 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 
     [Fact]
-    public void ValidateGameList_RejectsAnExecutablePathOnAPackagedGame()
+    public void ValidateGameList_AcceptsAResolvedGameWhosePathIsNotKnownYet()
+    {
+        Assert.True(_host.ValidateGameList(
+        [
+            new GameSetting { Id = "5JWDDE307Z5127JK7KM4YCB1XW", Name = "Overwatch" },
+        ], out var failure));
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void ValidateGameList_StillRequiresAPathForACustomGame()
     {
         Assert.False(_host.ValidateGameList(
         [
-            new GameSetting { Id = "Overwatch", Name = "Overwatch", ExecutablePath = @"C:\Games\Overwatch\Overwatch.exe" },
+            new GameSetting { Id = "custom-doom", Name = "Doom" },
         ], out var failure));
-        Assert.Contains("packaged", failure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("absolute executable path", failure, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateGameList_AcceptsAnExecutablePathOnAResolvedGame()
+    {
+        Assert.True(_host.ValidateGameList(
+        [
+            new GameSetting
+            {
+                Id = "5JWDDE307Z5127JK7KM4YCB1XW",
+                Name = "Overwatch",
+                ExecutablePath = OperatingSystem.IsWindows() ? @"C:\Games\Overwatch\Overwatch.exe" : "/games/Overwatch/Overwatch.exe",
+            },
+        ], out var failure));
+        Assert.Null(failure);
     }
 
     [Fact]
@@ -465,7 +612,6 @@ public sealed class GameCustomSettingsTests : IDisposable
             var game = Assert.Single(_host.GameList, candidate => candidate.ExecutablePath == exe);
             Assert.StartsWith("custom-", game.Id);
             Assert.Equal("Suggested", game.Name);
-            Assert.False(game.BuiltIn);
             Assert.Contains(exe, _store.Load().Game.GameList.Select(g => g.ExecutablePath));
         }
         finally

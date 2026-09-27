@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import type { SettingsPageName } from '../useSettings';
 import type { GameSetting, GameSettings, RecordingMode } from '../settingsModel';
-import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
+import type { GameAddRequestedMessage, GameModelStatus, GameSearchResultsMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage, SettingsUpdateResultMessage } from '../../ipc/protocol';
 import { Button, Toggle } from '../../components/ui/controls';
-import { UnsupportedGamesList } from './game/UnsupportedGamesList';
+import { GameSupportAction, GameSupportTag, useGameRequests } from './game/GameSupport';
 import { IgnoredApplicationsList } from './game/IgnoredApplicationsList';
-import { GameOverrideFields } from './game/GameOverrideFields';
+import { GameOverrideFields, hasOverrides } from './game/GameOverrideFields';
 import { CustomGameDraftEditor } from './game/CustomGameDraftEditor';
 import { useCustomGameDraft } from './game/useCustomGameDraft';
 
@@ -20,7 +20,6 @@ export function GamePage({
   update,
   page,
   externalPushCount: _externalPushCount,
-  builtInGameIds,
   selectedGameExecutable,
   settingsUpdateResult,
   onBrowseExecutable,
@@ -28,10 +27,10 @@ export function GamePage({
   onSearchGames,
   resolvedGameSearch,
   onResolveGameSearch,
-  catalogueGames,
   modelStatuses,
   gameAddRequested,
   onRequestGame,
+  onDownloadModel,
   globalClipBeforeSeconds,
   globalClipAfterSeconds,
   globalRecordingMode,
@@ -43,7 +42,6 @@ export function GamePage({
   update: (page: SettingsPageName, patch: Partial<Record<string, unknown>>) => string;
   page: SettingsPageName;
   externalPushCount: number;
-  builtInGameIds: readonly string[];
   selectedGameExecutable: SelectedGameExecutableMessage | null;
   settingsUpdateResult: SettingsUpdateResultMessage | null;
   onBrowseExecutable: (requestId: string) => void;
@@ -51,10 +49,10 @@ export function GamePage({
   onSearchGames: (requestId: string, query: string) => void;
   resolvedGameSearch: ResolvedGameSearchMessage | null;
   onResolveGameSearch: (requestId: string, input: string) => void;
-  catalogueGames: GameInfo[];
   modelStatuses: GameModelStatus[];
   gameAddRequested: GameAddRequestedMessage | null;
   onRequestGame: (requestId: string, gameId: string) => void;
+  onDownloadModel: (gameId: string) => void;
   globalClipBeforeSeconds?: number;
   globalClipAfterSeconds?: number;
   globalRecordingMode: RecordingMode;
@@ -68,7 +66,6 @@ export function GamePage({
 
   const gameList = Array.isArray(settings.gameList) ? settings.gameList : [];
   const ignoredApplications = Array.isArray(settings.ignoredApplications) ? settings.ignoredApplications : [];
-  const builtInIds = new Set(builtInGameIds.map((id) => id.toLowerCase()));
   const saveGameList = (next: GameSetting[]) => update(page, { gameList: next });
 
   const draftState = useCustomGameDraft({
@@ -83,6 +80,9 @@ export function GamePage({
     onResolveGameSearch,
   });
   const { draft } = draftState;
+  const gameRequests = useGameRequests(gameAddRequested, onRequestGame);
+  const statusFor = (gameId: string) =>
+    modelStatuses.find((status) => status.gameId.toLowerCase() === gameId.toLowerCase());
 
   useEffect(() => {
     if (!focusGameId) return;
@@ -102,9 +102,16 @@ export function GamePage({
     saveGameList(gameList.map((game, i) => (i === index ? { ...game, ...patch } : game)));
   }
 
-  function resetPackagedGame(index: number) {
-    const game = gameList[index];
-    replaceGame(index, { id: game.id, name: game.name });
+  function resetOverrides(index: number) {
+    const {
+      autoRecordOverride: _autoRecord,
+      recordingModeOverride: _recordingMode,
+      qualityOverride: _quality,
+      captureMethodOverride: _captureMethod,
+      automaticClipOverride: _automaticClip,
+      ...rest
+    } = gameList[index];
+    replaceGame(index, rest);
   }
 
   return (
@@ -117,27 +124,19 @@ export function GamePage({
           label="Automatically record recognized games when they launch"
         />
       </section>
-      <UnsupportedGamesList
-        modelStatuses={modelStatuses}
-        catalogueGames={catalogueGames}
-        gameAddRequested={gameAddRequested}
-        onRequestGame={onRequestGame}
-      />
       <div className="game-list">
         <div className="game-list-heading">
           <h3 className="subheading">Games</h3>
           <Button onClick={draftState.startAdd} disabled={draft !== null}>Add custom game</Button>
         </div>
         {gameList.length === 0 ? (
-          <p className="muted small">No game overrides or custom games yet; known games come from the project catalogue.</p>
+          <p className="muted small">No games yet. Games are added when Tript recognizes them, or add one yourself.</p>
         ) : (
-          <p className="muted small">
-            Packaged games support per-game overrides. Custom games use the exact executable path you provide.
-          </p>
+          <p className="muted small">Each game uses the exact executable path shown and supports per-game overrides.</p>
         )}
 
         {draft && (
-          <CustomGameDraftEditor state={draftState} draft={draft} gameList={gameList} builtInIds={builtInIds} />
+          <CustomGameDraftEditor state={draftState} draft={draft} gameList={gameList} />
         )}
 
         {gameList.map((game, index) => (
@@ -147,27 +146,37 @@ export function GamePage({
             data-game-id={game.id}
           >
             <div className="game-row-main">
-              <strong>{game.name}</strong>
-              <span className="muted small">{game.id}</span>
-              {builtInIds.has(game.id.toLowerCase()) ? (
-                <Button variant="ghost" onClick={() => resetPackagedGame(index)} title="Reset all overrides for this game">Reset overrides</Button>
-              ) : (
-                <>
-                  <Button variant="ghost" onClick={() => draftState.startEdit(index, game)} disabled={draft !== null}>Edit</Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => saveGameList(gameList.filter((_, i) => i !== index))}
-                    title="Remove this custom game"
-                  >
-                    Remove
-                  </Button>
-                </>
-              )}
+              <div className="game-row-identity">
+                <div className="game-row-name">
+                  <strong>{game.name}</strong>
+                  <GameSupportTag status={statusFor(game.id)} />
+                </div>
+                <span className="muted small">{game.id}</span>
+              </div>
+              <div className="game-row-actions">
+                <GameSupportAction
+                  gameId={game.id}
+                  status={statusFor(game.id)}
+                  requests={gameRequests}
+                  onDownloadModel={onDownloadModel}
+                />
+                {hasOverrides(game) && (
+                  <Button variant="ghost" onClick={() => resetOverrides(index)} title="Reset all overrides for this game">Reset overrides</Button>
+                )}
+                <Button variant="ghost" onClick={() => draftState.startEdit(index, game)} disabled={draft !== null}>Edit</Button>
+                <Button
+                  variant="danger"
+                  onClick={() => saveGameList(gameList.filter((_, i) => i !== index))}
+                  title="Remove this game"
+                >
+                  Remove
+                </Button>
+              </div>
             </div>
 
             <div className="game-executable-readonly">
               <span className="muted small">Executable</span>
-              <code>{game.executablePath ?? game.executable ?? 'Provided by the packaged game'}</code>
+              <code>{game.executablePath ?? 'Detected on first launch'}</code>
             </div>
 
             <GameOverrideFields

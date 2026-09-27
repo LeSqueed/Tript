@@ -19,13 +19,16 @@ public sealed class RecorderLifecycleTests : IDisposable
         _root = Path.Combine(Path.GetTempPath(), "tript-recorder-lifecycle", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
         var settingsPath = Path.Combine(_root, "settings.json");
+        var store = new SettingsStore(new SettingsFileProvider(settingsPath));
+        store.Load().Game.GameList.Add(new GameSetting { Id = "5JWDDE307Z5127JK7KM4YCB1XW", Name = "Overwatch" });
+        store.Save();
         _host = new AppHost(new AppOptions
         {
             ContentRoot = _root,
             SettingsPath = settingsPath,
             WebRoot = _root,
             FakeRecorder = true,
-        }, new SettingsStore(new SettingsFileProvider(settingsPath)), runtime: null, new RecordingSessionTracker(),
+        }, store, runtime: null, new RecordingSessionTracker(),
             recorderStopTimeout: TimeSpan.FromMilliseconds(20),
             storageProbe: AmpleStorage.Probe);
     }

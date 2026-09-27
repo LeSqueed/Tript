@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ComponentProps } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
-import type { GameAddRequestedMessage, GameInfo, GameModelStatus, GameSearchResultsMessage, ModelStatusMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
+import type { GameAddRequestedMessage, GameModelStatus, GameSearchResultsMessage, ModelStatusMessage, ResolvedGameSearchMessage, SelectedGameExecutableMessage } from '../ipc/protocol';
 import { useIpcMessage, useSendOnConnect } from '../app/useConnection';
 import { useAudioLevels } from '../settings/useAudioLevels';
 import { useSettings, type SettingsPageName } from '../settings/useSettings';
@@ -39,7 +39,6 @@ function LiveAudioPage({
 
 export function SettingsView({
   client,
-  builtInGameIds = [],
   focusGameId = null,
   onFocusGameHandled,
   focusPage = null,
@@ -47,7 +46,6 @@ export function SettingsView({
   active = true,
 }: {
   client: IpcClient;
-  builtInGameIds?: readonly string[];
   focusGameId?: string | null;
   onFocusGameHandled?: () => void;
   focusPage?: SettingsPageName | null;
@@ -68,7 +66,6 @@ export function SettingsView({
   const [selectedGameExecutable, setSelectedGameExecutable] = useState<SelectedGameExecutableMessage | null>(null);
   const [gameSearchResults, setGameSearchResults] = useState<GameSearchResultsMessage | null>(null);
   const [resolvedGameSearch, setResolvedGameSearch] = useState<ResolvedGameSearchMessage | null>(null);
-  const [catalogueGames, setCatalogueGames] = useState<GameInfo[]>([]);
   const [modelStatuses, setModelStatuses] = useState<GameModelStatus[]>([]);
   const [gameAddRequested, setGameAddRequested] = useState<GameAddRequestedMessage | null>(null);
   const controller = useSettings(client);
@@ -95,10 +92,6 @@ export function SettingsView({
     if (typeof response?.requestId === 'string' && Array.isArray(response.results)) {
       setGameSearchResults(response as GameSearchResultsMessage);
     }
-  });
-
-  useIpcMessage(client, 'gameList', (content) => {
-    if (Array.isArray(content)) setCatalogueGames(content as GameInfo[]);
   });
 
   useIpcMessage(client, 'modelStatus', (content) => {
@@ -211,7 +204,6 @@ export function SettingsView({
             update={controller.update}
             page={page}
             externalPushCount={controller.externalPushCount}
-            builtInGameIds={builtInGameIds}
             focusGameId={focusGameId}
             onFocusHandled={onFocusGameHandled}
             selectedGameExecutable={selectedGameExecutable}
@@ -221,10 +213,10 @@ export function SettingsView({
             onSearchGames={(requestId, query) => client.send('SearchGames', { requestId, query, limit: 20 })}
             resolvedGameSearch={resolvedGameSearch}
             onResolveGameSearch={(requestId, input) => client.send('ResolveGameSearch', { requestId, input })}
-            catalogueGames={catalogueGames}
             modelStatuses={modelStatuses}
             gameAddRequested={gameAddRequested}
             onRequestGame={(requestId, gameId) => client.send('RequestGameAdd', { requestId, gameId })}
+            onDownloadModel={(gameId) => client.send('DownloadGameModel', { gameId })}
             globalClipBeforeSeconds={controller.settings.recording.automaticClipBeforeSeconds}
             globalClipAfterSeconds={controller.settings.recording.automaticClipAfterSeconds}
             globalRecordingMode={controller.settings.recording.mode}

@@ -197,8 +197,6 @@ internal sealed class GameInfo
 
     public string? ExecutablePath { get; set; }
 
-    public bool BuiltIn { get; set; }
-
     public bool Detected { get; set; }
 }
 
@@ -395,6 +393,11 @@ internal sealed class ResolveGameSearchParameters
     public string RequestId { get; set; } = string.Empty;
 
     public string Input { get; set; } = string.Empty;
+}
+
+internal sealed class DownloadGameModelParameters
+{
+    public string GameId { get; set; } = string.Empty;
 }
 
 internal sealed class RequestGameAddParameters

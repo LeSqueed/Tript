@@ -3,6 +3,28 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.2.1 (2026-09-28)
+
+### Games
+
+- **WARDOGS is supported, in beta.** Tript bookmarks kills, kill assists, deaths, vehicle kills,
+  revives and wins, and cuts highlights from kills and kill assists. Overwatch is in beta too.
+
+### Bookmarks
+
+- **Plays: bookmarks for moments that are not kills.** A game can now mark moments such as a
+  destroyed vehicle or a win. They show as **Play** with the moment's name, for example
+  "Play · Vehicle destroyed", in a colour of their own and with their own filter in the bookmark
+  list.
+- **The bookmark list names each bookmark,** the same way the timeline already did.
+
+### Keyboard
+
+- **Enter saves.** In a field next to a save or create button, such as a clip's title, pressing
+  Enter does the same as clicking that button.
+- **Arrow keys move between the buttons in a dialog,** such as the delete dialog. Enter or Space
+  then presses the one you are on.
+
 ## 1.2.0 (2026-09-27)
 
 ### Games

@@ -206,6 +206,7 @@ internal sealed partial class AppHost
         var regionGroups = workspace.LoadRegionGroups();
         var labels = parameters.Labels.Select(TrainingWorkspaceEditor.ToLabel).ToList();
         var id = TrainingSampleStore.SampleId(sourcePath, parameters.TimestampSeconds);
+        workspace.EnsureDirectories();
         var temporaryPath = Path.Combine(workspace.SamplesPath, id + ".capture-" + Guid.NewGuid().ToString("N") + ".png");
         try
         {

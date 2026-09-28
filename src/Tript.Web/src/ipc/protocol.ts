@@ -721,6 +721,7 @@ export interface PublishTrainingModelParameters {
   gameId: string;
   username: string;
   password: string;
+  minimumAppVersion?: string;
 }
 
 export interface NewConnectionParameters {

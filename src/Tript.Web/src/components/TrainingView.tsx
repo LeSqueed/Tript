@@ -361,7 +361,11 @@ export function TrainingView({ client }: TrainingViewProps) {
             </p>
           )}
 
-          <TrainingPublishForm client={client} gameId={gameId} hasModel={Boolean(training.model)} />
+          <TrainingPublishForm
+            client={client}
+            gameId={gameId}
+            hasModel={Boolean(training.model) || training.events.some((event) => event.detectionKind === 'Ocr')}
+          />
 
           {workspace.selectedSample && (
             <TrainingSampleEditor

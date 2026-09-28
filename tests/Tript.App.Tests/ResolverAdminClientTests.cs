@@ -36,6 +36,99 @@ public sealed class ResolverAdminClientTests : IDisposable
         Assert.Contains("filename=model.zip", handler.UploadBody);
     }
 
+    private const string OcrEvents =
+        """[{"id":1,"name":"Victory","type":"Trigger","detectionKind":"Ocr","classId":-1,"bookmarkType":"Play"}]""";
+    private const string ObjectEvents =
+        """[{"id":1,"name":"Elimination","type":"Trigger","detectionKind":"Object","classId":0,"bookmarkType":"Kill"}]""";
+
+    private (AdminHandler Handler, HttpClient Http, ResolverAdminClient Client) NewClient()
+    {
+        var handler = new AdminHandler();
+        var http = new HttpClient(handler);
+        return (handler, http, new ResolverAdminClient(new ResolverConfig(new Uri("https://resolver.test/"), null), http));
+    }
+
+    [Fact]
+    public async Task Publish_AnOcrOnlyModel_UploadsItsOcrFilesAndTheMinimumAppVersion()
+    {
+        Directory.CreateDirectory(_root);
+        var events = Path.Combine(_root, "events.json");
+        File.WriteAllText(events, OcrEvents);
+        File.WriteAllBytes(Path.Combine(_root, "ocr_model.onnx"), [1, 2, 3]);
+        File.WriteAllText(Path.Combine(_root, "ocr_dict.txt"), "A\nB\n");
+        var (handler, http, client) = NewClient();
+        using (http)
+        using (client)
+        {
+            var revision = await client.PublishAsync("01HRESOLVEDGAME000000000000", _root, events,
+                "admin", "password-123", minimumAppVersion: "1.2.1");
+
+            Assert.Equal(1, revision);
+            Assert.Contains("name=minimumAppVersion", handler.UploadBody);
+            Assert.Contains("1.2.1", handler.UploadBody);
+            Assert.Contains("ocr_model.onnx", handler.UploadBody);
+            Assert.Contains("ocr_dict.txt", handler.UploadBody);
+        }
+    }
+
+    [Fact]
+    public async Task Publish_OcrEventsWithoutAnOcrModel_IsRefusedBeforeAnyRequest()
+    {
+        Directory.CreateDirectory(_root);
+        var events = Path.Combine(_root, "events.json");
+        File.WriteAllText(events, OcrEvents);
+        var (handler, http, client) = NewClient();
+        using (http)
+        using (client)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.PublishAsync(
+                "01HRESOLVEDGAME000000000000", _root, events, "admin", "password-123"));
+
+            Assert.Contains("OCR", error.Message);
+            Assert.Empty(handler.Paths);
+        }
+    }
+
+    [Fact]
+    public async Task Publish_ObjectEventsWithoutAnObjectModel_IsRefusedBeforeAnyRequest()
+    {
+        Directory.CreateDirectory(_root);
+        var events = Path.Combine(_root, "events.json");
+        File.WriteAllText(events, ObjectEvents);
+        var (handler, http, client) = NewClient();
+        using (http)
+        using (client)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.PublishAsync(
+                "01HRESOLVEDGAME000000000000", _root, events, "admin", "password-123"));
+
+            Assert.Contains("model.onnx", error.Message);
+            Assert.Empty(handler.Paths);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("  ", null)]
+    [InlineData("1.2.1", "1.2.1")]
+    [InlineData(" 1.2.1 ", "1.2.1")]
+    [InlineData("01.2.3", "1.2.3")]
+    public void MinimumAppVersion_IsOptionalAndNormalized(string? input, string? expected)
+    {
+        Assert.Equal(expected, ResolverAdminClient.NormalizeMinimumAppVersion(input));
+    }
+
+    [Theory]
+    [InlineData("1.2")]
+    [InlineData("1.2.1.0")]
+    [InlineData("v1.2.1")]
+    [InlineData("1.2.x")]
+    public void MinimumAppVersion_RejectsAnythingButMajorMinorPatch(string input)
+    {
+        Assert.Throws<InvalidOperationException>(() => ResolverAdminClient.NormalizeMinimumAppVersion(input));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

@@ -99,4 +99,51 @@ describe('TrainingEventEditor', () => {
     expect(screen.getByRole('alert').textContent).toContain('requires a language and template');
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  function bookmarkOptionValues(): string[] {
+    const select = screen.getByLabelText('Bookmark') as HTMLSelectElement;
+    return [...select.options].map((option) => option.value);
+  }
+
+  it('offers Play but not Manual for automatic events', () => {
+    const onSave = vi.fn();
+    const event: TrainingEventDefinition = { id: 5, classId: 3, name: 'Vehicle destroyed', type: 'Trigger' };
+    render(<TrainingEventEditor event={event} isNew onCancel={vi.fn()} onSave={onSave} />);
+
+    expect(bookmarkOptionValues()).toEqual(['', 'Kill', 'Goal', 'Assist', 'Death', 'Play']);
+    fireEvent.change(screen.getByLabelText('Bookmark'), { target: { value: 'Play' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ bookmarkType: 'Play' }));
+  });
+
+  it('keeps a legacy Manual bookmark on a trigger until it is changed', () => {
+    const onSave = vi.fn();
+    const event: TrainingEventDefinition = {
+      id: 6, classId: 4, name: 'Old event', type: 'Trigger', bookmarkType: 'Manual',
+    };
+    render(<TrainingEventEditor event={event} isNew={false} onCancel={vi.fn()} onSave={onSave} />);
+
+    expect(bookmarkOptionValues()).toContain('Manual');
+    expect(screen.getByRole('option', { name: 'Manual (legacy)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ bookmarkType: 'Manual' }));
+  });
+
+  it('drops the bookmark from an exclusion event when it is saved', () => {
+    const onSave = vi.fn();
+    const event: TrainingEventDefinition = {
+      id: -1, classId: -1, name: 'Respawning', type: 'Exclusion', detectionKind: 'Ocr', bookmarkType: 'Manual',
+      ocr: { patterns: [{ languageTag: 'en-US', template: 'RESPAWNING' }] },
+    };
+    render(<TrainingEventEditor event={event} isNew={false} onCancel={vi.fn()} onSave={onSave} />);
+
+    const select = screen.getByLabelText('Bookmark') as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'Exclusion', bookmarkType: null }));
+  });
 });

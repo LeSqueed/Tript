@@ -20,6 +20,23 @@ public class BookmarkTypeConverterTests
     }
 
     [Fact]
+    public void Play_RoundTripsWithItsSubtype()
+    {
+        var json = JsonSerializer.Serialize(new Bookmark { Type = BookmarkType.Play, Subtype = "Vehicle destroyed" });
+
+        Assert.Contains("\"Play\"", json);
+        var bookmark = JsonSerializer.Deserialize<Bookmark>(json)!;
+        Assert.Equal(BookmarkType.Play, bookmark.Type);
+        Assert.Equal("Vehicle destroyed", bookmark.Subtype);
+    }
+
+    [Fact]
+    public void Play_IsNotIncludedInHighlightsByType()
+    {
+        Assert.False(BookmarkType.Play.IsIncludedInHighlights());
+    }
+
+    [Fact]
     public void KnownName_IsCaseInsensitive()
     {
         Assert.Equal(BookmarkType.Goal, Deserialize("\"goal\"").Type);

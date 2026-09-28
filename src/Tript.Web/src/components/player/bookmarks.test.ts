@@ -5,6 +5,7 @@ import type { BookmarkItem } from '../../ipc/protocol';
 import {
   bookmarkColor,
   bookmarkKindLabel,
+  bookmarkRowLabel,
   filterBookmarks,
   summarizeBookmarks,
 } from './bookmarks';
@@ -24,6 +25,21 @@ describe('bookmarkColor', () => {
 
   it('falls back to the accent for unknown types', () => {
     expect(bookmarkColor('something-new')).toBe('#22d3ee');
+  });
+
+  it('gives plays a colour of their own', () => {
+    expect(bookmarkColor('play')).toBe('#f472b6');
+    expect(bookmarkColor('play')).not.toBe(bookmarkColor('something-new'));
+  });
+});
+
+describe('bookmarkRowLabel', () => {
+  it('appends the subtype that names a play', () => {
+    expect(bookmarkRowLabel({ type: 'play', subtype: 'Vehicle destroyed' })).toBe('Play · Vehicle destroyed');
+  });
+
+  it('shows just the kind when there is no subtype', () => {
+    expect(bookmarkRowLabel({ type: 'kill' })).toBe('Kill');
   });
 });
 

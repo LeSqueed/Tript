@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import type { BookmarkItem } from '../../ipc/protocol';
 import { Button, Checkbox } from '../ui/controls';
 import { formatTime } from './timelineModel';
-import { bookmarkColor, bookmarkKindLabel, filterBookmarks, summarizeBookmarks } from './bookmarks';
+import { bookmarkColor, bookmarkRowLabel, filterBookmarks, summarizeBookmarks } from './bookmarks';
 
 export interface BookmarkPanelProps {
   bookmarks: BookmarkItem[];
@@ -75,14 +75,14 @@ export function BookmarkPanel({
                 className="bookmark-row-seek"
                 onClick={() => onSeek(bookmark.time)}
                 aria-current={bookmark.id === activeId ? 'true' : undefined}
-                aria-label={`Play from ${bookmarkKindLabel(bookmark.type)} at ${formatTime(bookmark.time)}`}
+                aria-label={`Play from ${bookmarkRowLabel(bookmark)} at ${formatTime(bookmark.time)}`}
               >
                 <span
                   className="bookmark-swatch"
                   style={{ background: bookmarkColor(bookmark.type) }}
                   aria-hidden="true"
                 />
-                <span className="bookmark-row-label">{bookmarkKindLabel(bookmark.type)}</span>
+                <span className="bookmark-row-label">{bookmarkRowLabel(bookmark)}</span>
                 <span className="bookmark-row-time">{formatTime(bookmark.time)}</span>
               </button>
               {onDelete && bookmark.type === 'manual' && (

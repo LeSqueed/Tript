@@ -299,6 +299,11 @@ public sealed class DetectionHost : IDisposable
                     Type = bookmarkType,
                     Time = now - recording.StartTimeUtc,
                 };
+                if (bookmarkType == BookmarkType.Play)
+                {
+                    bookmark.Subtype = definition.Name;
+                    bookmark.IsAutomaticClipCandidate = definition.IncludeInAutoClips;
+                }
                 recording.AddBookmark(bookmark);
                 if (definition.IncludeInAutoClips)
                     _onAutomaticClipBookmark?.Invoke(bookmark);

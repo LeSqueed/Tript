@@ -105,6 +105,34 @@ public sealed class DetectionHostTests
 
             var bookmark = Assert.Single(recording.Bookmarks);
             Assert.Equal(BookmarkType.Kill, bookmark.Type);
+            Assert.Null(bookmark.Subtype);
+            Assert.Null(bookmark.IsAutomaticClipCandidate);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Detections_PlayDefinition_NamesTheBookmarkAndFollowsItsAutoClipSetting(bool includeInAutoClips)
+    {
+        var play = Trigger(0, BookmarkType.Play, includeInAutoClips);
+        play.Name = "Vehicle destroyed";
+        var detector = WithFrameSource(new()
+        {
+            ["Wardogs"] = [play],
+        });
+        var recording = new FakeRecordingSession();
+
+        using (new ActiveRecordingScope(recording))
+        using (var host = new DetectionHost(detector, detector.DefinitionSource))
+        {
+            Assert.True(host.Start("Wardogs"));
+            detector.RaiseDetections(Box(0));
+
+            var bookmark = Assert.Single(recording.Bookmarks);
+            Assert.Equal(BookmarkType.Play, bookmark.Type);
+            Assert.Equal("Vehicle destroyed", bookmark.Subtype);
+            Assert.Equal(includeInAutoClips, bookmark.IsAutomaticClipCandidate);
         }
     }
 

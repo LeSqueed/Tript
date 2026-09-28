@@ -23,7 +23,8 @@ public enum BookmarkType
 
     [IncludeInHighlights]
     Assist,
-    Death
+    Death,
+    Play
 }
 
 public static class BookmarkTypeExtensions

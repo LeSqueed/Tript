@@ -172,7 +172,13 @@
   align-items: end;
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(2, minmax(12rem, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(12rem, 1fr)) minmax(9rem, 11rem) auto;
+}
+
+.training-publish-fields .input {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
 }
 
 @media (max-width: 760px) {

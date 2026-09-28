@@ -7,12 +7,13 @@ const BOOKMARK_COLORS: Record<string, string> = {
   death: '#f0b429',
   assist: '#36d399',
   goal: '#4aa8ff',
+  play: '#f472b6',
   manual: '#a78bfa',
 };
 
 const UNKNOWN_COLOR = '#22d3ee';
 
-export const BOOKMARK_KINDS = ['kill', 'death', 'assist', 'goal', 'manual'] as const;
+export const BOOKMARK_KINDS = ['kill', 'death', 'assist', 'goal', 'play', 'manual'] as const;
 
 export interface BookmarkKindSummary {
   type: string;
@@ -30,6 +31,11 @@ export function bookmarkKindLabel(type: string): string {
     return 'Bookmark';
   }
   return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+export function bookmarkRowLabel(bookmark: Pick<BookmarkItem, 'type' | 'subtype'>): string {
+  const kind = bookmarkKindLabel(bookmark.type);
+  return bookmark.subtype ? `${kind} · ${bookmark.subtype}` : kind;
 }
 
 export function summarizeBookmarks(bookmarks: BookmarkItem[]): BookmarkKindSummary[] {

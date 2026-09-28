@@ -26,6 +26,49 @@ public class OcrTokenTemplateMatcherTests
         Assert.Equal("en", match.LanguageTag);
     }
 
+    private static OcrPatternDefinition Number(string template) => new()
+    {
+        LanguageTag = "en-US",
+        Template = template,
+        MaximumEditDistance = 0,
+    };
+
+    [Theory]
+    [InlineData("Respawning in 3...", "3")]
+    [InlineData("RESPAWNING IN 12", "12")]
+    [InlineData("RESPAWNINGIN3", "3")]
+    public void IntCaptureMatchesAndCapturesTheNumber(string text, string expected)
+    {
+        var match = OcrTokenTemplateMatcher.FindBestMatch(text, [Number("RESPAWNING IN {int:1..2}...")]);
+
+        Assert.NotNull(match);
+        Assert.Equal(expected, match.Captures["int"]);
+    }
+
+    [Fact]
+    public void IntCaptureRejectsLettersWhereTheNumberShouldBe()
+    {
+        Assert.Null(OcrTokenTemplateMatcher.FindBestMatch("RESPAWNING IN AMON", [Number("RESPAWNING IN {int}")]));
+    }
+
+    [Fact]
+    public void IntCaptureRespectsItsDigitLength()
+    {
+        Assert.Null(OcrTokenTemplateMatcher.FindBestMatch("WAVE 123 CLEARED", [Number("WAVE {int:1..2} CLEARED")]));
+        Assert.NotNull(OcrTokenTemplateMatcher.FindBestMatch("WAVE 123 CLEARED", [Number("WAVE {int} CLEARED")]));
+        Assert.NotNull(OcrTokenTemplateMatcher.FindBestMatch("WAVE 7 CLEARED", [Number("WAVE {int:1} CLEARED")]));
+    }
+
+    [Theory]
+    [InlineData("WAVE {int:0..2}")]
+    [InlineData("WAVE {int:3..2}")]
+    [InlineData("WAVE {int:1..10}")]
+    [InlineData("WAVE {int:x}")]
+    public void IntCaptureRejectsInvalidLengths(string template)
+    {
+        Assert.Throws<FormatException>(() => OcrTokenTemplateMatcher.Validate(Number(template)));
+    }
+
     [Fact]
     public void CaptureMatchesVariablePlayerName()
     {

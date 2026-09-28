@@ -12,10 +12,14 @@ namespace Tript.Settings.Tests;
 public class BookmarkMetadataTests
 {
     [Fact]
-    public void BookmarkVocabulary_HasTheFiveMembersInOrder()
+    public void BookmarkVocabulary_HasTheSixMembersInOrder()
     {
         Assert.Equal(
-            new[] { BookmarkType.Manual, BookmarkType.Kill, BookmarkType.Goal, BookmarkType.Assist, BookmarkType.Death },
+            new[]
+            {
+                BookmarkType.Manual, BookmarkType.Kill, BookmarkType.Goal, BookmarkType.Assist, BookmarkType.Death,
+                BookmarkType.Play,
+            },
             Enum.GetValues<BookmarkType>());
     }
 

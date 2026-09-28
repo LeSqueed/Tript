@@ -130,6 +130,55 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(call?.[1].ocrRegions[0].height).toBeCloseTo(0.3, 5);
   });
 
+  it('saves OCR region text on Enter', () => {
+    const client = createClient();
+    render(<TrainingSampleEditor
+      client={client}
+      gameId="game-1"
+      sample={{ ...sample, sample: { ...sample.sample, labels: [], ocrRegions: [] } }}
+      events={events}
+      onClose={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add OCR region' }));
+    drawOcrRegion();
+    const text = screen.getByLabelText('Text');
+    fireEvent.change(text, { target: { value: 'ELIMINATED AMON' } });
+    fireEvent.keyDown(text, { key: 'Enter' });
+
+    expect(screen.queryByLabelText('Text')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }));
+    const call = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingSample');
+    expect(call?.[1].ocrRegions[0]).toMatchObject({ text: 'ELIMINATED AMON' });
+  });
+
+  it('creates a region group from the label frame palette', () => {
+    const client = createClient();
+    render(<TrainingSampleEditor
+      client={client}
+      gameId="game-1"
+      sample={sample}
+      events={events}
+      regionGroups={[{
+        id: 3, name: 'Kill feed', screenRegionX: null, screenRegionY: null, screenRegionW: null, screenRegionH: null,
+      }]}
+      onClose={vi.fn()}
+    />);
+
+    const name = screen.getByLabelText('New region group name');
+    fireEvent.change(name, { target: { value: '  Medals  ' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+
+    const call = client.send.mock.calls.find(([method]) => method === 'UpdateTrainingRegionGroups');
+    expect(call?.[1]).toMatchObject({ gameId: 'game-1' });
+    expect(call?.[1].regionGroups).toEqual([
+      expect.objectContaining({ id: 3, name: 'Kill feed' }),
+      expect.objectContaining({ id: 4, name: 'Medals', screenRegionX: null }),
+    ]);
+    expect((name as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('Medals')).toBeTruthy();
+  });
+
   it('edits and removes an OCR region from its caption', () => {
     const client = createClient();
     render(<TrainingSampleEditor

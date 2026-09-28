@@ -8,6 +8,7 @@ import { TrainingSampleEditor } from './TrainingSampleEditor';
 import { TrainingEventEditor } from './TrainingEventEditor';
 import { TrainingEventTree } from './TrainingEventTree';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
+import { newRegionGroup } from './trainingRegions';
 import type { TrainingEventDefinition, TrainingRegionGroup } from '../ipc/protocol';
 import { filterTrainingSamples, type SampleKindFilter } from './training/trainingMetrics';
 import { TrainingControlsPanel, type TrainingScope } from './training/TrainingControlsPanel';
@@ -177,14 +178,7 @@ export function TrainingView({ client }: TrainingViewProps) {
   const createRegionGroup = () => {
     const name = newGroupName.trim();
     if (!name) return;
-    saveRegionGroups([...regionGroups, {
-      id: Math.max(0, ...regionGroups.map((group) => group.id)) + 1,
-      name,
-      screenRegionX: null,
-      screenRegionY: null,
-      screenRegionW: null,
-      screenRegionH: null,
-    }]);
+    saveRegionGroups([...regionGroups, newRegionGroup(regionGroups, name)]);
     setNewGroupName('');
   };
 
@@ -293,6 +287,7 @@ export function TrainingView({ client }: TrainingViewProps) {
                   <TextField
                     value={newGroupName}
                     onChange={setNewGroupName}
+                    onEnter={createRegionGroup}
                     placeholder="New group name"
                     aria-label="New region group name"
                   />
@@ -366,7 +361,11 @@ export function TrainingView({ client }: TrainingViewProps) {
             </p>
           )}
 
-          <TrainingPublishForm client={client} gameId={gameId} hasModel={Boolean(training.model)} />
+          <TrainingPublishForm
+            client={client}
+            gameId={gameId}
+            hasModel={Boolean(training.model) || training.events.some((event) => event.detectionKind === 'Ocr')}
+          />
 
           {workspace.selectedSample && (
             <TrainingSampleEditor

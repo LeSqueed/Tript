@@ -465,13 +465,8 @@ internal sealed partial class AppHost
         StopDetection();
         SetBackgroundWorkSuspendedForRecording(false);
 
-        if (_pendingSessionReassignment is { } reassignment
-            && !RelocateStoppedRecording(reassignment)
-            && _pendingMetadata is not null)
-        {
-            _pendingMetadata.Game = reassignment.OriginalGame;
-            _pendingMetadata.GameId = reassignment.OriginalGameId;
-        }
+        if (_pendingSessionReassignment is { } reassignment)
+            RelocateStoppedRecording(reassignment);
 
         var sourcePath = _activeOutputPath;
         var recordsSession = _activeRecordingMode?.RecordsSession() == true;
@@ -567,64 +562,51 @@ internal sealed partial class AppHost
         var collision = moves.FirstOrDefault(move => File.Exists(move.Destination));
         if (collision != default)
         {
-            PushError($"The recording could not be moved to {reassignment.TargetGame} because '{Path.GetFileName(collision.Destination)}' already exists there.");
+            KeepReassignedGameInPlace(linkedHighlights, sourceRelative, reassignment);
+            Log.Warning("AppHost: recording kept in place for {GameId}: {File} already exists in the game folder",
+                reassignment.TargetGameId, Path.GetFileName(collision.Destination));
+            PushError($"Saved to {reassignment.TargetGame}, but the file stayed in the main recordings folder because '{Path.GetFileName(collision.Destination)}' already exists in the game folder.");
             return false;
         }
 
-        var completedMoves = new List<(string Source, string Destination)>();
-        var updatedRecords = new List<(string ClipFileName, ClipTitleRecord Record)>();
-        try
+        if (!RecordingRelocation.TryMoveAll(moves, File.Move, retryDelays: null, out var moveFailure))
         {
-            foreach (var move in moves)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(move.Destination)!);
-                File.Move(move.Source, move.Destination);
-                completedMoves.Add(move);
-            }
-
-            foreach (var (clipFileName, record) in linkedHighlights)
-            {
-                if (!_clipTitles.SaveAutomaticAssignment(clipFileName, targetRelative,
-                        reassignment.TargetGame, reassignment.TargetGameId))
-                {
-                    throw new IOException($"The metadata for '{clipFileName}' could not be updated.");
-                }
-                updatedRecords.Add((clipFileName, record));
-            }
-
-            _activeSessionPath = targetSessionPath;
-            if (_activeOutputPath is not null)
-                _activeOutputPath = targetSessionPath;
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            foreach (var (clipFileName, record) in updatedRecords)
-            {
-                _clipTitles.SaveAutomaticAssignment(clipFileName, sourceRelative,
-                    record.Game, record.GameId);
-            }
-            for (var index = completedMoves.Count - 1; index >= 0; index--)
-            {
-                var move = completedMoves[index];
-                try
-                {
-                    if (File.Exists(move.Destination) && !File.Exists(move.Source))
-                    {
-                        Directory.CreateDirectory(Path.GetDirectoryName(move.Source)!);
-                        File.Move(move.Destination, move.Source);
-                    }
-                }
-                catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
-                {
-                    Log.Error(rollbackException, "AppHost: recording reassignment rollback failed for {Path}", move.Source);
-                }
-            }
-
-            Log.Warning(exception, "AppHost: recording could not be reassigned to {GameId}",
+            KeepReassignedGameInPlace(linkedHighlights, sourceRelative, reassignment);
+            Log.Warning(moveFailure, "AppHost: recording kept in place for {GameId} because it could not be moved",
                 reassignment.TargetGameId);
-            PushError($"The recording could not be moved to {reassignment.TargetGame}, so it remains in its original game.");
+            PushError($"Saved to {reassignment.TargetGame}, but the file stayed in the main recordings folder because it was in use.");
             return false;
+        }
+
+        foreach (var (clipFileName, _) in linkedHighlights)
+        {
+            if (_clipTitles.SaveAutomaticAssignment(clipFileName, targetRelative,
+                    reassignment.TargetGame, reassignment.TargetGameId))
+            {
+                continue;
+            }
+
+            RecordingRelocation.RollBack(moves, File.Move);
+            KeepReassignedGameInPlace(linkedHighlights, sourceRelative, reassignment);
+            Log.Warning("AppHost: recording kept in place for {GameId}: the metadata for {Clip} could not be updated",
+                reassignment.TargetGameId, clipFileName);
+            PushError($"Saved to {reassignment.TargetGame}, but the file stayed in the main recordings folder because its highlights could not be updated.");
+            return false;
+        }
+
+        _activeSessionPath = targetSessionPath;
+        if (_activeOutputPath is not null)
+            _activeOutputPath = targetSessionPath;
+        return true;
+    }
+
+    private void KeepReassignedGameInPlace(IEnumerable<(string ClipFileName, ClipTitleRecord Record)> linkedHighlights,
+        string sourceRelative, PendingSessionReassignment reassignment)
+    {
+        foreach (var (clipFileName, _) in linkedHighlights)
+        {
+            _clipTitles.SaveAutomaticAssignment(clipFileName, sourceRelative,
+                reassignment.TargetGame, reassignment.TargetGameId);
         }
     }
 

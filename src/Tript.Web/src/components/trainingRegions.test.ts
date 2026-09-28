@@ -3,6 +3,7 @@ import {
   effectiveTrainingRegion,
   isLabelInsideEffectiveRegion,
   isLabelInsideRegion,
+  newRegionGroup,
 } from './trainingRegions';
 
 describe('trainingRegions', () => {
@@ -51,5 +52,20 @@ describe('trainingRegions', () => {
     }, [{
       id: 1, classId: 0, name: 'Event', type: 'Trigger', regionGroupId: 99,
     }], [])).toBe(false);
+  });
+
+  it('gives a new region group the next free id and no region', () => {
+    expect(newRegionGroup([], 'First')).toEqual({
+      id: 1,
+      name: 'First',
+      screenRegionX: null,
+      screenRegionY: null,
+      screenRegionW: null,
+      screenRegionH: null,
+    });
+    expect(newRegionGroup([
+      { id: 2, name: 'A', screenRegionX: null, screenRegionY: null, screenRegionW: null, screenRegionH: null },
+      { id: 7, name: 'B', screenRegionX: null, screenRegionY: null, screenRegionW: null, screenRegionH: null },
+    ], 'C').id).toBe(8);
   });
 });

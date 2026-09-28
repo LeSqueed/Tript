@@ -43,6 +43,7 @@ CROP_WIDTH = 320
 PAD_VALUE = 127
 WINDOWS_FONTS = Path("C:/Windows/Fonts")
 FONT_CANDIDATES = ["impact.ttf", "bahnschrift.ttf", "arialbd.ttf"]
+PLAIN_FONT_CANDIDATES = ["bahnschrift.ttf", "arial.ttf"]
 
 NAME_WORDS = [
     "AMON", "OKASHI", "CASTLER", "STINKIE", "HELOISE", "MAXIMUS", "KENPO", "JOHNWATER",
@@ -72,6 +73,19 @@ class Phrase:
     region: Region | None
     render_prefix: str
     render_suffix: str
+    template: str = ""
+
+INT_PLACEHOLDER = re.compile(r"\{int(?::(\d+)(?:\.\.(\d+))?)?\}", re.IGNORECASE)
+DEFAULT_INT_DIGITS = 4
+
+def expand_ints(template: str, rng: random.Random) -> str:
+    def digits(match: re.Match) -> str:
+        low = int(match.group(1) or 1)
+        high = int(match.group(2) or (match.group(1) or DEFAULT_INT_DIGITS))
+        length = rng.randint(low, max(low, high))
+        first = str(rng.randint(1, 9)) if length > 1 else str(rng.randint(0, 9))
+        return first + "".join(str(rng.randint(0, 9)) for _ in range(length - 1))
+    return INT_PLACEHOLDER.sub(digits, template)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -83,6 +97,10 @@ def main() -> int:
     parser.add_argument("--ability-names", default="",
                         help='comma list, e.g. "Turret=SENTRY TURRET,Mine=VENOM MINE"')
     parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument("--style", choices=["feed", "plain"], default="feed",
+                        help="feed: Overwatch-style kill-feed banners; plain: upright text on a translucent band")
+    parser.add_argument("--font", default=None,
+                        help="font file, or a name under C:/Windows/Fonts, for synthetic crops")
     args = parser.parse_args()
 
     if not 0 < args.validation < 0.5 or args.synthetic_per_phrase < 0:
@@ -123,7 +141,15 @@ def main() -> int:
             print(f"REAL region-crops={len(region_crops)}", flush=True)
 
         if args.synthetic_per_phrase:
-            synth = render_synthetic(phrases, backgrounds, args.synthetic_per_phrase, images, rng)
+            if args.style == "plain":
+                font_path = resolve_font(args.font, PLAIN_FONT_CANDIDATES)
+                synth_backgrounds = load_frame_backgrounds(workspace)
+            else:
+                font_path = resolve_font(args.font, FONT_CANDIDATES)
+                synth_backgrounds = backgrounds
+            print(f"SYNTHETIC style={args.style} font={font_path}", flush=True)
+            synth = render_synthetic(phrases, synth_backgrounds, args.synthetic_per_phrase, images, rng,
+                                     style=args.style, font_path=font_path)
             records.extend(synth)
             print(f"SYNTHETIC crops={len(synth)}", flush=True)
 
@@ -206,6 +232,11 @@ def build_phrases(events: list[dict], groups: dict[int, dict],
             continue
         name = event.get("name", "")
         region = event_region(event, groups)
+        placeholders = re.findall(r"\{[^}]*\}", template)
+        if placeholders and all(INT_PLACEHOLDER.fullmatch(p) for p in placeholders):
+            result[name] = Phrase(normalize(INT_PLACEHOLDER.sub("", template)), "numeric", region,
+                                  render_prefix="", render_suffix="", template=template)
+            continue
         parts = re.split(r"\{[^}]*\}", template)
         if len(parts) > 1:
             prefix, suffix = normalize(parts[0]), normalize(parts[-1])
@@ -339,21 +370,35 @@ def fit_crop(crop: Image.Image) -> Image.Image:
     canvas.paste(resized, (0, 0))
     return canvas
 
+def resolve_font(requested: str | None, candidates: list[str]) -> str | None:
+    if requested:
+        path = Path(requested)
+        path = path if path.is_file() else WINDOWS_FONTS / requested
+        if not path.is_file():
+            raise FileNotFoundError(f"font not found: {requested}")
+        return str(path)
+    return next((str(WINDOWS_FONTS / f) for f in candidates if (WINDOWS_FONTS / f).is_file()), None)
+
 def render_synthetic(phrases: dict[str, Phrase], backgrounds: list[Image.Image], per_phrase: int,
-                     images: Path, rng: random.Random) -> list:
-    font_path = next((str(WINDOWS_FONTS / f) for f in FONT_CANDIDATES
-                      if (WINDOWS_FONTS / f).is_file()), None)
+                     images: Path, rng: random.Random, style: str = "feed",
+                     font_path: str | None = None) -> list:
     records: list[tuple[str, str, str]] = []
     seq = 0
     for phrase in phrases.values():
         for _ in range(per_phrase):
+            label = phrase.label
             if phrase.kind == "elimination":
                 owner = rng.choice(NAME_WORDS) + ("'S" if rng.random() < 0.7 else "")
                 visible = f"{phrase.render_prefix}{owner}{phrase.render_suffix}"
+            elif phrase.kind == "numeric":
+                visible = expand_ints(phrase.template, rng)
+                label = normalize(visible)
             else:
                 visible = phrase.label
-            render_one(visible, phrase.kind, backgrounds, font_path, rng).save(images / f"synth_{seq:05d}.png")
-            records.append((f"images/synth_{seq:05d}.png", phrase.label, "synthetic"))
+            tile = (render_plain(visible, backgrounds, font_path, rng) if style == "plain"
+                    else render_one(visible, phrase.kind, backgrounds, font_path, rng))
+            tile.save(images / f"synth_{seq:05d}.png")
+            records.append((f"images/synth_{seq:05d}.png", label, "synthetic"))
             seq += 1
     return records
 
@@ -400,6 +445,75 @@ def render_one(text: str, kind: str, backgrounds: list[Image.Image], font_path: 
     tile = ImageEnhance.Brightness(tile).enhance(rng.uniform(0.75, 1.15))
     if rng.random() < 0.5:
         tile = tile.filter(ImageFilter.GaussianBlur(rng.uniform(0.3, 1.0)))
+    return fit_crop(tile)
+
+def load_frame_backgrounds(workspace: Path, limit: int = 40) -> list[Image.Image]:
+    frames: list[Image.Image] = []
+    for image_path in sorted((workspace / "samples").glob("*.png"))[:limit]:
+        with Image.open(image_path) as src:
+            frame = src.convert("RGB")
+            frame.thumbnail((960, 960), Image.Resampling.LANCZOS)
+            frames.append(frame)
+    return frames
+
+def frame_patch(frames: list[Image.Image], width: int, height: int, rng: random.Random) -> Image.Image:
+    frame = rng.choice(frames)
+    scale = rng.uniform(0.6, 1.4)
+    patch_w = max(8, min(frame.width, int(width * scale)))
+    patch_h = max(8, min(frame.height, int(height * scale)))
+    left = rng.randint(0, frame.width - patch_w)
+    top = rng.randint(0, frame.height - patch_h)
+    return frame.crop((left, top, left + patch_w, top + patch_h)).resize((width, height), Image.Resampling.LANCZOS)
+
+def plain_font(font_path: str | None, size: int, rng: random.Random) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    if not font_path:
+        return ImageFont.load_default(size)
+    font = ImageFont.truetype(font_path, size)
+    try:
+        font.set_variation_by_name(rng.choice([
+            b"Regular", b"SemiBold", b"Bold",
+            b"SemiCondensed", b"SemiBold SemiCondensed", b"Bold SemiCondensed",
+            b"SemiBold Condensed",
+        ]))
+    except (OSError, ValueError):
+        pass
+    return font
+
+def render_plain(text: str, frames: list[Image.Image], font_path: str | None,
+                 rng: random.Random) -> Image.Image:
+    size = rng.randint(28, 42)
+    font = plain_font(font_path, size, rng)
+    pad_x, pad_y = rng.randint(2, 8), rng.randint(0, 3)
+    left, top, right, bottom = ImageDraw.Draw(Image.new("RGB", (4, 4))).textbbox((0, 0), text, font=font)
+    tile_w, tile_h = right - left + pad_x * 2, bottom - top + pad_y * 2
+
+    if frames and rng.random() < 0.85:
+        tile = frame_patch(frames, tile_w, tile_h, rng)
+    else:
+        base = rng.randint(30, 110)
+        tile = Image.new("RGB", (tile_w, tile_h), (base, base, base))
+
+    if rng.random() < 0.8:
+        overlay = Image.new("RGBA", tile.size, (0, 0, 0, 0))
+        shade = rng.randint(15, 70)
+        ImageDraw.Draw(overlay).rectangle([0, 0, tile_w, tile_h], fill=(shade, shade, shade, rng.randint(40, 150)))
+        tile = Image.alpha_composite(tile.convert("RGBA"), overlay).convert("RGB")
+
+    draw = ImageDraw.Draw(tile)
+    x, y = pad_x - left, pad_y - top
+    if rng.random() < 0.6:
+        draw.text((x + 1, y + 1), text, font=font, fill=(0, 0, 0))
+    grey = rng.randint(185, 250)
+    draw.text((x, y), text, font=font, fill=(grey, grey, min(255, grey + rng.randint(-6, 6))))
+
+    if rng.random() < 0.7:
+        factor = rng.uniform(0.35, 0.75)
+        small = tile.resize((max(8, int(tile.width * factor)), max(4, int(tile.height * factor))),
+                            Image.Resampling.BILINEAR)
+        tile = small.resize(tile.size, Image.Resampling.BICUBIC)
+    tile = ImageEnhance.Brightness(tile).enhance(rng.uniform(0.8, 1.15))
+    if rng.random() < 0.4:
+        tile = tile.filter(ImageFilter.GaussianBlur(rng.uniform(0.3, 0.9)))
     return fit_crop(tile)
 
 if __name__ == "__main__":

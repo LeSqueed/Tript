@@ -11,7 +11,21 @@ interface TrainingEventEditorProps {
   onSave(event: TrainingEventDefinition): void;
 }
 
-const BOOKMARK_TYPES = ['Manual', 'Kill', 'Goal', 'Assist', 'Death'];
+const BOOKMARK_OPTIONS = [
+  { value: 'Kill', label: 'Kill' },
+  { value: 'Goal', label: 'Goal' },
+  { value: 'Assist', label: 'Assist' },
+  { value: 'Death', label: 'Death' },
+  { value: 'Play', label: 'Play (named after this event)' },
+];
+
+function bookmarkOptions(current: string) {
+  const options = [{ value: '', label: 'No bookmark' }, ...BOOKMARK_OPTIONS];
+  if (current && !BOOKMARK_OPTIONS.some((option) => option.value === current)) {
+    options.push({ value: current, label: `${current} (legacy)` });
+  }
+  return options;
+}
 
 export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSave }: TrainingEventEditorProps) {
   const [name, setName] = useState(event.name);
@@ -90,7 +104,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
             classId: objectClassId,
             ...(event.ocr !== undefined ? { ocr: null } : {}),
           }),
-      bookmarkType: type === 'Subtractor' ? null : bookmarkType || null,
+      bookmarkType: type === 'Trigger' ? bookmarkType || null : null,
       includeInAutoClips: type === 'Trigger' && includeInAutoClips,
       ...(fixedPosition || event.fixedPosition !== undefined
         ? { fixedPosition: detectionKind === 'Object' && fixedPosition }
@@ -99,6 +113,10 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
          ? { subtractsEventId: type === 'Subtractor' ? parsedSubtractsEventId : null }
          : {}),
     });
+  };
+
+  const saveOnEnter = () => {
+    if (name.trim()) save();
   };
 
   return (
@@ -112,7 +130,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
           <Button variant="ghost" size="small" onClick={onCancel} aria-label="Cancel event edit">Cancel</Button>
         </div>
         <Field label="Name">
-          <TextField value={name} onChange={setName} autoFocus />
+          <TextField value={name} onChange={setName} onEnter={saveOnEnter} autoFocus />
         </Field>
         <div className="training-event-form-grid">
           <Field label="Detection">
@@ -129,17 +147,17 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
                 const nextType = value as TrainingEventDefinition['type'];
                 setType(nextType);
                 if (nextType !== 'Subtractor') setSubtractsEventId('');
-                if (nextType === 'Subtractor') setBookmarkType('');
+                if (nextType !== 'Trigger') setBookmarkType('');
               }}
               options={[{ value: 'Trigger', label: 'Trigger' }, { value: 'Exclusion', label: 'Exclusion' }, { value: 'Subtractor', label: 'Subtractor' }]}
             />
           </Field>
           <Field label="Bookmark">
             <SelectField
-              value={bookmarkType}
+              value={type === 'Trigger' ? bookmarkType : ''}
               onChange={setBookmarkType}
-              disabled={type === 'Subtractor'}
-              options={[{ value: '', label: 'No bookmark' }, ...BOOKMARK_TYPES.map((value) => ({ value, label: value }))]}
+              disabled={type !== 'Trigger'}
+              options={bookmarkOptions(bookmarkType)}
             />
           </Field>
         </div>
@@ -148,7 +166,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
             <div className="training-ocr-pattern-heading">
               <div>
                 <strong>Text patterns</strong>
-                <p>The recogniser reads the same text regardless of language; the tag just labels each wording. Any one pattern activating means this event fires. Wrap a run of words in braces, such as {'{name}'} or {'{name:1..4}'}, to match it as a variable.</p>
+                <p>The recogniser reads the same text regardless of language; the tag just labels each wording. Any one pattern activating means this event fires. Wrap a run of words in braces, such as {'{name}'} or {'{name:1..4}'}, to match it as a variable. Use {'{int}'} for a number, or {'{int:1..2}'} to limit how many digits it has.</p>
               </div>
               <Button
                 variant="ghost"
@@ -166,6 +184,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
                       value={pattern.languageTag}
                       placeholder="en-US"
                       onChange={(value) => updatePattern(index, { languageTag: value })}
+                      onEnter={saveOnEnter}
                     />
                   </Field>
                   {knownLanguages.length > 0 && (
@@ -185,6 +204,7 @@ export function TrainingEventEditor({ event, events = [], isNew, onCancel, onSav
                   <TextField
                     value={pattern.template}
                     placeholder="YOU DEFEATED {name:1..4}"
+                    onEnter={saveOnEnter}
                     onChange={(value) => setOcrPatterns((current) => current.map((candidate, candidateIndex) =>
                       candidateIndex === index ? { ...candidate, template: value } : candidate))}
                   />

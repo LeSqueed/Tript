@@ -25,8 +25,10 @@ internal sealed class ResolverAdminClient : IDisposable
     }
 
     internal async Task<int> PublishAsync(string gameId, string installDirectory, string eventsPath,
-        string username, string password, CancellationToken cancellationToken = default)
+        string username, string password, CancellationToken cancellationToken = default,
+        string? minimumAppVersion = null)
     {
+        EnsureCompleteBundle(installDirectory, eventsPath);
         var token = await LoginAsync(username, password, cancellationToken).ConfigureAwait(false);
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -34,7 +36,7 @@ internal sealed class ResolverAdminClient : IDisposable
             var archivePath = BuildArchive(gameId, revision, installDirectory, eventsPath);
             try
             {
-                var published = await UploadAsync(gameId, archivePath, token, cancellationToken)
+                var published = await UploadAsync(gameId, archivePath, token, minimumAppVersion, cancellationToken)
                     .ConfigureAwait(false);
                 if (published == revision) return published;
                 await DeleteAsync(gameId, published, token, cancellationToken).ConfigureAwait(false);
@@ -75,12 +77,14 @@ internal sealed class ResolverAdminClient : IDisposable
     }
 
     private async Task<int> UploadAsync(string gameId, string archivePath, string token,
-        CancellationToken cancellationToken)
+        string? minimumAppVersion, CancellationToken cancellationToken)
     {
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(gameId), "gameId");
         form.Add(new StringContent(ModelApiV1Compatibility.Version.ToString(
             System.Globalization.CultureInfo.InvariantCulture)), "modelApiVersion");
+        if (!string.IsNullOrWhiteSpace(minimumAppVersion))
+            form.Add(new StringContent(minimumAppVersion), "minimumAppVersion");
         await using var stream = File.OpenRead(archivePath);
         using var file = new StreamContent(stream);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
@@ -110,6 +114,38 @@ internal sealed class ResolverAdminClient : IDisposable
         var request = new HttpRequestMessage(method, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
+    }
+
+    internal static string? NormalizeMinimumAppVersion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        var parts = trimmed.Split('.');
+        if (parts.Length != 3 || !Version.TryParse(trimmed, out var version))
+            throw new InvalidOperationException("The minimum app version must look like 1.2.1.");
+        return $"{version.Major}.{version.Minor}.{version.Build}";
+    }
+
+    internal static void EnsureCompleteBundle(string installDirectory, string eventsPath)
+    {
+        if (!File.Exists(eventsPath))
+            throw new InvalidOperationException("There is no installed model for this game. Install one before publishing.");
+
+        var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(
+            File.ReadAllText(eventsPath), ModelJsonFiles.Options) ?? [];
+        if (definitions.Any(definition => definition.DetectionKind == DetectionKind.Object)
+            && !File.Exists(Path.Combine(installDirectory, "model.onnx")))
+        {
+            throw new InvalidOperationException(
+                "The installed model has object events but no model.onnx. Train and install it before publishing.");
+        }
+        if (definitions.Any(definition => definition.DetectionKind == DetectionKind.Ocr)
+            && (!File.Exists(Path.Combine(installDirectory, "ocr_model.onnx"))
+                || !File.Exists(Path.Combine(installDirectory, "ocr_dict.txt"))))
+        {
+            throw new InvalidOperationException(
+                "The installed model has OCR events but no OCR model and dictionary. Train and install it before publishing.");
+        }
     }
 
     private static string BuildArchive(string gameId, int revision, string installDirectory, string eventsPath)

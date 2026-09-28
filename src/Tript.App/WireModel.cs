@@ -429,6 +429,7 @@ internal sealed class PublishTrainingModelParameters
     public string GameId { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+    public string? MinimumAppVersion { get; set; }
 }
 
 #if TRIPT_TRAINING

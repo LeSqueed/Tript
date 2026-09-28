@@ -25,10 +25,12 @@ internal sealed partial class AppHost
                 throw new InvalidOperationException("Enter the resolver admin username and password.");
             if (_resolverClient is null)
                 throw new InvalidOperationException("No resolver URL is configured.");
+            var minimumAppVersion = ResolverAdminClient.NormalizeMinimumAppVersion(parameters.MinimumAppVersion);
             var installed = TrainingWorkspace.ForGame(parameters.GameId, TrainingPaths.InstalledModelsPath);
             using var admin = new ResolverAdminClient(_resolverClient.Config);
             var revision = await admin.PublishAsync(parameters.GameId, installed.RootPath, installed.EventsPath,
-                parameters.Username.Trim(), parameters.Password, _discoveryCancellation.Token).ConfigureAwait(false);
+                parameters.Username.Trim(), parameters.Password, _discoveryCancellation.Token,
+                minimumAppVersion).ConfigureAwait(false);
             client.Push("trainingPublishResult", JsonSerializer.SerializeToElement(new
             {
                 requestId,
@@ -206,6 +208,7 @@ internal sealed partial class AppHost
         var regionGroups = workspace.LoadRegionGroups();
         var labels = parameters.Labels.Select(TrainingWorkspaceEditor.ToLabel).ToList();
         var id = TrainingSampleStore.SampleId(sourcePath, parameters.TimestampSeconds);
+        workspace.EnsureDirectories();
         var temporaryPath = Path.Combine(workspace.SamplesPath, id + ".capture-" + Guid.NewGuid().ToString("N") + ".png");
         try
         {

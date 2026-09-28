@@ -60,6 +60,9 @@ public static class OcrTokenTemplateMatcher
     private const int MaximumTemplateLength = 512;
     private const int MaximumTemplateTokens = 64;
     private const int MaximumCaptureTokens = 16;
+    private const string DigitCaptureName = "int";
+    private const int DefaultMaximumDigits = 4;
+    private const int MaximumDigits = 9;
 
     private const int RelaxSentinel = -1;
     private const double LiteralBudgetFraction = 0.35;
@@ -342,6 +345,22 @@ public static class OcrTokenTemplateMatcher
         }
 
         var capture = (CaptureToken)templateTokens[templateIndex];
+        if (capture.Digits)
+        {
+            for (var length = capture.MinimumTokens;
+                 length <= capture.MaximumTokens && textIndex + length <= text.Value.Length; length++)
+            {
+                if (!AllDigits(text.Value, textIndex, length)) break;
+                var sourceStart = text.SourceIndexes[textIndex];
+                var sourceEnd = text.SourceIndexes[textIndex + length - 1] + 1;
+                captures[capture.Name] = text.Source[sourceStart..sourceEnd];
+                FindCompactMatches(templateTokens, text, maximumEditDistance, minimumScore, templateIndex + 1,
+                    textIndex + length, literalScore, literalCount, capturesValid, captures, onMatch);
+            }
+            captures.Remove(capture.Name);
+            return;
+        }
+
         for (var end = textIndex; end <= text.Value.Length; end++)
         {
             var tokenCount = end == textIndex
@@ -417,6 +436,21 @@ public static class OcrTokenTemplateMatcher
         }
 
         var capture = (CaptureToken)templateTokens[templateIndex];
+        if (capture.Digits)
+        {
+            var token = textTokens[textIndex];
+            if (token.Length < capture.MinimumTokens || token.Length > capture.MaximumTokens
+                || !AllDigits(token, 0, token.Length))
+            {
+                return;
+            }
+            captures[capture.Name] = token;
+            FindMatches(templateTokens, textTokens, maximumEditDistance, templateIndex + 1,
+                textIndex + 1, literalScore, literalCount, captures, onMatch);
+            captures.Remove(capture.Name);
+            return;
+        }
+
         var remaining = textTokens.Length - textIndex;
         for (var count = capture.MinimumTokens; count <= Math.Min(capture.MaximumTokens, remaining); count++)
         {
@@ -478,6 +512,8 @@ public static class OcrTokenTemplateMatcher
             throw new FormatException($"OCR capture name '{name}' is invalid.");
         }
 
+        if (name.Equals(DigitCaptureName, StringComparison.OrdinalIgnoreCase))
+            return ParseDigitCapture(separator < 0 ? null : specification[(separator + 1)..]);
         if (separator < 0) return new CaptureToken(name, 1, 4);
         var range = specification[(separator + 1)..].Split("..", StringSplitOptions.None);
         if (range.Length != 2 || !int.TryParse(range[0], out var minimum)
@@ -488,6 +524,33 @@ public static class OcrTokenTemplateMatcher
                 $"OCR capture '{name}' must use a range between 1 and {MaximumCaptureTokens} tokens.");
         }
         return new CaptureToken(name, minimum, maximum);
+    }
+
+    private static CaptureToken ParseDigitCapture(string? range)
+    {
+        if (range is null) return new CaptureToken(DigitCaptureName, 1, DefaultMaximumDigits, Digits: true);
+
+        var bounds = range.Split("..", StringSplitOptions.None);
+        var minimum = 0;
+        var maximum = 0;
+        var valid = bounds.Length is 1 or 2
+            && int.TryParse(bounds[0], out minimum)
+            && int.TryParse(bounds[^1], out maximum);
+        if (!valid || minimum < 1 || maximum < minimum || maximum > MaximumDigits)
+        {
+            throw new FormatException(
+                $"OCR number capture '{{int}}' must use a digit length between 1 and {MaximumDigits}, such as {{int:1..2}}.");
+        }
+        return new CaptureToken(DigitCaptureName, minimum, maximum, Digits: true);
+    }
+
+    private static bool AllDigits(string value, int start, int length)
+    {
+        for (var index = start; index < start + length; index++)
+        {
+            if (value[index] is < '0' or > '9') return false;
+        }
+        return length > 0;
     }
 
     private static int LevenshteinDistance(string left, string right, int cutoff)
@@ -517,7 +580,8 @@ public static class OcrTokenTemplateMatcher
 
     private abstract record TemplateToken;
     private sealed record LiteralToken(string Value) : TemplateToken;
-    private sealed record CaptureToken(string Name, int MinimumTokens, int MaximumTokens) : TemplateToken;
+    private sealed record CaptureToken(string Name, int MinimumTokens, int MaximumTokens, bool Digits = false)
+        : TemplateToken;
     private sealed record MatchState(double Score, IReadOnlyDictionary<string, string> Captures);
     private sealed record CompactMatchState(MatchState Match, bool CapturesValid)
     {

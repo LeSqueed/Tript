@@ -2,9 +2,52 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Button, Checkbox, SelectField, Slider } from './controls';
+import { Button, Checkbox, SelectField, Slider, TextField } from './controls';
 
 afterEach(cleanup);
+
+describe('TextField onEnter', () => {
+  it('runs on a plain Enter and still calls a caller onKeyDown', () => {
+    const onEnter = vi.fn();
+    const onKeyDown = vi.fn();
+    render(<TextField aria-label="Name" value="" onChange={vi.fn()} onEnter={onEnter} onKeyDown={onKeyDown} />);
+
+    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
+
+    expect(onEnter).toHaveBeenCalledTimes(1);
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores modified Enter, IME composition and other keys', () => {
+    const onEnter = vi.fn();
+    render(<TextField aria-label="Name" value="" onChange={vi.fn()} onEnter={onEnter} />);
+    const input = screen.getByLabelText('Name');
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(input, { key: 'a' });
+
+    expect(onEnter).not.toHaveBeenCalled();
+  });
+
+  it('lets a caller onKeyDown claim Enter first', () => {
+    const onEnter = vi.fn();
+    render(
+      <TextField
+        aria-label="Name"
+        value=""
+        onChange={vi.fn()}
+        onEnter={onEnter}
+        onKeyDown={(event) => event.preventDefault()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter' });
+
+    expect(onEnter).not.toHaveBeenCalled();
+  });
+});
 
 describe('pointer focus release', () => {
   it('releases a pointer-activated button without affecting keyboard focus', () => {

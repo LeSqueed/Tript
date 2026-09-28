@@ -5,6 +5,8 @@ import type { TrainingPublishResultMessage } from '../../ipc/protocol';
 import type { IpcClient } from '../../ipc/websocketClient';
 import { Button, Field, TextField } from '../ui/controls';
 
+const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+
 export function TrainingPublishForm({ client, gameId, hasModel }: {
   client: IpcClient;
   gameId: string;
@@ -12,6 +14,7 @@ export function TrainingPublishForm({ client, gameId, hasModel }: {
 }) {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  const [minimumVersion, setMinimumVersion] = useState('');
   const [requestId, setRequestId] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const requestRef = useRef<string | null>(null);
@@ -38,7 +41,15 @@ export function TrainingPublishForm({ client, gameId, hasModel }: {
       gameId,
       username: username.trim(),
       password,
+      ...(minimumVersion.trim() ? { minimumAppVersion: minimumVersion.trim() } : {}),
     });
+  };
+
+  const minimumVersionValid = minimumVersion.trim() === '' || VERSION_PATTERN.test(minimumVersion.trim());
+  const canPublish = hasModel && Boolean(username.trim()) && Boolean(password) && minimumVersionValid
+    && requestId === null;
+  const publishOnEnter = () => {
+    if (canPublish) publish();
   };
 
   return (
@@ -49,15 +60,40 @@ export function TrainingPublishForm({ client, gameId, hasModel }: {
       </div>
       <div className="training-publish-fields">
         <Field label="Admin username">
-          <TextField value={username} onChange={setUsername} autoComplete="username" />
+          <TextField value={username} onChange={setUsername} onEnter={publishOnEnter} autoComplete="username" />
         </Field>
         <Field label="Admin password">
-          <TextField type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+          <TextField
+            type="password"
+            value={password}
+            onChange={setPassword}
+            onEnter={publishOnEnter}
+            autoComplete="current-password"
+          />
         </Field>
-        <Button onClick={publish} disabled={!hasModel || !username.trim() || !password || requestId !== null}>
+        <Field label="Minimum app version">
+          <TextField
+            value={minimumVersion}
+            onChange={setMinimumVersion}
+            onEnter={publishOnEnter}
+            placeholder="Optional"
+            aria-invalid={!minimumVersionValid}
+            aria-describedby="training-publish-version-hint"
+          />
+        </Field>
+        <Button onClick={publish} disabled={!canPublish}>
           {requestId ? 'Publishing…' : 'Publish model'}
         </Button>
       </div>
+      <p
+        id="training-publish-version-hint"
+        className={minimumVersionValid ? 'muted small' : 'training-label-warning small'}
+        role={minimumVersionValid ? undefined : 'alert'}
+      >
+        {minimumVersionValid
+          ? 'Set a minimum app version, such as 1.2.1, when older Tript versions cannot use this model. Leave it empty if every version can.'
+          : 'Use the form 1.2.1.'}
+      </p>
       {result && <p className="training-progress" role="status">{result}</p>}
     </section>
   );

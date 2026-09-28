@@ -13,7 +13,12 @@ import { Button, Field, TextField } from './ui/controls';
 import { TrainingEventEditor } from './TrainingEventEditor';
 import { TrainingEventTree } from './TrainingEventTree';
 import { TrainingRegionEditor } from './TrainingRegionEditor';
-import { effectiveTrainingRegion, isLabelInsideEffectiveRegion, type TrainingRegion } from './trainingRegions';
+import {
+  effectiveTrainingRegion,
+  isLabelInsideEffectiveRegion,
+  newRegionGroup,
+  type TrainingRegion,
+} from './trainingRegions';
 import { useTrainingDialog } from './useTrainingDialog';
 import {
   boxFromPoints,
@@ -116,6 +121,7 @@ export function TrainingSampleEditor({
     | null
   >(null);
   const [ocrRegionDraft, setOcrRegionDraft] = useState<{ index: number; text: string } | null>(null);
+  const [newGroupName, setNewGroupName] = useState('');
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const imageRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -143,7 +149,7 @@ export function TrainingSampleEditor({
     onClose();
   };
 
-  const dialogRef = useTrainingDialog<HTMLElement>(requestClose);
+  const dialogRef = useTrainingDialog<HTMLElement>(requestClose, { arrowNavigation: false });
 
   useEffect(() => {
     setLabels(sample.sample.labels);
@@ -533,13 +539,23 @@ export function TrainingSampleEditor({
       : { target: event, targetType: 'event' });
   };
 
+  const saveRegionGroups = (next: TrainingRegionGroup[]) => {
+    setGroupDefinitions(next);
+    const requestId = `region-groups-editor-${++requestCounterRef.current}`;
+    if (onRegionGroupsChange) onRegionGroupsChange(next, requestId);
+    else client.send('UpdateTrainingRegionGroups', { gameId, requestId, regionGroups: next });
+  };
+
+  const createRegionGroup = () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    saveRegionGroups([...groupDefinitions, newRegionGroup(groupDefinitions, name)]);
+    setNewGroupName('');
+  };
+
   const saveRegion = (target: TrainingEventDefinition | TrainingRegionGroup) => {
     if (regionDraft?.targetType === 'group') {
-      const next = groupDefinitions.map((group) => group.id === target.id ? target as TrainingRegionGroup : group);
-      setGroupDefinitions(next);
-      const requestId = `region-groups-editor-${++requestCounterRef.current}`;
-      if (onRegionGroupsChange) onRegionGroupsChange(next, requestId);
-      else client.send('UpdateTrainingRegionGroups', { gameId, requestId, regionGroups: next });
+      saveRegionGroups(groupDefinitions.map((group) => group.id === target.id ? target as TrainingRegionGroup : group));
     } else {
       const next = eventDefinitions.map((event) => event.id === target.id ? target as TrainingEventDefinition : event);
       setEventDefinitions(next);
@@ -683,6 +699,18 @@ export function TrainingSampleEditor({
                   {ocrRegions.length} region{ocrRegions.length === 1 ? '' : 's'}
                 </span>
               </div>
+              <div className="training-region-group-create">
+                <TextField
+                  value={newGroupName}
+                  onChange={setNewGroupName}
+                  onEnter={createRegionGroup}
+                  placeholder="New group name"
+                  aria-label="New region group name"
+                />
+                <Button variant="ghost" size="small" onClick={createRegionGroup} disabled={!newGroupName.trim()}>
+                  Create group
+                </Button>
+              </div>
             </div>
             <div className="training-event-scroll">
               <TrainingEventTree
@@ -781,6 +809,7 @@ export function TrainingSampleEditor({
                 value={ocrRegionDraft.text}
                 placeholder="Exact text visible in this box"
                 onChange={(value) => setOcrRegionDraft((draft) => draft ? { ...draft, text: value } : draft)}
+                onEnter={() => { if (ocrRegionDraft.text.trim()) saveOcrRegionText(); }}
               />
             </Field>
             <div className="training-event-dialog-actions">

@@ -1,8 +1,12 @@
 import { useEffect, useRef } from 'react';
+import { moveFocusWithArrows } from './ui/modalKeyboard';
 
 const FOCUSABLE = 'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])';
 
-export function useTrainingDialog<T extends HTMLElement>(onClose: () => void) {
+export function useTrainingDialog<T extends HTMLElement>(
+  onClose: () => void,
+  { arrowNavigation = true }: { arrowNavigation?: boolean } = {},
+) {
   const dialogRef = useRef<T>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -20,6 +24,7 @@ export function useTrainingDialog<T extends HTMLElement>(onClose: () => void) {
         closeRef.current();
         return;
       }
+      if (arrowNavigation && moveFocusWithArrows(dialog, event)) return;
       if (event.key !== 'Tab') return;
       const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
         .filter((element) => !element.hasAttribute('disabled'));

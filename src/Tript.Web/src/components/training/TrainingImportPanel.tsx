@@ -48,7 +48,13 @@ export function TrainingImportPanel({ client, importing, onImport }: {
       </div>
       <Field label="Training folder" hint="The selected folder is copied into this game's local workspace.">
         <div className="training-path-row">
-          <TextField value={sourcePath} onChange={setSourcePath} placeholder={examplePaths(platform).trainingFolder} aria-label="Training folder" />
+          <TextField
+            value={sourcePath}
+            onChange={setSourcePath}
+            onEnter={() => { if (sourcePath.trim() && !importing) onImport(sourcePath.trim()); }}
+            placeholder={examplePaths(platform).trainingFolder}
+            aria-label="Training folder"
+          />
           <Button variant="ghost" onClick={() => client.send('BrowseTrainingFolder')}>Browse</Button>
         </div>
       </Field>

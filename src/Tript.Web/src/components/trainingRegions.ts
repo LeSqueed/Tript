@@ -54,3 +54,14 @@ export function isLabelInsideEffectiveRegion(
     && !groups.some((group) => group.id === event.regionGroupId))) return false;
   return isLabelInsideRegion(label, effectiveTrainingRegion(event, groups));
 }
+
+export function newRegionGroup(groups: TrainingRegionGroup[], name: string): TrainingRegionGroup {
+  return {
+    id: Math.max(0, ...groups.map((group) => group.id)) + 1,
+    name,
+    screenRegionX: null,
+    screenRegionY: null,
+    screenRegionW: null,
+    screenRegionH: null,
+  };
+}

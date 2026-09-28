@@ -5,7 +5,7 @@ import { formatTime } from './timelineModel';
 import type { TimelineRegion } from './clipSeam';
 import { DEFAULT_REGION_SECONDS, resizeRegionEnd, resizeRegionStart } from './clipModel';
 import type { ClipDialogController } from './useClipDialog';
-import { Button, Slider } from '../../components/ui/controls';
+import { Button, isPlainEnter, Slider } from '../../components/ui/controls';
 
 export interface ClipDialogProps {
   dialog: ClipDialogController;
@@ -39,6 +39,11 @@ export function ClipDialog({ dialog, currentTime = 0 }: ClipDialogProps) {
             className="input"
             value={dialog.title}
             onChange={(event) => dialog.setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (!isPlainEnter(event)) return;
+              event.preventDefault();
+              if (dialog.regions.length > 0 && !inFlight) dialog.create();
+            }}
             placeholder="Clip title"
             spellCheck={false}
           />

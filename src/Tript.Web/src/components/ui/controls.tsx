@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-import { useRef, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from 'react';
+import {
+  useRef,
+  type InputHTMLAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+  type SelectHTMLAttributes,
+} from 'react';
 import { Icon, type IconName } from './Icon';
 import { releasePointerFocus } from './pointerFocus';
 
@@ -74,11 +81,13 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 export function TextField({
   value,
   onChange,
+  onEnter,
   type = 'text',
   ...rest
 }: {
   value: string | number;
   onChange: (value: string) => void;
+  onEnter?: () => void;
   type?: 'text' | 'number' | 'url' | 'password';
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
   return (
@@ -88,8 +97,22 @@ export function TextField({
       className={rest.className ? `input ${rest.className}` : 'input'}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(event) => {
+        rest.onKeyDown?.(event);
+        if (onEnter && isPlainEnter(event)) {
+          event.preventDefault();
+          onEnter();
+        }
+      }}
     />
   );
+}
+
+export function isPlainEnter(event: KeyboardEvent<HTMLElement>): boolean {
+  return event.key === 'Enter'
+    && !event.defaultPrevented
+    && !event.nativeEvent.isComposing
+    && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
 }
 
 export interface SelectOption {

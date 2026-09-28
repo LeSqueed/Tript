@@ -41,6 +41,11 @@ export function TrainingPublishForm({ client, gameId, hasModel }: {
     });
   };
 
+  const canPublish = hasModel && Boolean(username.trim()) && Boolean(password) && requestId === null;
+  const publishOnEnter = () => {
+    if (canPublish) publish();
+  };
+
   return (
     <section className="training-panel training-publish">
       <div>
@@ -49,12 +54,18 @@ export function TrainingPublishForm({ client, gameId, hasModel }: {
       </div>
       <div className="training-publish-fields">
         <Field label="Admin username">
-          <TextField value={username} onChange={setUsername} autoComplete="username" />
+          <TextField value={username} onChange={setUsername} onEnter={publishOnEnter} autoComplete="username" />
         </Field>
         <Field label="Admin password">
-          <TextField type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+          <TextField
+            type="password"
+            value={password}
+            onChange={setPassword}
+            onEnter={publishOnEnter}
+            autoComplete="current-password"
+          />
         </Field>
-        <Button onClick={publish} disabled={!hasModel || !username.trim() || !password || requestId !== null}>
+        <Button onClick={publish} disabled={!canPublish}>
           {requestId ? 'Publishing…' : 'Publish model'}
         </Button>
       </div>

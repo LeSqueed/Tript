@@ -142,16 +142,3 @@ internal sealed class ObsWeakSourceHandle : ObsSafeHandle
         return true;
     }
 }
-
-internal sealed class ObsSettingsArrayHandle : ObsSafeHandle
-{
-    internal ObsSettingsArrayHandle(nint handle) : base(handle, ownsHandle: true)
-    {
-    }
-
-    protected override bool ReleaseHandle()
-    {
-        ObsNative.obs_data_array_release(handle);
-        return true;
-    }
-}

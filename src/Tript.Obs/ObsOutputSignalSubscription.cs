@@ -80,10 +80,8 @@ internal sealed class ObsOutputSignalSubscription
             }
             _connected = false;
 
-            // Unbounded, this self-deadlocked whenever Disconnect ran on a thread that was itself
-            // inside a handler, or that pumped the SynchronizationContext a posted handler needed.
-            // On timeout the pin stays allocated: freeing it under a live callback hands libobs a
-            // dangling GCHandle.
+            // Bounded to avoid self-deadlock when Disconnect runs inside a handler. On timeout the pin stays
+            // allocated: freeing it under a live callback hands libobs a dangling GCHandle.
             var deadline = Environment.TickCount64 + (long)DisconnectTimeout.TotalMilliseconds;
             while (_callbacksInFlight != 0)
             {

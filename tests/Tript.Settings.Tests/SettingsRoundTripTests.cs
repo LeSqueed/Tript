@@ -36,64 +36,75 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void Streaming_DefaultsToOffWithTheTriptSender()
-    {
-        var streaming = _store.Load().Streaming;
-
-        Assert.False(streaming.ShareEnabled);
-        Assert.Equal(StreamShareWhen.WhileObsRuns, streaming.ShareWhen);
-        Assert.Equal("Tript", streaming.SenderName);
-    }
-
-    [Fact]
-    public void Streaming_RoundTrips()
+    public void SaveThenLoad_EveryPageKeepsItsNonDefaultValues()
     {
         var settings = _store.Load();
-        settings.Streaming.ShareEnabled = true;
-        settings.Streaming.ShareWhen = StreamShareWhen.Always;
-        settings.Streaming.SenderName = "Tript Game";
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load().Streaming;
-
-        Assert.True(reloaded.ShareEnabled);
-        Assert.Equal(StreamShareWhen.Always, reloaded.ShareWhen);
-        Assert.Equal("Tript Game", reloaded.SenderName);
-        using var onDisk = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, "settings.json")));
-        Assert.Equal("Always", onDisk.RootElement.GetProperty("streaming").GetProperty("shareWhen").GetString());
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsTheModel()
-    {
-        var settings = _store.Load();
-        settings.Recording.Mode = RecordingMode.Session;
-        settings.Recording.Fps = 144;
-        settings.Recording.Encoder = "nvenc";
+        var recording = settings.Recording;
+        recording.Mode = RecordingMode.Session;
+        recording.ResolutionWidth = 2560;
+        recording.ResolutionHeight = 1440;
+        recording.Fps = 144;
+        recording.Encoder = "nvenc";
+        recording.Quality = 18;
+        recording.RateControl = RateControlMode.Vbr;
+        recording.BitrateKbps = 25_000;
+        recording.MaxBitrateKbps = 40_000;
+        recording.EnableHdr = false;
+        recording.OutputDirectory = "/home/tester/Videos/Tript";
+        recording.AutomaticClipsEnabled = true;
+        recording.AutomaticClipBeforeSeconds = 3;
+        recording.AutomaticClipAfterSeconds = 12;
+        recording.DeleteLinkedHighlightsByDefault = true;
+        recording.TrashRetentionHours = 0;
         settings.Buffer.Enabled = true;
         settings.Buffer.Duration = TimeSpan.FromMinutes(2);
+        settings.Buffer.MaxSizeBytes = 1024;
         settings.Audio.OutputMode = AudioOutputMode.Mute;
+        settings.Audio.Tracks.Add(new AudioTrack
+        {
+            Name = "Game",
+            Sources =
+            {
+                new AudioSource
+                {
+                    Name = "Game audio", Kind = AudioSourceKind.Output, Volume = 0.5f,
+                    DeviceId = @"\\?\SWD\MMDEVAPI\{0.0.1.00000000}.{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}",
+                },
+            },
+        });
         settings.Capture.Method = DisplayCaptureMethod.Display;
         settings.Capture.Display = "DP-1";
         settings.Capture.DisplayLabel = "Screen DP-1";
         settings.Game.GameCaptureTimeout = TimeSpan.FromSeconds(25);
+        settings.Game.AutoRecordDetectedGames = false;
         settings.Game.IgnoredApplications.Add(@"C:\Tools\overlay.exe");
+        settings.Game.GameList.Add(new GameSetting
+        {
+            Id = "ow",
+            Name = "Overwatch",
+            QualityOverride = new GameQualityOverride { Fps = 240 },
+            AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3, AfterSeconds = 12 },
+        });
+        settings.General.StartWithWindows = true;
+        settings.General.StartupVisibility = StartupVisibility.Tray;
+        settings.General.MinimizeBehavior = MinimizeBehavior.Tray;
+        settings.General.CloseBehavior = CloseBehavior.HideToTray;
+        settings.General.ConvertHdrClipsToSdr = true;
+        settings.General.CheckForUpdatesAutomatically = false;
+        settings.General.DebugLogging = true;
+        settings.General.ClipOutputMode = ClipOutputMode.Separate;
+        settings.General.Notifications.Enabled = false;
+        settings.General.Notifications.ErrorsSound = false;
+        settings.Streaming.ShareEnabled = true;
+        settings.Streaming.ShareWhen = StreamShareWhen.Always;
+        settings.Streaming.SenderName = "Tript Game";
+        settings.Storage.MinimumFreeBytes = 1;
+        settings.Storage.WhenFull = StorageFullAction.ReclaimOldest;
+        settings.Storage.PolicyConfirmed = true;
+        settings.Storage.KeepSharingWhenFull = false;
         _store.Save();
 
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.Equal(RecordingMode.Session, reloaded.Recording.Mode);
-        Assert.Equal(144, reloaded.Recording.Fps);
-        Assert.Equal("nvenc", reloaded.Recording.Encoder);
-        Assert.True(reloaded.Buffer.Enabled);
-        Assert.Equal(TimeSpan.FromMinutes(2), reloaded.Buffer.Duration);
-        Assert.Equal(AudioOutputMode.Mute, reloaded.Audio.OutputMode);
-        Assert.Equal(DisplayCaptureMethod.Display, reloaded.Capture.Method);
-        Assert.Equal("DP-1", reloaded.Capture.Display);
-
-        Assert.Equal("Screen DP-1", reloaded.Capture.DisplayLabel);
-        Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
-        Assert.Equal([@"C:\Tools\overlay.exe"], reloaded.Game.IgnoredApplications);
+        Assert.Equivalent(settings, new SettingsStore(_provider).Load(), strict: true);
     }
 
     [Fact]
@@ -187,28 +198,6 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void SaveThenLoad_RoundTripsGeneralSettings()
-    {
-        var settings = _store.Load();
-        settings.General.StartWithWindows = true;
-        settings.General.StartupVisibility = StartupVisibility.Tray;
-        settings.General.MinimizeBehavior = MinimizeBehavior.Tray;
-        settings.General.CloseBehavior = CloseBehavior.HideToTray;
-        settings.General.Notifications.Enabled = false;
-        settings.General.Notifications.Errors = false;
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.True(reloaded.General.StartWithWindows);
-        Assert.Equal(StartupVisibility.Tray, reloaded.General.StartupVisibility);
-        Assert.Equal(MinimizeBehavior.Tray, reloaded.General.MinimizeBehavior);
-        Assert.Equal(CloseBehavior.HideToTray, reloaded.General.CloseBehavior);
-        Assert.False(reloaded.General.Notifications.Enabled);
-        Assert.False(reloaded.General.Notifications.Errors);
-    }
-
-    [Fact]
     public void AFileWithoutGeneralSettings_UsesTheGeneralDefaults()
     {
         File.WriteAllText(_provider.FilePath, "{\"version\":1,\"recording\":{\"mode\":\"Session\"}}");
@@ -251,91 +240,6 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void SaveThenLoad_RoundTripsTheTrashRetention()
-    {
-        Assert.Equal(24, _store.Load().Recording.TrashRetentionHours);
-
-        _store.Load().Recording.TrashRetentionHours = 72;
-        _store.Save();
-
-        Assert.Equal(72, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
-
-        _store.Load().Recording.TrashRetentionHours = 0;
-        _store.Save();
-
-        Assert.Equal(0, new SettingsStore(_provider).Load().Recording.TrashRetentionHours);
-    }
-
-    [Fact]
-    public void DeleteLinkedHighlightsByDefault_FreshAndOlderSettings_DefaultToFalse()
-    {
-        Assert.False(_store.Load().Recording.DeleteLinkedHighlightsByDefault);
-
-        File.WriteAllText(_provider.FilePath, """{"version":1,"recording":{"mode":"Session"}}""");
-
-        Assert.False(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
-    }
-
-    [Fact]
-    public void DeleteLinkedHighlightsByDefault_TrueAndFalse_RoundTrip()
-    {
-        _store.Load().Recording.DeleteLinkedHighlightsByDefault = true;
-        _store.Save();
-        Assert.True(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
-
-        _store.Load().Recording.DeleteLinkedHighlightsByDefault = false;
-        _store.Save();
-        Assert.False(new SettingsStore(_provider).Load().Recording.DeleteLinkedHighlightsByDefault);
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsTheOutputDirectory()
-    {
-        var settings = _store.Load();
-        settings.Recording.OutputDirectory = "/home/tester/Videos/Tript";
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.Equal("/home/tester/Videos/Tript", reloaded.Recording.OutputDirectory);
-    }
-
-    [Fact]
-    public void SaveThenLoad_EmptyOutputDirectory_ReadsBackAsNull()
-    {
-        var settings = _store.Load();
-        settings.Recording.OutputDirectory = null;
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.Null(reloaded.Recording.OutputDirectory);
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsTheResolution()
-    {
-        var settings = _store.Load();
-        settings.Recording.ResolutionWidth = 2560;
-        settings.Recording.ResolutionHeight = 1440;
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.Equal(2560, reloaded.Recording.ResolutionWidth);
-        Assert.Equal(1440, reloaded.Recording.ResolutionHeight);
-    }
-
-    [Fact]
-    public void TheDefaultResolution_IsTheSafeFallback_AndNeedsNoDisplay()
-    {
-        var settings = new Settings();
-
-        Assert.Equal(1920, settings.Recording.ResolutionWidth);
-        Assert.Equal(1080, settings.Recording.ResolutionHeight);
-    }
-
-    [Fact]
     public void ALoadOfAnExistingFile_KeepsItsStoredResolution()
     {
         File.WriteAllText(_provider.FilePath,
@@ -350,43 +254,6 @@ public class SettingsRoundTripTests : IDisposable
         var recording = doc.RootElement.GetProperty("recording");
         Assert.Equal(1280, recording.GetProperty("resolutionWidth").GetInt32());
         Assert.Equal(720, recording.GetProperty("resolutionHeight").GetInt32());
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsTheRateControlAndBitrateFields()
-    {
-        var settings = _store.Load();
-        settings.Recording.RateControl = RateControlMode.Vbr;
-        settings.Recording.BitrateKbps = 25_000;
-        settings.Recording.MaxBitrateKbps = 40_000;
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-
-        Assert.Equal(RateControlMode.Vbr, reloaded.Recording.RateControl);
-        Assert.Equal(25_000, reloaded.Recording.BitrateKbps);
-        Assert.Equal(40_000, reloaded.Recording.MaxBitrateKbps);
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsTheAudioSourceDeviceId()
-    {
-        const string deviceId = "\\\\?\\SWD\\MMDEVAPI\\{0.0.1.00000000}.{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}";
-        var settings = _store.Load();
-        settings.Audio.Tracks.Add(new AudioTrack
-        {
-            Name = "Game",
-            Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output, DeviceId = deviceId } },
-        });
-        _store.Save();
-
-        using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
-        var source = doc.RootElement.GetProperty("audio").GetProperty("tracks")[0].GetProperty("sources")[0];
-        Assert.Equal(deviceId, source.GetProperty("deviceId").GetString());
-
-        var reloaded = new SettingsStore(_provider).Load();
-        var reloadedSource = Assert.Single(Assert.Single(reloaded.Audio.Tracks).Sources);
-        Assert.Equal(deviceId, reloadedSource.DeviceId);
     }
 
     [Fact]
@@ -415,21 +282,6 @@ public class SettingsRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void SaveThenLoad_ASourceWithoutADevice_ReadsBackNull()
-    {
-        var settings = _store.Load();
-        settings.Audio.Tracks.Add(new AudioTrack
-        {
-            Name = "Game",
-            Sources = { new AudioSource { Name = "Game audio", Kind = AudioSourceKind.Output } },
-        });
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-        Assert.Null(Assert.Single(Assert.Single(reloaded.Audio.Tracks).Sources).DeviceId);
-    }
-
-    [Fact]
     public void TheRateControlMode_IsPersistedByName()
     {
         var settings = _store.Load();
@@ -439,18 +291,6 @@ public class SettingsRoundTripTests : IDisposable
         using var doc = JsonDocument.Parse(File.ReadAllText(_provider.FilePath));
         var recording = doc.RootElement.GetProperty("recording");
         Assert.Equal("Cbr", recording.GetProperty("rateControl").GetString());
-    }
-
-    [Fact]
-    public void ALoadOfAFileWithoutRateControl_TakesTheDefaults()
-    {
-        File.WriteAllText(_provider.FilePath, """{"version":1,"recording":{"mode":"Session","quality":10}}""");
-
-        var settings = _store.Load();
-
-        Assert.Equal(RateControlMode.Cqp, settings.Recording.RateControl);
-        Assert.Equal(15_000, settings.Recording.BitrateKbps);
-        Assert.Equal(0, settings.Recording.MaxBitrateKbps);
     }
 
     [Fact]

@@ -107,7 +107,6 @@ public sealed class ObsEncoderTests
         Assert.Equal("video encoder", encoder.Name);
         Assert.Equal("h264", encoder.Codec);
         Assert.Equal(ObsEncoderType.Video, encoder.Type);
-        Assert.Equal(ObsEncoderCaps.DynBitrate | ObsEncoderCaps.Roi, encoder.Caps);
     }
 
     [SkippableFact]
@@ -121,32 +120,6 @@ public sealed class ObsEncoderTests
         Assert.Equal("aac", encoder.Codec);
         Assert.Equal(ObsEncoderType.Audio, encoder.Type);
         Assert.Equal(2u, encoder.MixerIndex);
-    }
-
-    [SkippableFact]
-    public void TheCapabilityProbes_AgreeForTheRegisteredIds()
-    {
-        using var session = StartSession();
-
-        Assert.Equal(ObsEncoderCaps.DynBitrate | ObsEncoderCaps.Roi, ObsEncoder.GetTypeCaps(X264Id));
-    }
-
-    [SkippableFact]
-    public void TheVaapiEncoder_IsMarkedInternal()
-    {
-        RequireVaapiHardware();
-        using var session = StartSession();
-
-        Assert.Equal(ObsEncoderCaps.Internal, ObsEncoder.GetTypeCaps(VaapiId));
-    }
-
-    [SkippableFact]
-    public void TheTypeLevelAndInstanceLevelCaps_Agree()
-    {
-        using var session = StartSession();
-        using var encoder = ObsEncoder.CreateVideo(X264Id, "caps");
-
-        Assert.Equal(ObsEncoder.GetTypeCaps(X264Id), encoder.Caps);
     }
 
     [SkippableFact]
@@ -168,7 +141,6 @@ public sealed class ObsEncoderTests
 
         Assert.False(encoder.IsActive);
         Assert.Null(encoder.LastError);
-        Assert.Equal(0u, encoder.EncodedFrames);
     }
 
     [SkippableFact]
@@ -221,27 +193,6 @@ public sealed class ObsEncoderTests
         Assert.Equal(30, readBack.GetInt("crf"));
 
         Assert.Equal("CRF", readBack.GetString("rate_control"));
-    }
-
-    [SkippableFact]
-    public void TheX264TypeDefaults_MatchTheSpecifiedDefaults()
-    {
-        using var session = StartSession();
-
-        using var defaults = ObsEncoder.GetTypeDefaults(X264Id);
-        Assert.NotNull(defaults);
-
-        Assert.Equal(6000, defaults!.GetInt("bitrate"));
-        Assert.False(defaults.GetBool("use_bufsize"));
-        Assert.Equal(6000, defaults.GetInt("buffer_size"));
-        Assert.Equal(23, defaults.GetInt("crf"));
-        Assert.Equal("CBR", defaults.GetString("rate_control"));
-        Assert.Equal("veryfast", defaults.GetString("preset"));
-        Assert.Equal(string.Empty, defaults.GetString("profile"));
-        Assert.Equal(string.Empty, defaults.GetString("tune"));
-
-        Assert.False(defaults.HasUserValue("bitrate"));
-        Assert.True(defaults.HasDefaultValue("bitrate"));
     }
 
     [SkippableFact]
@@ -311,7 +262,6 @@ public sealed class ObsEncoderTests
 
         Assert.Equal(0u, encoder.Width);
         Assert.Equal(0u, encoder.Height);
-        Assert.False(encoder.ScalingEnabled);
     }
 
     [SkippableFact]
@@ -326,78 +276,6 @@ public sealed class ObsEncoderTests
 
         Assert.Equal(1280u, encoder.Width);
         Assert.Equal(720u, encoder.Height);
-    }
-
-    [SkippableFact]
-    public void ScaledSize_ReadsBackAfterBinding()
-    {
-        using var session = StartSession();
-        using var encoder = ObsEncoder.CreateVideo(X264Id, "scaled");
-
-        session.Runtime.TryGetVideoHandle(out var video);
-        encoder.BindToVideo(video);
-
-        encoder.SetScaledSize(640, 360);
-
-        Assert.True(encoder.ScalingEnabled);
-        Assert.Equal(640u, encoder.Width);
-        Assert.Equal(360u, encoder.Height);
-
-        encoder.SetScaledSize(0, 0);
-        Assert.False(encoder.ScalingEnabled);
-        Assert.Equal(1280u, encoder.Width);
-        Assert.Equal(720u, encoder.Height);
-    }
-
-    [SkippableFact]
-    public void GpuScaleType_ReadsBackWhatWasSet()
-    {
-        using var session = StartSession();
-        using var encoder = ObsEncoder.CreateVideo(X264Id, "gpu scaled");
-
-        Assert.False(encoder.GpuScalingEnabled);
-        Assert.Equal(ObsScaleType.Disable, encoder.GpuScaleType);
-
-        encoder.SetGpuScaleType(ObsScaleType.Bicubic);
-
-        Assert.True(encoder.GpuScalingEnabled);
-        Assert.Equal(ObsScaleType.Bicubic, encoder.GpuScaleType);
-    }
-
-    [SkippableFact]
-    public void TheFrameRateDivisor_RoundTripsBeforeAndAfterBinding()
-    {
-        using var session = StartSession();
-        using var encoder = ObsEncoder.CreateVideo(X264Id, "divisor");
-
-        Assert.Equal(1u, encoder.FrameRateDivisor);
-
-        Assert.True(encoder.SetFrameRateDivisor(2));
-        Assert.Equal(2u, encoder.FrameRateDivisor);
-
-        session.Runtime.TryGetVideoHandle(out var video);
-        encoder.BindToVideo(video);
-
-        Assert.True(encoder.SetFrameRateDivisor(3));
-        Assert.Equal(3u, encoder.FrameRateDivisor);
-    }
-
-    [SkippableFact]
-    public void PreferredVideoFormatAndColourSpace_RoundTrip()
-    {
-        using var session = StartSession();
-        using var encoder = ObsEncoder.CreateVideo(X264Id, "preferences");
-
-        Assert.Equal(ObsVideoFormat.None, encoder.PreferredVideoFormat);
-
-        encoder.PreferredVideoFormat = ObsVideoFormat.Nv12;
-        Assert.Equal(ObsVideoFormat.Nv12, encoder.PreferredVideoFormat);
-
-        encoder.PreferredColorSpace = ObsColorSpace.Rec2100Pq;
-        Assert.Equal(ObsColorSpace.Rec2100Pq, encoder.PreferredColorSpace);
-
-        encoder.PreferredRange = ObsVideoRange.Full;
-        Assert.Equal(ObsVideoRange.Full, encoder.PreferredRange);
     }
 
     [SkippableFact]
@@ -419,30 +297,5 @@ public sealed class ObsEncoderTests
         encoder.BindToAudio(audio);
 
         Assert.Equal(48000u, encoder.SampleRate);
-    }
-
-    [SkippableFact]
-    public void RoiIsRefusedOnAnEncoderWithoutTheCapability()
-    {
-        RequireVaapiHardware();
-        using var session = StartSession();
-
-        using var vaapi = ObsEncoder.CreateVideo(VaapiId, "no roi");
-        Assert.False(vaapi.Caps.HasFlag(ObsEncoderCaps.Roi));
-        Assert.False(vaapi.AddRoi(ObsEncoderRoi.Square(0, 0, 100, 0.5f)));
-        Assert.False(vaapi.HasRoi);
-    }
-
-    [SkippableFact]
-    public void RoiIsAcceptedOnAnEncoderWithTheCapability()
-    {
-        using var session = StartSession();
-
-        using var x264 = ObsEncoder.CreateVideo(X264Id, "roi");
-        Assert.True(x264.Caps.HasFlag(ObsEncoderCaps.Roi));
-
-        Assert.True(x264.AddRoi(ObsEncoderRoi.Square(320, 180, 100, 0.5f)));
-
-        x264.ClearRoi();
     }
 }

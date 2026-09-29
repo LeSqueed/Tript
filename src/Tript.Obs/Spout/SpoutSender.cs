@@ -92,9 +92,7 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
 
             using (var listLock = _list.Lock(ListLockTimeout))
             {
-                // The sender list is shared by every Spout application on the machine. Writing it
-                // without the lock could clobber another sender's registration, so on a timeout this
-                // leaves _registered false and the next Publish tries again.
+                // The sender list is machine-wide; never write it unlocked. On timeout the next Publish retries.
                 if (!listLock.Acquired)
                 {
                     Diagnostics.ReportFirst(ref _listLockTimeoutReported, DiagnosticLevel.Warning,
@@ -345,10 +343,8 @@ internal sealed class SpoutSender : ISharedTextureSink, IDisposable
             }
         }
 
-        // AbandonedMutexException means the wait succeeded and this thread now owns the mutex; the
-        // previous owner simply died holding it. It is reported as acquired because it is: treating
-        // it as a failure would skip the release and hold the mutex forever. A timeout is the only
-        // real failure, and callers must check Acquired before writing shared memory.
+        // An abandoned mutex is owned by us now and must count as acquired, or it is never released.
+        // Only a timeout is a failure; callers must check Acquired before writing shared memory.
         internal LockScope Lock(TimeSpan timeout)
         {
             bool acquired;

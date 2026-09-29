@@ -459,16 +459,11 @@ public sealed class FrameDeliveryFixture : IDisposable
             ? new Vector2(info!.OutputWidth, info.OutputHeight)
             : Vector2.Zero;
 
-        item.Transform = new ObsTransform
-        {
-            Position = new Vector2(0, 0),
-            Scale = Vector2.One,
-            Alignment = ObsAlignment.Top | ObsAlignment.Left,
-            BoundsType = ObsBoundsType.Stretch,
-            BoundsAlignment = ObsAlignment.Top | ObsAlignment.Left,
-            Bounds = bounds,
-            CropToBounds = false
-        };
+        item.Alignment = ObsAlignment.Top | ObsAlignment.Left;
+        item.Position = Vector2.Zero;
+        item.BoundsType = ObsBoundsType.Stretch;
+        item.BoundsAlignment = ObsAlignment.Top | ObsAlignment.Left;
+        item.Bounds = bounds;
 
         Session.Runtime.SetOutputSource(0, scene.AsSource());
         return new ChannelScope(scene, item);

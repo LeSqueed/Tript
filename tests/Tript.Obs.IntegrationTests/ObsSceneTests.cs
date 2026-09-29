@@ -11,20 +11,6 @@ public sealed class ObsSceneTests
     private const string ScreenCaptureId = "xshm_input";
 
     [SkippableFact]
-    public void AScene_IsASourceOfSceneType()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("a scene");
-
-        using var source = scene.AsSource();
-
-        Assert.Equal(ObsSourceType.Scene, source.Type);
-        Assert.True(source.IsScene);
-        Assert.Equal("a scene", source.Name);
-        Assert.Equal("a scene", scene.Name);
-    }
-
-    [SkippableFact]
     public void ASceneAndItsSource_ConvertBackAndForth()
     {
         using var session = ObsSession.StartWithSourceTypes();

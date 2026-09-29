@@ -169,19 +169,6 @@ public sealed class ObsRuntime : IDisposable
         ObsNative.obs_add_data_path(path);
     }
 
-    public bool RemoveDataPath(string path)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(path);
-        return ObsNative.obs_remove_data_path(path);
-    }
-
-    public string? FindDataFile(string file)
-    {
-        ThrowIfDisposed();
-        ArgumentException.ThrowIfNullOrEmpty(file);
-        return Utf8Marshal.ReadOwned(ObsNative.obs_find_data_file(file));
-    }
-
     public void AddModulePath(string binaryPath, string dataPath)
     {
         ThrowIfDisposed();
@@ -220,40 +207,6 @@ public sealed class ObsRuntime : IDisposable
         ObsNative.obs_post_load_modules();
     }
 
-    public ObsModuleOpenResult OpenModule(string path, string dataPath, out ObsModule module)
-    {
-        ThrowIfDisposed();
-        ArgumentException.ThrowIfNullOrEmpty(path);
-        ArgumentException.ThrowIfNullOrEmpty(dataPath);
-
-        var code = ObsNative.obs_open_module(out var pointer, path, dataPath);
-        module = new ObsModule(pointer);
-
-        if (!Enum.IsDefined((ObsModuleOpenResult)code))
-            throw new ObsException($"obs_open_module returned {code}, which is not a documented module status.");
-
-        return (ObsModuleOpenResult)code;
-    }
-
-    public bool InitModule(ObsModule module)
-    {
-        ThrowIfDisposed();
-
-        if (!module.IsValid)
-            throw new ArgumentException("The module handle is null.", nameof(module));
-
-        return ObsNative.obs_init_module(module.Pointer);
-    }
-
-    public string? GetModuleName(ObsModule module)
-    {
-        ThrowIfDisposed();
-
-        return module.IsValid
-            ? Utf8Marshal.ReadBorrowed(ObsNative.obs_get_module_name(module.Pointer))
-            : null;
-    }
-
     public IReadOnlyList<string> EnumerateInputTypes()
     {
         ThrowIfDisposed();
@@ -275,15 +228,6 @@ public sealed class ObsRuntime : IDisposable
         {
             ThrowIfDisposed();
             return ObsNative.obs_get_video_sdr_white_level();
-        }
-    }
-
-    public float HdrNominalPeakLevelNits
-    {
-        get
-        {
-            ThrowIfDisposed();
-            return ObsNative.obs_get_video_hdr_nominal_peak_level();
         }
     }
 
@@ -466,9 +410,6 @@ public sealed class ObsRuntime : IDisposable
         video = HasVideo ? ObsNative.obs_get_video() : nint.Zero;
         return video != nint.Zero;
     }
-
-    internal bool IsCurrentVideoHandle(nint video) =>
-        TryGetVideoHandle(out var current) && current == video;
 
     internal bool TryGetAudioHandle(out nint audio)
     {

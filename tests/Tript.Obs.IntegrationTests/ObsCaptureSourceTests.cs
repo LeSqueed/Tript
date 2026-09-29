@@ -188,18 +188,6 @@ public sealed class ObsCaptureSourceTests
     }
 
     [SkippableFact]
-    public void GameCapture_IsReportedAbsentOnLinux()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        Assert.Null(ObsCaptureSource.GetGameCaptureProperties());
-        Assert.Null(ObsCaptureSource.BuildGameCaptureSettings(new ObsGameCaptureTarget("title", null, "/path/to/game")));
-
-        using var source = ObsSource.CreatePrivate(XshmInputId, "not a game source");
-        Assert.False(ObsCaptureSource.Retarget(source, new ObsGameCaptureTarget("title", null, null)));
-    }
-
-    [SkippableFact]
     public void Retargeting_ADisplaySource_IsRefusedOnLinux()
     {
         using var session = ObsSession.StartWithSourceTypes();

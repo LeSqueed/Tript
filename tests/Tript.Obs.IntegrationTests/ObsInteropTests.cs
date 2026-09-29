@@ -105,24 +105,6 @@ public sealed class ObsInteropTests
     }
 
     [Fact]
-    public void ObsTransformInfo_MatchesTheNativeStructLayout()
-    {
-        Assert.Equal(8, Marshal.SizeOf<Vec2Native>());
-        Assert.Equal(16, Marshal.SizeOf<ObsSceneItemCropNative>());
-        Assert.Equal(44, Marshal.SizeOf<ObsTransformInfoNative>());
-
-        Assert.Equal(0, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Position)));
-        Assert.Equal(8, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Rotation)));
-        Assert.Equal(12, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Scale)));
-        Assert.Equal(20, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Alignment)));
-        Assert.Equal(24, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.BoundsType)));
-        Assert.Equal(28, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.BoundsAlignment)));
-        Assert.Equal(32, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.Bounds)));
-
-        Assert.Equal(40, (int)Marshal.OffsetOf<ObsTransformInfoNative>(nameof(ObsTransformInfoNative.CropToBounds)));
-    }
-
-    [Fact]
     public unsafe void VideoIoStructs_MatchTheNativeLayout()
     {
         Assert.Equal(104, Marshal.SizeOf<VideoDataNative>());
@@ -147,9 +129,6 @@ public sealed class ObsInteropTests
         Assert.Equal(32, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.CacheSize)));
         Assert.Equal(40, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.ColorSpace)));
         Assert.Equal(44, (int)Marshal.OffsetOf<VideoOutputInfoNative>(nameof(VideoOutputInfoNative.Range)));
-
-        Assert.Equal(20, Marshal.SizeOf<ObsEncoderRoiNative>());
-        Assert.Equal(16, (int)Marshal.OffsetOf<ObsEncoderRoiNative>(nameof(ObsEncoderRoiNative.Priority)));
     }
 
     [Fact]

@@ -50,12 +50,9 @@ public sealed class ObsOutput : IDisposable
         return new ObsOutput(pointer);
     }
 
-    // Draining in-flight callbacks before releasing the output is what keeps libobs from calling into
-    // a freed handle. The drain used to be unbounded, and with no SynchronizationContext the stop
-    // handlers run synchronously inside the callback, so a handler that blocked, for example on a
-    // lock the disposing thread already held, hung shutdown forever. On timeout the handle is leaked
-    // on purpose: releasing it while a callback may still be running is a native use-after-free,
-    // which is far worse than one output left behind at exit.
+    // Drain in-flight callbacks before release so libobs never calls into a freed handle. Bounded, since a
+    // handler blocked on a lock we hold would hang shutdown; on timeout the handle is leaked on purpose
+    // rather than risk a native use-after-free.
     private static readonly TimeSpan CallbackDrainTimeout = TimeSpan.FromSeconds(10);
 
     public void Dispose()
@@ -101,12 +98,6 @@ public sealed class ObsOutput : IDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
         return Utf8Marshal.ReadBorrowed(ObsNative.obs_output_get_display_name(id));
-    }
-
-    public static ObsOutputFlags GetTypeFlags(string id)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(id);
-        return (ObsOutputFlags)ObsNative.obs_get_output_flags(id);
     }
 
     public static IReadOnlyList<string> EnumerateTypeIds()
@@ -212,25 +203,9 @@ public sealed class ObsOutput : IDisposable
         ObsNative.obs_output_set_audio_encoder(Pointer, encoder.Pointer, index);
     }
 
-    public ObsEncoder? GetAudioEncoder(nuint index) =>
-        ObsEncoder.FromBorrowedPointerOrNull(ObsNative.obs_output_get_audio_encoder(Pointer, index));
-
-    public void SetMedia(nint video, nint audio) => ObsNative.obs_output_set_media(Pointer, video, audio);
-
-    public void SetPreferredSize(uint width, uint height) =>
-        ObsNative.obs_output_set_preferred_size(Pointer, width, height);
-
-    public void SetReconnectSettings(int retryCount, int retrySeconds) =>
-        ObsNative.obs_output_set_reconnect_settings(Pointer, retryCount, retrySeconds);
-
-    public void SetDelay(uint seconds, ObsOutputDelayFlags flags) =>
-        ObsNative.obs_output_set_delay(Pointer, seconds, (uint)flags);
-
     public bool IsActive => ObsNative.obs_output_active(Pointer);
 
     public bool CanPause => ObsNative.obs_output_can_pause(Pointer);
-
-    public bool IsPaused => ObsNative.obs_output_paused(Pointer);
 
     public bool Start()
     {
@@ -242,21 +217,7 @@ public sealed class ObsOutput : IDisposable
 
     public void Stop() => ObsNative.obs_output_stop(Pointer);
 
-    public void ForceStop() => ObsNative.obs_output_force_stop(Pointer);
-
-    public bool SetPaused(bool paused) => ObsNative.obs_output_pause(Pointer, paused);
-
-    public int FramesDropped => ObsNative.obs_output_get_frames_dropped(Pointer);
-
-    public int TotalFrames => ObsNative.obs_output_get_total_frames(Pointer);
-
     public ulong TotalBytes => ObsNative.obs_output_get_total_bytes(Pointer);
-
-    public float Congestion => ObsNative.obs_output_get_congestion(Pointer);
-
-    public int ConnectTimeMilliseconds => ObsNative.obs_output_get_connect_time_ms(Pointer);
-
-    public bool IsReconnecting => ObsNative.obs_output_reconnecting(Pointer);
 
     public string? LastError => Utf8Marshal.ReadBorrowed(ObsNative.obs_output_get_last_error(Pointer));
 

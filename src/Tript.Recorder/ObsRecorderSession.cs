@@ -14,11 +14,8 @@ public sealed class ObsRecorderSession : IRecorderSession
     private const string Mp4OutputId = "mp4_output";
     private const string ReplayBufferId = "replay_buffer";
 
-    // ffmpeg_muxer only writes the moov atom when the output stops, so a crash, a power loss or any
-    // forced exit leaves an unplayable recording. mp4_output is OBS's Hybrid MP4 writer, which keeps
-    // recovery data as it goes and still finalizes to an ordinary seekable MP4. It ships in
-    // obs-outputs and only exists from OBS 31, while the supported floor is 30.1 and Linux builds use
-    // whatever OBS the system has, so this falls back rather than refusing to record.
+    // Hybrid MP4 survives a crash (ffmpeg_muxer's moov is written only on stop), but it needs OBS 31+
+    // while the floor is 30.1, so fall back rather than refuse to record.
     private static string SessionOutputId() =>
         ObsOutput.IsTypeRegistered(Mp4OutputId) ? Mp4OutputId : FfmpegMuxerId;
 
@@ -392,7 +389,7 @@ public sealed class ObsRecorderSession : IRecorderSession
             return null;
 
         var space = game.ColorSpace;
-        Log.Information("ObsRecorderSession: the hooked game reports {ColourSpace}", space);
+        Log.Debug("ObsRecorderSession: the hooked game reports {ColourSpace}", space);
         return space;
     }
 

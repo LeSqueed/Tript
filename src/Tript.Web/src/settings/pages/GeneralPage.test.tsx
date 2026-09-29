@@ -123,3 +123,15 @@ describe('HDR clip conversion', () => {
     expect(update).toHaveBeenCalledWith('general', { convertHdrClipsToSdr: false });
   });
 });
+
+describe('debug logging toggle', () => {
+  it('is off unless the setting is on, and saves the flipped value', () => {
+    const update = renderPage();
+    const toggle = screen.getByLabelText('Debug logging') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+
+    fireEvent.click(toggle);
+
+    expect(update).toHaveBeenCalledWith('general', { debugLogging: true });
+  });
+});

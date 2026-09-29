@@ -8,9 +8,8 @@ interface ErrorBoundaryState {
   failed: boolean;
 }
 
-// Without a boundary, a render error anywhere unmounts the whole tree and leaves a blank window, with
-// nothing recorded on either side of the bridge. Recording keeps running in the host regardless, so
-// the fallback says so rather than implying Tript itself has stopped.
+// Without a boundary a render error blanks the window. Recording keeps running in the host, so the
+// fallback says so.
 export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
   state: ErrorBoundaryState = { failed: false };
 

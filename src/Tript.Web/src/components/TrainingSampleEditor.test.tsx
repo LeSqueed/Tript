@@ -92,6 +92,27 @@ describe('TrainingSampleEditor save lifecycle', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('puts a label back where it was when a move or resize is cancelled', () => {
+    render(<TrainingSampleEditor client={createClient()} gameId="game-1" sample={sample} events={events} onClose={vi.fn()} />);
+    const canvas = document.querySelector('.training-editor-canvas') as HTMLElement;
+    const box = () => document.querySelector('.training-box') as HTMLElement;
+    const geometry = () => ({ left: box().style.left, top: box().style.top, width: box().style.width });
+    const original = geometry();
+
+    makeDirty();
+    expect(geometry()).not.toEqual(original);
+    fireEvent.pointerCancel(canvas, { pointerId: 1 });
+    expect(geometry()).toEqual(original);
+
+    const handle = document.querySelector('.training-box-handle') as HTMLElement;
+    Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
+    fireEvent.pointerDown(handle, { clientX: 35, clientY: 35, pointerId: 2 });
+    fireEvent.pointerMove(canvas, { clientX: 80, clientY: 80, pointerId: 2 });
+    expect(geometry().width).not.toEqual(original.width);
+    fireEvent.pointerCancel(canvas, { pointerId: 2 });
+    expect(geometry()).toEqual(original);
+  });
+
   function drawOcrRegion() {
     const canvas = document.querySelector('.training-editor-canvas') as HTMLElement;
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({

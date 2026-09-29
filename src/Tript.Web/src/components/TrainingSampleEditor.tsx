@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { IpcClient } from '../ipc/websocketClient';
 import type {
   TrainingEventDefinition,
@@ -17,19 +17,9 @@ import {
   effectiveTrainingRegion,
   isLabelInsideEffectiveRegion,
   newRegionGroup,
-  type TrainingRegion,
 } from './trainingRegions';
 import { useTrainingDialog } from './useTrainingDialog';
-import {
-  boxFromPoints,
-  moveBox,
-  moveRegion,
-  normalizedPoint,
-  regionFromPoints,
-  resizeBottomRight,
-  resizeRegionBottomRight,
-  type TrainingPoint,
-} from './trainingCoordinates';
+import { useTrainingGestures } from './useTrainingGestures';
 
 interface TrainingSampleEditorProps {
   client: IpcClient;
@@ -45,14 +35,6 @@ interface TrainingSampleEditorProps {
   hasModel?: boolean;
   onClose(): void;
 }
-
-type Gesture =
-  | { kind: 'draw'; start: TrainingPoint; classId: number; index: number }
-  | { kind: 'move'; index: number; start: TrainingPoint; original: TrainingLabel }
-  | { kind: 'resize'; index: number; original: TrainingLabel }
-  | { kind: 'draw-ocr'; start: TrainingPoint; index: number }
-  | { kind: 'move-ocr'; index: number; start: TrainingPoint; original: TrainingRegion }
-  | { kind: 'resize-ocr'; index: number; original: TrainingRegion };
 
 const EMPTY_REGION_GROUPS: TrainingRegionGroup[] = [];
 
@@ -112,7 +94,6 @@ export function TrainingSampleEditor({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const firstObjectEvent = events.find((event) => (event.detectionKind ?? 'Object') === 'Object');
   const [classId, setClassId] = useState(String(sample.sample.labels[0]?.classId ?? firstObjectEvent?.classId ?? 0));
-  const [gesture, setGesture] = useState<Gesture | null>(null);
   const [drawMode, setDrawMode] = useState<'label' | 'ocrRegion'>('label');
   const [eventDraft, setEventDraft] = useState<{ event: TrainingEventDefinition; isNew: boolean } | null>(null);
   const [regionDraft, setRegionDraft] = useState<
@@ -141,6 +122,29 @@ export function TrainingSampleEditor({
     selectedIndex == null ? Number(classId) : labels[selectedIndex]?.classId
   ));
   const activeRegion = activeEvent ? effectiveTrainingRegion(activeEvent, groupDefinitions) : null;
+  const {
+    updateGesture,
+    beginDraw,
+    beginMove,
+    beginResize,
+    beginMoveOcr,
+    beginResizeOcr,
+    finishGesture,
+    cancelGesture,
+    clearGesture,
+  } = useTrainingGestures({
+    imageRef,
+    labels,
+    setLabels,
+    ocrRegions,
+    setOcrRegions,
+    drawMode,
+    canDrawLabel: activeEvent !== undefined,
+    classId,
+    setClassId,
+    setSelectedIndex,
+    openOcrRegionDraft: setOcrRegionDraft,
+  });
 
   const requestClose = () => {
     if (labelsAreDirty && !window.confirm(
@@ -166,7 +170,7 @@ export function TrainingSampleEditor({
     setIsSuggesting(false);
     setSuggestionConfidence({});
     setSelectedIndex(null);
-    setGesture(null);
+    clearGesture();
     if (sample.sample.labels[0]) setClassId(String(sample.sample.labels[0].classId));
   }, [sample.sample.id, sample.sample.labels, sample.sample.ocrRegions]);
 
@@ -276,136 +280,6 @@ export function TrainingSampleEditor({
     observer.observe(stage);
     return () => observer.disconnect();
   }, [sample.sample.imageHeight, sample.sample.imageWidth]);
-
-  const pointFor = (event: React.PointerEvent): TrainingPoint | null => {
-    const bounds = imageRef.current?.getBoundingClientRect();
-    return bounds ? normalizedPoint(event.nativeEvent, bounds) : null;
-  };
-
-  const updateGesture = (event: React.PointerEvent) => {
-    if (!gesture) return;
-    const point = pointFor(event);
-    if (!point) return;
-    if (gesture.kind === 'draw') {
-      const draft = boxFromPoints(gesture.start, point, gesture.classId);
-      setLabels((current) => current.map((label, index) => index === gesture.index ? draft : label));
-      return;
-    }
-    if (gesture.kind === 'move') {
-      setLabels((current) => current.map((label, index) => index === gesture.index
-        ? moveBox(gesture.original, { x: point.x - gesture.start.x, y: point.y - gesture.start.y })
-        : label));
-      return;
-    }
-    if (gesture.kind === 'resize') {
-      setLabels((current) => current.map((label, index) => index === gesture.index
-        ? resizeBottomRight(gesture.original, point)
-        : label));
-      return;
-    }
-    if (gesture.kind === 'draw-ocr') {
-      const draft = { ...regionFromPoints(gesture.start, point), text: ocrRegions[gesture.index]?.text ?? '' };
-      setOcrRegions((current) => current.map((region, index) => index === gesture.index ? draft : region));
-      return;
-    }
-    if (gesture.kind === 'move-ocr') {
-      setOcrRegions((current) => current.map((region, index) => index === gesture.index
-        ? { ...region, ...moveRegion(gesture.original, { x: point.x - gesture.start.x, y: point.y - gesture.start.y }) }
-        : region));
-      return;
-    }
-    if (gesture.kind === 'resize-ocr') {
-      setOcrRegions((current) => current.map((region, index) => index === gesture.index
-        ? { ...region, ...resizeRegionBottomRight(gesture.original, point) }
-        : region));
-    }
-  };
-
-  const beginDraw = (event: PointerEvent) => {
-    const target = event.target as HTMLElement;
-    if (event.target !== event.currentTarget && target.tagName !== 'IMG') return;
-    const point = pointFor(event);
-    if (!point) return;
-    if (drawMode === 'ocrRegion') {
-      setSelectedIndex(null);
-      const index = ocrRegions.length;
-      setOcrRegions((current) => [...current, { ...regionFromPoints(point, point), text: '' }]);
-      setGesture({ kind: 'draw-ocr', start: point, index });
-      event.currentTarget.setPointerCapture(event.pointerId);
-      return;
-    }
-    if (!activeEvent) return;
-    setSelectedIndex(null);
-    const index = labels.length;
-    const activeClassId = Number(classId);
-    setLabels((current) => [...current, boxFromPoints(point, point, activeClassId)]);
-    setGesture({ kind: 'draw', start: point, classId: activeClassId, index });
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const beginMove = (event: PointerEvent, index: number) => {
-    const point = pointFor(event);
-    if (!point) return;
-    setSelectedIndex(index);
-    setClassId(String(labels[index].classId));
-    setGesture({ kind: 'move', index, start: point, original: labels[index] });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.stopPropagation();
-  };
-
-  const beginResize = (event: PointerEvent, index: number) => {
-    setSelectedIndex(index);
-    setGesture({ kind: 'resize', index, original: labels[index] });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.stopPropagation();
-  };
-
-  const beginMoveOcr = (event: PointerEvent, index: number) => {
-    const point = pointFor(event);
-    if (!point) return;
-    setGesture({ kind: 'move-ocr', index, start: point, original: ocrRegions[index] });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.stopPropagation();
-  };
-
-  const beginResizeOcr = (event: PointerEvent, index: number) => {
-    setGesture({ kind: 'resize-ocr', index, original: ocrRegions[index] });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.stopPropagation();
-  };
-
-  const finishGesture = () => {
-    if (gesture?.kind === 'draw') {
-      const draft = labels[gesture.index];
-      if (draft && draft.width > 0.001 && draft.height > 0.001) {
-        setSelectedIndex(gesture.index);
-      } else {
-        setLabels((current) => current.filter((_, index) => index !== gesture.index));
-      }
-    } else if (gesture?.kind === 'draw-ocr') {
-      const draft = ocrRegions[gesture.index];
-      if (draft && draft.width > 0.002 && draft.height > 0.002) {
-        setOcrRegionDraft({ index: gesture.index, text: draft.text });
-      } else {
-        setOcrRegions((current) => current.filter((_, index) => index !== gesture.index));
-      }
-    }
-    setGesture(null);
-  };
-
-  const cancelGesture = () => {
-    if (gesture?.kind === 'draw') {
-      setLabels((current) => current.filter((_, index) => index !== gesture.index));
-    } else if (gesture?.kind === 'move' || gesture?.kind === 'resize') {
-      setLabels((current) => current.map((label, index) => index === gesture.index ? gesture.original : label));
-    } else if (gesture?.kind === 'draw-ocr') {
-      setOcrRegions((current) => current.filter((_, index) => index !== gesture.index));
-    } else if (gesture?.kind === 'move-ocr' || gesture?.kind === 'resize-ocr') {
-      setOcrRegions((current) => current.map((region, index) =>
-        index === gesture.index ? { ...gesture.original, text: region.text } : region));
-    }
-    setGesture(null);
-  };
 
   const updateSelectedClass = (value: string) => {
     const target = eventDefinitions.find((candidate) => candidate.classId === Number(value));

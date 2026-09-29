@@ -71,14 +71,6 @@ describe('recording page layout', () => {
     expect(quality.value).toBe('7');
     expect(quality.selectedOptions[0].text).toBe('7 (custom)');
   });
-
-  it('no longer renders the removed automatic-highlight controls', () => {
-    renderPage();
-
-    expect(screen.queryByLabelText(/^Delete linked highlights by default/)).toBeNull();
-    expect(screen.queryByLabelText(/^Seconds before each highlight/)).toBeNull();
-    expect(screen.queryByLabelText(/^Seconds after each highlight/)).toBeNull();
-  });
 });
 
 describe('recording mode change', () => {

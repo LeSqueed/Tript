@@ -14,16 +14,13 @@ internal sealed class ResolverClient : IDisposable
     private readonly ResolverConfig _config;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
-    private readonly ResolverGameRegistry? _registry;
 
-    internal ResolverClient(ResolverConfig config, HttpClient? httpClient = null,
-        ResolverGameRegistry? registry = null)
+    internal ResolverClient(ResolverConfig config, HttpClient? httpClient = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         _ownsHttp = httpClient is null;
-        _registry = registry;
     }
 
     internal Uri ManifestUri => _config.Endpoint("manifest");
@@ -40,9 +37,7 @@ internal sealed class ResolverClient : IDisposable
         var query = $"resolve?input={Uri.EscapeDataString(input.Trim())}";
         if (!string.IsNullOrWhiteSpace(nameHint))
             query += $"&name={Uri.EscapeDataString(nameHint.Trim())}";
-        var game = await GetAsync<ResolvedGame>(_config.Endpoint(query), authenticated: true, cancellationToken);
-        _registry?.TryUpsert(game);
-        return game;
+        return await GetAsync<ResolvedGame>(_config.Endpoint(query), authenticated: true, cancellationToken);
     }
 
     internal async Task<IReadOnlyList<ResolverSearchResult>> SearchAsync(string query, int limit = 20,
@@ -54,16 +49,6 @@ internal sealed class ResolverClient : IDisposable
             _config.Endpoint($"search?q={Uri.EscapeDataString(query.Trim())}&limit={limit}"), authenticated: true,
             cancellationToken);
         return response.Results;
-    }
-
-    internal async Task<ResolvedGame> GetGameAsync(string gameId,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(gameId);
-        var game = await GetAsync<ResolvedGame>(_config.Endpoint($"games/{Uri.EscapeDataString(gameId.Trim())}"),
-            authenticated: false, cancellationToken);
-        _registry?.TryUpsert(game);
-        return game;
     }
 
     internal async Task<GameRequestResult> RequestGameAsync(string gameId, string installId,
@@ -112,22 +97,10 @@ internal sealed class ResolverClient : IDisposable
 internal sealed class ResolvedGame
 {
     public string GameId { get; init; } = string.Empty;
-    public bool Canonical { get; init; }
     public string Source { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public int? Year { get; init; }
     public string? Platforms { get; init; }
-    public IReadOnlyList<ResolverAlias>? Aliases { get; init; }
-}
-
-internal sealed class ResolverAlias
-{
-    public string GameId { get; init; } = string.Empty;
-    public string Namespace { get; init; } = string.Empty;
-    public string Value { get; init; } = string.Empty;
-    public string Provenance { get; init; } = string.Empty;
-    public string Confidence { get; init; } = string.Empty;
-    public DateTimeOffset VerifiedAt { get; init; }
 }
 
 internal sealed class ResolverSearchResult
@@ -137,7 +110,6 @@ internal sealed class ResolverSearchResult
     public int? Year { get; init; }
     public string? Platforms { get; init; }
     public string Source { get; init; } = string.Empty;
-    public long? SteamAppId { get; init; }
     public long? IgdbId { get; init; }
 }
 

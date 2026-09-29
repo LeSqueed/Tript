@@ -10,9 +10,8 @@ namespace Tript.Recorder;
 
 public sealed class Recorder : IDisposable
 {
-    // libobs reports a finished save or stop through a callback. If that callback never fires, for
-    // example because the disk filled mid-save, an unbounded wait here hung shutdown until the shell
-    // killed the process, which skips obs_shutdown. Both bounds are far above a healthy save or stop.
+    // Bounded because the completion callback may never fire (disk full mid-save); a hung wait gets the
+    // process killed, which skips obs_shutdown. Both bounds are far above a healthy save or stop.
     private static readonly TimeSpan ReplaySaveWait = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan OutputStopWait = TimeSpan.FromSeconds(30);
 
@@ -230,13 +229,11 @@ public sealed class Recorder : IDisposable
         }
         catch (ObjectDisposedException exception)
         {
-            Log.Warning(exception, "Recorder: the output was already disposed when it was asked to stop");
+            Log.Debug(exception, "Recorder: the output was already disposed when it was asked to stop");
         }
 
         return true;
     }
-
-    internal bool StopForGameEnd() => Stop(RecorderStopReason.GameStopped);
 
     public void Dispose()
     {
@@ -271,7 +268,7 @@ public sealed class Recorder : IDisposable
             }
             catch (ObjectDisposedException exception)
             {
-                Log.Warning(exception, "Recorder: the output was already disposed while the recorder was disposing");
+                Log.Debug(exception, "Recorder: the output was already disposed while the recorder was disposing");
             }
         }
 

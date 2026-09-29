@@ -24,5 +24,4 @@ public sealed class ColorPlan
 
     public required string EncoderFamily { get; init; }
 
-    public bool IsVaapi => EncoderFamily == "vaapi";
 }

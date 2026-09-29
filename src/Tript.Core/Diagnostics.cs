@@ -11,10 +11,7 @@ public enum DiagnosticLevel
     Error,
 }
 
-// The binding and media libraries deliberately take no logging dependency, which left their catch
-// blocks with nowhere to report to, so failures there vanished. The host installs a sink at startup
-// and these libraries report through it. With no sink installed, reports are dropped: a library
-// used on its own behaves exactly as before.
+// Lets the logging-free libraries report failures; the host installs the sink, and without one reports are dropped.
 public static class Diagnostics
 {
     private static Action<DiagnosticLevel, string, Exception?>? _sink;
@@ -22,8 +19,7 @@ public static class Diagnostics
     public static void SetSink(Action<DiagnosticLevel, string, Exception?>? sink) =>
         Volatile.Write(ref _sink, sink);
 
-    // Called from catch blocks and from native callbacks that libobs invokes, where an escaping
-    // exception terminates the process, so this must never throw.
+    // Must never throw: it runs inside libobs callbacks, where an escaping exception kills the process.
     public static void Report(DiagnosticLevel level, string message, Exception? exception = null)
     {
         var sink = Volatile.Read(ref _sink);
@@ -39,9 +35,7 @@ public static class Diagnostics
         }
     }
 
-    // For callbacks libobs invokes every frame or audio tick. A failure there repeats at that rate,
-    // and reporting each one would flood the log and roll out everything that explains it. The first
-    // report carries the stack, which is the useful part.
+    // For per-frame callbacks: report only the first failure so a repeating one cannot flood the log.
     public static void ReportFirst(ref int reported, DiagnosticLevel level, string message,
         Exception? exception = null)
     {

@@ -80,36 +80,6 @@ public sealed class ObsLifecycleTests
     }
 
     [SkippableFact]
-    public void AnAddedDataPath_ResolvesFilesAndUnknownNamesReturnNull()
-    {
-        using var session = ObsSession.Start();
-
-        var coreData = ObsTestEnvironment.CoreDataPath;
-        if (coreData is null)
-            throw new Xunit.SkipException("No OBS core data dir found; nothing to resolve data files from.");
-
-        const string probeFile = "license/gplv2.txt";
-        if (!File.Exists(Path.Combine(coreData, probeFile)))
-            throw new Xunit.SkipException(
-                $"This machine's OBS core data dir ({coreData}) does not ship {probeFile}; there is no file to resolve.");
-
-        session.Runtime.AddDataPath(coreData);
-
-        try
-        {
-            var found = session.Runtime.FindDataFile(probeFile);
-
-            Assert.NotNull(found);
-            Assert.True(File.Exists(found));
-            Assert.Null(session.Runtime.FindDataFile("no/such/file.txt"));
-        }
-        finally
-        {
-            Assert.True(session.Runtime.RemoveDataPath(coreData));
-        }
-    }
-
-    [SkippableFact]
     public void RepeatedStartupAndShutdown_LeavesNoLiveAllocations()
     {
         RunCycle();

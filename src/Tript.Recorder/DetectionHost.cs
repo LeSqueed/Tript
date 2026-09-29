@@ -71,7 +71,7 @@ public sealed class DetectionHost : IDisposable
             {
                 if (_run != null && _run.GameId == gameId)
                 {
-                    Log.Information("DetectionHost: detection already running for {GameId}", gameId);
+                    Log.Debug("DetectionHost: detection already running for {GameId}", gameId);
                     return true;
                 }
 
@@ -141,7 +141,7 @@ public sealed class DetectionHost : IDisposable
         var byClass = definitions
             .Where(definition => definition.DetectionKind == DetectionKind.Object)
             .ToDictionary(definition => definition.ClassId);
-        Log.Information("DetectionHost: loaded event definitions for {GameId}: {Definitions}",
+        Log.Debug("DetectionHost: loaded event definitions for {GameId}: {Definitions}",
             gameId, string.Join(", ", definitions.Select(d => $"{d.ClassId}={d.Name}/{d.BookmarkType?.ToString() ?? "none"}")));
 
         var run = new DetectionRun(gameId, definitions, byClass, _onAutomaticClipBookmark);
@@ -198,6 +198,7 @@ public sealed class DetectionHost : IDisposable
         private readonly IReadOnlyDictionary<int, EventDefinition> _definitionsByClass;
         private readonly Action<Bookmark>? _onAutomaticClipBookmark;
         private readonly object _processingGate = new();
+        private readonly HashSet<int> _unknownClassesReported = [];
         private readonly OcrTextTracker _ocrTracker;
         private readonly TriggerCounter _triggerCounter;
         private readonly object _callbackGate = new();
@@ -259,8 +260,9 @@ public sealed class DetectionHost : IDisposable
             {
                 if (!_definitionsByClass.TryGetValue(detection.ClassId, out var definition))
                 {
-                    Log.Warning("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping",
-                        detection.ClassId, GameId);
+                    if (_unknownClassesReported.Add(detection.ClassId))
+                        Log.Warning("DetectionHost: no event definition for class {ClassId} of {GameId}; dropping it",
+                            detection.ClassId, GameId);
                     continue;
                 }
 
@@ -282,14 +284,14 @@ public sealed class DetectionHost : IDisposable
             var recording = RecordingSessionRegistry.Active;
             if (recording == null)
             {
-                Log.Warning("CreateBookmark: detected '{EventName}' but no active recording was available",
+                Log.Debug("CreateBookmark: detected '{EventName}' but no active recording was available",
                     definition.Name);
                 return;
             }
 
             var effectiveCount = Math.Min(count, MaxNewOccurrencesPerCycle);
             if (effectiveCount < count)
-                Log.Warning("CreateBookmark: clamped {Requested} new '{EventName}' occurrence(s) to {Cap} for one cycle",
+                Log.Debug("CreateBookmark: clamped {Requested} new '{EventName}' occurrence(s) to {Cap} for one cycle",
                     count, definition.Name, MaxNewOccurrencesPerCycle);
 
             for (var index = 0; index < effectiveCount; index++)

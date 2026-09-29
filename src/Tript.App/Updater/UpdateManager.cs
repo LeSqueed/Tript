@@ -77,9 +77,7 @@ internal sealed class UpdateManager : IDisposable
 
             var versionText = candidateVersion.ToString();
 
-            // A rolled-back release would otherwise be downloaded and staged again the next day, and
-            // fail again. An automatic check leaves it; a manual one is a deliberate retry. Any newer
-            // release makes the record obsolete.
+            // Automatic checks skip a rolled-back release so it is not re-staged daily; a manual check retries it.
             var rolledBack = RolledBackVersion();
             if (rolledBack is not null)
             {
@@ -141,10 +139,7 @@ internal sealed class UpdateManager : IDisposable
             or InvalidDataException or JsonException or UnauthorizedAccessException
             or TaskCanceledException)
         {
-            // A manual failure only reached the UI, and an automatic one only Debug, so a rejected
-            // update left no durable record. An integrity failure (checksum mismatch, unsafe zip entry,
-            // a size that disagrees with the release) means a corrupted or tampered download and must
-            // be visible either way. Being offline during an automatic check is routine.
+            // An integrity failure means a corrupted or tampered download and is always logged; being offline is routine.
             if (exception is InvalidDataException)
                 Log.Warning(exception, "UpdateManager: the update was rejected as invalid");
             else if (manual)
@@ -181,8 +176,6 @@ internal sealed class UpdateManager : IDisposable
         }
     }
 
-    // Called once this version has run past the probation window, so the launcher can no longer
-    // roll it back and the previous install is no longer needed.
     internal void DiscardPreviousInstall()
     {
         if (_disposed)
@@ -230,14 +223,10 @@ internal sealed class UpdateManager : IDisposable
             Log.Information("UpdateManager: running {Version}; the previous install is kept until the rollback "
                 + "window has passed", _currentVersion);
 
-        // old-App is deliberately kept here. It is the only way back if this version turns out not
-        // to start, and deleting it on the first startup is what used to make a bad release
-        // unrecoverable. DiscardPreviousInstall removes it once this version has run past the
-        // launcher's probation window.
+        // Keep old-App: it is the only way back if this version fails to start. DiscardPreviousInstall
+        // removes it after the probation window.
 
-        // After a rollback the marker still names the version that failed, and its staged folder is
-        // gone (it became App, then failed-App). Left in place, the UI would offer "Restart & update"
-        // for the very build that could not start.
+        // After a rollback the marker names the failed build; left in place the UI would offer it again.
         if (marker is not null && string.Equals(marker.Version, RolledBackVersion(), StringComparison.Ordinal))
         {
             DeleteFileIfExists(markerPath);
@@ -455,8 +444,7 @@ internal sealed class UpdateManager : IDisposable
         }
     }
 
-    // Not just tidying: a leftover old-App makes the launcher's first MoveFileW fail, so every later
-    // update is silently never applied. A failure here is the only trace of that.
+    // A leftover old-App makes the launcher's first MoveFileW fail, so later updates silently never apply.
     private static void DeleteDirectoryIfExists(string path)
     {
         try

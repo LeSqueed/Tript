@@ -55,20 +55,10 @@ internal static unsafe partial class ObsNative
     internal static partial void obs_set_nix_platform(int platform);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_get_nix_platform();
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_set_nix_platform_display(nint display);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_get_nix_platform_display();
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void obs_add_data_path(string path);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_remove_data_path(string path);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_find_data_file(string file);
@@ -87,16 +77,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_post_load_modules();
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int obs_open_module(out nint module, string path, string dataPath);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_init_module(nint module);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_get_module_name(nint module);
 
     [LibraryImport(ObsLibrary.Name)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -138,29 +118,7 @@ internal static unsafe partial class ObsNative
         delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint param);
 
     [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool video_output_active(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial nint video_output_get_info(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int video_output_get_format(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint video_output_get_width(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint video_output_get_height(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial double video_output_get_frame_rate(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint video_output_get_skipped_frames(nint video);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint video_output_get_total_frames(nint video);
 
     [LibraryImport(ObsLibrary.Name)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -194,21 +152,8 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_source_remove(nint source);
 
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_source_removed(nint source);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_get_source_by_name(string name);
-
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_source_get_display_name(string id);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial uint obs_get_source_output_flags(string id);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint obs_source_get_output_flags(nint source);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_source_get_name(nint source);
@@ -223,9 +168,6 @@ internal static unsafe partial class ObsNative
     internal static partial nint obs_source_get_id(nint source);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_source_get_unversioned_id(nint source);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial int obs_source_get_type(nint source);
 
     [LibraryImport(ObsLibrary.Name)]
@@ -233,9 +175,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_source_update(nint source, nint settings);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_source_reset_settings(nint source, nint settings);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_source_get_width(nint source);
@@ -297,14 +236,6 @@ internal static unsafe partial class ObsNative
     [LibraryImport(ObsLibrary.Name)]
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_source_active(nint source);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_source_showing(nint source);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_source_is_scene(nint source);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_source_set_audio_mixers(nint source, uint mixers);
@@ -387,10 +318,6 @@ internal static unsafe partial class ObsNative
         nint scene, delegate* unmanaged[Cdecl]<nint, nint, nint, byte> callback, nint parameter);
 
     [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_scene_reorder_items(nint scene, nint* itemOrder, nuint count);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_addref(nint item);
 
     [LibraryImport(ObsLibrary.Name)]
@@ -413,18 +340,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_get_pos(nint item, out Vec2Native position);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_rot(nint item, float degrees);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial float obs_sceneitem_get_rot(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_scale(nint item, ref Vec2Native scale);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_get_scale(nint item, out Vec2Native scale);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_set_alignment(nint item, uint alignment);
@@ -451,28 +366,6 @@ internal static unsafe partial class ObsNative
     internal static partial void obs_sceneitem_get_bounds(nint item, out Vec2Native bounds);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_bounds_crop(nint item, [MarshalAs(UnmanagedType.U1)] bool crop);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_sceneitem_get_bounds_crop(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_crop(nint item, ref ObsSceneItemCropNative crop);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_get_crop(nint item, out ObsSceneItemCropNative crop);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_get_info2(nint item, out ObsTransformInfoNative info);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_info2(nint item, ref ObsTransformInfoNative info);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_order(nint item, int movement);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_set_order_position(nint item, int position);
 
     [LibraryImport(ObsLibrary.Name)]
@@ -487,46 +380,13 @@ internal static unsafe partial class ObsNative
     internal static partial bool obs_sceneitem_set_visible(nint item, [MarshalAs(UnmanagedType.U1)] bool visible);
 
     [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_sceneitem_locked(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_sceneitem_set_locked(nint item, [MarshalAs(UnmanagedType.U1)] bool locked);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_select(nint item, [MarshalAs(UnmanagedType.U1)] bool select);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_sceneitem_selected(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_scale_filter(nint item, int filter);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_sceneitem_get_scale_filter(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_blending_method(nint item, int method);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_sceneitem_get_blending_method(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_set_blending_mode(nint item, int mode);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_sceneitem_get_blending_mode(nint item);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_defer_update_begin(nint item);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_sceneitem_defer_update_end(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_sceneitem_force_update_transform(nint item);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_video_encoder_create(string id, string name, nint settings, nint hotkeyData);
@@ -560,12 +420,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int obs_get_encoder_type(string id);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial uint obs_get_encoder_caps(string id);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint obs_encoder_get_caps(nint encoder);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -634,43 +488,10 @@ internal static unsafe partial class ObsNative
     internal static partial void obs_encoder_set_scaled_size(nint encoder, uint width, uint height);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_encoder_set_gpu_scale_type(nint encoder, int scaleType);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_encoder_set_frame_rate_divisor(nint encoder, uint divisor);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_encoder_set_preferred_video_format(nint encoder, int format);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_encoder_set_preferred_color_space(nint encoder, int colorspace);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_encoder_set_preferred_range(nint encoder, int range);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_encoder_scaling_enabled(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_encoder_get_width(nint encoder);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_encoder_get_height(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_encoder_gpu_scaling_enabled(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_encoder_get_scale_type(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint obs_encoder_get_frame_rate_divisor(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint obs_encoder_get_encoded_frames(nint encoder);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial uint obs_encoder_get_sample_rate(nint encoder);
@@ -680,29 +501,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nuint obs_encoder_get_mixer_index(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_encoder_get_preferred_video_format(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_encoder_get_preferred_color_space(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_encoder_get_preferred_range(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_encoder_add_roi(nint encoder, in ObsEncoderRoiNative roi);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_encoder_has_roi(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_encoder_clear_roi(nint encoder);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial uint obs_encoder_get_roi_increment(nint encoder);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_output_create(string id, string name, nint settings, nint hotkeyData);
@@ -719,12 +517,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_output_stop(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_force_stop(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_delay(nint output, uint delaySec, uint flags);
 
     [LibraryImport(ObsLibrary.Name)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -744,14 +536,6 @@ internal static unsafe partial class ObsNative
     internal static partial bool obs_output_can_pause(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_output_pause(nint output, [MarshalAs(UnmanagedType.U1)] bool pause);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_output_paused(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_settings(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
@@ -759,21 +543,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_proc_handler(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_media(nint output, nint video, nint audio);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_mixer(nint output, nuint mixerIndex);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nuint obs_output_get_mixer(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_mixers(nint output, nuint mixers);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nuint obs_output_get_mixers(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_output_set_video_encoder(nint output, nint encoder);
@@ -785,44 +554,10 @@ internal static unsafe partial class ObsNative
     internal static partial void obs_output_set_audio_encoder(nint output, nint encoder, nuint index);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_output_get_video_encoder(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_output_get_video_encoder2(nint output, nuint index);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_output_get_audio_encoder(nint output, nuint index);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_service(nint output, nint service);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_reconnect_settings(nint output, int retryCount, int retrySec);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial ulong obs_output_get_total_bytes(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_output_get_frames_dropped(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_output_get_total_frames(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_output_set_preferred_size(nint output, uint width, uint height);
-
-    [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_id(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial float obs_output_get_congestion(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_output_get_connect_time_ms(nint output);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_output_reconnecting(nint output);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial nint obs_output_get_last_error(nint output);
@@ -832,9 +567,6 @@ internal static unsafe partial class ObsNative
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_output_get_display_name(string id);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial uint obs_get_output_flags(string id);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -864,16 +596,10 @@ internal static unsafe partial class ObsNative
     internal static partial nint obs_data_create();
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_create_from_json(string json);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_data_create_from_json_file(string file);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_data_create_from_json_file_safe(string file, string backupExtension);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_addref(nint data);
 
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_data_release(nint data);
@@ -885,16 +611,7 @@ internal static unsafe partial class ObsNative
     internal static partial void obs_data_set_int(nint data, string name, long value);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_double(nint data, string name, double value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void obs_data_set_bool(nint data, string name, [MarshalAs(UnmanagedType.U1)] bool value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_obj(nint data, string name, nint value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_array(nint data, string name, nint value);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint obs_data_get_string(nint data, string name);
@@ -903,92 +620,18 @@ internal static unsafe partial class ObsNative
     internal static partial long obs_data_get_int(nint data, string name);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial double obs_data_get_double(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_data_get_bool(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_get_obj(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_get_array(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_string(nint data, string name, string? value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_int(nint data, string name, long value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_double(nint data, string name, double value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_bool(nint data, string name, [MarshalAs(UnmanagedType.U1)] bool value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_obj(nint data, string name, nint value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_set_default_array(nint data, string name, nint value);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_get_default_string(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial long obs_data_get_default_int(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial double obs_data_get_default_double(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_data_get_default_bool(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_get_default_obj(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint obs_data_get_default_array(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_get_defaults(nint data);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_data_has_user_value(nint data, string name);
 
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_data_has_default_value(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_erase(nint data, string name);
-
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_data_clear(nint data);
 
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_unset_user_value(nint data, string name);
-
-    [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial void obs_data_unset_default_value(nint data, string name);
-
     [LibraryImport(ObsLibrary.Name)]
     internal static partial void obs_data_apply(nint target, nint applyData);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_get_json(nint data);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_get_json_with_defaults(nint data);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_get_json_pretty(nint data);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_get_json_pretty_with_defaults(nint data);
 
     [LibraryImport(ObsLibrary.Name, StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -1002,57 +645,4 @@ internal static unsafe partial class ObsNative
     [return: MarshalAs(UnmanagedType.U1)]
     internal static partial bool obs_data_save_json_pretty_safe(nint data, string file, string tempExtension, string backupExtension);
 
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_first(nint data);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_data_item_next(ref nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_item_release(ref nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_item_get_name(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_data_item_gettype(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial int obs_data_item_numtype(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_data_item_has_user_value(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    internal static partial bool obs_data_item_has_default_value(nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_array_create();
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_array_addref(nint array);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_array_release(nint array);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nuint obs_data_array_count(nint array);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nint obs_data_array_item(nint array, nuint index);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial nuint obs_data_array_push_back(nint array, nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_array_insert(nint array, nuint index, nint item);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_array_push_back_array(nint array, nint other);
-
-    [LibraryImport(ObsLibrary.Name)]
-    internal static partial void obs_data_array_erase(nint array, nuint index);
 }

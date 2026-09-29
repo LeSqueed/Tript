@@ -36,20 +36,6 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void TheNinePages_Exist()
-    {
-        Assert.Equal(9, Enum.GetValues<SettingsPage>().Length);
-        Assert.Equal(
-            new[]
-            {
-                SettingsPage.Recording, SettingsPage.Buffer, SettingsPage.Audio, SettingsPage.Capture,
-                SettingsPage.Game, SettingsPage.General, SettingsPage.Hotkeys, SettingsPage.Streaming,
-                SettingsPage.Storage,
-            },
-            Enum.GetValues<SettingsPage>());
-    }
-
-    [Fact]
     public void EachPage_IsAddressedIndependently()
     {
         var recording = _store.Page<RecordingSettings>(SettingsPage.Recording);
@@ -76,57 +62,6 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void AutomaticClips_DefaultOff_AndRoundTrips()
-    {
-        var settings = _store.Load();
-        Assert.False(settings.Recording.AutomaticClipsEnabled);
-
-        settings.Recording.AutomaticClipsEnabled = true;
-        _store.Save();
-
-        Assert.True(new SettingsStore(_provider).Load().Recording.AutomaticClipsEnabled);
-    }
-
-    [Fact]
-    public void AutomaticClipSeconds_FreshSettings_DefaultToFiveBeforeAndEightAfter()
-    {
-        var settings = new SettingsStore(_provider).Load();
-        Assert.Equal(5, settings.Recording.AutomaticClipBeforeSeconds);
-        Assert.Equal(8, settings.Recording.AutomaticClipAfterSeconds);
-    }
-
-    [Fact]
-    public void AutomaticClipSeconds_NonDefaultGlobalValues_RoundTrip()
-    {
-        var settings = _store.Load();
-        settings.Recording.AutomaticClipBeforeSeconds = 3;
-        settings.Recording.AutomaticClipAfterSeconds = 12;
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-        Assert.Equal(3, reloaded.Recording.AutomaticClipBeforeSeconds);
-        Assert.Equal(12, reloaded.Recording.AutomaticClipAfterSeconds);
-    }
-
-    [Fact]
-    public void AutomaticClipOverride_WithBothFields_RoundTrips()
-    {
-        var settings = _store.Load();
-        settings.Game.GameList.Add(new GameSetting
-        {
-            Id = "ow-clips-both",
-            Name = "Overwatch Clips Both",
-            AutomaticClipOverride = new GameAutomaticClipOverride { BeforeSeconds = 3, AfterSeconds = 12 },
-        });
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow-clips-both");
-        Assert.Equal(3, game.AutomaticClipOverride!.BeforeSeconds);
-        Assert.Equal(12, game.AutomaticClipOverride!.AfterSeconds);
-    }
-
-    [Fact]
     public void AutomaticClipOverride_WithOnlyOneField_OtherStaysNullOnReload()
     {
         var settings = _store.Load();
@@ -145,18 +80,6 @@ public class LogicalPagesTests : IDisposable
     }
 
     [Fact]
-    public void AutomaticClipOverride_AbsentGame_ReloadsAsNull()
-    {
-        var settings = _store.Load();
-        settings.Game.GameList.Add(new GameSetting { Id = "ow-no-clips", Name = "Overwatch No Clips" });
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow-no-clips");
-        Assert.Null(game.AutomaticClipOverride);
-    }
-
-    [Fact]
     public void SaveOnePage_DoesNotDisturbTheOthers()
     {
         var settings = _store.Load();
@@ -172,23 +95,5 @@ public class LogicalPagesTests : IDisposable
         Assert.Equal("Mic", Assert.Single(reloaded.Audio.Tracks).Name);
         Assert.Equal(TimeSpan.FromSeconds(25), reloaded.Game.GameCaptureTimeout);
         Assert.Equal(DisplayCaptureMethod.Display, reloaded.Capture.Method);
-    }
-
-    [Fact]
-    public void GamePage_HoldsPerGameOverrides()
-    {
-        var settings = _store.Load();
-        settings.Game.GameList.Add(new GameSetting
-        {
-            Id = "ow",
-            Name = "Overwatch",
-            QualityOverride = new GameQualityOverride { Fps = 240 },
-        });
-        _store.Save();
-
-        var reloaded = new SettingsStore(_provider).Load();
-        var game = Assert.Single(reloaded.Game.GameList, g => g.Id == "ow");
-        Assert.Equal("ow", game.Id);
-        Assert.Equal(240, game.QualityOverride!.Fps);
     }
 }

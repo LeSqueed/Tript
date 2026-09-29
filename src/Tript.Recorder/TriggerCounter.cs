@@ -46,7 +46,7 @@ internal sealed class TriggerCounter
                     _previousNetCounts.GetValueOrDefault(definition.Id), GrossCount(definition));
             }
 
-            Log.Information("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
+            Log.Debug("DetectionHost: exclusion detected for {GameId}; suppressing {Count} event(s) in this cycle",
                 _gameId, objects.Count + activeOcr.Count);
             return;
         }

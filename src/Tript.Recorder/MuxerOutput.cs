@@ -100,8 +100,7 @@ internal sealed class MuxerOutput : IRecorderOutput, IReplayBufferOutput
 
     public bool WaitForReplaySave(TimeSpan timeout) => _replaySaveCompleted.Wait(timeout);
 
-    // A quick clip whose save never signalled (the disk filled, or the muxer errored) left
-    // _replaySaveCompleted reset forever, so an unbounded wait here hung every later shutdown.
+    // Bounded: a save that never signals (disk full, muxer error) would otherwise hang every later shutdown.
     private static readonly TimeSpan ReplaySaveDisposeWait = TimeSpan.FromSeconds(30);
 
     private int _disposed;

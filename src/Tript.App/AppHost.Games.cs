@@ -58,9 +58,7 @@ internal sealed partial class AppHost
         }
     }
 
-    // The UI deliberately shows one friendly line for every resolver failure, but DNS, TLS, a 401 from
-    // a rotated key and a 500 from the service need very different fixes, so the log has to tell them
-    // apart. HttpRequestException carries no request headers, so this cannot leak the API key.
+    // HttpRequestException carries no request headers, so logging it cannot leak the API key.
     private static void LogResolverFailure(string operation, Exception exception)
     {
         var status = exception is HttpRequestException { StatusCode: { } code } ? ((int)code).ToString() : "none";

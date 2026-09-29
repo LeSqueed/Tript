@@ -178,17 +178,14 @@ internal sealed partial class AppHost : IDisposable
             }
             else if (resolverConfig.BaseUri.IsLoopback)
             {
-                // The checked-in config/resolver.json points here, and only release.yml replaces it.
-                // A locally built or hand-copied bundle therefore asks localhost for its models and,
-                // with nothing listening, auto-detection finds no model and silently does nothing.
+                // Only release builds replace the checked-in localhost resolver; a local build silently gets no models.
                 Log.Warning("AppHost: resolver.json points at {Resolver}; models and game search only work "
                     + "while a resolver runs on this machine", resolverConfig.BaseUri);
             }
 
             if (resolverConfig is not null)
             {
-                _resolverClient = new ResolverClient(resolverConfig,
-                    registry: new ResolverGameRegistry());
+                _resolverClient = new ResolverClient(resolverConfig);
                 _ownsResolverClient = true;
             }
         }
@@ -316,8 +313,6 @@ internal sealed partial class AppHost : IDisposable
             {
                 _ = CheckForUpdatesAutomaticAsync();
 
-                // One-shot: once this version has outlived the launcher's rollback window, the
-                // previous install it would have rolled back to is no longer needed.
                 _previousInstallTimer = new Timer(
                     _ => _maintenance.Run("previous install cleanup", _updateManager.DiscardPreviousInstall), null,
                     UpdateManager.PreviousInstallProbation, Timeout.InfiniteTimeSpan);
@@ -409,9 +404,7 @@ internal sealed partial class AppHost : IDisposable
 
         try
         {
-            // StopRecording returns false and hands the finalization to CompletePendingStop when the
-            // output is slow to stop. Wait for that to land before dropping _recorder below, or the
-            // session's .metadata.json and every bookmark in it are lost.
+            // A slow stop finalizes in CompletePendingStop; dropping _recorder first loses the metadata and bookmarks.
             if (!StopRecording() && !WaitForPendingStopFinalization(_pendingStopFinalizeTimeout))
             {
                 Log.Error("AppHost: shutdown did not finish stopping the recording in time; "
@@ -441,9 +434,7 @@ internal sealed partial class AppHost : IDisposable
 
         if (recorder?.Snapshot.State == RecorderState.Stopping)
         {
-            // Deferred because disposing a still-stopping output can block on libobs, but the process
-            // is about to exit and nothing awaits thread-pool work at exit. Wait briefly so the flush
-            // usually lands, and give up rather than hanging the quit if libobs is wedged.
+            // Disposing a still-stopping output can block on libobs: wait briefly, then give up rather than hang the quit.
             var deferred = new ManualResetEventSlim(false);
             ThreadPool.QueueUserWorkItem(_ =>
             {
@@ -457,8 +448,7 @@ internal sealed partial class AppHost : IDisposable
                 }
             });
 
-            // Only dispose once the worker is known to be done with it: a timed-out wait leaves it
-            // about to call Set(), and that would throw ObjectDisposedException on a pool thread.
+            // After a timed-out wait the worker may still call Set(), which would throw on a pool thread.
             if (deferred.Wait(_pendingStopFinalizeTimeout))
                 deferred.Dispose();
             else
@@ -728,6 +718,7 @@ internal sealed partial class AppHost : IDisposable
             _trash.UpdateRoot(ContentLayout.TrashRoot(effectiveRoot));
         }
 
+        AppLog.SetDebugLogging(settings.General.DebugLogging);
         SettingsChanged?.Invoke(settings);
         PushSettings();
         PushSettingsUpdateResult(requestId, true, null);
@@ -799,10 +790,7 @@ internal sealed partial class AppHost : IDisposable
         PushTrayStatus();
     }
 
-    // An exception escaping a pool thread terminates the process. The crash handler logs it on the
-    // way down, but the recording still dies with the process, so background work is caught here.
-    // Auto-start is the case that mattered: an encoder that refused to open killed Tript at the
-    // moment the game started.
+    // An exception escaping a pool thread kills the process and the recording with it.
     private static void RunGuarded(Action work, string what) =>
         ThreadPool.QueueUserWorkItem(_ =>
         {

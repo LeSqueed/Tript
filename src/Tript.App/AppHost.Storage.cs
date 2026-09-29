@@ -49,10 +49,8 @@ internal sealed partial class AppHost
         _storageTimer = new Timer(_ => OnStorageTimer(), null, StorageIdleInterval, StorageIdleInterval);
     }
 
-    // Samples run every 15s while recording, and ApplyStoragePolicy can stop a recording. A slow or
-    // network volume that outlasted the interval put two threads into that policy at once. Direct
-    // callers (a settings change, startup) wait for the gate so a new configuration is never
-    // dropped; the timer just skips a tick when a sample is already running.
+    // One sample at a time, since the policy can stop a recording: the timer skips a busy tick, direct
+    // callers wait so a new configuration is never dropped.
     private readonly Lock _storageSampleGate = new();
 
     private void OnStorageTimer()

@@ -18,10 +18,8 @@ public sealed class ObsSourceTests
         using var source = ObsSource.Create(ColourSourceId, "a colour");
 
         Assert.Equal(ColourSourceId, source.Id);
-        Assert.Equal(ColourSourceId, source.UnversionedId);
         Assert.Equal("a colour", source.Name);
         Assert.Equal(ObsSourceType.Input, source.Type);
-        Assert.False(source.IsScene);
     }
 
     [SkippableFact]
@@ -52,40 +50,6 @@ public sealed class ObsSourceTests
     }
 
     [SkippableFact]
-    public void TwoSourcesMayShareAName_AndTheLookupFindsTheOlder()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var first = ObsSource.Create(ColourSourceId, "duplicated");
-        using var second = ObsSource.Create(ColourSourceId, "duplicated");
-
-        using var found = ObsSource.FindByName("duplicated");
-
-        Assert.NotNull(found);
-        Assert.Equal(first.Uuid, found.Uuid);
-    }
-
-    [SkippableFact]
-    public void APrivateSource_IsNotFindableByName()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.CreatePrivate(ColourSourceId, "kept private");
-
-        Assert.Null(ObsSource.FindByName("kept private"));
-    }
-
-    [SkippableFact]
-    public void AFindableSource_IsFoundByName()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.Create(ColourSourceId, "findable");
-
-        using var found = ObsSource.FindByName("findable");
-
-        Assert.NotNull(found);
-        Assert.Equal(source.Uuid, found.Uuid);
-    }
-
-    [SkippableFact]
     public void AnUnregisteredSourceId_IsRefusedRatherThanGivenAPlaceholder()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -93,7 +57,6 @@ public sealed class ObsSourceTests
         var failure = Assert.Throws<ObsException>(() => ObsSource.Create("tript_no_such_source", "ghost"));
 
         Assert.Contains("tript_no_such_source", failure.Message, StringComparison.Ordinal);
-        Assert.Null(ObsSource.FindByName("ghost"));
     }
 
     [SkippableFact]
@@ -104,17 +67,6 @@ public sealed class ObsSourceTests
         Assert.NotNull(ObsSource.GetTypeDisplayName(ColourSourceId));
         Assert.NotNull(ObsSource.GetTypeDisplayName(ScreenCaptureId));
         Assert.Null(ObsSource.GetTypeDisplayName("tript_no_such_source"));
-    }
-
-    [SkippableFact]
-    public void ScreenCapture_DeclaresItselfAVideoSourceThatDoesNotDuplicate()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.Create(ScreenCaptureId, "screen");
-
-        Assert.True(source.OutputFlags.HasFlag(ObsSourceOutputFlags.Video));
-        Assert.True(source.OutputFlags.HasFlag(ObsSourceOutputFlags.DoNotDuplicate));
-        Assert.Equal(ObsSource.GetTypeOutputFlags(ScreenCaptureId), source.OutputFlags);
     }
 
     [SkippableFact]
@@ -156,49 +108,6 @@ public sealed class ObsSourceTests
         Assert.Equal(123u, source.Height);
         Assert.Equal(321u, source.BaseWidth);
         Assert.Equal(123u, source.BaseHeight);
-    }
-
-    [SkippableFact]
-    public void ASourcesName_CanBeChangedAfterCreation()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.Create(ColourSourceId, "first name");
-
-        source.Name = "second name";
-
-        Assert.Equal("second name", source.Name);
-        Assert.Null(ObsSource.FindByName("first name"));
-        using var found = ObsSource.FindByName("second name");
-        Assert.NotNull(found);
-    }
-
-    [SkippableFact]
-    public void ANewSource_IsEnabledAndNeitherActiveNorShowing()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.Create(ColourSourceId, "idle");
-
-        Assert.True(source.IsEnabled);
-        Assert.False(source.IsActive);
-        Assert.False(source.IsShowing);
-        Assert.False(source.IsRemoved);
-
-        source.IsEnabled = false;
-        Assert.False(source.IsEnabled);
-    }
-
-    [SkippableFact]
-    public void MarkingASourceRemoved_RaisesAFlagWithoutDestroyingOrUnlistingIt()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var source = ObsSource.Create(ColourSourceId, "to be removed");
-
-        source.MarkRemoved();
-
-        Assert.True(source.IsRemoved);
-        Assert.Equal("to be removed", source.Name);
-        using var stillFound = ObsSource.FindByName("to be removed");
-        Assert.NotNull(stillFound);
     }
 
     [SkippableFact]

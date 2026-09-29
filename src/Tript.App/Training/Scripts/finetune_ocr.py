@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
 
-"""Fine-tune PP-OCRv4-English on a workspace's OCR crops and export the result to ONNX.
+"""Fine-tune PP-OCRv4-English on dataset/ocr and export dataset/ocr_model.onnx + ocr_dict.txt.
 
-Reads ``dataset/ocr/{images,labels.tsv}`` built by export_ocr_dataset.py, drives the vendored
-PaddleOCR ``tools/train.py`` + ``tools/export_model.py`` from the pretrained checkpoint, converts
-with paddle2onnx, and writes ``dataset/ocr_model.onnx`` + ``dataset/ocr_dict.txt`` on the runtime
-contract (input [1,3,48,W] BGR, output softmax [1,T,len(dict)+2], CTC blank at 0).
-
-Progress goes to ``dataset/progress.json`` on train_model.py's heartbeat schema. CPU only -
-PaddlePaddle has no Windows GPU and the fine-tune is small.
+Runtime contract: input [1,3,48,W] BGR, output softmax [1,T,len(dict)+2], CTC blank at 0.
 """
 from __future__ import annotations
 

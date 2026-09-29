@@ -182,39 +182,10 @@ public sealed class ObsSourceLifetimeTests
         }
     }
 
-    [SkippableFact]
-    public void DisposingAFindableScene_LeavesItNeitherFindableNorAlive()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        var scene = ObsScene.Create("findable scene");
-        using var weak = WeakReferenceTo(scene);
-
-        using (var found = ObsSource.FindByName("findable scene"))
-        {
-            Assert.NotNull(found);
-        }
-
-        scene.Dispose();
-        session.Runtime.WaitForDestroyQueue();
-
-        Assert.Null(ObsSource.FindByName("findable scene"));
-        Assert.True(weak.IsExpired);
-    }
-
     private static ObsWeakSource WeakReferenceTo(ObsScene scene)
     {
         using var source = scene.AsSource();
         return source.CreateWeakReference();
-    }
-
-    [SkippableFact]
-    public void APrivateScene_IsNeverFindableByName()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("private scene");
-
-        Assert.Null(ObsSource.FindByName("private scene"));
     }
 
     [SkippableFact]

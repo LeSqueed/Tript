@@ -20,12 +20,6 @@ public static class ObsCaptureSource
     private const string WindowKey = "window";
     private const string PriorityKey = "priority";
 
-    public static IReadOnlyList<ObsSourceProperty>? GetGameCaptureProperties()
-    {
-        var properties = DiscoverGameCaptureProperties();
-        return properties.Count == 0 ? null : properties;
-    }
-
     public static ObsSettings? BuildGameCaptureSettings(ObsGameCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);

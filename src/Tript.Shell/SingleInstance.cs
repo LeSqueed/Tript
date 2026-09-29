@@ -208,14 +208,12 @@ internal sealed class SingleInstance : IDisposable
             }
             catch (ObjectDisposedException)
             {
-                // Dispose raced this iteration. Letting it escape would crash the process on
-                // shutdown, from a background thread.
+                // Dispose raced this iteration; escaping would crash the process from a background thread.
                 break;
             }
             catch (IOException exception) when (!_cancellation.IsCancellationRequested)
             {
-                // If creating the pipe itself keeps failing (another process holding the name, say)
-                // this loop would otherwise spin a core at 100% and silently stop accepting launches.
+                // Back off, or a pipe that keeps failing to create spins a core at 100%.
                 if (Interlocked.Exchange(ref _pipeFailureReported, 1) == 0)
                     Log.Warning(exception, "Tript.Shell: the single-instance pipe failed; a second launch may not bring Tript forward");
                 Thread.Sleep(250);
@@ -264,9 +262,7 @@ internal sealed class SingleInstance : IDisposable
         _disposed = true;
         _cancellation.Cancel();
 
-        // Disposing the CTS while ServerLoop may still read its Token turns a slow shutdown into an
-        // ObjectDisposedException on a background thread. If the thread has not stopped, leave the
-        // CTS for the GC: it is finalizable and the process is exiting.
+        // Leave the CTS to the GC if the loop has not stopped: it may still read the Token.
         if (_serverThread.Join(TimeSpan.FromSeconds(2)))
             _cancellation.Dispose();
         else

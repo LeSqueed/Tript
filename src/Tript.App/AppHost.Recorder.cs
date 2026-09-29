@@ -256,6 +256,9 @@ internal sealed partial class AppHost
 
             PushState(recording: true, effectiveGameId);
             PushContent();
+            Log.Information("Recording started: {Game}, {Mode}, to {Path}",
+                string.IsNullOrWhiteSpace(gameName) ? "no game" : gameName, resolved.Mode,
+                _activeOutputPath ?? "the replay buffer only");
             if (resolved.Mode is RecordingMode.ReplayBufferOnly)
             {
                 RequestNotification(NotificationKind.RecordingStarted, "Buffering started",
@@ -320,10 +323,8 @@ internal sealed partial class AppHost
         return true;
     }
 
-    // Deliberately not gated on _disposed: shutdown is exactly when finalizing matters most, because
-    // this is the only path that writes the session's .metadata.json and its bookmarks. Dispose waits
-    // for _stopFinalizationPending to clear before it drops _recorder, so the identity check below is
-    // what keeps this from finalizing against a session that has already been replaced.
+    // Not gated on _disposed: this is the only path that writes the session's metadata and bookmarks,
+    // and shutdown is when it matters most. The identity check stops it finalizing a replaced session.
     private void CompletePendingStop(RecorderStateMachine recorder)
     {
         var deadline = DateTime.UtcNow + _pendingStopFinalizeTimeout;
@@ -354,8 +355,7 @@ internal sealed partial class AppHost
         }
     }
 
-    // Lets Dispose block until the queued CompletePendingStop has finished, so the recorder is not
-    // torn out from under it. Returns false when the budget ran out and the metadata was lost.
+    // Returns false when the budget ran out and the session metadata was lost.
     private bool WaitForPendingStopFinalization(TimeSpan budget)
     {
         var deadline = DateTime.UtcNow + budget;
@@ -474,6 +474,8 @@ internal sealed partial class AppHost
         var labelAsPq = recordsSession && sourcePath is not null && PortalCaptureWasPq(_recorderSession);
 
         var session = _sessionTracker.Stop();
+        Log.Information("Recording stopped: {Path}, {Bookmarks} bookmark(s)",
+            _activeSessionPath ?? sourcePath ?? "the replay buffer only", session?.Bookmarks.Count ?? 0);
         if (session is not null && _pendingMetadata is not null && recordsSession)
         {
             _pendingMetadata.Bookmarks = session.Bookmarks.ToList();
@@ -642,10 +644,8 @@ internal sealed partial class AppHost
         _metadataCheckpointTimer = null;
     }
 
-    // Bookmarks live only in _sessionTracker until the recording stops, so a crash or a power loss
-    // takes the whole session's worth with it even now that the video itself survives. Writing the
-    // record periodically bounds that loss to the checkpoint interval. Safe mid-recording because
-    // WriteMetadataRecord never probes the file that is still being written.
+    // Bounds the bookmarks a crash can lose to one checkpoint interval. Safe mid-recording because
+    // WriteMetadataRecord never probes the file still being written.
     private void CheckpointMetadata()
     {
         if (_disposed || Interlocked.Exchange(ref _metadataCheckpointRunning, 1) != 0)

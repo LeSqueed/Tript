@@ -7,20 +7,6 @@ namespace Tript.App;
 
 internal sealed partial class AppHost
 {
-    internal string ResolveDetectedGameId(string processName)
-    {
-        foreach (var game in GameList)
-        {
-            if (game.Id.Length == 0)
-                continue;
-
-            if (ExecutableNames.Comparer.Equals(ExecutableNames.Normalize(LibraryGames.ExecutableOf(game)), processName))
-                return game.Id;
-        }
-
-        return processName;
-    }
-
     private string? ResolveStoredGameId(string? storedId, string? gameName) =>
         Games.ResolveStoredGameId(storedId, gameName);
 

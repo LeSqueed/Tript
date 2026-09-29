@@ -9,19 +9,6 @@ public enum ObsEncoderType
     Video = 1
 }
 
-[Flags]
-public enum ObsEncoderCaps : uint
-{
-    None = 0,
-    Deprecated = 1 << 0,
-    PassTexture = 1 << 1,
-    DynBitrate = 1 << 2,
-    Internal = 1 << 3,
-    Roi = 1 << 4,
-    Scaling = 1 << 5,
-    MultitrackDynBitrate = 1 << 6
-}
-
 public enum ObsPropertyType
 {
     Invalid = 0,

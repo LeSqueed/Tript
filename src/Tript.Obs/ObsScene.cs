@@ -126,26 +126,6 @@ public sealed class ObsScene : IDisposable
         return items;
     }
 
-    public bool Reorder(IReadOnlyList<ObsSceneItem> bottomToTop)
-    {
-        ArgumentNullException.ThrowIfNull(bottomToTop);
-
-        var pointers = new nint[bottomToTop.Count];
-        for (var i = 0; i < bottomToTop.Count; i++)
-        {
-            ArgumentNullException.ThrowIfNull(bottomToTop[i]);
-            pointers[i] = bottomToTop[i].Pointer;
-        }
-
-        unsafe
-        {
-            fixed (nint* first = pointers)
-            {
-                return ObsNative.obs_scene_reorder_items(Pointer, first, (nuint)pointers.Length);
-            }
-        }
-    }
-
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte Collect(nint scene, nint item, nint parameter)
     {

@@ -124,21 +124,6 @@ internal static class DetectionFramePreprocessor
         return coverage > 1f ? GrayscaleStrategy.WholeFrameOnce : GrayscaleStrategy.PerGroupCrop;
     }
 
-    internal static int CountGrayscalePixels(IReadOnlyList<RegionGroup> groups, int frameW, int frameH)
-    {
-        if (SelectGrayscaleStrategy(groups) == GrayscaleStrategy.WholeFrameOnce)
-            return frameW * frameH;
-
-        var total = 0;
-        foreach (var g in groups)
-        {
-            if (TryGetCropRect(g, frameW, frameH, out _, out _, out var cropW, out var cropH))
-                total += cropW * cropH;
-        }
-
-        return total;
-    }
-
     internal static bool TryGetCropRect(RegionGroup group, int frameW, int frameH,
         out int cropX, out int cropY, out int cropW, out int cropH)
     {
@@ -401,29 +386,10 @@ internal static class DetectionFramePreprocessor
             });
         }
 
-        if (Log.IsEnabled(LogEventLevel.Debug))
+        if (results.Count > 0 && Log.IsEnabled(LogEventLevel.Debug))
         {
-            var highestConf = results.Count > 0
-                ? results.Max(r => r.Confidence)
-                : 0f;
-
-            if (results.Count == 0 && numDetections > 0)
-            {
-                for (int i = 0; i < numDetections; i++)
-                {
-                    for (int c = 0; c < numClasses; c++)
-                    {
-                        var conf = output[(4 + c) * numDetections + i];
-                        if (conf > highestConf) highestConf = conf;
-                    }
-                }
-            }
-
-            var classIds = results.Count > 0
-                ? string.Join(",", results.Select(r => $"{r.ClassId}({r.Confidence:F2})"))
-                : "none";
-            Log.Debug("ParseYoloOutput: {Results} results, highestConf={Conf:F4}, classIds=[{ClassIds}], {Total} detections, numClasses={Classes}",
-                results.Count, highestConf, classIds, numDetections, numClasses);
+            Log.Debug("ParseYoloOutput: {Count} detection(s): {Classes}", results.Count,
+                string.Join(", ", results.Select(r => $"class {r.ClassId} at {r.Confidence:F2}")));
         }
 
         return results;

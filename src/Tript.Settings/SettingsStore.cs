@@ -40,12 +40,10 @@ public sealed class SettingsStore
         }
     }
 
-    // Where the unreadable settings file was moved, when Load had to fall back to defaults.
     public string? RecoveredFrom { get; private set; }
 
-    // A settings.json that fails to parse used to throw straight out of Load, which runs during
-    // startup, so Tript refused to start at all. Falling back to defaults keeps it usable, and moving
-    // the bad file aside first means the next Save cannot overwrite the user's only copy.
+    // An unparsable file falls back to defaults so startup still succeeds; it is moved aside first so
+    // the next Save cannot overwrite the user's only copy.
     private Settings DeserializeOrRecover(string json)
     {
         try

@@ -10,9 +10,8 @@ internal static class ProcessPipes
 {
     private static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(2);
 
-    // A dedicated thread, not ReadToEndAsync: a process's redirected pipes are synchronous handles, so
-    // the async read blocks a pool thread. With the pool busy it could start after the process had
-    // exited and DrainGrace had run out, and a successful ffprobe then came back as empty output.
+    // A dedicated thread: redirected pipes are synchronous, and a starved pool thread could start reading
+    // only after DrainGrace ran out, turning a successful ffprobe into empty output.
     internal static Task<string> BeginRead(StreamReader reader)
     {
         var read = Task.Factory.StartNew(reader.ReadToEnd, CancellationToken.None,
@@ -33,11 +32,9 @@ internal static class ProcessPipes
     internal static string TextOf(Task<string> read) =>
         read.IsCompletedSuccessfully ? read.Result : string.Empty;
 
-    // Called right after Start for every ffmpeg and ffprobe child. The job ties the child to Tript's
-    // lifetime, so a crash or forced exit no longer leaves ffmpeg running and holding its output.
-    internal static void Adopt(Process process)
+    internal static void Start(Process process)
     {
-        ChildProcessJob.Track(process);
+        ChildProcessJob.StartTracked(process);
         LowerPriority(process);
     }
 
@@ -65,8 +62,7 @@ internal static class ProcessPipes
                                              or System.ComponentModel.Win32Exception
                                              or NotSupportedException)
         {
-            // InvalidOperationException is the normal "already exited" case. Anything else means
-            // an ffmpeg that may still be running, holding its output file, with nothing tracking it.
+            // InvalidOperationException just means it already exited.
             if (exception is not InvalidOperationException)
                 Diagnostics.Report(DiagnosticLevel.Warning, "Could not kill an ffmpeg process; it may still be running", exception);
         }

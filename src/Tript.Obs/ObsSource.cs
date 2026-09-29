@@ -64,18 +64,6 @@ public sealed class ObsSource : IDisposable
         return Utf8Marshal.ReadBorrowed(ObsNative.obs_source_get_display_name(id));
     }
 
-    public static ObsSourceOutputFlags GetTypeOutputFlags(string id)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(id);
-        return (ObsSourceOutputFlags)ObsNative.obs_get_source_output_flags(id);
-    }
-
-    public static ObsSource? FindByName(string name)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(name);
-        return FromOwnedPointerOrNull(ObsNative.obs_get_source_by_name(name));
-    }
-
     public ObsSource AddReference() => FromOwnedPointer(ObsNative.obs_source_get_ref(Pointer));
 
     public ObsWeakSource CreateWeakReference() =>
@@ -84,9 +72,6 @@ public sealed class ObsSource : IDisposable
     public void Dispose() => _handle.Dispose();
 
     public string Id => Utf8Marshal.ReadBorrowed(ObsNative.obs_source_get_id(Pointer)) ?? string.Empty;
-
-    public string UnversionedId =>
-        Utf8Marshal.ReadBorrowed(ObsNative.obs_source_get_unversioned_id(Pointer)) ?? string.Empty;
 
     public string Name
     {
@@ -102,10 +87,6 @@ public sealed class ObsSource : IDisposable
 
     public ObsSourceType Type => (ObsSourceType)ObsNative.obs_source_get_type(Pointer);
 
-    public ObsSourceOutputFlags OutputFlags => (ObsSourceOutputFlags)ObsNative.obs_source_get_output_flags(Pointer);
-
-    public bool IsScene => ObsNative.obs_source_is_scene(Pointer);
-
     public ObsSettings GetSettings() => ObsSettings.FromOwnedPointer(ObsNative.obs_source_get_settings(Pointer));
 
     public IReadOnlyList<ObsSourceProperty> EnumerateProperties() =>
@@ -115,12 +96,6 @@ public sealed class ObsSource : IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         ObsNative.obs_source_update(Pointer, settings.Pointer);
-    }
-
-    public void ResetSettings(ObsSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ObsNative.obs_source_reset_settings(Pointer, settings.Pointer);
     }
 
     public uint Width => ObsNative.obs_source_get_width(Pointer);
@@ -157,8 +132,6 @@ public sealed class ObsSource : IDisposable
 
     public bool IsActive => ObsNative.obs_source_active(Pointer);
 
-    public bool IsShowing => ObsNative.obs_source_showing(Pointer);
-
     public uint AudioMixers
     {
         get => ObsNative.obs_source_get_audio_mixers(Pointer);
@@ -175,9 +148,6 @@ public sealed class ObsSource : IDisposable
 
     public void MarkInactive() => ObsNative.obs_source_dec_active(Pointer);
 
-    public void MarkRemoved() => ObsNative.obs_source_remove(Pointer);
-
-    public bool IsRemoved => ObsNative.obs_source_removed(Pointer);
 }
 
 public sealed class ObsWeakSource : IDisposable

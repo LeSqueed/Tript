@@ -6,9 +6,7 @@ internal sealed record ResolverConfig(Uri BaseUri, string? ApiKey)
 {
     internal const string FileName = "resolver.json";
 
-    // A record prints every positional member, so the generated ToString would write ApiKey into
-    // any log line or exception that formats this config. The key is readable on disk by design,
-    // but logs are what users get asked to send, so it must never end up in one.
+    // Overridden so the record's generated ToString never writes ApiKey into a log users are asked to send.
     public override string ToString() =>
         $"ResolverConfig {{ BaseUri = {BaseUri}, ApiKey = {(ApiKey is null ? "none" : "set")} }}";
 

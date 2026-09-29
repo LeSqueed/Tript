@@ -42,41 +42,6 @@ public sealed class ObsSceneItemOrderTests
     }
 
     [SkippableFact]
-    public void MovingAnItemToTheTop_GivesItTheHighestPosition()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("moved");
-        using var first = Add(scene, "first");
-        using var second = Add(scene, "second");
-        using var third = Add(scene, "third");
-
-        first.MoveInOrder(ObsOrderMovement.Top);
-
-        Assert.Equal(2, first.OrderPosition);
-        Assert.Equal(0, second.OrderPosition);
-        Assert.Equal(1, third.OrderPosition);
-    }
-
-    [SkippableFact]
-    public void MovingAnItemUpOrDown_ShiftsItByOne()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("nudged");
-        using var first = Add(scene, "first");
-        using var second = Add(scene, "second");
-        using var third = Add(scene, "third");
-
-        first.MoveInOrder(ObsOrderMovement.Up);
-        Assert.Equal(1, first.OrderPosition);
-        Assert.Equal(0, second.OrderPosition);
-
-        third.MoveInOrder(ObsOrderMovement.Bottom);
-        Assert.Equal(0, third.OrderPosition);
-        Assert.Equal(2, first.OrderPosition);
-        Assert.Equal(1, second.OrderPosition);
-    }
-
-    [SkippableFact]
     public void SettingAnOrderPosition_PutsTheItemExactlyThere()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -90,41 +55,6 @@ public sealed class ObsSceneItemOrderTests
         Assert.Equal(0, third.OrderPosition);
         Assert.Equal(1, first.OrderPosition);
         Assert.Equal(2, second.OrderPosition);
-    }
-
-    [SkippableFact]
-    public void ReorderingTheWholeScene_AppliesTheGivenOrderBottomFirst()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("reordered");
-        using var first = Add(scene, "first");
-        using var second = Add(scene, "second");
-        using var third = Add(scene, "third");
-
-        Assert.True(scene.Reorder([second, first, third]));
-
-        Assert.Equal(0, second.OrderPosition);
-        Assert.Equal(1, first.OrderPosition);
-        Assert.Equal(2, third.OrderPosition);
-
-        var items = scene.EnumerateItems();
-        Assert.Equal([second.Id, first.Id, third.Id], items.Select(item => item.Id));
-        foreach (var item in items)
-            item.Dispose();
-    }
-
-    [SkippableFact]
-    public void ReorderingWithAnIncompleteList_IsRefusedAndChangesNothing()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var scene = ObsScene.CreatePrivate("partial");
-        using var first = Add(scene, "first");
-        using var second = Add(scene, "second");
-
-        Assert.False(scene.Reorder([second]));
-
-        Assert.Equal(0, first.OrderPosition);
-        Assert.Equal(1, second.OrderPosition);
     }
 
     [SkippableFact]

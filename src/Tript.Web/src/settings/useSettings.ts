@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS: SettingsModel = {
     minimizeBehavior: 'Taskbar',
     closeBehavior: 'Exit',
     checkForUpdatesAutomatically: true,
+    debugLogging: false,
     clipOutputMode: 'Combine',
     notifications: {
       enabled: true,

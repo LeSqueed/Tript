@@ -48,13 +48,13 @@ public static class ModelService
 
             if (!File.Exists(path))
             {
-                Log.Information("No events.json found for game {GameId}", id);
+                Log.Debug("No events.json found for game {GameId}", id);
                 return new List<EventDefinition>();
             }
 
             var json = File.ReadAllText(path);
             var definitions = JsonSerializer.Deserialize<List<EventDefinition>>(json, _jsonOptions) ?? new();
-            Log.Information("Loaded {Count} event definitions for game {GameId}", definitions.Count, id);
+            Log.Debug("Loaded {Count} event definitions for game {GameId}", definitions.Count, id);
             return definitions;
         });
     }
@@ -77,18 +77,6 @@ public static class ModelService
                 return [];
             }
         });
-    }
-
-    public static void SaveEventDefinitions(string gameId, List<EventDefinition> definitions)
-    {
-        var key = CanonicalGameId(gameId);
-        var path = Path.Combine(GetGamePath(gameId), "events.json");
-        var json = JsonSerializer.Serialize(definitions, _jsonOptions);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, json);
-        _definitions[key] = definitions;
-        _regionGroups.TryRemove(key, out _);
-        Log.Information("Saved {Count} event definitions for game {GameId}", definitions.Count, gameId);
     }
 
     public static bool HasModelForGame(string gameId)
@@ -214,7 +202,7 @@ public static class ModelService
         }
 
         released?.Dispose();
-        Log.Information("Released ONNX model for game {GameId}; it stays loaded until another game's model is used",
+        Log.Debug("Released ONNX model for game {GameId}; it stays loaded until another game's model is used",
             key);
     }
 
@@ -370,19 +358,6 @@ public static class ModelService
             .Select(Path.GetFileName)
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    public static string[] GetLoadableGameIds()
-    {
-        return ModelRoots()
-            .SelectMany(EnumerateDirectories)
-            .Where(IsCompleteModelBundle)
-            .Select(Path.GetFileName)
-            .OfType<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(HasModelForGame)
-            .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 

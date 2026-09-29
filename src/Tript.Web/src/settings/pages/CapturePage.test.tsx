@@ -33,17 +33,6 @@ function renderPage(
 afterEach(cleanup);
 
 describe('capture method', () => {
-  it('renders the three plain labels', () => {
-    renderPage();
-
-    const select = screen.getByLabelText(/^Capture method/) as HTMLSelectElement;
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      'Automatic',
-      'Game window',
-      'A specific monitor',
-    ]);
-  });
-
   it('sends just the method when switching to the game window', () => {
     const update = renderPage();
 

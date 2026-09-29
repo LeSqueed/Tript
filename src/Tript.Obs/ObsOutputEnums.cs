@@ -31,16 +31,3 @@ public enum ObsOutputStopCode
     EncodeError = -8,
     HdrDisabled = -9
 }
-
-[Flags]
-public enum ObsOutputDelayFlags : uint
-{
-    None = 0,
-    Preserve = 1 << 0
-}
-
-public static class ObsOutputCapacity
-{
-    public const int MaxAudioEncoders = 6;
-    public const int MaxVideoEncoders = 10;
-}

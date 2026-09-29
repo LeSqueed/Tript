@@ -6,15 +6,9 @@ using System.Runtime.InteropServices;
 
 namespace Tript.Core;
 
-// Every graceful exit path kills Tript's ffmpeg and training children, but none of those paths run
-// when Tript crashes, when the shell falls back to Environment.Exit, or when the process is killed.
-// The children then kept running: ffmpeg holding its output file, and a training run holding GPU
-// memory for hours. A job object with kill-on-close fixes that at the OS level. The job handle is
-// deliberately never closed: Windows closes it when this process ends, however it ends, and that
-// is what kills the children.
-//
-// Only processes that must not outlive Tript belong here. Explorer, the browser and anything else
-// opened for the user must never be tracked, or quitting Tript would close them too.
+// Kill-on-close job so ffmpeg and training children die with Tript even on a crash or hard kill. The
+// handle is deliberately never closed; process exit closes it. Never track processes opened for the
+// user (Explorer, the browser), or quitting Tript would close them too.
 public static class ChildProcessJob
 {
     private const int JobObjectExtendedLimitInformation = 9;
@@ -25,7 +19,37 @@ public static class ChildProcessJob
     private static readonly Lazy<ChildProcessReaper> Reaper =
         new(CreateReaper, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private static readonly Lock StartGate = CreateStartGate();
+
+    private static bool _exiting;
+
     internal static nint Handle => Job.Value;
+
+    // Start and job assignment happen under one gate that process exit also takes. A thread torn down
+    // inside Process.Start at exit otherwise leaves a child suspended forever and never in the job.
+    public static void StartTracked(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        lock (StartGate)
+        {
+            if (_exiting)
+                throw new InvalidOperationException("Tript is shutting down, so no new child process is started.");
+            if (!process.Start())
+                throw new InvalidOperationException($"Could not start {process.StartInfo.FileName}.");
+            Track(process);
+        }
+    }
+
+    private static Lock CreateStartGate()
+    {
+        var gate = new Lock();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            lock (gate)
+                _exiting = true;
+        };
+        return gate;
+    }
 
     public static void Track(Process process)
     {
@@ -51,7 +75,6 @@ public static class ChildProcessJob
         }
         catch (InvalidOperationException)
         {
-            // The child already exited, so there is nothing left to tie.
         }
     }
 

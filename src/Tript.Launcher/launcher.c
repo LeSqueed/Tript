@@ -8,23 +8,19 @@
 #define MARKER_CAPACITY 4096
 #define MARKER_TOKEN_CAPACITY 256
 
-// Mirrored in src/Tript.Shell/ShellExitCodes.cs - keep the two in step. Tript.Shell.exe returns
-// this instead of 0 when the user clicked "Restart & update"; seeing it here is what tells this
-// launcher to check for (and apply) a staged update before relaunching the shell.
+// Mirrored in src/Tript.Shell/ShellExitCodes.cs: the shell exits with this to apply a staged update.
 #define TRIPT_EXIT_CODE_RESTART_FOR_UPDATE 90
 
 // A safety valve, not an expected case: stops the launcher from looping forever if the shell
 // somehow kept exiting with the restart-for-update code.
 #define TRIPT_MAX_UPDATE_RESTARTS 3
 
-// A version swapped in by this run that exits with a failure within this long is treated as a
-// broken update and rolled back. Mirrored by UpdateManager, which keeps old-App until the app has
-// run for longer than this, so the version to go back to is still there.
+// A swapped-in version failing within this window is rolled back. UpdateManager keeps old-App
+// for longer than this, so the rollback target still exists.
 #define TRIPT_UPDATE_PROBATION_MS 60000
 
-// A folder window open in App (Explorer), or the old shell's WebView2 helpers still exiting, makes
-// moving App aside fail with access denied. Giving up at once used to restart the old version with
-// no word to the user, so a brief lock is waited out and a lasting one is put to the user.
+// Explorer or exiting WebView2 helpers can briefly lock App: wait out a short lock, ask the user
+// about a lasting one rather than silently restarting the old version.
 #define TRIPT_SWAP_RETRY_MS 5000
 #define TRIPT_SWAP_RETRY_STEP_MS 250
 
@@ -34,11 +30,8 @@ static int fail(const wchar_t *message)
     return 1;
 }
 
-// old-App is the rollback target for the version in App, and UpdateManager deletes it once that
-// version has outlived the rollback window. A restart before that left it in place, and because
-// MoveFileW cannot rename onto an existing directory the swap was skipped without a word. Renaming
-// it aside keeps this launcher free of a recursive delete: UpdateManager.SweepLeftovers removes any
-// folder in .tript-update that is neither old-App nor the staged folder the marker names.
+// A leftover old-App would make MoveFileW skip the swap silently, so it is renamed aside;
+// UpdateManager.SweepLeftovers removes it later, keeping a recursive delete out of this launcher.
 static void DiscardStalePreviousInstall(const wchar_t *stagingDirectory, const wchar_t *oldAppBackupPath)
 {
     wchar_t discardPath[PATH_CAPACITY];
@@ -81,10 +74,7 @@ static BOOL MoveAppAside(const wchar_t *appDirectory, const wchar_t *oldAppBacku
     }
 }
 
-// ASCII-only widen: the marker's own format guarantees every byte is a digit, ASCII letter, '.'
-// or '-' (see src/Tript.App/Updater/UpdateMarker.cs) - callers only widen a token that has already
-// passed IsSafeMarkerToken, so a 1:1 byte->UTF-16 widen is exact and avoids pulling in
-// MultiByteToWideChar for a launcher this small.
+// ASCII-only widen: callers pass tokens that already passed IsSafeMarkerToken.
 static void WidenAscii(const char *source, wchar_t *destination, size_t capacity)
 {
     size_t index = 0;
@@ -93,9 +83,7 @@ static void WidenAscii(const char *source, wchar_t *destination, size_t capacity
     destination[index] = L'\0';
 }
 
-// Accepts only the characters the marker's staged-folder-name field can legitimately contain and
-// rejects "..". Defense in depth, not the only guard - GetFileAttributesW on the staged shell
-// executable (below) is what actually gates whether a swap is attempted at all.
+// Defense in depth only: the staged shell existing is what actually gates a swap.
 static BOOL IsSafeMarkerToken(const char *token)
 {
     if (token[0] == '\0' || strstr(token, "..") != NULL)
@@ -111,8 +99,6 @@ static BOOL IsSafeMarkerToken(const char *token)
     return TRUE;
 }
 
-// Finds the given 0-based line in a '\n'-delimited buffer, trims a trailing '\r', and writes it
-// (NUL-terminated) into `line`. Returns FALSE if that many lines don't exist or don't fit.
 static BOOL ExtractLine(const char *buffer, int lineIndex, char *line, size_t lineCapacity)
 {
     const char *cursor = buffer;
@@ -138,11 +124,8 @@ static BOOL ExtractLine(const char *buffer, int lineIndex, char *line, size_t li
     }
 }
 
-// A swap that was interrupted between the two MoveFileW calls in TryApplyStagedUpdate - a power loss
-// or a hard kill in that millisecond window - leaves App\ missing while the previous install sits
-// intact in .tript-update\old-App. Without this the next launch fails with "Tript is incomplete" and
-// the user has to reinstall, so the recovery runs before the marker is even read: the marker may be
-// absent or malformed and the install still needs putting back.
+// Recovers a swap interrupted between the two MoveFileW calls (App\ missing, old-App intact).
+// Runs before the marker is read, since the marker may be absent or malformed.
 static void RestoreInterruptedSwap(const wchar_t *appDirectory, const wchar_t *oldAppBackupPath)
 {
     wchar_t backupShellPath[PATH_CAPACITY];
@@ -158,15 +141,12 @@ static void RestoreInterruptedSwap(const wchar_t *appDirectory, const wchar_t *o
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
         return; // No usable backup to restore - leave the caller to report the missing install.
 
-    // Best effort: if this fails the caller still reports the missing install, which is where we
-    // already were. A success puts old-App back as App\ and leaves any staged update to retry.
+// Best effort: on failure the caller still reports the missing install.
     MoveFileW(oldAppBackupPath, appDirectory);
 }
 
-// A new version that dies within the probation window is almost certainly broken, and the updater
-// that could fix it lives inside the version that will not start. This puts the previous install
-// back and records the failed version in .tript-update\rolled-back, which UpdateManager reads so
-// the old version does not download and apply the same release again the next day.
+// A new version that dies within probation is rolled back, and the failed version is recorded in
+// .tript-update\rolled-back so UpdateManager does not re-apply the same release.
 static BOOL RollBackFailedUpdate(const wchar_t *launcherDirectory, const char *failedVersion)
 {
     wchar_t appDirectory[PATH_CAPACITY];
@@ -189,8 +169,7 @@ static BOOL RollBackFailedUpdate(const wchar_t *launcherDirectory, const char *f
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
         return FALSE; // Nothing to go back to.
 
-    // failed-App left by an earlier rollback makes this fail. UpdateManager sweeps it on the next
-    // start, so the most this costs is one launch without a rollback.
+// A leftover failed-App makes this fail; UpdateManager sweeps it on the next start.
     if (!MoveFileW(appDirectory, failedAppPath))
         return FALSE;
 
@@ -212,17 +191,9 @@ static BOOL RollBackFailedUpdate(const wchar_t *launcherDirectory, const char *f
     return TRUE;
 }
 
-// Looks for a staged update under <launcherDirectory>\.tript-update\ready.marker (written by
-// Tript.App.Updater.UpdateManager - see src/Tript.App/Updater/UpdateMarker.cs, which this must
-// stay in step with) and, if one is validly staged, swaps it into place before App\Tript.Shell.exe
-// is launched. Never deletes the marker, the old-App backup, or any staged folder itself -
-// UpdateManager.SweepLeftovers() on the next .NET process's startup owns that cleanup, keeping
-// this native surface to string handling and a couple of MoveFileExW calls.
-//
-// Returns TRUE to continue starting the app normally (whether or not a swap happened -
-// appDirectory/shellPath are always rebuilt fresh by the caller afterwards). Returns FALSE only
-// for the one truly unrecoverable case - a swap left App\ missing and rolling back failed too - in
-// which case *fatalExitCode is set and wWinMain must return it immediately.
+// Swaps a validly staged update (see UpdateMarker.cs, keep in step) into place before the shell starts.
+// Never deletes the marker or staged folders; UpdateManager.SweepLeftovers() owns cleanup.
+// Returns FALSE only when a swap left App\ missing and the rollback failed too; *fatalExitCode is set.
 static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExitCode,
     BOOL *swapped, char *swappedVersion, size_t versionCapacity)
 {
@@ -285,10 +256,8 @@ static BOOL TryApplyStagedUpdate(const wchar_t *launcherDirectory, int *fatalExi
 
     DiscardStalePreviousInstall(stagingDirectory, oldAppBackupPath);
 
-    // Plain MoveFileW, not MoveFileExW(..., MOVEFILE_REPLACE_EXISTING): that flag is documented to
-    // fail whenever either path names a directory, which both of these always are. A same-volume
-    // directory rename only succeeds when the destination doesn't already exist yet, which is the
-    // case here as long as UpdateManager.SweepLeftovers() cleared old-App on the previous startup.
+// Plain MoveFileW: MOVEFILE_REPLACE_EXISTING fails on directories, so this relies on
+// UpdateManager.SweepLeftovers() having cleared old-App on the previous startup.
     if (!MoveAppAside(appDirectory, oldAppBackupPath))
         return TRUE; // Could not move the current App\ aside (a lock the user chose not to clear,
                       // or old-App still present from a previous swap). The marker is untouched, so

@@ -34,9 +34,7 @@ public sealed class DetectorFramePacingTests
             Thread.Sleep(TimeSpan.FromSeconds(3.2));
             detector.Stop();
 
-            var copied = (int)typeof(VisualEventDetector)
-                .GetField("_diagnosticFrameCount", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .GetValue(detector)!;
+            var copied = detector.FramesCopied;
 
             Assert.InRange(batches.Count, 3, 6);
             Assert.InRange(source.Delivered, 40, int.MaxValue);

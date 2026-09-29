@@ -139,8 +139,6 @@ internal sealed class LiveHighlightTracker
     {
         lock (_gate)
         {
-            // Stop only needs to wait for tasks still running. Finished ones used to pile up until
-            // the next recording began, one per highlight.
             _tasks.RemoveAll(static tracked => tracked.IsCompleted);
             _tasks.Add(task);
         }
@@ -203,11 +201,7 @@ internal sealed class LiveHighlightTracker
             foreach (var bookmarkId in region.BookmarkIds)
                 _savedBookmarkIds.Add(bookmarkId);
 
-            // A saved region is inert to everything that walks _regions: Stop skips it and
-            // ClaimUnsaved excludes it, both because its bookmarks are now saved. Left in place,
-            // Remember scanned every saved region for every new bookmark, which is quadratic over a
-            // long session, and a saved region could still be extended by a later bookmark that
-            // would then never be saved.
+            // Left in place, a saved region could be extended by a later bookmark that is then never saved.
             _regions.Remove(region);
         }
     }

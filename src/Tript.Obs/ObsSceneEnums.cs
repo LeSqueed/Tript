@@ -23,28 +23,3 @@ public enum ObsBoundsType
     ScaleToHeight,
     MaxOnly
 }
-
-public enum ObsOrderMovement
-{
-    Up = 0,
-    Down,
-    Top,
-    Bottom
-}
-
-public enum ObsBlendingMethod
-{
-    Default = 0,
-    SrgbOff
-}
-
-public enum ObsBlendingType
-{
-    Normal = 0,
-    Additive,
-    Subtract,
-    Screen,
-    Multiply,
-    Lighten,
-    Darken
-}

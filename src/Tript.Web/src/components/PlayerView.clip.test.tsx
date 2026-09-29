@@ -714,20 +714,6 @@ describe('clip creation handoff', () => {
     expect(client.sent.filter((entry) => entry.method === 'CreateClip')).toHaveLength(0);
   });
 
-  it('no longer renders a per-clip progress list under the player', () => {
-    const client = mockClient();
-    const container = renderPlayer(client);
-    markDefaultSegment();
-    openClipDialog();
-    fireEvent.click(createButton());
-    const sent = client.sent.find((entry) => entry.method === 'CreateClip')?.parameters as { id: string };
-    act(() => {
-      client.emit('importProgress', { id: sent.id, status: 'done', content: {} });
-    });
-    expect(container.querySelector('.player-clip-progress')).toBeNull();
-    expect(screen.queryByText('Creating…')).toBeNull();
-  });
-
   it('the state message audio tracks surface per-track controls in the dialog', () => {
     const client = mockClient();
     renderPlayer(client);

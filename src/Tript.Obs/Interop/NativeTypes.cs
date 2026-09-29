@@ -45,43 +45,11 @@ internal struct Vec2Native
 }
 
 [StructLayout(LayoutKind.Sequential)]
-internal struct ObsSceneItemCropNative
-{
-    public int Left;
-    public int Top;
-    public int Right;
-    public int Bottom;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal struct ObsTransformInfoNative
-{
-    public Vec2Native Position;
-    public float Rotation;
-    public Vec2Native Scale;
-    public uint Alignment;
-    public int BoundsType;
-    public uint BoundsAlignment;
-    public Vec2Native Bounds;
-    public byte CropToBounds;
-}
-
-[StructLayout(LayoutKind.Sequential)]
 internal struct DStrNative
 {
     public nint Array;
     public nuint Length;
     public nuint Capacity;
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal struct ObsEncoderRoiNative
-{
-    public uint Top;
-    public uint Bottom;
-    public uint Left;
-    public uint Right;
-    public float Priority;
 }
 
 [StructLayout(LayoutKind.Sequential)]

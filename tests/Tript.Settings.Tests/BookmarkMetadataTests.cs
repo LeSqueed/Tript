@@ -11,29 +11,15 @@ namespace Tript.Settings.Tests;
 
 public class BookmarkMetadataTests
 {
-    [Fact]
-    public void BookmarkVocabulary_HasTheSixMembersInOrder()
-    {
-        Assert.Equal(
-            new[]
-            {
-                BookmarkType.Manual, BookmarkType.Kill, BookmarkType.Goal, BookmarkType.Assist, BookmarkType.Death,
-                BookmarkType.Play,
-            },
-            Enum.GetValues<BookmarkType>());
-    }
-
-    [Fact]
-    public void HighlightMarking_DistinguishesPositiveTypesFromManualAndDeaths()
-    {
-        Assert.True(BookmarkType.Kill.IsIncludedInHighlights());
-        Assert.True(BookmarkType.Goal.IsIncludedInHighlights());
-
-        Assert.True(BookmarkType.Assist.IsIncludedInHighlights());
-
-        Assert.False(BookmarkType.Manual.IsIncludedInHighlights());
-        Assert.False(BookmarkType.Death.IsIncludedInHighlights());
-    }
+    [Theory]
+    [InlineData(BookmarkType.Kill, true)]
+    [InlineData(BookmarkType.Goal, true)]
+    [InlineData(BookmarkType.Assist, true)]
+    [InlineData(BookmarkType.Manual, false)]
+    [InlineData(BookmarkType.Death, false)]
+    [InlineData(BookmarkType.Play, false)]
+    public void OnlyPositiveEventsAreIncludedInHighlights(BookmarkType type, bool included) =>
+        Assert.Equal(included, type.IsIncludedInHighlights());
 
     [Fact]
     public void RecordingMetadata_RoundTripsThroughJson()

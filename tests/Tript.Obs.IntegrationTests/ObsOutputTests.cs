@@ -74,50 +74,6 @@ public sealed class ObsOutputTests
     }
 
     [SkippableFact]
-    public void TheInstanceFlags_MatchTheTypeFlags()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        var fromType = ObsOutput.GetTypeFlags(FfmpegMuxerId);
-        using var output = ObsOutput.Create(FfmpegMuxerId, "flags");
-
-        Assert.Equal(fromType, output.Flags);
-        Assert.NotEqual(ObsOutputFlags.None, output.Flags);
-    }
-
-    [SkippableFact]
-    public void TheFileMuxer_IsAnEncodedAvOutputThatDoesNotNeedAService()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        var flags = ObsOutput.GetTypeFlags(FfmpegMuxerId);
-
-        Assert.True(flags.HasFlag(ObsOutputFlags.Video));
-        Assert.True(flags.HasFlag(ObsOutputFlags.Audio));
-        Assert.True(flags.HasFlag(ObsOutputFlags.Encoded));
-        Assert.False(flags.HasFlag(ObsOutputFlags.Service));
-        Assert.True(flags.HasFlag(ObsOutputFlags.MultiTrack));
-    }
-
-    [SkippableFact]
-    public void TheStreamingMuxers_AreTheServiceShapedOutputs()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        var mpegts = ObsOutput.GetTypeFlags(MpegtsMuxerId);
-        Assert.True(mpegts.HasFlag(ObsOutputFlags.Encoded));
-        Assert.True(mpegts.HasFlag(ObsOutputFlags.Service));
-
-        var hls = ObsOutput.GetTypeFlags(HlsMuxerId);
-        Assert.True(hls.HasFlag(ObsOutputFlags.Encoded));
-        Assert.True(hls.HasFlag(ObsOutputFlags.Service));
-
-        var generic = ObsOutput.GetTypeFlags(FfmpegOutputId);
-        Assert.False(generic.HasFlag(ObsOutputFlags.Encoded));
-        Assert.False(generic.HasFlag(ObsOutputFlags.Service));
-    }
-
-    [SkippableFact]
     public void TheFileMuxer_DeclaresOnlyThePathProperty()
     {
         using var session = ObsSession.StartWithSourceTypes();
@@ -127,53 +83,6 @@ public sealed class ObsOutputTests
         var path = Assert.Single(properties);
         Assert.Equal("path", path.Name);
         Assert.Equal(ObsPropertyType.Text, path.Type);
-    }
-
-    [SkippableFact]
-    public void TheFileMuxer_DefaultsAreEmpty()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-
-        using var defaults = ObsOutput.GetTypeDefaults(FfmpegMuxerId);
-
-        Assert.NotNull(defaults);
-        Assert.Empty(defaults.EnumerateEntries());
-    }
-
-    [SkippableFact]
-    public void AnAudioEncoder_AssignedToASlot_ComesBackFromThatSlot()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var output = ObsOutput.Create(FfmpegMuxerId, "wiring");
-
-        using var audio = ObsEncoder.CreateAudio("ffmpeg_aac", "wiring audio");
-        output.SetAudioEncoder(audio, 0);
-
-        using var readBack = output.GetAudioEncoder(0);
-
-        Assert.NotNull(readBack);
-        Assert.Equal("ffmpeg_aac", readBack!.Id);
-        Assert.Equal("wiring audio", readBack.Name);
-
-        Assert.Null(output.GetAudioEncoder(1));
-    }
-
-    [SkippableFact]
-    public void ReadingAnEncoderSlot_DoesNotConsumeTheOutputsOwnReference()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var output = ObsOutput.Create(FfmpegMuxerId, "slot refcount");
-        using var audio = ObsEncoder.CreateAudio("ffmpeg_aac", "slot refcount audio");
-        output.SetAudioEncoder(audio, 0);
-
-        for (var read = 0; read < 4; read++)
-        {
-            using var readBack = output.GetAudioEncoder(0);
-            Assert.Equal("slot refcount audio", readBack!.Name);
-        }
-
-        using var stillThere = output.GetAudioEncoder(0);
-        Assert.Equal("slot refcount audio", stillThere!.Name);
     }
 
     [SkippableFact]
@@ -187,27 +96,6 @@ public sealed class ObsOutputTests
         using var readBack = output.GetSettings();
 
         Assert.Equal("/tmp/nonexistent-directory/out.mp4", readBack.GetString("path"));
-    }
-
-    [SkippableFact]
-    public void ANewOutput_IsNotActiveAndNotPaused()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var output = ObsOutput.Create(FfmpegMuxerId, "fresh");
-
-        Assert.False(output.IsActive);
-        Assert.False(output.IsPaused);
-    }
-
-    [SkippableFact]
-    public void AFileOutput_ReportsNoNetworkVocabulary()
-    {
-        using var session = ObsSession.StartWithSourceTypes();
-        using var output = ObsOutput.Create(FfmpegMuxerId, "stats");
-
-        Assert.False(output.IsReconnecting);
-        Assert.Equal(0f, output.Congestion);
-        Assert.Equal(-1, output.ConnectTimeMilliseconds);
     }
 
     [SkippableFact]

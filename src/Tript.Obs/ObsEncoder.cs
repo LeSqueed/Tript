@@ -88,12 +88,6 @@ public sealed class ObsEncoder : IDisposable
         return (ObsEncoderType)ObsNative.obs_get_encoder_type(id);
     }
 
-    public static ObsEncoderCaps GetTypeCaps(string id)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(id);
-        return (ObsEncoderCaps)ObsNative.obs_get_encoder_caps(id);
-    }
-
     public static IReadOnlyList<string> EnumerateTypeIds()
     {
         var ids = new List<string>();
@@ -135,8 +129,6 @@ public sealed class ObsEncoder : IDisposable
 
     public string Codec => Utf8Marshal.ReadBorrowed(ObsNative.obs_encoder_get_codec(Pointer)) ?? string.Empty;
 
-    public ObsEncoderCaps Caps => (ObsEncoderCaps)ObsNative.obs_encoder_get_caps(Pointer);
-
     public ObsSettings GetSettings() => ObsSettings.FromOwnedPointer(ObsNative.obs_encoder_get_settings(Pointer));
 
     public void Update(ObsSettings settings)
@@ -160,65 +152,11 @@ public sealed class ObsEncoder : IDisposable
     public void SetScaledSize(uint width, uint height) =>
         ObsNative.obs_encoder_set_scaled_size(Pointer, width, height);
 
-    public bool ScalingEnabled => ObsNative.obs_encoder_scaling_enabled(Pointer);
-
-    public void SetGpuScaleType(ObsScaleType scaleType) =>
-        ObsNative.obs_encoder_set_gpu_scale_type(Pointer, (int)scaleType);
-
-    public bool GpuScalingEnabled => ObsNative.obs_encoder_gpu_scaling_enabled(Pointer);
-
-    public ObsScaleType GpuScaleType => (ObsScaleType)ObsNative.obs_encoder_get_scale_type(Pointer);
-
-    public bool SetFrameRateDivisor(uint divisor) =>
-        ObsNative.obs_encoder_set_frame_rate_divisor(Pointer, divisor);
-
-    public uint FrameRateDivisor => ObsNative.obs_encoder_get_frame_rate_divisor(Pointer);
-
-    public uint EncodedFrames => ObsNative.obs_encoder_get_encoded_frames(Pointer);
-
-    public ObsVideoFormat PreferredVideoFormat
-    {
-        get => (ObsVideoFormat)ObsNative.obs_encoder_get_preferred_video_format(Pointer);
-        set => ObsNative.obs_encoder_set_preferred_video_format(Pointer, (int)value);
-    }
-
-    public ObsColorSpace PreferredColorSpace
-    {
-        get => (ObsColorSpace)ObsNative.obs_encoder_get_preferred_color_space(Pointer);
-        set => ObsNative.obs_encoder_set_preferred_color_space(Pointer, (int)value);
-    }
-
-    public ObsVideoRange PreferredRange
-    {
-        get => (ObsVideoRange)ObsNative.obs_encoder_get_preferred_range(Pointer);
-        set => ObsNative.obs_encoder_set_preferred_range(Pointer, (int)value);
-    }
-
     public uint SampleRate => ObsNative.obs_encoder_get_sample_rate(Pointer);
 
     public nuint FrameSize => ObsNative.obs_encoder_get_frame_size(Pointer);
 
     public nuint MixerIndex => ObsNative.obs_encoder_get_mixer_index(Pointer);
-
-    public bool AddRoi(ObsEncoderRoi roi)
-    {
-        var native = new ObsEncoderRoiNative
-        {
-            Top = roi.Top,
-            Bottom = roi.Bottom,
-            Left = roi.Left,
-            Right = roi.Right,
-            Priority = roi.Priority
-        };
-
-        return ObsNative.obs_encoder_add_roi(Pointer, native);
-    }
-
-    public bool HasRoi => ObsNative.obs_encoder_has_roi(Pointer);
-
-    public void ClearRoi() => ObsNative.obs_encoder_clear_roi(Pointer);
-
-    public uint RoiIncrement => ObsNative.obs_encoder_get_roi_increment(Pointer);
 
     private static void ThrowIfUnregistered(string id)
     {

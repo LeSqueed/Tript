@@ -46,10 +46,8 @@ internal static class Program
         }
     }
 
-    // libobs formats every diagnostic that matters for a recorder, including D3D11 device loss,
-    // encoder open failures, NVENC session limits and capture hook errors, and hands it to one
-    // process-wide handler. Without this they are formatted and dropped. Installed before
-    // obs_startup so module loading and graphics init are captured too.
+    // Without this libobs drops device loss, encoder and hook errors. Installed before obs_startup so
+    // module loading and graphics init are captured too.
     private static void InstallObsLogBridge()
     {
         lock (ObsLogGate)
@@ -60,16 +58,7 @@ internal static class Program
             try
             {
                 _obsLogScope = ObsLog.Install(static (level, message) =>
-                {
-                    var serilogLevel = IsExpectedModuleSkip(message) ? LogEventLevel.Debug : level switch
-                    {
-                        ObsLogLevel.Error => LogEventLevel.Error,
-                        ObsLogLevel.Warning => LogEventLevel.Warning,
-                        ObsLogLevel.Info => LogEventLevel.Information,
-                        _ => LogEventLevel.Debug,
-                    };
-                    Log.Write(serilogLevel, "libobs: {Message}", message.TrimEnd());
-                });
+                    Log.Write(ObsLogLevelFor(level, message), "libobs: {Message}", message.TrimEnd()));
             }
             catch (Exception exception) when (exception is InvalidOperationException or DllNotFoundException
                 or EntryPointNotFoundException)
@@ -82,10 +71,15 @@ internal static class Program
     internal static AppHost BuildApp(AppOptions options)
     {
         AppLog.Configure(options.LogDirectory, options.VerboseLog);
+        Log.Information("Tript {Version} starting on {OS}{Mode}",
+            Updater.UpdateManager.CurrentInstalledVersion() ?? "(development build)",
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            options.FakeRecorder ? " with the fake recorder" : string.Empty);
 
         DeclareDpiAwareness();
 
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
+        AppLog.SetDebugLogging(store.Load().General.DebugLogging);
 
 #if TRIPT_TRAINING
         ModelService.ConfigureModelRoots(TrainingPaths.InstalledModelsPath, GameModelPaths.ModelsRoot);
@@ -227,9 +221,9 @@ internal static class Program
         var report = runtime.LoadAllModules();
         runtime.PostLoadModules();
 
-        Log.Information("Tript.App: registered input types: {Types}",
+        Log.Debug("Tript.App: registered input types: {Types}",
             string.Join(", ", runtime.EnumerateInputTypes()));
-        Log.Information("Tript.App: registered output types: {Types}",
+        Log.Debug("Tript.App: registered output types: {Types}",
             string.Join(", ", ObsOutput.EnumerateTypeIds()));
 
         var fatal = FatalModuleFailures(report.FailedModules, isWindows);
@@ -324,8 +318,7 @@ internal static class Program
                     }
                     gsLeave();
 
-                    // This is a second D3D11 device created only to explain the failure. Without
-                    // gs_destroy it stays alive for the rest of the process.
+                    // A second D3D11 device made only for diagnosis; without gs_destroy it lives until exit.
                     gsDestroy(graphics);
                 }
             }
@@ -413,6 +406,14 @@ internal static class Program
         };
     }
 
+    internal static LogEventLevel ObsLogLevelFor(ObsLogLevel level, string message) =>
+        IsExpectedModuleSkip(message) ? LogEventLevel.Debug : level switch
+        {
+            ObsLogLevel.Error => LogEventLevel.Error,
+            ObsLogLevel.Warning => LogEventLevel.Warning,
+            _ => LogEventLevel.Debug,
+        };
+
     internal static bool IsExpectedModuleSkip(string message) =>
         message.StartsWith("Skipping module '", StringComparison.Ordinal)
         && message.Contains("not on safe list", StringComparison.Ordinal);
@@ -443,9 +444,7 @@ internal static class Program
     internal static IReadOnlyList<string> SafeModules(bool isWindows) =>
         isWindows
 
-            // obs-outputs is here for mp4_output, OBS's Hybrid MP4 writer, which is what keeps a
-            // recording playable after a crash. It also carries the RTMP/FLV outputs, which Tript
-            // never creates. Keep in step with OBS_MODULES in the Makefile.
+            // obs-outputs provides the crash-safe Hybrid MP4 writer. Keep in step with OBS_MODULES in the Makefile.
             ? new[] { "obs-x264", "obs-ffmpeg", "obs-outputs", "obs-nvenc", "obs-qsv11", "win-capture", "image-source", "win-wasapi" }
             : new[]
             {

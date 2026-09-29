@@ -39,8 +39,7 @@ internal sealed partial class AppHost
         }
     }
 
-    // Takes no path from the client on purpose: the host decides what to open, so this command cannot
-    // be turned into "open any folder on the machine" the way a path parameter could.
+    // Takes no path from the client, so it cannot be used to open an arbitrary folder.
     internal void OpenLogFolder()
     {
         var directory = AppLog.LogDirectory;

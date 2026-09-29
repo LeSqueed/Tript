@@ -125,10 +125,8 @@ internal static class WindowsAppIdentity
         public int PropertyId;
     }
 
-    // Declaring only the two fields makes this 16 bytes, but native PROPVARIANT is an 8-byte header
-    // plus a two-pointer union: 24 on x64. SetValue and PropVariantClear write the full 24, so a
-    // short struct corrupts the adjacent stack. Size is pinned rather than padded with fields
-    // because over-sizing is harmless and under-sizing is not.
+    // Native PROPVARIANT is 24 bytes on x64 and SetValue/PropVariantClear write all of it; a shorter
+    // struct corrupts the adjacent stack.
     [StructLayout(LayoutKind.Explicit, Size = 24)]
     private struct PropVariant
     {

@@ -32,7 +32,58 @@ class Region:
     def bottom(self) -> float:
         return self.y + self.h
 
+@dataclass
+class ExportCounts:
+    crops: int = 0
+    augmented: int = 0
+    train_crops: int = 0
+    validation_crops: int = 0
+
 def main() -> int:
+    args = parse_args()
+    workspace = args.workspace.resolve()
+    events = materialize_event_regions(
+        load_events(workspace / "events.json"), load_region_groups(workspace / "regionGroups.json"))
+    samples, invalid_labels, skipped_samples, data_warnings = load_samples(workspace, events)
+    assignments = split_samples(samples, args.validation)
+    dataset = workspace / f"dataset.export-{uuid.uuid4().hex}"
+
+    try:
+        counts = export_crops(assignments, dataset, events, args.size, args.augment)
+        event_coverage, coverage_warnings = summarize_coverage(assignments, events)
+        warnings = data_warnings + coverage_warnings
+        write_json(dataset / "dataset.yaml", {
+            "path": str((workspace / "dataset").resolve()),
+            "train": "images/train",
+            "val": "images/val",
+            "nc": len(events),
+            "names": {str(event["classId"]): event["name"] for event in events},
+        })
+        write_json(dataset / "export.json", {
+            "size": args.size,
+            "augment": args.augment,
+            "sampleCount": len(samples),
+            "cropCount": counts.crops,
+            "augmentedCrops": counts.augmented,
+            "invalidLabels": invalid_labels,
+            "skippedSamples": skipped_samples,
+            "trainingSamples": len(assignments["train"]),
+            "validationSamples": len(assignments["val"]),
+            "trainingCrops": counts.train_crops,
+            "validationCrops": counts.validation_crops,
+            "eventCoverage": event_coverage,
+            "warnings": warnings,
+        })
+        swap_in_dataset(workspace, dataset)
+    except Exception:
+        if dataset.exists():
+            shutil.rmtree(dataset)
+        raise
+
+    report(args, samples, assignments, counts, event_coverage, warnings)
+    return 0
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--size", type=int, default=640)
@@ -40,133 +91,89 @@ def main() -> int:
     parser.add_argument("--augment", type=int, default=0,
         help="per-training-crop augmented copies (contrast, brightness, gamma, pixelation); validation is never augmented")
     args = parser.parse_args()
-
     if args.size <= 0 or not 0 < args.validation < 1:
         raise ValueError("size must be positive and validation must be between 0 and 1")
     if args.augment < 0:
         raise ValueError("augment must be non-negative")
+    return args
 
-    workspace = args.workspace.resolve()
-    events = load_events(workspace / "events.json")
-    region_groups = load_region_groups(workspace / "regionGroups.json")
-    events = materialize_event_regions(events, region_groups)
-    samples, invalid_labels, skipped_samples, data_warnings = load_samples(workspace, events)
-    dataset = workspace / f"dataset.export-{uuid.uuid4().hex}"
+def export_crops(assignments: dict[str, list[dict]], dataset: Path, events: list[dict], size: int,
+                 augment: int) -> ExportCounts:
+    for split in ("train", "val"):
+        (dataset / "images" / split).mkdir(parents=True)
+        (dataset / "labels" / split).mkdir(parents=True)
 
-    try:
-        for split in ("train", "val"):
-            (dataset / "images" / split).mkdir(parents=True)
-            (dataset / "labels" / split).mkdir(parents=True)
-
-        assignments = split_samples(samples, args.validation)
-
-        total_samples = sum(len(value) for value in assignments.values())
-        progress_step = max(1, total_samples // 20)
-        print(
-            f"EXPORT size={args.size} augment={args.augment} samples={len(samples)} "
-            f"train={len(assignments['train'])} val={len(assignments['val'])}",
-            flush=True,
-        )
-        exported = 0
-        augmented_crops = 0
-        split_crops = {"train": 0, "val": 0}
-        processed = 0
-        for split, split_samples_list in assignments.items():
-            for sample in split_samples_list:
-                emitted, augmented = export_sample(
-                    sample, split, dataset, events, args.size, exported, args.augment
-                )
-                exported += emitted
-                augmented_crops += augmented
-                split_crops[split] += emitted
-                processed += 1
-                if processed % progress_step == 0 or processed == total_samples:
-                    print(f"PROGRESS {processed}/{total_samples} samples (crops={exported})", flush=True)
-
-        if exported == 0:
-            raise ValueError("no valid training crops were exported")
-
-        dataset_config = {
-            "path": str((workspace / "dataset").resolve()),
-            "train": "images/train",
-            "val": "images/val",
-            "nc": len(events),
-            "names": {str(event["classId"]): event["name"] for event in events},
-        }
-        (dataset / "dataset.yaml").write_text(
-            json.dumps(dataset_config, indent=2) + "\n", encoding="utf-8"
-        )
-        event_coverage, coverage_warnings = summarize_coverage(assignments, events)
-        warnings = data_warnings + coverage_warnings
-        (dataset / "export.json").write_text(
-            json.dumps(
-                {
-                    "size": args.size,
-                    "augment": args.augment,
-                    "sampleCount": len(samples),
-                    "cropCount": exported,
-                    "augmentedCrops": augmented_crops,
-                    "invalidLabels": invalid_labels,
-                    "skippedSamples": skipped_samples,
-                    "trainingSamples": len(assignments["train"]),
-                    "validationSamples": len(assignments["val"]),
-                    "trainingCrops": split_crops["train"],
-                    "validationCrops": split_crops["val"],
-                    "eventCoverage": event_coverage,
-                    "warnings": warnings,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        destination = workspace / "dataset"
-        backup = workspace / f"dataset.previous-{uuid.uuid4().hex}"
-        if destination.exists():
-            destination.replace(backup)
-        try:
-            dataset.replace(destination)
-        except Exception:
-            if backup.exists() and not destination.exists():
-                backup.replace(destination)
-            raise
-        if backup.exists():
-            try:
-                for name in PRESERVED_ACROSS_EXPORT:
-                    carried = backup / name
-                    if carried.exists():
-                        carried.replace(destination / name)
-            except OSError as error:
-                print(
-                    f"WARNING could not carry OCR artifacts across the export; "
-                    f"they remain in {backup.name} ({error})",
-                    flush=True,
-                )
+    total = sum(len(value) for value in assignments.values())
+    step = max(1, total // 20)
+    print(
+        f"EXPORT size={size} augment={augment} samples={total} "
+        f"train={len(assignments['train'])} val={len(assignments['val'])}",
+        flush=True,
+    )
+    counts = ExportCounts()
+    processed = 0
+    for split, split_samples_list in assignments.items():
+        for sample in split_samples_list:
+            emitted, augmented = export_sample(sample, split, dataset, events, size, counts.crops, augment)
+            counts.crops += emitted
+            counts.augmented += augmented
+            if split == "train":
+                counts.train_crops += emitted
             else:
-                shutil.rmtree(backup)
+                counts.validation_crops += emitted
+            processed += 1
+            if processed % step == 0 or processed == total:
+                print(f"PROGRESS {processed}/{total} samples (crops={counts.crops})", flush=True)
 
-        coverage = ", ".join(
-            f"{item['name']}={item['trainingSamples']}/{item['validationSamples']}"
-            for item in event_coverage
-        )
-        print(f"COVERAGE train/val frames: {coverage}", flush=True)
-        for warning in warnings:
-            print(f"WARNING {warning}", flush=True)
-        if augmented_crops:
-            print(
-                f"AUGMENT copies={args.augment} extra={augmented_crops} train-only", flush=True
-            )
+    if counts.crops == 0:
+        raise ValueError("no valid training crops were exported")
+    return counts
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+def swap_in_dataset(workspace: Path, dataset: Path) -> None:
+    destination = workspace / "dataset"
+    backup = workspace / f"dataset.previous-{uuid.uuid4().hex}"
+    if destination.exists():
+        destination.replace(backup)
+    try:
+        dataset.replace(destination)
+    except Exception:
+        if backup.exists() and not destination.exists():
+            backup.replace(destination)
+        raise
+    if not backup.exists():
+        return
+    try:
+        for name in PRESERVED_ACROSS_EXPORT:
+            carried = backup / name
+            if carried.exists():
+                carried.replace(destination / name)
+    except OSError as error:
         print(
-            f"EXPORTED samples={len(samples)} train={len(assignments['train'])} "
-            f"val={len(assignments['val'])} crops={exported} size={args.size}",
+            f"WARNING could not carry OCR artifacts across the export; "
+            f"they remain in {backup.name} ({error})",
             flush=True,
         )
-        return 0
-    except Exception:
-        if dataset.exists():
-            shutil.rmtree(dataset)
-        raise
+    else:
+        shutil.rmtree(backup)
+
+def report(args: argparse.Namespace, samples: list[dict], assignments: dict[str, list[dict]],
+           counts: ExportCounts, event_coverage: list[dict], warnings: list[str]) -> None:
+    coverage = ", ".join(
+        f"{item['name']}={item['trainingSamples']}/{item['validationSamples']}" for item in event_coverage
+    )
+    print(f"COVERAGE train/val frames: {coverage}", flush=True)
+    for warning in warnings:
+        print(f"WARNING {warning}", flush=True)
+    if counts.augmented:
+        print(f"AUGMENT copies={args.augment} extra={counts.augmented} train-only", flush=True)
+    print(
+        f"EXPORTED samples={len(samples)} train={len(assignments['train'])} "
+        f"val={len(assignments['val'])} crops={counts.crops} size={args.size}",
+        flush=True,
+    )
 
 def load_events(path: Path) -> list[dict]:
     events = json.loads(path.read_text(encoding="utf-8"))
@@ -256,7 +263,6 @@ def load_samples(workspace: Path, events: list[dict]) -> tuple[list[dict], int, 
         ]
         ocr_regions = sample.get("ocrRegions")
         if not labels and isinstance(ocr_regions, list) and ocr_regions:
-
             continue
         if not labels or errors:
             skipped_samples += 1
@@ -453,7 +459,7 @@ def export_sample(
                     (right - left) / image.width,
                     (bottom - top) / image.height,
                 )
-            base = ImageOps.grayscale(crop).convert("RGB").resize((size, size), Image.Resampling.LANCZOS)
+            base = ImageOps.grayscale(crop).resize((size, size), Image.Resampling.LANCZOS).convert("RGB")
             copies = 1 + (augment if split == "train" else 0)
             for copy_index in range(copies):
                 stem = f"{sequence:06d}_{group_index:02d}"

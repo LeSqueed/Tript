@@ -239,32 +239,6 @@ public class RecorderStateMachineTests
     }
 
     [Fact]
-    public void AStopForGameEnd_CompletesWithGameStoppedAsTheReason()
-    {
-        using var recorder = NewRecorder(_session);
-        recorder.Start(TestSettings.Session());
-
-        Assert.True(recorder.StopForGameEnd());
-        Assert.Equal(RecorderState.Stopping, recorder.Snapshot.State);
-        Assert.Equal(RecorderStopReason.GameStopped, recorder.Snapshot.LastStopReason);
-
-        _session.LastCreatedOutput!.RaiseStop(ObsOutputStopCode.Success);
-
-        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
-        Assert.Equal(RecorderStopReason.GameStopped, recorder.Snapshot.LastStopReason);
-        Assert.Equal(ObsOutputStopCode.Success, recorder.Snapshot.LastStopCode);
-    }
-
-    [Fact]
-    public void StopForGameEndFromIdle_IsANoOp()
-    {
-        using var recorder = NewRecorder(_session);
-
-        Assert.False(recorder.StopForGameEnd());
-        Assert.Equal(RecorderState.Idle, recorder.Snapshot.State);
-    }
-
-    [Fact]
     public void Snapshot_IsReadableAcrossThreads()
     {
         using var recorder = NewRecorder(_session);

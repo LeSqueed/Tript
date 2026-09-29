@@ -273,12 +273,6 @@ internal sealed class ThumbnailStore : IDisposable
         public void Dispose() => store?.ReleaseRemoval(videoFileName);
     }
 
-    internal void Invalidate(string videoFileName)
-    {
-        lock (_stateGate)
-            InvalidateLocked(videoFileName);
-    }
-
     private void InvalidateLocked(string videoFileName)
     {
         _fileVersions[videoFileName] = _fileVersions.GetValueOrDefault(videoFileName) + 1;

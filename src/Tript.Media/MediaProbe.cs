@@ -11,15 +11,12 @@ public sealed class MediaProbe
 {
     private readonly string _ffprobePath;
 
-    // Keyed on path alone, a file rewritten in place kept its first answer forever. The replay scratch
-    // file is reused for every live highlight, so its stale duration made clip regions get computed
-    // against the wrong length. The stamp makes a changed file miss the cache.
+    // Keyed on path plus write stamp: the replay scratch file is rewritten in place for every highlight.
     private readonly record struct FileStamp(long Length, DateTime LastWriteUtc);
 
     private readonly Dictionary<string, (FileStamp Stamp, MediaInfo Info)> _cache = new(StringComparer.Ordinal);
 
-    // Previously unbounded: one entry per file probed for the life of the process. Evicting a single
-    // entry at a time rather than clearing keeps a large library from re-probing everything per scan.
+    // Bounded, evicting one entry at a time so a large library does not re-probe everything per scan.
     internal const int MaxCachedEntries = 4096;
 
     public MediaProbe(string ffprobePath)
@@ -238,15 +235,13 @@ public sealed class MediaProbe
 
         try
         {
-            if (!process.Start())
-                throw new InvalidOperationException($"Failed to start {fileName}");
+            ProcessPipes.Start(process);
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
             throw new ClipSourceException($"Failed to start {fileName}: {ex.Message}", ex);
         }
 
-        ProcessPipes.Adopt(process);
         var stdout = ProcessPipes.BeginRead(process.StandardOutput);
         var stderr = ProcessPipes.BeginRead(process.StandardError);
 

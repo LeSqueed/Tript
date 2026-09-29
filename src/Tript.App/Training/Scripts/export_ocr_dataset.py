@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
 
-"""Build the OCR recogniser's fine-tune dataset from a Tript workspace.
-
-Training crops come from three sources:
-
-1. Object-detection labels of a pre-conversion sample set (``--object-samples``). Each kill-feed
-   row carries an elimination-icon box plus an ability-keyword box whose class *name* matches an
-   OCR event, so the feed-line strip and its meaning are both known.
-2. ``ocrRegions`` in the workspace samples: a free-form box the user drew on a frame plus the
-   exact text they read inside it (direct ground truth).
-3. Synthetic feed lines rendered in a condensed bold face over real empty-feed backgrounds, with
-   random owner names, italic shear, drop shadow, the red banner, and a faded variant.
-
-Every crop is labelled with the canonical phrase (``ELIMINATED SENTRY TURRET``,
-``PLAY OF THE GAME`` …); the owner name is deliberately dropped, so labels are deterministic and
-the recogniser learns to skip the variable span.
-
-Output: ``dataset/ocr/{images/, labels.tsv, character_dict.txt, export.json}``.
-"""
+"""Build dataset/ocr/{images/, labels.tsv, character_dict.txt, export.json} from a Tript workspace."""
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import random
 import re
@@ -75,6 +59,21 @@ class Phrase:
     render_suffix: str
     template: str = ""
 
+MEASURE = ImageDraw.Draw(Image.new("RGB", (4, 4)))
+
+@functools.lru_cache(maxsize=64)
+def load_font(font_path: str | None, size: int, variation: bytes | None = None
+              ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    if not font_path:
+        return ImageFont.load_default(size)
+    font = ImageFont.truetype(font_path, size)
+    if variation is not None:
+        try:
+            font.set_variation_by_name(variation)
+        except (OSError, ValueError):
+            pass
+    return font
+
 INT_PLACEHOLDER = re.compile(r"\{int(?::(\d+)(?:\.\.(\d+))?)?\}", re.IGNORECASE)
 DEFAULT_INT_DIGITS = 4
 
@@ -88,6 +87,43 @@ def expand_ints(template: str, rng: random.Random) -> str:
     return INT_PLACEHOLDER.sub(digits, template)
 
 def main() -> int:
+    args = parse_args()
+    workspace = args.workspace.resolve()
+    rng = random.Random(args.seed)
+
+    events = json.loads((workspace / "events.json").read_text(encoding="utf-8"))
+    groups = {g["id"]: g for g in load_json_list(workspace / "regionGroups.json")}
+    overrides = dict(OVERWATCH_ABILITY_NAMES)
+    for pair in (p.strip() for p in args.ability_names.split(",") if p.strip()):
+        name, _, phrase = pair.partition("=")
+        overrides[name.strip()] = phrase.strip()
+
+    phrases = build_phrases(events, groups, overrides)
+    if not phrases:
+        raise ValueError("events.json has no OCR events with a usable template")
+    print("PHRASES " + json.dumps({n: p.label for n, p in phrases.items()}), flush=True)
+
+    staging = workspace / f"dataset.ocr-export-{rng.getrandbits(48):012x}"
+    images = staging / "images"
+    images.mkdir(parents=True)
+    try:
+        records = collect_records(args, workspace, events, phrases, images, rng)
+        real_count, charset = write_outputs(staging, records, rng, args.validation)
+        destination = workspace / "dataset" / "ocr"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            shutil.rmtree(destination)
+        staging.replace(destination)
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+
+    print(f"EXPORTED total={len(records)} real={real_count} "
+          f"synthetic={len(records) - real_count} chars={len(charset)}", flush=True)
+    return 0
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--object-samples", type=Path, default=None,
@@ -102,97 +138,68 @@ def main() -> int:
     parser.add_argument("--font", default=None,
                         help="font file, or a name under C:/Windows/Fonts, for synthetic crops")
     args = parser.parse_args()
-
     if not 0 < args.validation < 0.5 or args.synthetic_per_phrase < 0:
         raise ValueError("validation must be in (0,0.5) and synthetic-per-phrase non-negative")
+    return args
 
-    workspace = args.workspace.resolve()
-    rng = random.Random(args.seed)
-
-    events = json.loads((workspace / "events.json").read_text(encoding="utf-8"))
-    groups = {g["id"]: g for g in load_json_list(workspace / "regionGroups.json")}
-
-    overrides = dict(OVERWATCH_ABILITY_NAMES)
-    for pair in (p.strip() for p in args.ability_names.split(",") if p.strip()):
-        name, _, phrase = pair.partition("=")
-        overrides[name.strip()] = phrase.strip()
-
-    phrases = build_phrases(events, groups, overrides)
-    if not phrases:
-        raise ValueError("events.json has no OCR events with a usable template")
-    print("PHRASES " + json.dumps({n: p.label for n, p in phrases.items()}), flush=True)
-
-    staging = workspace / f"dataset.ocr-export-{rng.getrandbits(48):012x}"
-    images = staging / "images"
-    images.mkdir(parents=True)
+def collect_records(args: argparse.Namespace, workspace: Path, events: list[dict],
+                    phrases: dict[str, Phrase], images: Path, rng: random.Random) -> list[tuple[str, str, str]]:
     records: list[tuple[str, str, str]] = []
+    backgrounds: list[Image.Image] = []
+    if args.object_samples is not None:
+        real, backgrounds = harvest_object_crops(args.object_samples.resolve(), events, phrases, images)
+        records.extend(real)
+        print(f"REAL object-crops={len(real)} backgrounds={len(backgrounds)}", flush=True)
 
-    try:
-        backgrounds: list[Image.Image] = []
-        if args.object_samples is not None:
-            real, backgrounds = harvest_object_crops(
-                args.object_samples.resolve(), events, phrases, images)
-            records.extend(real)
-            print(f"REAL object-crops={len(real)} backgrounds={len(backgrounds)}", flush=True)
+    region_crops = harvest_region_crops(workspace, images)
+    records.extend(region_crops)
+    if region_crops:
+        print(f"REAL region-crops={len(region_crops)}", flush=True)
 
-        region_crops = harvest_region_crops(workspace, images)
-        records.extend(region_crops)
-        if region_crops:
-            print(f"REAL region-crops={len(region_crops)}", flush=True)
+    if args.synthetic_per_phrase:
+        if args.style == "plain":
+            font_path = resolve_font(args.font, PLAIN_FONT_CANDIDATES)
+            synth_backgrounds = load_frame_backgrounds(workspace)
+        else:
+            font_path = resolve_font(args.font, FONT_CANDIDATES)
+            synth_backgrounds = backgrounds
+        print(f"SYNTHETIC style={args.style} font={font_path}", flush=True)
+        synth = render_synthetic(phrases, synth_backgrounds, args.synthetic_per_phrase, images, rng,
+                                 style=args.style, font_path=font_path)
+        records.extend(synth)
+        print(f"SYNTHETIC crops={len(synth)}", flush=True)
 
-        if args.synthetic_per_phrase:
-            if args.style == "plain":
-                font_path = resolve_font(args.font, PLAIN_FONT_CANDIDATES)
-                synth_backgrounds = load_frame_backgrounds(workspace)
-            else:
-                font_path = resolve_font(args.font, FONT_CANDIDATES)
-                synth_backgrounds = backgrounds
-            print(f"SYNTHETIC style={args.style} font={font_path}", flush=True)
-            synth = render_synthetic(phrases, synth_backgrounds, args.synthetic_per_phrase, images, rng,
-                                     style=args.style, font_path=font_path)
-            records.extend(synth)
-            print(f"SYNTHETIC crops={len(synth)}", flush=True)
+    if not records:
+        raise ValueError("no OCR training crops were produced")
+    return records
 
-        if not records:
-            raise ValueError("no OCR training crops were produced")
+def write_outputs(staging: Path, records: list[tuple[str, str, str]], rng: random.Random,
+                  validation: float) -> tuple[int, list[str]]:
+    charset = sorted({ch for _, label, _ in records for ch in label if ch != " "})
+    (staging / "character_dict.txt").write_text("\n".join(charset) + "\n", encoding="utf-8")
 
-        charset = sorted({ch for _, label, _ in records for ch in label if ch != " "})
-        (staging / "character_dict.txt").write_text("\n".join(charset) + "\n", encoding="utf-8")
+    rng.shuffle(records)
+    lines = []
+    val_target = 0
+    for group in ([r for r in records if r[2] == "real"],
+                  [r for r in records if r[2] != "real"]):
+        val_n = min(len(group) - 1, max(1, round(len(group) * validation))) if group else 0
+        val_target += val_n
+        for i, (rel, label, _) in enumerate(group):
+            lines.append(f"{'val' if i < val_n else 'train'}\t{rel}\t{label}")
+    rng.shuffle(lines)
+    (staging / "labels.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        rng.shuffle(records)
-        lines = []
-        val_target = 0
-        for group in ([r for r in records if r[2] == "real"],
-                      [r for r in records if r[2] != "real"]):
-            val_n = min(len(group) - 1, max(1, round(len(group) * args.validation))) if group else 0
-            val_target += val_n
-            for i, (rel, label, _) in enumerate(group):
-                lines.append(f"{'val' if i < val_n else 'train'}\t{rel}\t{label}")
-        rng.shuffle(lines)
-        (staging / "labels.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-        coverage: dict[str, int] = {}
-        for _, label, _ in records:
-            coverage[label] = coverage.get(label, 0) + 1
-        real_count = sum(1 for _, _, k in records if k == "real")
-        (staging / "export.json").write_text(json.dumps({
-            "cropHeight": CROP_HEIGHT, "cropWidth": CROP_WIDTH,
-            "total": len(records), "real": real_count, "synthetic": len(records) - real_count,
-            "validation": val_target, "characters": len(charset), "coverage": coverage,
-        }, indent=2) + "\n", encoding="utf-8")
-
-        destination = workspace / "dataset" / "ocr"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            shutil.rmtree(destination)
-        staging.replace(destination)
-        print(f"EXPORTED total={len(records)} real={real_count} "
-              f"synthetic={len(records) - real_count} chars={len(charset)}", flush=True)
-        return 0
-    except Exception:
-        if staging.exists():
-            shutil.rmtree(staging)
-        raise
+    coverage: dict[str, int] = {}
+    for _, label, _ in records:
+        coverage[label] = coverage.get(label, 0) + 1
+    real_count = sum(1 for _, _, k in records if k == "real")
+    (staging / "export.json").write_text(json.dumps({
+        "cropHeight": CROP_HEIGHT, "cropWidth": CROP_WIDTH,
+        "total": len(records), "real": real_count, "synthetic": len(records) - real_count,
+        "validation": val_target, "characters": len(charset), "coverage": coverage,
+    }, indent=2) + "\n", encoding="utf-8")
+    return real_count, charset
 
 def load_json_list(path: Path) -> list:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
@@ -362,7 +369,6 @@ def crop_strip(image: Image.Image, x0: float, y0: float, x1: float, y1: float) -
     return image.crop((left, top, right, bottom))
 
 def fit_crop(crop: Image.Image) -> Image.Image:
-
     natural = max(1, round(crop.width * CROP_HEIGHT / crop.height))
     width = min(natural, CROP_WIDTH)
     resized = crop.convert("RGB").resize((width, CROP_HEIGHT), Image.Resampling.LANCZOS)
@@ -405,12 +411,12 @@ def render_synthetic(phrases: dict[str, Phrase], backgrounds: list[Image.Image],
 def render_one(text: str, kind: str, backgrounds: list[Image.Image], font_path: str | None,
                rng: random.Random) -> Image.Image:
     size = rng.randint(30, 40)
-    font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default(size)
+    font = load_font(font_path, size)
     pad = 14
-    tw = int(ImageDraw.Draw(Image.new("RGB", (4, 4))).textlength(text, font=font))
+    tw = int(MEASURE.textlength(text, font=font))
 
     score = str(rng.choice([100, 100, 100, 47, 6, 88, 150])) if kind == "elimination" and rng.random() < 0.6 else ""
-    score_w = int(ImageDraw.Draw(Image.new("RGB", (4, 4))).textlength(score, font=font)) + 20 if score else 0
+    score_w = int(MEASURE.textlength(score, font=font)) + 20 if score else 0
     tile_w, tile_h = tw + pad * 2 + score_w, size + 10 + pad
 
     if backgrounds and rng.random() < 0.8:
@@ -465,26 +471,23 @@ def frame_patch(frames: list[Image.Image], width: int, height: int, rng: random.
     top = rng.randint(0, frame.height - patch_h)
     return frame.crop((left, top, left + patch_w, top + patch_h)).resize((width, height), Image.Resampling.LANCZOS)
 
+PLAIN_VARIATIONS = [
+    b"Regular", b"SemiBold", b"Bold",
+    b"SemiCondensed", b"SemiBold SemiCondensed", b"Bold SemiCondensed",
+    b"SemiBold Condensed",
+]
+
 def plain_font(font_path: str | None, size: int, rng: random.Random) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     if not font_path:
-        return ImageFont.load_default(size)
-    font = ImageFont.truetype(font_path, size)
-    try:
-        font.set_variation_by_name(rng.choice([
-            b"Regular", b"SemiBold", b"Bold",
-            b"SemiCondensed", b"SemiBold SemiCondensed", b"Bold SemiCondensed",
-            b"SemiBold Condensed",
-        ]))
-    except (OSError, ValueError):
-        pass
-    return font
+        return load_font(None, size)
+    return load_font(font_path, size, rng.choice(PLAIN_VARIATIONS))
 
 def render_plain(text: str, frames: list[Image.Image], font_path: str | None,
                  rng: random.Random) -> Image.Image:
     size = rng.randint(28, 42)
     font = plain_font(font_path, size, rng)
     pad_x, pad_y = rng.randint(2, 8), rng.randint(0, 3)
-    left, top, right, bottom = ImageDraw.Draw(Image.new("RGB", (4, 4))).textbbox((0, 0), text, font=font)
+    left, top, right, bottom = MEASURE.textbbox((0, 0), text, font=font)
     tile_w, tile_h = right - left + pad_x * 2, bottom - top + pad_y * 2
 
     if frames and rng.random() < 0.85:

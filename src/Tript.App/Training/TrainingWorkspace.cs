@@ -37,10 +37,6 @@ internal sealed class TrainingWorkspace
 
     internal string OcrDetectorPath => Path.Combine(RootPath, "ocr_detector.onnx");
 
-    internal string OcrModelPath => Path.Combine(RootPath, "ocr_model.onnx");
-
-    internal string OcrDictionaryPath => Path.Combine(RootPath, "ocr_dict.txt");
-
     internal string PreferencesPath => Path.Combine(RootPath, "preferences.json");
 
     internal string SamplesPath => Path.Combine(RootPath, "samples");
@@ -101,16 +97,6 @@ internal sealed class TrainingWorkspace
                 WriteIndented = true,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             }));
-    }
-
-    internal List<EventDefinition> LoadRuntimeDefinitions()
-    {
-        var runtimePath = TrainingPaths.InstalledEventsPath(GameId);
-        if (!File.Exists(runtimePath))
-            return LoadDefinitions();
-
-        return JsonSerializer.Deserialize<List<EventDefinition>>(File.ReadAllText(runtimePath),
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? [];
     }
 
     internal static TrainingWorkspace ForGame(string gameId, string? rootPath = null)
@@ -214,9 +200,6 @@ internal static class TrainingPaths
     internal static string RootPath => Path.Combine(SettingsFilePaths.ConfigDirectory, "training");
 
     internal static string InstalledModelsPath => Path.Combine(SettingsFilePaths.ConfigDirectory, "models");
-
-    internal static string InstalledModelPath(string gameId) =>
-        Path.Combine(TrainingWorkspace.ForGame(gameId, InstalledModelsPath).RootPath, "model.onnx");
 
     internal static string InstalledEventsPath(string gameId) =>
         Path.Combine(TrainingWorkspace.ForGame(gameId, InstalledModelsPath).RootPath, "events.json");

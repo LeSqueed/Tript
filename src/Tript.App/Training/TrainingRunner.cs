@@ -46,7 +46,6 @@ internal sealed class TrainingDatasetExportSummary
     public int Size { get; init; }
     public int Augment { get; init; }
     public int SampleCount { get; init; }
-    public int CropCount { get; init; }
     public int AugmentedCrops { get; init; }
     public int InvalidLabels { get; init; }
     public int SkippedSamples { get; init; }

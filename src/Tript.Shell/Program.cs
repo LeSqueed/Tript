@@ -148,9 +148,7 @@ internal static class Program
         }
     }
 
-    // Tript.Shell is a WinExe, and a Linux desktop launch has no terminal either, so there is nothing
-    // the user can see when startup fails: launching Tript just does nothing. This is the only
-    // feedback on that path.
+    // The only visible feedback when startup fails: there is no console on either platform.
     private static void ReportStartupFailure(string summary, string? detail)
     {
         const int maxDetail = 400;

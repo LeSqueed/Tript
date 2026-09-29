@@ -79,8 +79,6 @@ internal static class TrayIconFactory
     [SupportedOSPlatform("windows")]
     private static void DrawDot(Graphics graphics, RectangleF bounds, float outline, Color colour, bool filled)
     {
-        // A dark disc under the badge keeps the ring's hole from filling with viewfinder artwork,
-        // which is what tells a buffer-only run apart from a recording one at 16px.
         using (var plate = new SolidBrush(Plate))
             graphics.FillEllipse(plate, bounds);
 

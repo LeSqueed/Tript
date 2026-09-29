@@ -32,10 +32,8 @@ internal sealed class ShellWindow : IDisposable
     private LinuxShellNotifications? _linuxNotifications;
     private Timer? _visibilityWatch;
     private PhotinoWindow? _window;
-    // These are written on the single-instance pipe thread, an AppHost background thread or a pool
-    // thread and read on the UI thread, with no lock between them. Without volatile a stale read is
-    // allowed; for _restartForUpdatePending that means exiting instead of restarting into a staged
-    // update, silently.
+    // Written off the UI thread and read on it without a lock; a stale _restartForUpdatePending would
+    // exit instead of restarting into the staged update.
     private volatile bool _activationPending;
     private bool _startupMinimizePending;
     private int _exitRequested;
@@ -45,9 +43,8 @@ internal sealed class ShellWindow : IDisposable
     private StartupVisibility _startupVisibility;
     private volatile bool _startupVisibilityApplied;
     private volatile bool _disposed;
-    // Photino dereferences the native window inside Invoke, so a call made before OnCreated or after
-    // the window closed is an access violation no catch can stop. The startup update check raising
-    // its "update ready" notification did exactly that and killed the process.
+    // Photino dereferences the native window inside Invoke: a call before OnCreated or after close is an
+    // uncatchable access violation.
     private volatile bool _nativeReady;
     private readonly IShellWindowControl _windowControl = ShellWindowControl.ForCurrentOs();
     private TerminationSignals? _terminationSignals;
@@ -137,9 +134,7 @@ internal sealed class ShellWindow : IDisposable
         if (OperatingSystem.IsWindows())
             SystemEvents.SessionEnding -= OnSessionEnding;
 
-        // A plain Dispose returns while a tick may still be running against the window being torn
-        // down. The wait is bounded because a tick can be parked in window.Invoke, which needs this
-        // very thread, so waiting forever here would deadlock the exit.
+        // Wait for a running tick, but bounded: a tick parked in window.Invoke needs this thread.
         if (_visibilityWatch is { } watch)
         {
             using var settled = new ManualResetEvent(false);
@@ -170,10 +165,8 @@ internal sealed class ShellWindow : IDisposable
         return null;
     }
 
-    // Windows restart, shutdown and log off kill the process without any of the deliberate exit paths
-    // running, so an in-progress recording loses its metadata and its mp4 is never finalized. This is
-    // the only warning we get. Stop synchronously: the handler runs on the SystemEvents pump, not the
-    // Photino message loop, and returning here is what tells Windows we are ready to go.
+    // The only warning before a Windows restart or log off kills the process. Stop synchronously so the
+    // recording is finalized; returning tells Windows we are ready.
     [SupportedOSPlatform("windows")]
     private void OnSessionEnding(object? sender, SessionEndingEventArgs e) =>
         StopRecordingThenExit(e.Reason.ToString());
@@ -294,8 +287,7 @@ internal sealed class ShellWindow : IDisposable
         // Off the message pump, which CloseWindow needs: stopping here flushes the session metadata.
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            // A throw here used to skip the close below and crash the pool thread, so the exit never
-            // completed. A failed stop is logged and the window still closes.
+            // A failed stop must not skip the close below.
             try
             {
                 if (_host.IsRecording)
@@ -492,9 +484,7 @@ internal sealed class ShellWindow : IDisposable
     private const int MaxClientErrorReports = 200;
     private int _clientErrorReports;
 
-    // The UI's error boundary and global handlers report here over the native bridge, which still
-    // works when the control socket is the thing that broke. Bounded again on this side: the page
-    // already truncates, but a UI stuck in a render loop must not be able to fill the disk.
+    // Bounded again here so a UI stuck in a render loop cannot fill the disk with error reports.
     private void LogClientError(string payload)
     {
         if (Interlocked.Increment(ref _clientErrorReports) > MaxClientErrorReports)
@@ -567,8 +557,7 @@ internal sealed class ShellWindow : IDisposable
         }
     }
 
-    // An exception escaping a pool thread terminates the process, so a failed hotkey or tray action
-    // used to take a running recording down with it.
+    // An exception escaping a pool thread kills the process and the recording with it.
     private static void RunInBackground(Action action, string what)
     {
         ThreadPool.QueueUserWorkItem(_ =>
@@ -584,10 +573,8 @@ internal sealed class ShellWindow : IDisposable
         });
     }
 
-    // ReportVisibility blocks in window.Invoke, which needs the UI thread. While a native folder
-    // picker holds that thread (up to five minutes) the one-second timer used to queue a new blocked
-    // callback every tick, around three hundred of them, starving the pool that hotkeys, the tray and
-    // the clip pipeline all run on. Skipping a tick while one is still running bounds that to one.
+    // Skip a tick while one is still blocked in window.Invoke (a native picker can hold the UI thread
+    // for minutes), or blocked callbacks pile up and starve the thread pool.
     private void OnVisibilityTick(PhotinoWindow window)
     {
         if (_disposed || Interlocked.Exchange(ref _visibilityTicking, 1) != 0)

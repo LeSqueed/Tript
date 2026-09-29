@@ -2,6 +2,7 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Buffers;
+using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -52,23 +53,25 @@ public class VisualEventDetector : IDisposable
 
     private InferenceSession? _session;
     private object? _runIdentity;
-    private float[]? _inputBuffer;
-    private DenseTensor<float>? _inputTensor;
-    private List<NamedOnnxValue>? _inputContainer;
-    private IReadOnlyList<string>? _outputNames;
+    private DetectionModelLoader.InferenceState? _inference;
     private RunOptions? _runOptions;
     private string? _gameId;
     private int _isProcessing;
-    private int _diagnosticFrameCount;
-    private DateTime _lastEmptyInferenceLog;
+    private int _framesCopied;
     private List<RegionGroup> _regionGroups = new();
     private List<EventDefinition> _objectDefinitions = [];
     private GrayscaleStrategy _grayscaleStrategy = GrayscaleStrategy.PerGroupCrop;
-    private int _numClasses;
+    private readonly DetectionLoopStats _stats = new();
+    private readonly RepeatedFailure _frameCopyFailures = new();
+    private readonly RepeatedFailure _detectionFailures = new();
+    private readonly RepeatedFailure _inferenceFailures = new();
+    private readonly RepeatedFailure _ocrFailures = new();
     private bool _disposed;
     private bool _quarantined;
 
     public event Action<DetectionBatch>? DetectionsAvailable;
+
+    internal int FramesCopied => Volatile.Read(ref _framesCopied);
 
     public VisualEventDetector(int detectionIntervalMs = 1000)
     {
@@ -159,17 +162,13 @@ public class VisualEventDetector : IDisposable
                 _gameId = gameId;
                 _session = session;
                 _runIdentity = runIdentity;
-                _inputBuffer = inference?.InputBuffer;
-                _inputTensor = inference?.InputTensor;
-                _inputContainer = inference?.InputContainer;
-                _outputNames = inference?.OutputNames;
+                _inference = inference;
                 _runOptions = runOptions;
                 _regionGroups = regionGroups;
                 _objectDefinitions = definitions
                     .Where(definition => definition.DetectionKind == DetectionKind.Object)
                     .ToList();
                 _grayscaleStrategy = grayscaleStrategy;
-                _numClasses = inference?.NumClasses ?? 0;
                 _subscription = subscription;
                 _cts = cts;
                 _frameHungry = false;
@@ -204,7 +203,8 @@ public class VisualEventDetector : IDisposable
                 _detectionThread = thread;
                 thread.Start();
 
-                Log.Information("VisualEventDetector: Started for game {GameId} with {RegionGroupCount} region groups",
+                _stats.Reset();
+                Log.Debug("VisualEventDetector: started for {GameId} with {RegionGroupCount} region groups",
                     gameId, _regionGroups.Count);
             }
             catch
@@ -212,6 +212,7 @@ public class VisualEventDetector : IDisposable
                 _subscription = null;
                 _cts = null;
                 _runOptions = null;
+                _inference = null;
                 _detectionThread = null;
                 _session = null;
                 _runIdentity = null;
@@ -285,7 +286,7 @@ public class VisualEventDetector : IDisposable
             }
         }
 
-        Log.Information("VisualEventDetector: Stopped");
+        Log.Debug("VisualEventDetector: stopped");
     }
 
     private void RunDetectionThread(CancellationToken token, object runIdentity,
@@ -319,10 +320,7 @@ public class VisualEventDetector : IDisposable
                     _subscription = null;
                     _cts = null;
                     _runOptions = null;
-                    _inputContainer = null;
-                    _inputTensor = null;
-                    _inputBuffer = null;
-                    _outputNames = null;
+                    _inference = null;
                     _session = null;
                     _runIdentity = null;
                     _objectDefinitions = [];
@@ -361,12 +359,13 @@ public class VisualEventDetector : IDisposable
                     var matches = OcrFramePass.Run(recognizer, regionPlans, frame.Buffer, frame.Width,
                         frame.Height, token);
                     _ocrSnapshot = new OcrSnapshot(matches, DateTime.UtcNow);
+                    _ocrFailures.Recovered();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (ObjectDisposedException) { break; }
                 catch (Exception ex)
                 {
-                    Log.Warning(ex, "VisualEventDetector: OCR pass failed");
+                    Log.Write(_ocrFailures.NextLevel(), ex, "VisualEventDetector: OCR pass failed");
                 }
                 finally
                 {
@@ -444,12 +443,13 @@ public class VisualEventDetector : IDisposable
 
                 if (queued)
                 {
+                    Interlocked.Increment(ref _framesCopied);
                     _frameHungry = false;
                     _frameArrived.Set();
                 }
                 else
                 {
-                    Log.Warning("VisualEventDetector: frame queue rejected a frame, dropping it");
+                    Log.Debug("VisualEventDetector: frame queue rejected a frame, dropping it");
                 }
             }
 
@@ -477,13 +477,11 @@ public class VisualEventDetector : IDisposable
                 }
             }
 
-            if (queued && Interlocked.Increment(ref _diagnosticFrameCount) % 15 == 0)
-                Log.Debug("VisualEventDetector: received {Count} live frame(s), latest {Width}x{Height}",
-                    _diagnosticFrameCount, width, height);
+            _frameCopyFailures.Recovered();
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "VisualEventDetector: frame copy error");
+            Log.Write(_frameCopyFailures.NextLevel(), ex, "VisualEventDetector: frame copy error");
         }
         finally
         {
@@ -517,9 +515,11 @@ public class VisualEventDetector : IDisposable
 
                 _frameArrived.Wait(framePeriodMs + FrameWaitSlackMs, ct);
 
+                _stats.LogIfDue(_gameId);
+
                 if (!_frameQueue.Reader.TryRead(out var frameData))
                 {
-                    Log.Verbose("DetectionLoop: no frame available");
+                    _stats.Missed++;
                     continue;
                 }
 
@@ -529,8 +529,6 @@ public class VisualEventDetector : IDisposable
                     frameData = newer;
                 }
 
-                Log.Verbose("DetectionLoop: processing frame {W}x{H}", frameData.Width, frameData.Height);
-
                 try
                 {
                     var fW = frameData.Width;
@@ -538,23 +536,16 @@ public class VisualEventDetector : IDisposable
 
                     if (DetectionFramePreprocessor.IsNearBlack(frameData.Buffer, fW, fH))
                     {
-                        Log.Verbose("DetectionLoop: skipping near-black frame");
-
+                        _stats.Dark++;
                         DetectionsAvailable?.Invoke(new DetectionBatch { FrameTimestamp = frameData.Timestamp });
                         continue;
                     }
 
+                    var started = Stopwatch.GetTimestamp();
                     List<DetectionResult> allResults = session is null
                         ? []
                         : DetectObjects(session, frameData);
-
-                    Log.Verbose("DetectionLoop: {Count} results across {Groups} groups", allResults.Count, _regionGroups.Count);
-                    if (allResults.Count == 0 && DateTime.UtcNow - _lastEmptyInferenceLog >= TimeSpan.FromSeconds(5))
-                    {
-                        _lastEmptyInferenceLog = DateTime.UtcNow;
-                        Log.Information("DetectionLoop: processed live frame {W}x{H}; inference returned no detections",
-                            fW, fH);
-                    }
+                    _stats.Record(Stopwatch.GetElapsedTime(started), allResults.Count > 0, fW, fH);
 
                     DetectionsAvailable?.Invoke(new DetectionBatch
                     {
@@ -571,8 +562,11 @@ public class VisualEventDetector : IDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                Log.Warning(ex, "VisualEventDetector: detection error");
+                Log.Write(_detectionFailures.NextLevel(), ex, "VisualEventDetector: detection error");
+                continue;
             }
+
+            _detectionFailures.Recovered();
         }
     }
 
@@ -651,38 +645,34 @@ public class VisualEventDetector : IDisposable
     private List<DetectionResult>? RunInferenceOnGray(
         InferenceSession session, byte[] grayData)
     {
-        var buffer = _inputBuffer;
-        var container = _inputContainer;
-        var outputNames = _outputNames;
+        var inference = _inference;
         var runOptions = _runOptions;
-        if (buffer == null || container == null || outputNames == null || runOptions == null)
+        if (inference == null || runOptions == null)
             return null;
 
         try
         {
-            DetectionFramePreprocessor.FillInputTensor(grayData, buffer, ModelInputSize);
+            DetectionFramePreprocessor.FillInputTensor(grayData, inference.InputBuffer, ModelInputSize);
 
-            using var results = session.Run(container, outputNames, runOptions);
+            using var results = session.Run(inference.InputContainer, inference.OutputNames, runOptions);
             var tensor = results[0].AsTensor<float>();
 
             var span = tensor is DenseTensor<float> dense
                 ? dense.Buffer.Span
                 : tensor.ToArray().AsSpan();
-            return DetectionFramePreprocessor.ParseYoloOutputForInput(span, ModelInputSize, ModelInputSize, _numClasses);
+            var parsed = DetectionFramePreprocessor.ParseYoloOutputForInput(span, ModelInputSize, ModelInputSize,
+                inference.NumClasses);
+            _inferenceFailures.Recovered();
+            return parsed;
         }
         catch (ObjectDisposedException)
         {
-            Log.Debug("RunInferenceOnGray: session disposed");
-            return null;
-        }
-        catch (OnnxRuntimeException ex)
-        {
-            Log.Warning(ex, "RunInferenceOnGray: ONNX error");
+            Log.Debug("VisualEventDetector: inference skipped, the session was disposed");
             return null;
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "RunInferenceOnGray: inference error");
+            Log.Write(_inferenceFailures.NextLevel(), ex, "VisualEventDetector: inference failed");
             return null;
         }
     }
@@ -699,9 +689,7 @@ public class VisualEventDetector : IDisposable
 
         Stop();
 
-        // Only the frame callback and the detection thread touch this event. Stop has removed the
-        // subscription, so once the thread has joined nothing can Set or Wait on it. A quarantined
-        // thread is still inside Wait, so the event is left for the GC in that case.
+        // A quarantined detection thread may still be inside Wait on this event, so leave it to the GC then.
         bool quarantined;
         lock (_lifecycleGate)
             quarantined = _quarantined;

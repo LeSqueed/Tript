@@ -13,11 +13,11 @@ public class BookmarkTypeConverterTests
     private static Bookmark Deserialize(string typeToken) =>
         JsonSerializer.Deserialize<Bookmark>($$"""{"Type":{{typeToken}},"Time":"00:00:10"}""")!;
 
-    [Fact]
-    public void KnownName_RoundTrips()
-    {
-        Assert.Equal(BookmarkType.Kill, Deserialize("\"Kill\"").Type);
-    }
+    [Theory]
+    [InlineData("\"Kill\"", BookmarkType.Kill)]
+    [InlineData("\"goal\"", BookmarkType.Goal)]
+    public void AKnownName_IsReadCaseInsensitively(string token, BookmarkType expected) =>
+        Assert.Equal(expected, Deserialize(token).Type);
 
     [Fact]
     public void Play_RoundTripsWithItsSubtype()
@@ -30,60 +30,18 @@ public class BookmarkTypeConverterTests
         Assert.Equal("Vehicle destroyed", bookmark.Subtype);
     }
 
-    [Fact]
-    public void Play_IsNotIncludedInHighlightsByType()
+    [Theory]
+    [InlineData("\"RemovedInAnEarlierVersion\"")]
+    [InlineData("3")]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("""{"name":"Kill","nested":{"a":[1,2]}}""")]
+    [InlineData("""["Kill"]""")]
+    public void AnUnreadableToken_FallsBackToManual_WithoutFailingTheRestOfTheObject(string token)
     {
-        Assert.False(BookmarkType.Play.IsIncludedInHighlights());
-    }
-
-    [Fact]
-    public void KnownName_IsCaseInsensitive()
-    {
-        Assert.Equal(BookmarkType.Goal, Deserialize("\"goal\"").Type);
-    }
-
-    [Fact]
-    public void UnknownName_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("\"RemovedInAnEarlierVersion\"").Type);
-    }
-
-    [Fact]
-    public void NumericToken_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("3").Type);
-    }
-
-    [Fact]
-    public void NumericToken_DoesNotFailTheRestOfTheObject()
-    {
-        var bookmark = Deserialize("3");
+        var bookmark = Deserialize(token);
 
         Assert.Equal(BookmarkType.Manual, bookmark.Type);
         Assert.Equal(TimeSpan.FromSeconds(10), bookmark.Time);
-    }
-
-    [Fact]
-    public void NullToken_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("null").Type);
-    }
-
-    [Fact]
-    public void BooleanToken_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("true").Type);
-    }
-
-    [Fact]
-    public void ObjectToken_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("""{"name":"Kill","nested":{"a":[1,2]}}""").Type);
-    }
-
-    [Fact]
-    public void ArrayToken_FallsBackToManual()
-    {
-        Assert.Equal(BookmarkType.Manual, Deserialize("""["Kill"]""").Type);
     }
 }

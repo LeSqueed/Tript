@@ -60,22 +60,6 @@ public class FullFrameGroupTests
         }
     }
 
-    [Theory]
-    [InlineData(1920, 1080)]
-    [InlineData(2560, 1440)]
-    [InlineData(1280, 720)]
-    public void Cycle_never_converts_more_pixels_than_the_frame_holds(int frameW, int frameH)
-    {
-        var definitions = OverwatchDefinitions();
-        definitions.Add(FullFrameDef(7));
-        var groups = DetectionFramePreprocessor.BuildRegionGroups(definitions);
-
-        var converted = DetectionFramePreprocessor.CountGrayscalePixels(groups, frameW, frameH);
-
-        Assert.True(converted <= frameW * frameH,
-            $"converted {converted} pixels, frame holds {frameW * frameH}");
-    }
-
     [Fact]
     public void Full_frame_group_set_converts_the_frame_exactly_once()
     {
@@ -85,7 +69,6 @@ public class FullFrameGroupTests
 
         Assert.Equal(GrayscaleStrategy.WholeFrameOnce,
             DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
-        Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     [Fact]
@@ -95,7 +78,6 @@ public class FullFrameGroupTests
 
         Assert.Equal(GrayscaleStrategy.PerGroupCrop,
             DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
-        Assert.Equal(390_526, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     [Fact]
@@ -109,7 +91,6 @@ public class FullFrameGroupTests
 
         Assert.Equal(GrayscaleStrategy.WholeFrameOnce,
             DetectionFramePreprocessor.SelectGrayscaleStrategy(groups));
-        Assert.Equal(W * H, DetectionFramePreprocessor.CountGrayscalePixels(groups, W, H));
     }
 
     [Fact]

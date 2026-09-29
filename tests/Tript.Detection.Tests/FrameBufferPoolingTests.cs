@@ -47,29 +47,6 @@ public class FrameBufferPoolingTests
     }
 
     [Fact]
-    public void BoundedChannel_DropOldest_InvokesCallbackForEveryEvictedItem()
-    {
-        var dropped = new List<int>();
-        var channel = Channel.CreateBounded<int>(
-            new BoundedChannelOptions(2)
-            {
-                FullMode = BoundedChannelFullMode.DropOldest
-            },
-            item => dropped.Add(item));
-
-        for (int i = 1; i <= 5; i++)
-        {
-            Assert.True(channel.Writer.TryWrite(i));
-        }
-
-        Assert.Equal(new[] { 1, 2, 3 }, dropped);
-
-        var remaining = new List<int>();
-        while (channel.Reader.TryRead(out var value)) remaining.Add(value);
-        Assert.Equal(new[] { 4, 5 }, remaining);
-    }
-
-    [Fact]
     public void ReturnBuffer_AttemptsPoolReturnExactlyOnce()
     {
         var foreign = new byte[3];

@@ -91,7 +91,7 @@ internal static class DetectionModelLoader
                 $"Event definitions for {gameId} do not match model.onnx: {mismatch}");
         }
 
-        Log.Information("VisualEventDetector: model {GameId} declares {NumClasses} classes for {EventCount} event definitions",
+        Log.Debug("VisualEventDetector: model {GameId} declares {NumClasses} classes for {EventCount} event definitions",
             gameId, numClasses, definitions.Count);
         return numClasses;
     }

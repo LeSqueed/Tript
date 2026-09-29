@@ -26,10 +26,6 @@ public sealed class OnnxModelMetadata
 
     public IReadOnlyDictionary<int, string>? ClassNames { get; init; }
 
-    public int? InputChannels => InputDimensions.Count == 4 && InputDimensions[1] > 0
-        ? InputDimensions[1]
-        : null;
-
     public int? InputHeight => InputDimensions.Count == 4 && InputDimensions[2] > 0
         ? InputDimensions[2]
         : null;

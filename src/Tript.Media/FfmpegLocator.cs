@@ -99,9 +99,7 @@ public sealed class FfmpegLocator
                 }
             };
 
-            if (!process.Start())
-                throw new FfmpegNotFoundException($"{what} at '{binary}' could not be started.");
-            ChildProcessJob.Track(process);
+            ChildProcessJob.StartTracked(process);
 
             if (!process.WaitForExit(5000))
             {

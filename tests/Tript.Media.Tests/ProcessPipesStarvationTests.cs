@@ -9,7 +9,7 @@ namespace Tript.Media.Tests;
 public sealed class ProcessPipesStarvationTests
 {
     [Fact]
-    public void AProbeStillReadsItsOutput_WhileEveryPoolThreadIsBusy()
+    public async Task AProbeStillReadsItsOutput_WhileEveryPoolThreadIsBusy()
     {
         var path = MediaTestFixture.CreateSdrSource($"starved-{Guid.NewGuid():N}.mp4", durationSeconds: 2);
         ThreadPool.GetMinThreads(out var workers, out _);
@@ -27,7 +27,7 @@ public sealed class ProcessPipesStarvationTests
         finally
         {
             release.Set();
-            Task.WaitAll(blockers, TimeSpan.FromSeconds(30));
+            await Task.WhenAll(blockers).WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 }

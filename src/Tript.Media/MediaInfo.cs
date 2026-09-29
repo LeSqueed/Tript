@@ -27,7 +27,6 @@ public sealed class MediaInfo
 
     public bool IsHdr => ColorTransfer is "smpte2084" or "arib-std-b67";
 
-    public static bool IsHdrTransfer(string? transfer) => transfer is "smpte2084" or "arib-std-b67";
 }
 
 public readonly record struct Fraction(long Numerator, long Denominator)

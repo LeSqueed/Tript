@@ -74,7 +74,6 @@ public sealed class VideoEncoderSelector
 
     private VideoEncoder Select()
     {
-        var tried = new List<string>();
         foreach (var candidate in _candidates)
         {
             if (_rejected.Contains(candidate.Key))
@@ -83,18 +82,17 @@ public sealed class VideoEncoderSelector
             var outcome = _probe(candidate);
             if (outcome.Succeeded)
             {
-                Diagnostics.Report(DiagnosticLevel.Information,
-                    $"Clips: encoding with {candidate.Key} (GPU){Tried(tried)}");
+                Diagnostics.Report(DiagnosticLevel.Information, $"Clips: encoding with {candidate.Key} (GPU)");
                 return candidate;
             }
 
             _rejected.Add(candidate.Key);
-            tried.Add($"{candidate.Key} ({FfmpegRunner.Tail(outcome.StandardError, 200).Trim()})");
+            Diagnostics.Report(DiagnosticLevel.Debug,
+                $"Clips: {candidate.Key} is unavailable: {OneLine(FfmpegRunner.Tail(outcome.StandardError, 200))}");
         }
 
         if (_candidates.Count > 0)
-            Diagnostics.Report(DiagnosticLevel.Warning,
-                $"Clips: no GPU encoder worked, encoding on the CPU with libx264{Tried(tried)}");
+            Diagnostics.Report(DiagnosticLevel.Warning, "Clips: no GPU encoder worked, encoding on the CPU with libx264");
         return VideoEncoder.Software;
     }
 
@@ -110,14 +108,14 @@ public sealed class VideoEncoderSelector
             return true;
         }
 
-        Diagnostics.Report(DiagnosticLevel.Information,
-            "Clips: tone mapping HDR on the CPU, Vulkan is unavailable: "
-            + FfmpegRunner.Tail(outcome.StandardError, 200).Trim());
+        Diagnostics.Report(DiagnosticLevel.Information, "Clips: tone mapping HDR on the CPU, Vulkan is unavailable");
+        Diagnostics.Report(DiagnosticLevel.Debug,
+            $"Clips: the Vulkan tone-mapping probe failed: {OneLine(FfmpegRunner.Tail(outcome.StandardError, 200))}");
         return false;
     }
 
-    private static string Tried(List<string> tried) =>
-        tried.Count == 0 ? string.Empty : "; tried " + string.Join("; ", tried);
+    private static string OneLine(string text) =>
+        string.Join(" | ", text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     internal static IReadOnlyList<string> ProbeArgs(VideoEncoder encoder)
     {

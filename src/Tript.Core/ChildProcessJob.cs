@@ -19,7 +19,37 @@ public static class ChildProcessJob
     private static readonly Lazy<ChildProcessReaper> Reaper =
         new(CreateReaper, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private static readonly Lock StartGate = CreateStartGate();
+
+    private static bool _exiting;
+
     internal static nint Handle => Job.Value;
+
+    // Start and job assignment happen under one gate that process exit also takes. A thread torn down
+    // inside Process.Start at exit otherwise leaves a child suspended forever and never in the job.
+    public static void StartTracked(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        lock (StartGate)
+        {
+            if (_exiting)
+                throw new InvalidOperationException("Tript is shutting down, so no new child process is started.");
+            if (!process.Start())
+                throw new InvalidOperationException($"Could not start {process.StartInfo.FileName}.");
+            Track(process);
+        }
+    }
+
+    private static Lock CreateStartGate()
+    {
+        var gate = new Lock();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            lock (gate)
+                _exiting = true;
+        };
+        return gate;
+    }
 
     public static void Track(Process process)
     {

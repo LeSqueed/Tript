@@ -16,9 +16,8 @@ public static class FfmpegRunner
         return trimmed.Length <= maxChars ? trimmed : "..." + trimmed[^maxChars..];
     }
 
-    // A fixed deadline would kill long, healthy encodes: a clip cut from a four-hour session can take
-    // many minutes. ffmpeg prints a stats line to stderr roughly twice a second while it works, so no
-    // output at all for this long means it is wedged rather than slow.
+    // An inactivity limit, not a deadline: long encodes are healthy, but ffmpeg prints stats about twice a
+    // second, so silence this long means it is wedged.
     internal static readonly TimeSpan DefaultStallTimeout = TimeSpan.FromMinutes(5);
 
     public static void Run(string ffmpegPath, IReadOnlyList<string> args, ClipRequest request, string stage)
@@ -50,15 +49,13 @@ public static class FfmpegRunner
 
         try
         {
-            if (!process.Start())
-                throw new ClipSourceException($"Failed to start ffmpeg: {ffmpegPath}");
+            ProcessPipes.Start(process);
         }
-        catch (System.ComponentModel.Win32Exception ex)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             throw new ClipSourceException($"Failed to start ffmpeg at '{ffmpegPath}': {ex.Message}", ex);
         }
 
-        ProcessPipes.Adopt(process);
 
         var stderr = new StringBuilder();
         var lastActivity = Environment.TickCount64;
@@ -92,9 +89,7 @@ public static class FfmpegRunner
         }
         catch
         {
-            // Anything thrown between Start and exit unwound through `using var process`, which
-            // disposes the Process object but does not kill the child. ffmpeg then kept running and
-            // kept its output file locked, with nothing tracking it.
+            // Disposing the Process does not kill the child, which would keep its output file locked.
             ProcessPipes.KillQuietly(process);
             throw;
         }
@@ -130,8 +125,7 @@ public static class FfmpegRunner
 
         try
         {
-            if (!process.Start())
-                return FfmpegOutcome.NotStarted($"Failed to start ffmpeg: {ffmpegPath}");
+            ProcessPipes.Start(process);
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
                                              or InvalidOperationException or IOException)
@@ -139,7 +133,6 @@ public static class FfmpegRunner
             return FfmpegOutcome.NotStarted($"Failed to start ffmpeg at '{ffmpegPath}': {exception.Message}");
         }
 
-        ProcessPipes.Adopt(process);
         try { process.StandardInput.Close(); } catch (IOException) {  }
 
         var stdout = ProcessPipes.BeginRead(process.StandardOutput);

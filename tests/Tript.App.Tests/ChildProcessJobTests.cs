@@ -40,16 +40,18 @@ public sealed class ChildProcessJobTests
         if (!OperatingSystem.IsWindows())
             throw new SkipException("Job objects are Windows-only.");
 
-        using var child = Process.Start(new ProcessStartInfo("cmd.exe", "/c ping -n 30 127.0.0.1 >nul")
+        using var child = new Process
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        })!;
+            StartInfo = new ProcessStartInfo("cmd.exe", "/c ping -n 30 127.0.0.1 >nul")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            },
+        };
+        ChildProcessJob.StartTracked(child);
 
         try
         {
-            ChildProcessJob.Track(child);
-
             Assert.True(IsProcessInJob(child.Handle, ChildProcessJob.Handle, out var inJob));
             Assert.True(inJob, "the child was not assigned to Tript's kill-on-close job");
         }

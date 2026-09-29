@@ -8,26 +8,17 @@ namespace Tript.Media.Tests;
 
 public class HdrDetectionTests
 {
-    [Fact]
-    public void Parse_TransferSmpte2084_IsHdr()
+    [Theory]
+    [InlineData("smpte2084", true)]
+    [InlineData("arib-std-b67", true)]
+    [InlineData("bt709", false)]
+    [InlineData("unknown", false)]
+    public void Parse_OnlyAnHdrTransferIsHdr(string transfer, bool hdr)
     {
-        var info = MediaProbe.Parse(StreamJson("smpte2084", "bt2020", "bt2020nc"), "fake.mkv");
-        Assert.True(info.IsHdr);
-        Assert.Equal("smpte2084", info.ColorTransfer);
-    }
+        var info = MediaProbe.Parse(StreamJson(transfer, "bt2020", "bt2020nc"), "fake.mkv");
 
-    [Fact]
-    public void Parse_TransferAribStdB67_IsHdr()
-    {
-        var info = MediaProbe.Parse(StreamJson("arib-std-b67", "bt2020", "bt2020nc"), "fake.mkv");
-        Assert.True(info.IsHdr);
-    }
-
-    [Fact]
-    public void Parse_TransferBt709_IsSdr()
-    {
-        var info = MediaProbe.Parse(StreamJson("bt709", "bt709", "bt709"), "fake.mp4");
-        Assert.False(info.IsHdr);
+        Assert.Equal(hdr, info.IsHdr);
+        Assert.Equal(transfer, info.ColorTransfer);
     }
 
     [Fact]
@@ -38,13 +29,6 @@ public class HdrDetectionTests
         Assert.Equal("unspecified", info.ColorTransfer);
         Assert.Equal("unspecified", info.ColorPrimaries);
         Assert.Equal("unspecified", info.ColorSpace);
-    }
-
-    [Fact]
-    public void Parse_UnknownTransfer_IsSdr()
-    {
-        var info = MediaProbe.Parse(StreamJson("unknown", "unknown", "unknown"), "fake.mp4");
-        Assert.False(info.IsHdr);
     }
 
     [Fact]

@@ -450,13 +450,7 @@ internal sealed class TrainingRunner
         foreach (var argument in scriptArguments)
             process.StartInfo.ArgumentList.Add(argument);
 
-        if (!process.Start())
-            throw new InvalidOperationException($"Could not start Python: {python.FileName}");
-
-        // Training runs for hours holding GPU memory. AppHost.Dispose cancels it on a graceful exit,
-        // but a crash or a forced exit skips that, and the trainer and its whole CUDA process tree
-        // kept running with Tript gone. Children of a job-assigned process join the job too.
-        ChildProcessJob.Track(process);
+        ChildProcessJob.StartTracked(process);
 
         lock (_gate)
             _process = process;

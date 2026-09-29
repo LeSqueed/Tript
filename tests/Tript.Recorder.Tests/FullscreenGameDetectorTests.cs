@@ -236,6 +236,7 @@ public sealed class FullscreenGameDetectorTests
         Assert.Equal(["found"], notifications);
     }
 
+    [WindowsFact]
     public void WindowsCandidateCasingIsStable()
     {
         var path = GamePath("Alpha.exe");
@@ -255,6 +256,10 @@ public sealed class FullscreenGameDetectorTests
         Assert.Equal(1, transitions);
     }
 
+    [WindowsTheory]
+    [InlineData("C:\\Windows\\System32\\explorer.exe")]
+    [InlineData("C:\\Windows\\SysWOW64\\something.exe")]
+    [InlineData("C:\\Program Files\\WindowsApps\\Example\\game.exe")]
     public void SystemLocationsAreIgnored(string path)
         => Assert.True(FullscreenGameDetector.IsSystemExecutable(path));
 

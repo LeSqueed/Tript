@@ -30,8 +30,7 @@ internal sealed class AppOptions
 
     public string? GameListJson { get; init; }
 
-    // Null means the per-user log folder. The test driver sets this so its child app hosts do not
-    // write into, and prune, the real user's logs.
+    // Null means the per-user folder; tests must set it or they prune the real user's logs.
     public string? LogDirectory { get; init; }
 
     public bool VerboseLog { get; init; }

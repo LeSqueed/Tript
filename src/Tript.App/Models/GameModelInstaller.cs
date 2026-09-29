@@ -32,9 +32,7 @@ internal static class GameModelInstaller
         }
     }
 
-    // A directory move fails outright while any file inside it is open, and a model was downloaded
-    // moments earlier: on Windows the scanner still has model.onnx open, which made an install fail
-    // for no reason the user could act on. Tript is unsigned, so it is scanned more eagerly.
+    // Retried because a virus scanner often still holds the just-downloaded model open, which fails a directory move.
     private static readonly TimeSpan MoveRetryWindow = TimeSpan.FromSeconds(3);
 
     private static void MoveDirectoryWithRetry(string source, string destination)
@@ -80,8 +78,7 @@ internal static class GameModelInstaller
             throw;
         }
 
-        // The model is installed by this point. A scanner still holding a file in the old copy must
-        // not turn a finished install into a failure; CleanupInterruptedInstalls removes it later.
+        // Installed already; a scanner-held old copy is left for CleanupInterruptedInstalls.
         try
         {
             if (Directory.Exists(backup))

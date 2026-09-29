@@ -60,8 +60,6 @@ internal static class AppLog
 #endif
     }
 
-    internal static LogEventLevel CurrentLevel => Level.MinimumLevel;
-
     internal static void Configure(string? logDirectory = null, bool verbose = false)
     {
         Volatile.Write(ref _logDirectoryOverride, string.IsNullOrWhiteSpace(logDirectory) ? null : logDirectory);

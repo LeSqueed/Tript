@@ -36,8 +36,6 @@ internal static class PrimaryDisplay
         }
     }
 
-    internal static DisplaySize DetectOrFallback() => Detect() ?? Fallback;
-
     private static DisplaySize? DetectWindows()
     {
         var hdc = GetDC(nint.Zero);

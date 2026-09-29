@@ -357,12 +357,10 @@ internal sealed class IpcServer : IDisposable
                 _owner.RemoveClient(this);
                 _outbound.Writer.TryComplete();
 
-                // "The UI went blank" is usually this socket closing, and nothing recorded when or why.
                 Log.Debug("Ipc: a client disconnected (state {State}, close status {Status})",
                     _socket.State, _socket.CloseStatus?.ToString() ?? "none");
 
-                // Dispose, not just the socket: the connection's CancellationTokenSource was otherwise
-                // never released, one per UI reload for the life of the process.
+                // Dispose the connection, not just the socket, or its CancellationTokenSource leaks per reload.
                 try
                 {
                     Dispose();
@@ -412,7 +410,6 @@ internal sealed class IpcServer : IDisposable
             }
             catch (JsonException exception)
             {
-                // The only client is Tript's own UI, so this is a frontend bug, not noise.
                 Log.Warning(exception, "Ipc: a client sent a message that is not valid JSON; it was ignored");
             }
         }

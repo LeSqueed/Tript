@@ -52,9 +52,6 @@ internal static class ContentLayout
 
     internal static bool IsClipPath(string wirePath) => TopLevelDirectory(wirePath) is Clips or Highlights;
 
-    internal static bool IsTrashPath(string wirePath) =>
-        wirePath.StartsWith(TrashStore.DirectoryName + "/", StringComparison.Ordinal);
-
     internal static string? GameSegment(string? wirePath)
     {
         if (string.IsNullOrWhiteSpace(wirePath))

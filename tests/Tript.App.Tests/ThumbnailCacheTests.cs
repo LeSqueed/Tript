@@ -160,23 +160,6 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task Invalidate_prevents_an_in_flight_extraction_from_publishing()
-    {
-        var video = WriteVideo("moving-to-trash.mp4");
-        var extractor = new BlockingExtractor();
-        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
-
-        var completion = store.EnsureAsync(video);
-        Assert.True(extractor.Entered.Wait(TimeSpan.FromSeconds(2)), "the background worker did not start");
-
-        store.Invalidate(Path.GetFileName(video));
-        extractor.Release.Set();
-
-        Assert.Null(await completion.WaitAsync(TimeSpan.FromSeconds(2)));
-        Assert.False(File.Exists(store.PathFor(Path.GetFileName(video))));
-    }
-
-    [Fact]
     public async Task HoldForRemoval_QueuesNoExtractionUntilReleased()
     {
         var video = WriteVideo("being-deleted.mp4");

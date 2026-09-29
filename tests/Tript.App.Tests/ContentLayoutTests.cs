@@ -63,6 +63,5 @@ public sealed class ContentLayoutTests
         Assert.Equal("a.mp4", ContentLayout.FileNameOf(wire));
         Assert.True(ContentLayout.IsSessionPath(wire));
         Assert.False(ContentLayout.IsClipPath(wire));
-        Assert.True(ContentLayout.IsTrashPath(".trash/entry/files/a.mp4"));
     }
 }

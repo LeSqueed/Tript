@@ -41,9 +41,6 @@ internal sealed class GameInventoryScanner
             _scan = Task.Run(() => ScanAsync(_discovery, cancellationToken, onDiscovered));
     }
 
-    // Every store source records why it skipped a library or an entry (an unreadable Steam
-    // libraryfolders.vdf, a missing Epic manifest directory, a registry key it could not open), and
-    // nothing ever read them, so "my game isn't detected" left no trace at all.
     private static void ReportDiagnostics(GameInventory inventory)
     {
         foreach (var diagnostic in inventory.Diagnostics)

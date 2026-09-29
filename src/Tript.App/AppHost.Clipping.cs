@@ -159,6 +159,8 @@ internal sealed partial class AppHost
                     }
                 }
 
+                Log.Information("Automatic highlights for {SourcePath}: {Created} created, {Failed} failed",
+                    sourcePath, regions.Count - failures, failures);
                 if (failures > 0)
                     PushError($"{failures} automatic highlight{(failures == 1 ? "" : "s")} could not be created.");
             }
@@ -239,6 +241,7 @@ internal sealed partial class AppHost
             AttachGameToClips(results, request.SourceSessionPath);
         }
 
+        Log.Information("Clip saved: {Files}", string.Join(", ", results.Select(RelativeToRoot)));
         _ipc.Broadcast("importProgress", JsonSerializer.SerializeToElement(new
         {
             id = request.OperationId,

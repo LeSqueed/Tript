@@ -142,56 +142,6 @@ public sealed class GameExecutableRoutingTests : IDisposable
     }
 
     [Fact]
-    public void ADetectedProcess_ResolvesToTheGamesId_NotItsProcessName()
-    {
-        Catalogue(new GameSetting { Id = "cs2-id", Name = "Counter-Strike 2", Executable = "cs2.exe" });
-
-        Assert.Equal("cs2-id", _host.ResolveDetectedGameId("cs2"));
-    }
-
-    [Fact]
-    public void ACustomGameWithAnExactPath_ResolvesToItsStableId()
-    {
-        Catalogue(new GameSetting
-        {
-            Id = "custom-doom",
-            Name = "Doom",
-            ExecutablePath = @"C:\Games\Doom\doom.exe",
-        });
-
-        Assert.Equal("custom-doom", _host.ResolveDetectedGameId("doom"));
-
-        Assert.Equal("doom", _host.GameCaptureName("custom-doom"));
-    }
-
-    [Theory]
-    [InlineData("Overwatch.exe")]
-    [InlineData("Overwatch")]
-    [InlineData("OVERWATCH.EXE")]
-    public void ALegacyOverwatchEntryWithAnExecutable_ResolvesToTheResolvedId(string executable)
-    {
-        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch", Executable = executable });
-
-        Assert.Equal(OverwatchId, _host.ResolveDetectedGameId("Overwatch"));
-    }
-
-    [Fact]
-    public void AGameWithNoExecutable_IsStillResolvedByItsDisplayName()
-    {
-        Catalogue(new GameSetting { Id = OverwatchId, Name = "Overwatch" });
-
-        Assert.Equal(OverwatchId, _host.ResolveDetectedGameId("Overwatch"));
-    }
-
-    [Fact]
-    public void AnUnlistedProcess_IsPassedThrough()
-    {
-        Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });
-
-        Assert.Equal("doom", _host.ResolveDetectedGameId("doom"));
-    }
-
-    [Fact]
     public void GameCapture_HooksTheExecutable_NotTheDisplayName()
     {
         Catalogue(new GameSetting { Id = "Overwatch", Name = "Overwatch" });

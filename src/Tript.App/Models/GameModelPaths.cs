@@ -24,8 +24,6 @@ internal static class GameModelPaths
 
     internal static string GamePath(string gameId) => Path.Combine(ModelsRoot, ValidateGameId(gameId));
 
-    internal static string InstalledManifestPath(string gameId) => Path.Combine(GamePath(gameId), "installed.json");
-
     internal static string ValidateGameId(string gameId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gameId);

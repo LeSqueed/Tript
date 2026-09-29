@@ -169,14 +169,7 @@ public sealed class ContentCatalogueTests : IDisposable
         var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
         Assert.True(clipTitles.SaveAutomatic("session-1-highlight-1.mp4", "sessions/session-1.mp4", 20, 40));
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
 
         var highlight = items.Single(item => item.GetProperty("fileName").GetString() == "session-1-highlight-1.mp4");
         Assert.Equal("highlight", highlight.GetProperty("contentType").GetString());
@@ -184,8 +177,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal("sessions/session-1.mp4", highlight.GetProperty("sourceSessionPath").GetString());
         Assert.Equal(20, highlight.GetProperty("clipStartTime").GetDouble());
         Assert.Equal(40, highlight.GetProperty("clipEndTime").GetDouble());
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]
@@ -503,19 +494,10 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.True(clipTitles.SaveAutomatic("unlinked-automatic.mp4", "   ", 10, 20));
         Assert.True(clipTitles.SaveAutomatic("missing-highlight.mp4", "sessions/orphan-source.mp4", 10, 20));
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
 
         Assert.Equal(2, items.Count);
         Assert.DoesNotContain(items, item => item.GetProperty("contentType").GetString() == "recording");
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]
@@ -569,15 +551,7 @@ public sealed class ContentCatalogueTests : IDisposable
 
         await File.WriteAllTextAsync(Path.Combine(sessions, "no-record.mp4"), "session");
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
         Assert.Equal(2, items.Count);
 
         var withRecord = items.Single(i => i.GetProperty("fileName").GetString() == "with-record.mp4");
@@ -596,8 +570,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.True(without.TryGetProperty("bookmarks", out var emptyBookmarks));
         Assert.Empty(emptyBookmarks.EnumerateArray());
         Assert.Equal("no-record", without.GetProperty("title").GetString());
-
-        await host.ShutdownAsync();
     }
 
     private void WriteSourceWithBookmarks(string sessionFileName, params double[] bookmarkSeconds)
@@ -1052,14 +1024,7 @@ public sealed class ContentCatalogueTests : IDisposable
             DurationSeconds = 137.5,
         });
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
 
         var withRecord = items.Single(i => i.GetProperty("fileName").GetString() == "with-record.mp4");
         Assert.Equal("Overwatch", withRecord.GetProperty("game").GetString());
@@ -1071,8 +1036,6 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.Equal(7, without.GetProperty("fileSizeBytes").GetInt64());
         Assert.True(without.GetProperty("startTime").GetDouble() > 0,
             "an item with no metadata record still carries a date");
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]
@@ -1097,22 +1060,13 @@ public sealed class ContentCatalogueTests : IDisposable
         var clipTitles = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"));
         Assert.True(clipTitles.SaveSourceSession("generated-name.mp4", "sessions/session-1.mp4"));
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
 
         Assert.Equal("Overwatch", GameOf(items, "session-1-clip-k2m3xq.mp4"));
 
         Assert.Equal("Deep Rock Galactic", GameOf(items, "session-10-clip-1-0s-10s.mp4"));
         Assert.Null(GameOf(items, "session-99-clip-x.mp4"));
         Assert.Equal("Overwatch", GameOf(items, "generated-name.mp4"));
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]
@@ -1142,18 +1096,9 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.True(clipTitles.SaveAutomatic("session-1-highlight-a.mp4", "sessions/session-1.mp4", 10, 20));
         Assert.True(clipTitles.SaveGame("session-1-highlight-a.mp4", "Overwatch", "Overwatch"));
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
 
         Assert.Equal("Overwatch", GameOf(items, "session-1-highlight-a.mp4"));
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]
@@ -1166,22 +1111,13 @@ public sealed class ContentCatalogueTests : IDisposable
         Assert.True(clipTitles.SaveAutomatic("session-1-highlight-live-abc.mp4",
             "Overwatch/sessions/session-1.mp4", 10, 20));
 
-        var host = AppHostDriver.StartFake(_contentRoot, _settingsPath);
-        await using var _ = host;
-        await host.ConnectWebSocketAsync();
-        await DrainPushes(host, 3);
-
-        await host.SendAsync("""{"method":"ListContent"}""");
-        var (_, content) = await host.ReceiveAsyncParsed();
-        var items = content.GetProperty("content").EnumerateArray().ToList();
+        var items = await ListContentItemsAsync();
         Assert.Equal("Overwatch", GameOf(items, "session-1-highlight-live-abc.mp4"));
 
         var record = new ClipTitleStore(Path.Combine(_contentRoot, "metadata"))
             .LoadRecord("session-1-highlight-live-abc.mp4");
         Assert.Equal("Overwatch", record!.Game);
         Assert.Equal(OverwatchId, record.GameId);
-
-        await host.ShutdownAsync();
     }
 
     [SkippableFact]

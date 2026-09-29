@@ -1,6 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using Tript.Core;
+
 namespace Tript.GameDiscovery.Tests;
+
+internal static class InstalledGameAssertions
+{
+    public static bool TryResolveCatalogueExecutable(this InstalledGame game, IDiscoveryFileSystem fileSystem,
+        string filenameOrRelativePath, out string executablePath)
+    {
+        executablePath = string.Empty;
+        return !string.IsNullOrWhiteSpace(filenameOrRelativePath)
+            && !FilePaths.IsFullyQualified(filenameOrRelativePath)
+            && PathSafety.TryResolveLexicallyContained(fileSystem, game.InstallRoot, filenameOrRelativePath,
+                out var candidate)
+            && fileSystem.FileExists(candidate)
+            && (executablePath = candidate).Length > 0;
+    }
+}
 
 internal sealed class TempFixture : IDisposable
 {

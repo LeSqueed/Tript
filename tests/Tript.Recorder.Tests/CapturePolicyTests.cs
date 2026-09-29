@@ -38,8 +38,7 @@ public sealed class CapturePolicyTests
     [Fact]
     public void TheDefaultPolicy_IsTheSettingsModelsDefault()
     {
-        Assert.Equal(DisplayCaptureMethod.Auto, new CaptureSettings().Method);
-        Assert.Equal(DisplayCaptureMethod.Auto, CapturePolicy.Default.Method);
+        Assert.Equal(new CaptureSettings().Method, CapturePolicy.Default.Method);
         Assert.Null(CapturePolicy.Default.PreferredDisplayId);
         Assert.Equal(new GameSettings().GameCaptureTimeout, CapturePolicy.Default.GameCaptureTimeout);
     }

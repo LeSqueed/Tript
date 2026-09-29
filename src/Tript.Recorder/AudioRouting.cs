@@ -34,8 +34,6 @@ public sealed class AudioRouting : IDisposable
 
     public IReadOnlyList<IAudioRoutedSource> Sources => _sources;
 
-    public IReadOnlyList<IAudioTrackEncoder> Encoders => _encoders;
-
     public RecordingMetadata Metadata { get; }
 
     public void Dispose()

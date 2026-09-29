@@ -14,25 +14,17 @@ public sealed record FullscreenGameCandidate(
     string ExecutablePath,
     DateTimeOffset? ProcessStartTime = null);
 
-public sealed class FullscreenGameDetector : IDisposable
+public sealed class FullscreenGameDetector : PollingGameDetector
 {
     private const uint MonitorDefaultToNearest = 2;
     private static readonly ProcessPathCache ProbedPaths = new();
-    private readonly TimeSpan _pollInterval;
     private readonly IReadOnlyList<Func<FullscreenGameCandidate?>> _candidateProbes;
     private readonly IDisposable? _ownedProbe;
     private readonly bool _probeWorksHere;
-    private readonly object _gate = new();
-    private readonly SerializedDetectorCallbackQueue _callbacks =
-        new("Tript fullscreen detector callbacks");
     private KnownTargetSet _knownTargets;
-    private long _targetVersion;
-    private Timer? _timer;
     private FullscreenGameCandidate? _activeCandidate;
     private FullscreenGameCandidate? _pendingCandidate;
     private int _pendingPolls;
-    private bool _disposed;
-    private int _ticking;
 
     public FullscreenGameDetector(
         IEnumerable<GameDetectionTarget> knownTargets,
@@ -66,6 +58,7 @@ public sealed class FullscreenGameDetector : IDisposable
         IReadOnlyList<Func<FullscreenGameCandidate?>> candidateProbesInPreferenceOrder,
         TimeSpan? pollInterval,
         IDisposable? ownedProbe)
+        : base(pollInterval ?? TimeSpan.FromSeconds(1), "Tript fullscreen detector callbacks")
     {
         ArgumentNullException.ThrowIfNull(candidateProbesInPreferenceOrder);
         foreach (var probe in candidateProbesInPreferenceOrder)
@@ -74,7 +67,6 @@ public sealed class FullscreenGameDetector : IDisposable
         _candidateProbes = [.. candidateProbesInPreferenceOrder];
         _ownedProbe = ownedProbe;
         _probeWorksHere = true;
-        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(1);
     }
 
     public event Action<FullscreenGameCandidate>? CandidateFound;
@@ -84,78 +76,25 @@ public sealed class FullscreenGameDetector : IDisposable
     public void UpdateKnownTargets(IEnumerable<GameDetectionTarget> knownTargets)
     {
         var replacement = CreateKnownTargetSet(knownTargets);
-        lock (_gate)
+        lock (Gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            BumpTargetVersionLocked();
             _knownTargets = replacement;
-            _targetVersion++;
         }
     }
 
-    public void Start()
-    {
-        if (!_probeWorksHere)
-            return;
+    private protected override bool CanPoll => _probeWorksHere;
 
-        lock (_gate)
-        {
-            if (_disposed || _timer is not null)
-                return;
-            _timer = new Timer(OnTick, null, TimeSpan.Zero, _pollInterval);
-        }
-    }
+    private protected override void OnDisposed() => _ownedProbe?.Dispose();
 
-    public void Dispose()
-    {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-            _disposed = true;
-            _timer?.Dispose();
-            _timer = null;
-        }
-        _callbacks.Dispose();
-        _ownedProbe?.Dispose();
-    }
-
-    internal void PollOnce() => OnTick(null);
-
-    internal void WaitForCallbacks() => _callbacks.WaitUntilIdle();
-
-    internal bool IsDisposed
-    {
-        get { lock (_gate) return _disposed; }
-    }
-
-    private void OnTick(object? state)
-    {
-        if (Interlocked.CompareExchange(ref _ticking, 1, 0) != 0)
-            return;
-
-        try
-        {
-            Poll();
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "FullscreenGameDetector: a poll failed; the watch continues.");
-        }
-        finally
-        {
-            Volatile.Write(ref _ticking, 0);
-        }
-    }
-
-    private void Poll()
+    private protected override void Poll()
     {
         long targetVersion;
         KnownTargetSet knownTargets;
-        lock (_gate)
+        lock (Gate)
         {
-            if (_disposed)
+            if (!TryReadTargetVersionLocked(out targetVersion))
                 return;
-            targetVersion = _targetVersion;
             knownTargets = _knownTargets;
         }
 
@@ -163,9 +102,9 @@ public sealed class FullscreenGameDetector : IDisposable
         FullscreenGameCandidate? cleared = null;
         FullscreenGameCandidate? found = null;
 
-        lock (_gate)
+        lock (Gate)
         {
-            if (_disposed || targetVersion != _targetVersion)
+            if (IsStaleLocked(targetVersion))
                 return;
 
             if (_activeCandidate is not null && SameCandidate(_activeCandidate, probed))
@@ -301,41 +240,6 @@ public sealed class FullscreenGameDetector : IDisposable
             or NotSupportedException)
         {
             return null;
-        }
-    }
-
-    private void Enqueue(
-        Action<FullscreenGameCandidate>? handlers,
-        FullscreenGameCandidate candidate,
-        long generation)
-    {
-        if (handlers is null)
-            return;
-
-        _callbacks.Enqueue(() => Raise(handlers, candidate, generation));
-    }
-
-    private void Raise(
-        Action<FullscreenGameCandidate> handlers,
-        FullscreenGameCandidate candidate,
-        long generation)
-    {
-        foreach (Action<FullscreenGameCandidate> handler in handlers.GetInvocationList())
-        {
-            lock (_gate)
-            {
-                if (_disposed || generation != _targetVersion)
-                    return;
-            }
-            try
-            {
-                handler(candidate);
-            }
-            catch (Exception exception)
-            {
-                Log.Warning(exception,
-                    "FullscreenGameDetector: a candidate subscriber threw; the watch continues.");
-            }
         }
     }
 

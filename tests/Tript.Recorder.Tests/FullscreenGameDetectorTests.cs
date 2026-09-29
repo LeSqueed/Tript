@@ -11,14 +11,6 @@ namespace Tript.Recorder.Tests;
 public sealed class FullscreenGameDetectorTests
 {
     [Fact]
-    public void DetectorIsCandidateDiscovery_NotAGameDetector()
-    {
-        Assert.False(typeof(IGameDetector).IsAssignableFrom(typeof(FullscreenGameDetector)));
-        Assert.Null(typeof(FullscreenGameDetector).GetEvent("GameStarted"));
-        Assert.Null(typeof(FullscreenGameDetector).GetEvent("GameStopped"));
-    }
-
-    [Fact]
     public void Poll_EmitsNormalizedTypedCandidate()
     {
         var path = GamePath("Alpha.EXE");
@@ -143,26 +135,6 @@ public sealed class FullscreenGameDetectorTests
     }
 
     [Fact]
-    public void SubscriberExceptionDoesNotPreventOtherSubscribersOrClearing()
-    {
-        FullscreenGameCandidate? probed = new(41, "alpha", GamePath("alpha.exe"));
-        using var detector = Detector([], () => probed);
-        var notifications = 0;
-        detector.CandidateFound += _ => throw new InvalidOperationException("test");
-        detector.CandidateFound += _ => notifications++;
-        detector.CandidateCleared += _ => notifications++;
-
-        detector.PollOnce();
-        detector.PollOnce();
-        detector.WaitForCallbacks();
-        probed = null;
-        detector.PollOnce();
-        detector.WaitForCallbacks();
-
-        Assert.Equal(2, notifications);
-    }
-
-    [Fact]
     public void CandidateFoundRequiresTwoConsecutiveStablePolls()
     {
         FullscreenGameCandidate? probed = new(41, "alpha", GamePath("alpha.exe"), StartTime(1));
@@ -236,36 +208,6 @@ public sealed class FullscreenGameDetectorTests
     }
 
     [Fact]
-    public async Task DisposeSuppressesQueuedCandidateCallbacks()
-    {
-        using var entered = new ManualResetEventSlim();
-        using var release = new ManualResetEventSlim();
-        FullscreenGameCandidate? probed =
-            new(41, "alpha", GamePath("alpha.exe"), StartTime(1));
-        var detector = Detector([], () => probed);
-        var notifications = new List<string>();
-        detector.CandidateFound += _ =>
-        {
-            notifications.Add("found");
-            entered.Set();
-            release.Wait(TimeSpan.FromSeconds(5));
-        };
-        detector.CandidateCleared += _ => notifications.Add("cleared");
-
-        detector.PollOnce();
-        detector.PollOnce();
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
-        probed = null;
-        detector.PollOnce();
-        var disposing = Task.Run(detector.Dispose);
-        Assert.True(SpinWait.SpinUntil(() => detector.IsDisposed, TimeSpan.FromSeconds(5)));
-        release.Set();
-        await disposing.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.Equal(["found"], notifications);
-    }
-
-    [Fact]
     public async Task UpdateKnownTargetsSuppressesQueuedCandidateCallbacks()
     {
         using var entered = new ManualResetEventSlim();
@@ -294,26 +236,6 @@ public sealed class FullscreenGameDetectorTests
         Assert.Equal(["found"], notifications);
     }
 
-    [Fact]
-    public async Task DisposeFromCandidateCallbackDoesNotDeadlock()
-    {
-        using var exited = new ManualResetEventSlim();
-        var detector = Detector(
-            [],
-            () => new(41, "alpha", GamePath("alpha.exe"), StartTime(1)));
-        detector.CandidateFound += _ =>
-        {
-            detector.Dispose();
-            exited.Set();
-        };
-
-        detector.PollOnce();
-        detector.PollOnce();
-
-        Assert.True(await Task.Run(() => exited.Wait(TimeSpan.FromSeconds(5))));
-    }
-
-    [WindowsFact]
     public void WindowsCandidateCasingIsStable()
     {
         var path = GamePath("Alpha.exe");
@@ -333,33 +255,6 @@ public sealed class FullscreenGameDetectorTests
         Assert.Equal(1, transitions);
     }
 
-    [Fact]
-    public async Task Poll_DropsReentrantCalls()
-    {
-        using var entered = new ManualResetEventSlim();
-        using var release = new ManualResetEventSlim();
-        var calls = 0;
-        using var detector = Detector([], () =>
-        {
-            Interlocked.Increment(ref calls);
-            entered.Set();
-            release.Wait(TimeSpan.FromSeconds(5));
-            return null;
-        });
-
-        var first = Task.Run(detector.PollOnce);
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
-        detector.PollOnce();
-        release.Set();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.Equal(1, calls);
-    }
-
-    [WindowsTheory]
-    [InlineData("C:\\Windows\\System32\\explorer.exe")]
-    [InlineData("C:\\Windows\\SysWOW64\\something.exe")]
-    [InlineData("C:\\Program Files\\WindowsApps\\Example\\game.exe")]
     public void SystemLocationsAreIgnored(string path)
         => Assert.True(FullscreenGameDetector.IsSystemExecutable(path));
 

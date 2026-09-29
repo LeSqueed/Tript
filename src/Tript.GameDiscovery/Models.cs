@@ -45,21 +45,7 @@ public sealed record InstalledGame(
     ProductId ProductId,
     string DisplayName,
     string InstallRoot,
-    ImmutableArray<string> ExecutablePaths)
-{
-    public bool TryResolveCatalogueExecutable(
-        IDiscoveryFileSystem fileSystem,
-        string filenameOrRelativePath,
-        out string executablePath)
-    {
-        executablePath = string.Empty;
-        return !string.IsNullOrWhiteSpace(filenameOrRelativePath)
-            && !FilePaths.IsFullyQualified(filenameOrRelativePath)
-            && PathSafety.TryResolveLexicallyContained(fileSystem, InstallRoot, filenameOrRelativePath, out var candidate)
-            && fileSystem.FileExists(candidate)
-            && (executablePath = candidate).Length > 0;
-    }
-}
+    ImmutableArray<string> ExecutablePaths);
 
 public sealed record SourceDiagnostic(
     GameStore Store,

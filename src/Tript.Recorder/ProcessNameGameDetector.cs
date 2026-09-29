@@ -7,41 +7,36 @@ using Tript.Core;
 
 namespace Tript.Recorder;
 
-public sealed class ProcessNameGameDetector : IGameDetector
+public sealed class ProcessNameGameDetector : PollingGameDetector, IGameDetector
 {
-    private readonly TimeSpan _pollInterval;
+    private const string CallbackThreadName = "Tript process detector callbacks";
     private readonly Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> _processProbe;
     private readonly IProcessFiles _processFiles = new ProcProcessFiles();
-    private readonly object _gate = new();
-    private readonly SerializedDetectorCallbackQueue _callbacks =
-        new("Tript process detector callbacks");
     private readonly Dictionary<int, DetectedGameProcess> _running = [];
     private Dictionary<int, ProbedIdentity> _probed = [];
     private TargetSet _targets;
-    private long _targetVersion;
-    private Timer? _timer;
-    private bool _disposed;
-    private int _ticking;
 
     public ProcessNameGameDetector(
         IEnumerable<GameDetectionTarget> targets,
         TimeSpan? pollInterval = null)
+        : base(pollInterval ?? DefaultPollInterval, CallbackThreadName)
     {
         _targets = CreateTargetSet(targets);
         _processProbe = ProbeProcesses;
-        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
     }
 
     internal ProcessNameGameDetector(
         IEnumerable<GameDetectionTarget> targets,
         Func<IReadOnlySet<string>, IReadOnlyList<ProcessSnapshot>> processProbe,
         TimeSpan? pollInterval = null)
+        : base(pollInterval ?? DefaultPollInterval, CallbackThreadName)
     {
         ArgumentNullException.ThrowIfNull(processProbe);
         _targets = CreateTargetSet(targets);
         _processProbe = processProbe;
-        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
     }
+
+    private static TimeSpan DefaultPollInterval => TimeSpan.FromSeconds(5);
 
     public event Action<DetectedGameProcess>? GameStarted;
 
@@ -50,76 +45,22 @@ public sealed class ProcessNameGameDetector : IGameDetector
     public void UpdateTargets(IEnumerable<GameDetectionTarget> targets)
     {
         var replacement = CreateTargetSet(targets);
-        lock (_gate)
+        lock (Gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            BumpTargetVersionLocked();
             _targets = replacement;
-            _targetVersion++;
         }
     }
 
-    public void Start()
-    {
-        lock (_gate)
-        {
-            if (_disposed || _timer is not null)
-                return;
-
-            _timer = new Timer(OnTick, null, TimeSpan.Zero, _pollInterval);
-        }
-    }
-
-    public void Dispose()
-    {
-        lock (_gate)
-        {
-            if (_disposed)
-                return;
-            _disposed = true;
-            _timer?.Dispose();
-            _timer = null;
-        }
-        _callbacks.Dispose();
-    }
-
-    internal void PollOnce() => OnTick(null);
-
-    internal void WaitForCallbacks() => _callbacks.WaitUntilIdle();
-
-    internal bool IsDisposed
-    {
-        get { lock (_gate) return _disposed; }
-    }
-
-    private void OnTick(object? state)
-    {
-        if (Interlocked.CompareExchange(ref _ticking, 1, 0) != 0)
-            return;
-
-        try
-        {
-            Poll();
-        }
-        catch (Exception exception)
-        {
-            Log.Warning(exception, "ProcessNameGameDetector: a poll failed; the watch continues.");
-        }
-        finally
-        {
-            Volatile.Write(ref _ticking, 0);
-        }
-    }
-
-    private void Poll()
+    private protected override void Poll()
     {
         TargetSet targets;
         long targetVersion;
-        lock (_gate)
+        lock (Gate)
         {
-            if (_disposed)
+            if (!TryReadTargetVersionLocked(out targetVersion))
                 return;
             targets = _targets;
-            targetVersion = _targetVersion;
         }
 
         var seen = new Dictionary<int, DetectedGameProcess>();
@@ -149,9 +90,9 @@ public sealed class ProcessNameGameDetector : IGameDetector
 
         List<DetectedGameProcess> started;
         List<DetectedGameProcess> stopped;
-        lock (_gate)
+        lock (Gate)
         {
-            if (_disposed || targetVersion != _targetVersion)
+            if (IsStaleLocked(targetVersion))
                 return;
 
             stopped = _running.Values
@@ -168,8 +109,10 @@ public sealed class ProcessNameGameDetector : IGameDetector
                 _running.Add(process.ProcessId, process);
         }
 
-        Enqueue(GameStopped, stopped, targetVersion);
-        Enqueue(GameStarted, started, targetVersion);
+        foreach (var process in stopped)
+            Enqueue(GameStopped, process, targetVersion);
+        foreach (var process in started)
+            Enqueue(GameStarted, process, targetVersion);
     }
 
     private bool TryKeepPathMatch(
@@ -178,7 +121,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
         TargetSet targets,
         out DetectedGameProcess tracked)
     {
-        lock (_gate)
+        lock (Gate)
         {
             if (_running.TryGetValue(snapshot.ProcessId, out tracked!)
                 && SameProcessIdentity(tracked.ProcessStartTime, snapshot.ProcessStartTime)
@@ -195,7 +138,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
     private IReadOnlyList<ProcessSnapshot> ProbeProcesses(IReadOnlySet<string> candidates)
     {
         Dictionary<int, ProbedIdentity> previous;
-        lock (_gate)
+        lock (Gate)
             previous = _probed;
 
         var snapshots = new List<ProcessSnapshot>();
@@ -251,7 +194,7 @@ public sealed class ProcessNameGameDetector : IGameDetector
             }
         }
 
-        lock (_gate)
+        lock (Gate)
             _probed = probed;
         return snapshots;
     }
@@ -280,42 +223,6 @@ public sealed class ProcessNameGameDetector : IGameDetector
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return path;
-        }
-    }
-
-    private void Enqueue(
-        Action<DetectedGameProcess>? handlers,
-        IEnumerable<DetectedGameProcess> processes,
-        long generation)
-    {
-        if (handlers is null)
-            return;
-
-        foreach (var process in processes)
-            _callbacks.Enqueue(() => Raise(handlers, process, generation));
-    }
-
-    private void Raise(
-        Action<DetectedGameProcess> handlers,
-        DetectedGameProcess process,
-        long generation)
-    {
-        foreach (Action<DetectedGameProcess> handler in handlers.GetInvocationList())
-        {
-            lock (_gate)
-            {
-                if (_disposed || generation != _targetVersion)
-                    return;
-            }
-            try
-            {
-                handler(process);
-            }
-            catch (Exception exception)
-            {
-                Log.Warning(exception,
-                    "ProcessNameGameDetector: a subscriber threw; the watch continues.");
-            }
         }
     }
 

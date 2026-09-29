@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Photino.NET;
 
@@ -20,14 +21,14 @@ internal static class WindowsWindow
 
     internal static void HideWindow(PhotinoWindow window)
     {
-        ShowWindow(window.WindowHandle, Hide);
+        ShowWindow(Handle(window), Hide);
     }
 
     // SW_RESTORE un-arranges as well as un-minimizes, so an unconditional restore drops a maximized
     // or snapped window back to its pre-arrange rect every time the tray activates it.
     internal static void ShowWindow(PhotinoWindow window)
     {
-        var handle = window.WindowHandle;
+        var handle = Handle(window);
         ShowWindow(handle, IsIconic(handle) ? Restore : Show);
         ShowContentWindows(handle);
         SetForegroundWindow(handle);
@@ -35,18 +36,34 @@ internal static class WindowsWindow
 
     internal static void MinimizeWindow(PhotinoWindow window)
     {
-        PostMessage(window.WindowHandle, WmSysCommand, (IntPtr)ScMinimize, IntPtr.Zero);
+        PostMessage(Handle(window), WmSysCommand, (IntPtr)ScMinimize, IntPtr.Zero);
     }
 
     internal static void CloseWindow(PhotinoWindow window)
     {
-        if (!PostMessage(window.WindowHandle, WmClose, IntPtr.Zero, IntPtr.Zero))
+        if (!PostMessage(Handle(window), WmClose, IntPtr.Zero, IntPtr.Zero))
             throw new ApplicationException("Windows could not close the shell window.");
+    }
+
+    private static readonly ConditionalWeakTable<PhotinoWindow, StrongBox<nint>> Handles = new();
+
+    // Photino's WindowHandle getter goes through Photino_Invoke off the UI thread, and Photino.Native 4.0
+    // wakes the waiting caller after it may have returned (use-after-free crash in RtlWakeConditionVariable).
+    // The HWND never changes, so read it once, on the UI thread from OnCreated.
+    internal static nint Handle(PhotinoWindow window)
+    {
+        if (Handles.TryGetValue(window, out var cached))
+            return cached.Value;
+
+        var handle = window.WindowHandle;
+        if (handle != IntPtr.Zero)
+            Handles.AddOrUpdate(window, new StrongBox<nint>(handle));
+        return handle;
     }
 
     internal static WindowPlacement? TryGetPlacement(PhotinoWindow window)
     {
-        var handle = window.WindowHandle;
+        var handle = Handle(window);
         var placement = new NativeWindowPlacement { Length = Marshal.SizeOf<NativeWindowPlacement>() };
         if (handle == IntPtr.Zero || !GetWindowPlacement(handle, ref placement))
             return null;
@@ -60,7 +77,7 @@ internal static class WindowsWindow
 
     internal static void ApplyPlacement(PhotinoWindow window, WindowPlacement saved)
     {
-        var handle = window.WindowHandle;
+        var handle = Handle(window);
         var placement = new NativeWindowPlacement { Length = Marshal.SizeOf<NativeWindowPlacement>() };
         if (handle == IntPtr.Zero || !GetWindowPlacement(handle, ref placement))
             return;
@@ -79,21 +96,21 @@ internal static class WindowsWindow
         SetWindowPlacement(handle, ref placement);
     }
 
-    internal static bool IsVisible(PhotinoWindow window) => IsWindowVisible(window.WindowHandle);
+    internal static bool IsVisible(PhotinoWindow window) => IsWindowVisible(Handle(window));
 
-    internal static bool IsMinimized(PhotinoWindow window) => IsIconic(window.WindowHandle);
+    internal static bool IsMinimized(PhotinoWindow window) => IsIconic(Handle(window));
 
     // IsWindowVisible stays true under a fullscreen app; the foreground window is the real signal.
-    internal static bool IsForeground(PhotinoWindow window) => GetForegroundWindow() == window.WindowHandle;
+    internal static bool IsForeground(PhotinoWindow window) => GetForegroundWindow() == Handle(window);
 
     internal static bool IsCoveredByFullscreenWindow(PhotinoWindow window)
     {
         var foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero || foreground == window.WindowHandle || IsDesktopWindow(foreground))
+        if (foreground == IntPtr.Zero || foreground == Handle(window) || IsDesktopWindow(foreground))
             return false;
 
         var monitor = MonitorFromWindow(foreground, MonitorDefaultToNull);
-        if (monitor == IntPtr.Zero || monitor != MonitorFromWindow(window.WindowHandle, MonitorDefaultToNull))
+        if (monitor == IntPtr.Zero || monitor != MonitorFromWindow(Handle(window), MonitorDefaultToNull))
             return false;
 
         var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
@@ -115,7 +132,7 @@ internal static class WindowsWindow
         return className.SequenceEqual("Progman") || className.SequenceEqual("WorkerW");
     }
 
-    internal static void ShowContentWindows(PhotinoWindow window) => ShowContentWindows(window.WindowHandle);
+    internal static void ShowContentWindows(PhotinoWindow window) => ShowContentWindows(Handle(window));
 
     private static void ShowContentWindows(IntPtr windowHandle)
     {

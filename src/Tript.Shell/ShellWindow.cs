@@ -435,6 +435,8 @@ internal sealed class ShellWindow : IDisposable
 
     private void OnCreated(PhotinoWindow window)
     {
+        if (OperatingSystem.IsWindows())
+            WindowsWindow.Handle(window);
         _nativeReady = true;
         if (_hotkeysStale)
         {
@@ -599,7 +601,7 @@ internal sealed class ShellWindow : IDisposable
     {
         try
         {
-            if (OperatingSystem.IsWindows() && window.WindowHandle == IntPtr.Zero)
+            if (OperatingSystem.IsWindows() && WindowsWindow.Handle(window) == IntPtr.Zero)
                 return;
             _host.SetWindowVisible(_windowControl.IsSeenByTheUser(window));
         }
@@ -628,8 +630,7 @@ internal sealed class ShellWindow : IDisposable
 
         try
         {
-            WindowPlacement? current = null;
-            window.Invoke(() => current = WindowsWindow.TryGetPlacement(window));
+            var current = WindowsWindow.TryGetPlacement(window);
             if (current is null)
                 return;
 

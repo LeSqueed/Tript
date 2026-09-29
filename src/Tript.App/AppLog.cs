@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
+using System.Globalization;
 using System.Threading;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
+using Serilog.Parsing;
 using Tript.Core;
 using Tript.Settings;
 
@@ -16,14 +18,18 @@ internal static class AppLog
 
     private const string LogsFolderName = "logs";
 
-    // Tript runs for days in the background, and pruning only ran at startup, so a single session
-    // could grow one file without bound. Rolling at a fixed size keeps disk use capped at roughly
-    // RetainedFiles * MaxFileBytes.
+    // Rolling at a fixed size caps disk use at roughly RetainedFiles * MaxFileBytes for sessions that run for days.
     private const long MaxFileBytes = 20L * 1024 * 1024;
+
+    private static readonly LoggingLevelSwitch Level = new(LogEventLevel.Information);
 
     private static int _crashHandlersInstalled;
 
     private static string? _logDirectoryOverride;
+
+    private static bool _launchVerbose;
+
+    private static bool _debugRequested;
 
     internal static string LogDirectory =>
         Volatile.Read(ref _logDirectoryOverride) ?? DefaultLogDirectory(OperatingSystem.IsWindows(),
@@ -45,9 +51,6 @@ internal static class AppLog
 
     internal static string? CurrentFile { get; private set; }
 
-    // Release builds write Information and above to the file: every UI command logs a Debug line, so
-    // Debug by default filled users' logs with noise. Debug builds, or --verbose-log on a release,
-    // write Debug too, including libobs's own debug output (module loading, for one).
     internal static LogEventLevel DefaultFileLevel(bool verbose)
     {
 #if DEBUG
@@ -57,28 +60,27 @@ internal static class AppLog
 #endif
     }
 
-    internal static void Configure(string? logDirectory = null, bool verbose = false,
-        LogEventLevel minimum = LogEventLevel.Information)
+    internal static LogEventLevel CurrentLevel => Level.MinimumLevel;
+
+    internal static void Configure(string? logDirectory = null, bool verbose = false)
     {
         Volatile.Write(ref _logDirectoryOverride, string.IsNullOrWhiteSpace(logDirectory) ? null : logDirectory);
+        _launchVerbose = verbose;
 
-        // Replacing Log.Logger does not dispose the previous one, so a second Configure would leak
-        // its file handle. CloseAndFlush disposes it and is harmless the first time.
+        // Replacing Log.Logger does not dispose the previous one, so a second Configure would leak its file handle.
         Log.CloseAndFlush();
 
         var configuration = new LoggerConfiguration()
-            .WriteTo.Sink(new StandardErrorSink(), restrictedToMinimumLevel: minimum);
+            .WriteTo.Sink(new StandardErrorSink(), restrictedToMinimumLevel: LogEventLevel.Information);
 
-        var floor = minimum;
+        Level.MinimumLevel = LogEventLevel.Information;
         if (TryCreateFileSink() is { } fileSink)
         {
-            var fileLevel = DefaultFileLevel(verbose);
-            configuration = configuration.WriteTo.Sink(fileSink, restrictedToMinimumLevel: fileLevel);
-            if (fileLevel < floor)
-                floor = fileLevel;
+            configuration = configuration.WriteTo.Sink(fileSink);
+            Level.MinimumLevel = FileLevel();
         }
 
-        Log.Logger = configuration.MinimumLevel.Is(floor).CreateLogger();
+        Log.Logger = configuration.MinimumLevel.ControlledBy(Level).CreateLogger();
 
         Diagnostics.SetSink(static (level, message, exception) => Log.Write(level switch
         {
@@ -89,11 +91,28 @@ internal static class AppLog
         }, exception, "{Message}", message));
     }
 
+    internal static void SetDebugLogging(bool enabled)
+    {
+        if (_debugRequested == enabled)
+            return;
+
+        _debugRequested = enabled;
+        if (CurrentFile is null)
+            return;
+
+        var level = FileLevel();
+        if (Level.MinimumLevel == level)
+            return;
+
+        Level.MinimumLevel = level;
+        Log.Information("Debug logging {State}", level <= LogEventLevel.Debug ? "enabled" : "disabled");
+    }
+
+    private static LogEventLevel FileLevel() => DefaultFileLevel(_launchVerbose || _debugRequested);
+
     internal static void Shutdown() => Log.CloseAndFlush();
 
-    // Nothing else in the process catches an exception that escapes a thread, so without these a
-    // crash leaves a log that simply stops. Safe to call before Configure: Log is a silent logger
-    // until then, and Configure swaps in the real one underneath these handlers.
+    // Without these a crash leaves a log that simply stops. Safe before Configure: Log is silent until then.
     internal static void InstallCrashHandlers()
     {
         if (Interlocked.Exchange(ref _crashHandlersInstalled, 1) != 0)
@@ -160,7 +179,23 @@ internal static class AppLog
             _ => "error",
         };
 
-        return $"Tript.App [{level}]: {logEvent.RenderMessage()}";
+        return $"Tript.App [{level}]: {RenderMessage(logEvent)}";
+    }
+
+    internal static string RenderMessage(LogEvent logEvent)
+    {
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        foreach (var token in logEvent.MessageTemplate.Tokens)
+        {
+            if (token is PropertyToken property
+                && logEvent.Properties.TryGetValue(property.PropertyName, out var value)
+                && value is ScalarValue { Value: string text })
+                writer.Write(text);
+            else
+                token.Render(logEvent.Properties, writer, CultureInfo.InvariantCulture);
+        }
+
+        return writer.ToString();
     }
 
     private sealed class StandardErrorSink : ILogEventSink
@@ -177,10 +212,8 @@ internal static class AppLog
 
     private sealed class FileSink : ILogEventSink, IDisposable
     {
-        // Flushing every line made each debug message a synchronous disk write, including the
-        // detection loop's once-per-tick lines. Anything at Information or above still flushes at
-        // once, so the lines that explain a crash reach disk before it; debug lines flush at most
-        // once a second, and Shutdown flushes whatever is left.
+        // Information and above flush at once so the lines explaining a crash reach disk; debug lines
+        // flush at most once a second so per-tick logging is not a synchronous write each time.
         private const long DebugFlushIntervalMilliseconds = 1000;
 
         private readonly string _directory;

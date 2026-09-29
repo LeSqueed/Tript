@@ -728,6 +728,7 @@ internal sealed partial class AppHost : IDisposable
             _trash.UpdateRoot(ContentLayout.TrashRoot(effectiveRoot));
         }
 
+        AppLog.SetDebugLogging(settings.General.DebugLogging);
         SettingsChanged?.Invoke(settings);
         PushSettings();
         PushSettingsUpdateResult(requestId, true, null);

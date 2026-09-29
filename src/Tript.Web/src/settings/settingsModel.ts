@@ -169,6 +169,7 @@ export interface GeneralSettings {
   closeBehavior: CloseBehavior;
   convertHdrClipsToSdr?: boolean;
   checkForUpdatesAutomatically?: boolean;
+  debugLogging?: boolean;
   clipOutputMode?: ClipOutputMode;
   notifications: NotificationSettings;
   [key: string]: unknown;

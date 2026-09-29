@@ -223,6 +223,14 @@ export function GeneralPage({
           through one before sharing it.
         </p>
         <div className="field">
+          <Toggle
+            checked={settings.debugLogging === true}
+            onChange={(checked) => update(page, { debugLogging: checked })}
+            label="Debug logging"
+          />
+          <span className="field-hint">Writes extra detail to the log for troubleshooting and takes effect immediately. Leave it off for normal use, as it makes log files grow much faster.</span>
+        </div>
+        <div className="field">
           <Button onClick={() => client.send('OpenLogFolder')}>Open log folder</Button>
         </div>
       </section>

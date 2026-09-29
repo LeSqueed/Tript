@@ -2,6 +2,8 @@
 // Copyright (c) 2026 LeSqueed and the Tript contributors
 
 using System.Text.RegularExpressions;
+using Serilog.Events;
+using Tript.Obs;
 using Xunit;
 
 namespace Tript.App.Tests;
@@ -71,11 +73,14 @@ public sealed class SafeModuleAllowlistTests
         Assert.Contains("obs-nvenc", Program.SafeModules(isWindows: false, nvidiaEncoderAvailable: true));
 
     [Theory]
-    [InlineData("Skipping module 'obs-vst', not on safe list", true)]
-    [InlineData("Failed to initialize module 'obs-nvenc.so'", false)]
-    [InlineData("Skipping module 'x' because it failed to load", false)]
-    public void OnlyTheIntendedModuleSkipsAreQuietened(string message, bool quiet) =>
-        Assert.Equal(quiet, Program.IsExpectedModuleSkip(message));
+    [InlineData(ObsLogLevel.Warning, "Skipping module 'obs-vst', not on safe list", LogEventLevel.Debug)]
+    [InlineData(ObsLogLevel.Warning, "Skipping module 'x' because it failed to load", LogEventLevel.Warning)]
+    [InlineData(ObsLogLevel.Error, "Failed to initialize module 'obs-nvenc.so'", LogEventLevel.Error)]
+    [InlineData(ObsLogLevel.Info, "video settings reset:", LogEventLevel.Debug)]
+    [InlineData(ObsLogLevel.Debug, "Loading module: obs-ffmpeg", LogEventLevel.Debug)]
+    public void LibobsOutput_OnlyWarningsAndErrorsReachTheNormalLog(ObsLogLevel level, string message,
+        LogEventLevel expected) =>
+        Assert.Equal(expected, Program.ObsLogLevelFor(level, message));
 
     [Fact]
     public void OnWindows_EveryBundledModuleIsRequired() =>

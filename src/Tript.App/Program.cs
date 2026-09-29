@@ -46,10 +46,8 @@ internal static class Program
         }
     }
 
-    // libobs formats every diagnostic that matters for a recorder, including D3D11 device loss,
-    // encoder open failures, NVENC session limits and capture hook errors, and hands it to one
-    // process-wide handler. Without this they are formatted and dropped. Installed before
-    // obs_startup so module loading and graphics init are captured too.
+    // Without this libobs drops device loss, encoder and hook errors. Installed before obs_startup so
+    // module loading and graphics init are captured too.
     private static void InstallObsLogBridge()
     {
         lock (ObsLogGate)
@@ -60,16 +58,7 @@ internal static class Program
             try
             {
                 _obsLogScope = ObsLog.Install(static (level, message) =>
-                {
-                    var serilogLevel = IsExpectedModuleSkip(message) ? LogEventLevel.Debug : level switch
-                    {
-                        ObsLogLevel.Error => LogEventLevel.Error,
-                        ObsLogLevel.Warning => LogEventLevel.Warning,
-                        ObsLogLevel.Info => LogEventLevel.Information,
-                        _ => LogEventLevel.Debug,
-                    };
-                    Log.Write(serilogLevel, "libobs: {Message}", message.TrimEnd());
-                });
+                    Log.Write(ObsLogLevelFor(level, message), "libobs: {Message}", message.TrimEnd()));
             }
             catch (Exception exception) when (exception is InvalidOperationException or DllNotFoundException
                 or EntryPointNotFoundException)
@@ -86,6 +75,7 @@ internal static class Program
         DeclareDpiAwareness();
 
         var store = new SettingsStore(new SettingsFileProvider(options.SettingsPath));
+        AppLog.SetDebugLogging(store.Load().General.DebugLogging);
 
 #if TRIPT_TRAINING
         ModelService.ConfigureModelRoots(TrainingPaths.InstalledModelsPath, GameModelPaths.ModelsRoot);
@@ -412,6 +402,14 @@ internal static class Program
             NixPlatformDisplay = display
         };
     }
+
+    internal static LogEventLevel ObsLogLevelFor(ObsLogLevel level, string message) =>
+        IsExpectedModuleSkip(message) ? LogEventLevel.Debug : level switch
+        {
+            ObsLogLevel.Error => LogEventLevel.Error,
+            ObsLogLevel.Warning => LogEventLevel.Warning,
+            _ => LogEventLevel.Debug,
+        };
 
     internal static bool IsExpectedModuleSkip(string message) =>
         message.StartsWith("Skipping module '", StringComparison.Ordinal)

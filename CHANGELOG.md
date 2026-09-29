@@ -3,6 +3,25 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.2.2 (2026-09-29)
+
+### Fixes
+
+- **Tript no longer crashes now and then while it is running.** A rare crash could close Tript
+  in the middle of a recording. It happened more often the longer Tript stayed open.
+- **Clips are no longer left locked after Tript closes.** Closing Tript while it was reading a
+  clip could leave a background process holding that file, so it could not be moved or deleted
+  until you restarted your PC.
+
+### Diagnostics
+
+- **Debug logging can be switched on in Settings.** Settings → General → Diagnostics has a
+  **Debug logging** switch that adds troubleshooting detail to the log straight away. Leave it off
+  for normal use.
+- **Logs are shorter and easier to read.** They now note when Tript starts, when each recording
+  starts and stops, and each clip that is saved, without repeating a line for every frame, so log
+  files stay small.
+
 ## 1.2.1 (2026-09-28)
 
 ### Games

@@ -35,7 +35,6 @@ describe('reportClientError', () => {
     expect(reports[0].stack).toBeTruthy();
   });
 
-  // A failure repeating on every render would otherwise flood the host log.
   it('sends an identical failure only once', () => {
     const reports = capture();
     for (let i = 0; i < 25; i++) reportClientError('render', new Error('loop'));
@@ -62,7 +61,6 @@ describe('reportClientError', () => {
     expect(describeError('plain text').message).toBe('plain text');
   });
 
-  // The bridge still works when the control socket is what broke.
   it('uses the native bridge when the shell provides one', () => {
     setErrorSinkForTests(null);
     const sendMessage = vi.fn();
@@ -82,7 +80,6 @@ function Explodes(): never {
 }
 
 describe('ErrorBoundary', () => {
-  // Without it a render error leaves a blank window and no trace anywhere.
   it('renders a recovery screen instead of a blank window, and reports the error', () => {
     const reports = capture();
     vi.spyOn(console, 'error').mockImplementation(() => {});

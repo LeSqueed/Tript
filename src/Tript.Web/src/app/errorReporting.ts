@@ -19,8 +19,7 @@ type NativeShellWindow = Window & {
 const MAX_MESSAGE = 1000;
 const MAX_STACK = 4000;
 
-// A failure that repeats on every render or every frame would otherwise flood the host log and push
-// out the lines that explain it, so identical reports are only sent once.
+// Identical reports are sent once, so a failure repeating every render cannot flood the host log.
 const MAX_DISTINCT_REPORTS = 50;
 const reported = new Set<string>();
 
@@ -44,10 +43,8 @@ export function describeError(error: unknown): { message: string; stack?: string
   return { message: truncate(text ?? 'unknown error', MAX_MESSAGE) };
 }
 
-// The native bridge is used rather than the control socket because a broken socket is itself one of
-// the commonest reasons the UI fails, and because React unmounts the failed tree, closing the socket,
-// before an error boundary gets to report. In a plain browser there is no bridge, so the console is
-// the only place left.
+// The native bridge, not the control socket: a broken socket is a common cause of UI failure, and the
+// socket closes with the failed tree before the boundary reports. A plain browser only has the console.
 function defaultSink(report: ClientErrorReport): void {
   const external = (window as NativeShellWindow).external;
   if (external?.sendMessage) {

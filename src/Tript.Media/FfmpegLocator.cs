@@ -12,6 +12,8 @@ public sealed class FfmpegLocator
     private static readonly string VendorDirectory =
         Path.Combine(AppContext.BaseDirectory, "vendor", "ffmpeg");
 
+    private static readonly TimeSpan VerifyTimeout = TimeSpan.FromSeconds(30);
+
     public string? SearchDirectory { get; init; }
 
     public (string Ffmpeg, string Ffprobe) Locate()
@@ -101,10 +103,11 @@ public sealed class FfmpegLocator
 
             ChildProcessJob.StartTracked(process);
 
-            if (!process.WaitForExit(5000))
+            if (!process.WaitForExit((int)VerifyTimeout.TotalMilliseconds))
             {
                 try { process.Kill(entireProcessTree: true); } catch {  }
-                throw new FfmpegNotFoundException($"{what} at '{binary}' did not respond to -version within 5s.");
+                throw new FfmpegNotFoundException(
+                    $"{what} at '{binary}' did not respond to -version within {VerifyTimeout.TotalSeconds:0}s.");
             }
 
             if (process.ExitCode != 0)

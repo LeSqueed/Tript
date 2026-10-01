@@ -10,14 +10,13 @@ internal sealed class LibraryProbe
 {
     internal const int ProbesPerListing = 12;
 
-    private readonly Lazy<MediaProbe?> _probe;
+    private readonly KeptOnceAvailable<MediaProbe> _probe;
     private readonly HashSet<string> _unprobeable = new(StringComparer.Ordinal);
 
     internal LibraryProbe(Func<string?> locateFfprobe)
     {
-        _probe = new Lazy<MediaProbe?>(
-            () => locateFfprobe() is { } ffprobe ? new MediaProbe(ffprobe) : null,
-            LazyThreadSafetyMode.ExecutionAndPublication);
+        _probe = new KeptOnceAvailable<MediaProbe>(
+            () => locateFfprobe() is { } ffprobe ? new MediaProbe(ffprobe) : null);
     }
 
     internal MediaProbe? Probe => _probe.Value;

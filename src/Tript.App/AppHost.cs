@@ -63,20 +63,7 @@ internal sealed partial class AppHost : IDisposable
     private readonly AudioLevelFeed _audioLevels;
     private int _windowVisible = 1;
 
-    private readonly Lazy<(string Ffmpeg, string Ffprobe)?> _libraryTools = new(() =>
-    {
-        try
-        {
-            var tools = new FfmpegLocator().Locate();
-            Log.Information("AppHost: using ffmpeg at {Ffmpeg}", tools.Ffmpeg);
-            return tools;
-        }
-        catch (FfmpegNotFoundException exception)
-        {
-            Log.Warning("no thumbnails or durations in the library: {Reason}", exception.Message);
-            return null;
-        }
-    }, LazyThreadSafetyMode.ExecutionAndPublication);
+    private readonly LibraryTools _libraryTools = new();
 
     private readonly LibraryProbe _libraryProbe;
     private readonly CoalescingRunner _contentPush;

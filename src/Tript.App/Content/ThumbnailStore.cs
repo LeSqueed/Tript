@@ -14,7 +14,7 @@ internal sealed class ThumbnailStore : IDisposable
     private static readonly TimeSpan WorkerShutdownWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FailedExtractionCooldown = TimeSpan.FromMinutes(5);
 
-    private readonly Lazy<IThumbnailExtractor?> _extractor;
+    private readonly KeptOnceAvailable<IThumbnailExtractor> _extractor;
     private readonly BlockingCollection<GenerationJob> _jobs =
         new(new ConcurrentQueue<GenerationJob>(), MaxPendingExtractions);
     private readonly Dictionary<string, GenerationJob> _pending;
@@ -32,8 +32,7 @@ internal sealed class ThumbnailStore : IDisposable
     internal ThumbnailStore(string thumbnailRoot, Func<IThumbnailExtractor?> extractorFactory)
     {
         _thumbnailRoot = thumbnailRoot;
-        _extractor = new Lazy<IThumbnailExtractor?>(extractorFactory,
-            LazyThreadSafetyMode.ExecutionAndPublication);
+        _extractor = new KeptOnceAvailable<IThumbnailExtractor>(extractorFactory);
         var comparer = FilePaths.Comparer;
         _pending = new Dictionary<string, GenerationJob>(comparer);
         _failed = new Dictionary<string, FailedGeneration>(comparer);

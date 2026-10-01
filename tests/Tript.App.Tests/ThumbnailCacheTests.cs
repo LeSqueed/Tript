@@ -72,19 +72,17 @@ public sealed class ThumbnailCacheTests : IDisposable
     }
 
     [SkippableFact]
-    public async Task Ensure_ReturnsNull_AndAsksOnce_WhenThereIsNoExtractor()
+    public async Task Ensure_ReturnsNull_WithoutAnExtractor_AndWorksOnceOneBecomesAvailable()
     {
         var video = WriteVideo("session-1.mp4");
-        var factoryCalls = 0;
-        using var store = new ThumbnailStore(ThumbnailRoot, () =>
-        {
-            factoryCalls++;
-            return null;
-        });
+        IThumbnailExtractor? extractor = null;
+        using var store = new ThumbnailStore(ThumbnailRoot, () => extractor);
 
         Assert.Null(await store.EnsureAsync(video));
-        Assert.Null(await store.EnsureAsync(video));
-        Assert.Equal(1, factoryCalls);
+
+        extractor = new CountingExtractor();
+
+        Assert.NotNull(await store.EnsureAsync(video));
     }
 
     [SkippableFact]

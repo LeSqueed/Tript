@@ -380,7 +380,7 @@ internal sealed partial class AppHost
     private IClipEngine BuildClipEngine()
     {
         var (ffmpeg, ffprobe) = _libraryTools.Value
-            ?? throw new FfmpegNotFoundException(FfmpegLocator.NotFoundMessage("ffmpeg"));
+            ?? throw new FfmpegNotFoundException(_libraryTools.Failure);
         var encoders = new VideoEncoderSelector(ffmpeg);
         ThreadPool.QueueUserWorkItem(_ =>
         {

@@ -97,6 +97,7 @@ internal sealed class ResolverClient : IDisposable
 internal sealed class ResolvedGame
 {
     public string GameId { get; init; } = string.Empty;
+    public bool Canonical { get; init; }
     public string Source { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public int? Year { get; init; }

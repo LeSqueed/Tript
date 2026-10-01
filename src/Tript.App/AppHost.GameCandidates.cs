@@ -61,59 +61,36 @@ internal sealed partial class AppHost
             var inventory = _gameInventory.Inventory;
             var resolution = CandidateResolverInput(candidate.Executable, normalized, inventory);
             libraryName = resolution.Name;
-            if (!resolution.StoreBacked)
+            var resolved = resolution.StoreBacked
+                ? await _resolverClient!.ResolveAsync(resolution.Input, resolution.Name,
+                    _discoveryCancellation.Token)
+                : await _resolverClient!.ResolveAsync(
+                    $"name:{Path.GetFileNameWithoutExtension(candidate.Executable)}",
+                    _discoveryCancellation.Token);
+            if (_disposed || _shuttingDown)
+                return;
+
+            // Outside a store install the executable's name is the only evidence, so it may only move
+            // a game the user already has; it never adds one.
+            if (!resolution.StoreBacked && (!resolved.Canonical || IsCustomGameId(resolved.GameId)))
             {
                 PushGameCandidate(candidate, normalized, libraryName);
                 return;
             }
-            var resolved = await _resolverClient!.ResolveAsync(resolution.Input, resolution.Name,
-                _discoveryCancellation.Token);
-            if (_disposed || _shuttingDown)
-                return;
 
             var displayName = string.IsNullOrWhiteSpace(resolved.DisplayName)
                 ? Path.GetFileNameWithoutExtension(candidate.Executable)
                 : resolved.DisplayName;
-            var wasNew = false;
-            lock (_settingsUpdateGate)
+            switch (ApplyResolvedCandidate(resolved.GameId, displayName, normalized,
+                        addIfMissing: resolution.StoreBacked))
             {
-                var saved = _settingsStore.TryUpdate(settings =>
-                {
-                    var game = settings.Game.GameList.FirstOrDefault(value =>
-                        string.Equals(value.Id, resolved.GameId, StringComparison.OrdinalIgnoreCase));
-                    if (game is null)
-                    {
-                        game = new GameSetting
-                        {
-                            Id = resolved.GameId,
-                            Name = displayName,
-                            ExecutablePath = normalized,
-                        };
-                        settings.Game.GameList.Add(game);
-                        wasNew = true;
-                    }
-                    else if (!FilePaths.Comparer.Equals(game.ExecutablePath?.Trim() ?? string.Empty, normalized))
-                    {
-                        game.ExecutablePath = normalized;
-                    }
-                    return ValidateGameList(settings.Game.GameList, out var validationError)
-                        ? null
-                        : validationError;
-                }, out _, out var failure);
-                if (!saved)
-                {
-                    Log.Warning("AppHost: resolved game candidate was not saved: {Reason}", failure);
+                case ResolvedCandidateOutcome.Added:
+                    PushGameAdded(resolved.GameId, displayName, normalized);
+                    break;
+                case ResolvedCandidateOutcome.NotApplied:
                     PushGameCandidate(candidate, normalized, libraryName);
-                    return;
-                }
-
-                ReloadGameList();
-                RebuildDetectionTargets();
-                PushGameList();
-                PushSettings();
+                    break;
             }
-            if (wasNew)
-                PushGameAdded(resolved.GameId, displayName, normalized);
         }
         catch (OperationCanceledException) when (_discoveryCancellation.IsCancellationRequested)
         {
@@ -134,6 +111,65 @@ internal sealed partial class AppHost
             lock (_candidateResolutionGate)
                 _resolvingCandidatePaths.Remove(normalized);
         }
+    }
+
+    private enum ResolvedCandidateOutcome
+    {
+        NotApplied,
+        Added,
+        Updated,
+    }
+
+    private ResolvedCandidateOutcome ApplyResolvedCandidate(string gameId, string displayName, string normalized,
+        bool addIfMissing)
+    {
+        var outcome = ResolvedCandidateOutcome.NotApplied;
+        lock (_settingsUpdateGate)
+        {
+            var saved = _settingsStore.TryUpdate(settings =>
+            {
+                var game = settings.Game.GameList.FirstOrDefault(value =>
+                    string.Equals(value.Id, gameId, StringComparison.OrdinalIgnoreCase));
+                if (game is null)
+                {
+                    if (!addIfMissing)
+                        return null;
+
+                    settings.Game.GameList.Add(new GameSetting
+                    {
+                        Id = gameId,
+                        Name = displayName,
+                        ExecutablePath = normalized,
+                    });
+                    outcome = ResolvedCandidateOutcome.Added;
+                }
+                else
+                {
+                    if (!FilePaths.Comparer.Equals(game.ExecutablePath?.Trim() ?? string.Empty, normalized))
+                        game.ExecutablePath = normalized;
+                    outcome = ResolvedCandidateOutcome.Updated;
+                }
+
+                return ValidateGameList(settings.Game.GameList, out var validationError)
+                    ? null
+                    : validationError;
+            }, out _, out var failure);
+            if (!saved)
+            {
+                Log.Warning("AppHost: resolved game candidate was not saved: {Reason}", failure);
+                return ResolvedCandidateOutcome.NotApplied;
+            }
+
+            if (outcome == ResolvedCandidateOutcome.NotApplied)
+                return outcome;
+
+            ReloadGameList();
+            RebuildDetectionTargets();
+            PushGameList();
+            PushSettings();
+        }
+
+        return outcome;
     }
 
     private void PushGameAdded(string gameId, string name, string executablePath)

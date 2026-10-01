@@ -300,7 +300,7 @@ public sealed class GameCustomSettingsTests : IDisposable
     }
 
     [Fact]
-    public void FullscreenCandidate_WithoutStoreEvidence_IsNotAddedAndDoesNotQueryTheResolver()
+    public void FullscreenCandidate_WithoutStoreEvidence_IsLookedUpByNameButNeverAdded()
     {
         var root = Path.Combine(_contentRoot, "unresolved");
         Directory.CreateDirectory(root);
@@ -321,9 +321,80 @@ public sealed class GameCustomSettingsTests : IDisposable
 
         host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", executablePath));
 
+        WaitForTheLookupToSettle(handler);
+        Assert.Equal("/resolve?input=name%3Aexample", Assert.Single(handler.Requests));
         Assert.DoesNotContain(host.GameList, game => game.Id == ResolverHandler.GameId);
-        Assert.DoesNotContain(store.Load().Game.GameList, value => value.Id == ResolverHandler.GameId);
-        Assert.Empty(handler.Requests);
+        Assert.Empty(store.Load().Game.GameList);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_OutsideAStore_NamedLikeAGameAlreadyListed_SwitchesThatGameToTheLaunchedCopy()
+    {
+        var (store, handler, host, launched) = HostWithAListedGame("name-match", canonical: true);
+        using var _ = host;
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", launched));
+
+        Assert.True(SpinWait.SpinUntil(
+            () => host.GameList.Any(game => game.Id == ResolverHandler.GameId && game.ExecutablePath == launched),
+            TimeSpan.FromSeconds(3)));
+        Assert.Equal("/resolve?input=name%3Aexample", Assert.Single(handler.Requests));
+        var game = Assert.Single(store.Load().Game.GameList);
+        Assert.Equal(launched, game.ExecutablePath);
+        Assert.False(game.AutoRecordOverride);
+    }
+
+    [Fact]
+    public void FullscreenCandidate_OutsideAStore_WhoseNameIsNotACanonicalGame_LeavesTheListedGameAlone()
+    {
+        var (store, handler, host, launched) = HostWithAListedGame("name-not-canonical", canonical: false);
+        using var _ = host;
+        var previous = store.Load().Game.GameList[0].ExecutablePath;
+
+        host.OnFullscreenCandidateFound(new FullscreenGameCandidate(42, "example.exe", launched));
+
+        WaitForTheLookupToSettle(handler);
+        Assert.Equal(previous, Assert.Single(store.Load().Game.GameList).ExecutablePath);
+    }
+
+    private (SettingsStore Store, ResolverHandler Handler, AppHost Host, string Launched) HostWithAListedGame(
+        string folder, bool canonical)
+    {
+        var root = Path.Combine(_contentRoot, folder);
+        var launched = Path.Combine(root, "Legacy", "example.exe");
+        var previous = Path.Combine(root, "steamapps", "common", "ExampleGame", "example.exe");
+        foreach (var path in new[] { launched, previous })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "exe");
+        }
+        var store = new SettingsStore(new SettingsFileProvider(Path.Combine(root, "settings.json")));
+        store.Load().Game.GameList.Add(new GameSetting
+        {
+            Id = ResolverHandler.GameId,
+            Name = "Example Game",
+            ExecutablePath = previous,
+            AutoRecordOverride = false,
+        });
+        store.Save();
+        var handler = new ResolverHandler { Canonical = canonical };
+        var resolver = new ResolverClient(new ResolverConfig(new Uri("https://resolver.test/"), null),
+            new HttpClient(handler));
+        var host = new AppHost(new AppOptions
+        {
+            ContentRoot = root,
+            SettingsPath = store.FilePath,
+            WebRoot = root,
+            FakeRecorder = true,
+        }, store, runtime: null, new RecordingSessionTracker(), resolverClient: resolver,
+            storageProbe: AmpleStorage.Probe);
+        return (store, handler, host, launched);
+    }
+
+    private static void WaitForTheLookupToSettle(ResolverHandler handler)
+    {
+        Assert.True(SpinWait.SpinUntil(() => handler.Requests.Count > 0, TimeSpan.FromSeconds(3)));
+        Thread.Sleep(250);
     }
 
     [Fact]
@@ -656,6 +727,7 @@ public sealed class GameCustomSettingsTests : IDisposable
     {
         internal const string GameId = "01HRESOLVEDGAME000000000000";
         internal List<string> Requests { get; } = [];
+        internal bool Canonical { get; init; } = true;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -664,7 +736,7 @@ public sealed class GameCustomSettingsTests : IDisposable
             Requests.Add(path);
             var content = path.StartsWith("/search", StringComparison.Ordinal)
                 ? """{"results":[{"name":"Example Game","source":"igdb","igdbId":456}]}"""
-                : $$"""{"gameId":"{{GameId}}","canonical":true,"source":"store","displayName":"Example Game"}""";
+                : $$"""{"gameId":"{{GameId}}","canonical":{{(Canonical ? "true" : "false")}},"source":"store","displayName":"Example Game"}""";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(content, Encoding.UTF8, "application/json"),

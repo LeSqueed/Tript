@@ -3,6 +3,22 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.2.3 (2026-10-02)
+
+### Fixes
+
+- **Clips, thumbnails and durations no longer stop working for a whole session.** If Tript's
+  video tools were slow to start once, for example while a game was running, Tript treated them
+  as missing until you restarted it, and creating a clip said the install was incomplete. Tript
+  now tries again shortly afterwards.
+
+### Games
+
+- **A second copy of a game you already have is recognised.** Launching a game from a copy
+  outside its launcher, such as an older or separately installed client, now records it as the
+  game already in your list, with its settings and highlights, instead of asking you to add it as
+  a new game.
+
 ## 1.2.2 (2026-09-29)
 
 ### Fixes

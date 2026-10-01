@@ -36,20 +36,20 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.2.2, )",
-          "Tript.Obs": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )",
+          "Tript.Obs": "[1.2.3, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )"
         }
       }
     },
@@ -108,20 +108,20 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.28.0, )",
           "Serilog": "[4.4.0, )",
-          "Tript.Core": "[1.2.2, )",
-          "Tript.Obs": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )",
+          "Tript.Obs": "[1.2.3, )"
         }
       },
       "tript.obs": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )"
         }
       },
       "tript.settings": {
         "type": "Project",
         "dependencies": {
-          "Tript.Core": "[1.2.2, )"
+          "Tript.Core": "[1.2.3, )"
         }
       }
     },

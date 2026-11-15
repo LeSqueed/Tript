@@ -32,12 +32,12 @@ internal sealed class ShellWindow : IDisposable
     private LinuxShellNotifications? _linuxNotifications;
     private Timer? _visibilityWatch;
     private PhotinoWindow? _window;
-    // Written off the UI thread and read on it without a lock; a stale _restartForUpdatePending would
-    // exit instead of restarting into the staged update.
+    // Written off the UI thread and read on it without a lock; a stale _restartPending would
+    // exit instead of restarting.
     private volatile bool _activationPending;
     private bool _startupMinimizePending;
     private int _exitRequested;
-    private volatile bool _restartForUpdatePending;
+    private volatile bool _restartPending;
     private volatile bool _webReady;
     private volatile string? _pendingNavigation;
     private StartupVisibility _startupVisibility;
@@ -89,7 +89,7 @@ internal sealed class ShellWindow : IDisposable
         _singleInstance.ActivationRequested += ShowMainWindow;
         _singleInstance.ExitRequested += RequestExit;
         _host.StatusChanged += UpdateTrayState;
-        _host.RestartForUpdateRequested += RestartForUpdate;
+        _host.RestartRequested += Restart;
         _host.NotificationRequested += (kind, title, body) =>
         {
             if (_linuxNotifications is { } linux)
@@ -124,7 +124,7 @@ internal sealed class ShellWindow : IDisposable
             _singleInstance.ExitRequested -= RequestExit;
         }
 
-        return _restartForUpdatePending;
+        return _restartPending;
     }
 
     public void Dispose()
@@ -385,18 +385,18 @@ internal sealed class ShellWindow : IDisposable
         }
     }
 
-    private void RestartForUpdate()
+    private void Restart()
     {
         var window = _window;
         if (window is null)
             return;
 
         Interlocked.Exchange(ref _exitRequested, 1);
-        _restartForUpdatePending = true;
+        _restartPending = true;
         Program.CloseShellOrRequestShutdown(
             () => _windowControl.Close(window),
             _host.Ipc.RequestShutdown,
-            () => Environment.Exit(ShellExitCodes.RestartForUpdate));
+            () => Environment.Exit(ShellExitCodes.Restart));
     }
 
     private bool OnClosing(PhotinoWindow window)

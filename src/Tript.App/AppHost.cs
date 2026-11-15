@@ -127,7 +127,8 @@ internal sealed partial class AppHost : IDisposable
         AudioDeviceInventory? audioDeviceInventory = null,
         GameIdAliasStore? gameIdAliases = null,
         TimeSpan? pendingStopFinalizeTimeout = null,
-        IStorageProbe? storageProbe = null)
+        IStorageProbe? storageProbe = null,
+        GraphicsDeviceMonitor? graphicsDevice = null)
     {
         _storageProbe = storageProbe ?? new DriveInfoStorageProbe();
         _portalRestoreTokens = new PortalRestoreTokenStore(Path.Combine(
@@ -234,6 +235,7 @@ internal sealed partial class AppHost : IDisposable
 
         InitializeStreaming();
         InitializeStorage();
+        WatchGraphicsDevice(graphicsDevice ?? (runtime is null ? new GraphicsDeviceMonitor() : GraphicsDeviceMonitor.Shared));
     }
 
     internal AppOptions Options => _options;
@@ -246,7 +248,6 @@ internal sealed partial class AppHost : IDisposable
 
     internal event Action<NotificationKind, string, string>? NotificationRequested;
 
-    internal event Action? RestartForUpdateRequested;
 
     internal ObsRuntime? Runtime => _runtime;
 
@@ -352,6 +353,7 @@ internal sealed partial class AppHost : IDisposable
 #endif
         lock (_recorderGate)
             _shuttingDown = true;
+        StopWatchingGraphicsDevice();
 
         try
         {

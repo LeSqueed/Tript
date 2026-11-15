@@ -73,7 +73,7 @@ internal static class Program
             };
             hostThread.Start();
 
-            var restartForUpdate = false;
+            var restart = false;
             try
             {
                 if (!WaitForUi(host.UiUrl, TimeSpan.FromSeconds(15)))
@@ -93,7 +93,7 @@ internal static class Program
                 }
 
                 using var shell = new ShellWindow(host.UiUrl, host, singleInstance);
-                restartForUpdate = shell.Run();
+                restart = shell.Run();
             }
             catch (Exception exception)
             {
@@ -110,10 +110,10 @@ internal static class Program
                     // would flush the log, so flush first or the reason for the kill is lost too.
                     Log.Fatal("Tript.Shell: the app host did not stop; terminating the process");
                     AppLog.Shutdown();
-                    Environment.Exit(1);
+                    Environment.Exit(restart ? ShellExitCodes.Restart : 1);
                 }
             }
-            return restartForUpdate ? ShellExitCodes.RestartForUpdate : 0;
+            return restart ? ShellExitCodes.Restart : 0;
         }
     }
 

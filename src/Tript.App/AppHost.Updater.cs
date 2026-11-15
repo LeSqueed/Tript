@@ -22,7 +22,7 @@ internal sealed partial class AppHost
         if (_updateManager is null || !_updateManager.TryApply())
             return;
 
-        RestartForUpdateRequested?.Invoke();
+        RestartRequested?.Invoke();
     }
 
     internal void PushUpdateStatus()

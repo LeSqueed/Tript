@@ -35,6 +35,7 @@ internal sealed partial class AppHost
         UnsupportedMode,
         RecorderRefused,
         InsufficientStorage,
+        GraphicsDeviceLost,
     }
 
     internal void StartRecordingOrReport(string? gameId, string? displayId = null, bool applyDisplay = false)
@@ -54,6 +55,8 @@ internal sealed partial class AppHost
             StartRecordingResult.InsufficientStorage =>
                 $"Recording did not start because {EffectiveRoot} is out of space. "
                 + "Free up space or lower the reserved free space in Settings, Storage.",
+            StartRecordingResult.GraphicsDeviceLost =>
+                "Recording did not start because the graphics driver reset. Restart Tript to record again.",
             _ => "Recording did not start because the recorder refused to start.",
         });
     }
@@ -101,6 +104,9 @@ internal sealed partial class AppHost
 
             if (_shuttingDown)
                 return StartRecordingResult.ShuttingDown;
+
+            if (GraphicsDeviceLost)
+                return StartRecordingResult.GraphicsDeviceLost;
 
             if (_stopFinalizationPending)
                 return StartRecordingResult.AlreadyRunning;
@@ -201,6 +207,8 @@ internal sealed partial class AppHost
                     return StartRecordingResult.RecorderRefused;
                 if (_shuttingDown || _disposed)
                     return StartRecordingResult.ShuttingDown;
+                if (GraphicsDeviceLost)
+                    return StartRecordingResult.GraphicsDeviceLost;
                 if (sessionStillOurs && !_stopFinalizationPending &&
                     _recorder is { Snapshot: { State: RecorderState.Idle } })
                 {
@@ -347,12 +355,15 @@ internal sealed partial class AppHost
                     _stopFinalizationPending = false;
                     Log.Error("AppHost: the recording output never reached Idle within {Timeout}; the session metadata and its bookmarks were not written",
                         _pendingStopFinalizeTimeout);
-                    return;
+                    break;
                 }
             }
 
             recorder.WaitForIdle(TimeSpan.FromMilliseconds(250));
         }
+
+        RequestRecoveryRestart("a recording that could not stop",
+            "The recording could not stop. Restart Tript to record again.");
     }
 
     // Returns false when the budget ran out and the session metadata was lost.

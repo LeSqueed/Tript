@@ -57,8 +57,7 @@ internal static class Program
 
             try
             {
-                _obsLogScope = ObsLog.Install(static (level, message) =>
-                    Log.Write(ObsLogLevelFor(level, message), "libobs: {Message}", message.TrimEnd()));
+                _obsLogScope = ObsLog.Install(static (level, message) => BridgeObsLog(level, message));
             }
             catch (Exception exception) when (exception is InvalidOperationException or DllNotFoundException
                 or EntryPointNotFoundException)
@@ -404,6 +403,29 @@ internal static class Program
             NixPlatform = ObsNixPlatform.X11Egl,
             NixPlatformDisplay = display
         };
+    }
+
+    private static readonly RepeatedLogThrottle ObsLogThrottle = new();
+
+    private static void BridgeObsLog(ObsLogLevel level, string message)
+    {
+        GraphicsDeviceMonitor.Shared.Observe(message);
+        WriteThrottledObsLog(ObsLogThrottle, level, message.TrimEnd());
+    }
+
+    internal static void WriteThrottledObsLog(RepeatedLogThrottle throttle, ObsLogLevel level, string message)
+    {
+        var decision = throttle.Check(message);
+        if (!decision.Write)
+            return;
+
+        var eventLevel = ObsLogLevelFor(level, message);
+        if (decision.SuppressedBefore > 0)
+            Log.Write(eventLevel, "libobs: the next line repeated {Count} more times in the last minute",
+                decision.SuppressedBefore);
+        Log.Write(eventLevel, "libobs: {Message}", message);
+        if (decision.SuppressionStarts)
+            Log.Write(eventLevel, "libobs: further repeats of the line above are suppressed for a minute");
     }
 
     internal static LogEventLevel ObsLogLevelFor(ObsLogLevel level, string message) =>

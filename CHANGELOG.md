@@ -3,6 +3,25 @@
 All notable changes to Tript are recorded here. Versions before 0.1.0-alpha.10 were not tracked in
 this file; their notes are on the [GitHub releases page](https://github.com/LeSqueed/Tript/releases).
 
+## 1.2.4 (2026-11-15)
+
+### Fixes
+
+- **Tript recovers on its own after a graphics driver reset.** If your graphics driver reset or
+  crashed while Tript was open, the next recording could not capture anything, never finished
+  stopping when the game closed, and Tript used more and more memory until you quit it. Tript now
+  notices the reset, stops the recording and restarts itself, then records again if the game is
+  still running.
+- **A recording that cannot stop no longer leaves Tript stuck.** Tript restarts instead of
+  waiting forever, so the next game is recorded again.
+- **Broken recordings no longer keep Tript busy.** For a recording that was cut off and cannot be
+  opened, Tript now retries its thumbnail less and less often instead of every few minutes.
+
+### Diagnostics
+
+- **Logs stay small when something goes wrong.** An error that repeats many times a second is now
+  written a few times a minute, with a count of the repeats.
+
 ## 1.2.3 (2026-10-02)
 
 ### Fixes

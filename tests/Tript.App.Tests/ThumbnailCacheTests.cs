@@ -33,6 +33,18 @@ public sealed class ThumbnailCacheTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(1, 5)]
+    [InlineData(2, 10)]
+    [InlineData(3, 20)]
+    [InlineData(9, 1280)]
+    [InlineData(10, 1440)]
+    [InlineData(100, 1440)]
+    public void CooldownAfter_DoublesPerRepeatedFailure_UpToADay(int failures, int expectedMinutes)
+    {
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), ThumbnailStore.CooldownAfter(failures));
+    }
+
     [SkippableFact]
     public async Task Ensure_RunsTheExtractorOnce_AndServesTheCachedFileAfterwards()
     {

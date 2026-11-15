@@ -13,6 +13,7 @@ internal sealed class ThumbnailStore : IDisposable
     private const int MaxPendingExtractions = 32;
     private static readonly TimeSpan WorkerShutdownWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FailedExtractionCooldown = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan MaxFailedExtractionCooldown = TimeSpan.FromHours(24);
 
     private readonly KeptOnceAvailable<IThumbnailExtractor> _extractor;
     private readonly BlockingCollection<GenerationJob> _jobs =
@@ -98,15 +99,19 @@ internal sealed class ThumbnailStore : IDisposable
             if (!TryReadSourceStamp(videoPath, out var source))
                 return null;
 
+            var previousFailures = 0;
             if (_failed.TryGetValue(key, out var failed))
             {
                 if (failed.Source == source && failed.RetryAfterUtc > DateTime.UtcNow)
                     return null;
+                if (failed.Source == source)
+                    previousFailures = failed.Failures;
                 _failed.Remove(key);
             }
 
             var fileVersion = _fileVersions.GetValueOrDefault(fileName);
-            job = new GenerationJob(key, videoPath, fileName, cached, source, _rootVersion, fileVersion);
+            job = new GenerationJob(key, videoPath, fileName, cached, source, _rootVersion, fileVersion,
+                previousFailures);
             _pending.Add(key, job);
             completion = job.Completion.Task;
             if (!_jobs.TryAdd(job))
@@ -161,8 +166,9 @@ internal sealed class ThumbnailStore : IDisposable
                     }
                     else if (attempted && IsCurrent(job) && SourceMatches(job))
                     {
+                        var failures = job.PreviousFailures + 1;
                         _failed[job.Key] = new FailedGeneration(
-                            job.Source, DateTime.UtcNow + FailedExtractionCooldown);
+                            job.Source, DateTime.UtcNow + CooldownAfter(failures), failures);
                     }
                     if (_pending.TryGetValue(job.Key, out var pending) && ReferenceEquals(pending, job))
                         _pending.Remove(job.Key);
@@ -351,8 +357,15 @@ internal sealed class ThumbnailStore : IDisposable
             _jobs.Dispose();
     }
 
+    internal static TimeSpan CooldownAfter(int failures)
+    {
+        var doublings = Math.Clamp(failures - 1, 0, 16);
+        var cooldown = FailedExtractionCooldown * Math.Pow(2, doublings);
+        return cooldown < MaxFailedExtractionCooldown ? cooldown : MaxFailedExtractionCooldown;
+    }
+
     private readonly record struct SourceStamp(long Length, DateTime LastWriteTimeUtc);
-    private readonly record struct FailedGeneration(SourceStamp Source, DateTime RetryAfterUtc);
+    private readonly record struct FailedGeneration(SourceStamp Source, DateTime RetryAfterUtc, int Failures);
 
     private sealed record GenerationJob(
         string Key,
@@ -361,7 +374,8 @@ internal sealed class ThumbnailStore : IDisposable
         string CachedPath,
         SourceStamp Source,
         long RootVersion,
-        long FileVersion)
+        long FileVersion,
+        int PreviousFailures)
     {
         internal TaskCompletionSource<string?> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);

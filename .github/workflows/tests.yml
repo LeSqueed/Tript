@@ -140,11 +140,17 @@ jobs:
       - name: Test
         run: >-
           xvfb-run -a -s "-screen 0 1920x1080x24"
-          make test-integration CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults"
+          make test-integration CONFIG=Release TEST_ARGS="--logger trx --results-directory $PWD/TestResults --blame-crash --blame-crash-dump-type full"
 
       - name: Name the failed tests
         if: failure()
         run: python3 scripts/report-failed-tests.py TestResults
+
+      - name: Name the test running at a crash
+        if: failure()
+        run: |
+          find TestResults -name 'Sequence_*.xml' -print -exec tail -n 8 {} \;
+          find TestResults -name '*.dmp' -exec ls -la {} \;
 
       - name: Keep the test results
         if: failure()
